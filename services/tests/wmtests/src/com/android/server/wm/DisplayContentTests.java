@@ -886,6 +886,63 @@ public class DisplayContentTests extends WindowTestsBase {
     }
 
     @Test
+    public void testDisplayCutout_hideInLandscape() {
+        assertDisplayCutoutInLandscape(true);
+    }
+
+    @Test
+    public void testDisplayCutout_keepInLandscape() {
+        assertDisplayCutoutInLandscape(false);
+    }
+
+    private void assertDisplayCutoutInLandscape(boolean hideInLandscape) {
+        final Resources res = mWm.mContext.getResources();
+        spyOn(res);
+        doReturn(hideInLandscape).when(res).getBoolean(
+                com.android.internal.R.bool.config_hideDisplayCutoutInLandscape);
+        final DisplayContent dc = createDisplayNoUpdateDisplayInfo();
+        dc.mInitialDisplayWidth = 1600;
+        dc.mInitialDisplayHeight = 2560;
+        dc.mBaseDisplayWidth = 1600;
+        dc.mBaseDisplayHeight = 2560;
+        dc.mIsSizeForced = false;
+        final DisplayCutout cutout = new DisplayCutout(Insets.of(0, 88, 0, 0),
+                null, new Rect(766, 20, 834, 88), null, null);
+        dc.mInitialDisplayCutout = cutout;
+
+        // The resource is read once when the display is created.
+        doReturn(!hideInLandscape).when(res).getBoolean(
+                com.android.internal.R.bool.config_hideDisplayCutoutInLandscape);
+        for (int rotation = Surface.ROTATION_0; rotation <= Surface.ROTATION_270; rotation++) {
+            final boolean hidden = hideInLandscape
+                    && (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270);
+            final DisplayCutout expected = hidden ? DisplayCutout.NO_CUTOUT
+                    : cutout.getRotated(1600, 2560, Surface.ROTATION_0, rotation);
+            assertEquals(expected, dc.calculateDisplayCutoutForRotation(rotation));
+            final DisplayInfo info = dc.computeScreenConfiguration(new Configuration(), rotation);
+            assertEquals(hidden ? null : expected, info.displayCutout);
+            final InsetsState state = dc.getInsetsStateForRotation(rotation);
+            assertEquals(expected, state.getDisplayCutout());
+            for (int i = 0; i < state.sourceSize(); i++) {
+                if (hidden) {
+                    assertEquals(0, state.sourceAt(i).getType()
+                            & WindowInsets.Type.displayCutout());
+                }
+            }
+            final DisplayFrames frames = new DisplayFrames();
+            dc.updateDisplayFrames(frames, rotation, info.logicalWidth, info.logicalHeight);
+            assertEquals(expected, frames.mInsetsState.getDisplayCutout());
+            assertEquals(dc.calculateRoundedCornersForRotation(rotation),
+                    frames.mInsetsState.getRoundedCorners());
+            assertEquals(dc.calculatePrivacyIndicatorBoundsForRotation(rotation),
+                    frames.mInsetsState.getPrivacyIndicatorBounds());
+            assertEquals(dc.calculateDisplayShapeForRotation(rotation),
+                    frames.mInsetsState.getDisplayShape());
+        }
+        assertEquals(cutout, dc.mInitialDisplayCutout);
+    }
+
+    @Test
     public void testDisplayCutout_rot0() {
         final DisplayContent dc = createNewDisplay();
         dc.mInitialDisplayWidth = 200;
@@ -904,6 +961,10 @@ public class DisplayContentTests extends WindowTestsBase {
 
     @Test
     public void testDisplayCutout_rot90() {
+        final Resources res = mWm.mContext.getResources();
+        spyOn(res);
+        doReturn(false).when(res).getBoolean(
+                com.android.internal.R.bool.config_hideDisplayCutoutInLandscape);
         // Prevent mInitialDisplayCutout from being updated from real display (e.g. null
         // if the device has no cutout).
         final DisplayContent dc = createDisplayNoUpdateDisplayInfo();
