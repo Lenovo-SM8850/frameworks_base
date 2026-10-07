@@ -58,6 +58,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.hardware.devicestate.DeviceStateManager;
 import android.hardware.power.Boost;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.os.SystemProperties;
@@ -219,6 +220,14 @@ public class DisplayRotation {
     @Surface.Rotation
     private int mUserRotation = Surface.ROTATION_0;
 
+    private final PerAppRotationSettings mPerAppRotationSettings;
+    @Nullable
+    private ActivityRecord mLastRotationApp;
+    private int mLastAppRotation = ROTATION_UNDEFINED;
+    @ScreenOrientation
+    private int mLastAppOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+    private final Runnable mUpdateAppRotation = this::updateAppRotation;
+
     private static final int CAMERA_ROTATION_DISABLED = 0;
     private static final int CAMERA_ROTATION_ENABLED = 1;
     private int mCameraRotationMode = CAMERA_ROTATION_DISABLED;
@@ -260,6 +269,7 @@ public class DisplayRotation {
         mDisplayWindowSettings = displayWindowSettings;
         mContext = context;
         mLock = lock;
+        mPerAppRotationSettings = new PerAppRotationSettings(context.getContentResolver());
         mDeviceStateController = deviceStateController;
         isDefaultDisplay = displayContent.isDefaultDisplay;
         mCompatPolicyForImmersiveApps = initImmersiveAppCompatPolicy(service, displayContent);
@@ -471,11 +481,15 @@ public class DisplayRotation {
     }
 
     boolean updateOrientation(@ScreenOrientation int newOrientation, boolean forceUpdate) {
-        if (newOrientation == mLastOrientation && !forceUpdate) {
+        if (newOrientation == mLastOrientation && !forceUpdate
+                && getRotationApp() == mLastRotationApp
+                && getAppRotation() == mLastAppRotation
+                && getAppOrientation() == mLastAppOrientation) {
             return false;
         }
         mLastOrientation = newOrientation;
-        if (newOrientation != mCurrentAppOrientation) {
+        if (newOrientation != mCurrentAppOrientation
+                || getAppOrientation() != mLastAppOrientation) {
             mCurrentAppOrientation = newOrientation;
             if (isDefaultDisplay) {
                 updateOrientationListenerLw();
@@ -559,10 +573,14 @@ public class DisplayRotation {
         final int lastOrientation = mLastOrientation;
         @Surface.Rotation
         int rotation = rotationForOrientation(lastOrientation, oldRotation);
+        mLastRotationApp = getRotationApp();
+        mLastAppRotation = getAppRotation();
+        mLastAppOrientation = getAppOrientation();
 
         // Preserve locked user rotation across screen off/on and keyguard
         if (getEnableLockScreenRotation()
-                && mUserRotationMode == WindowManagerPolicy.USER_ROTATION_LOCKED) {
+                && mUserRotationMode == WindowManagerPolicy.USER_ROTATION_LOCKED
+                && mLastAppOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
             final WindowContainer source = mDisplayContent.getLastOrientationSource();
             final boolean isAppRequest = source != null &&
                     (source.asActivityRecord() != null ||
@@ -883,6 +901,13 @@ public class DisplayRotation {
     }
 
     void freezeRotation(int rotation, String caller) {
+        // SystemUI follows natural-rotation changes by rewriting USER_ROTATION. On displays
+        // which ignore app orientation, a restored app rotation must not change the global lock.
+        if (isPerAppRotationDisplay()
+                && mUserRotationMode == WindowManagerPolicy.USER_ROTATION_LOCKED
+                && "RotationButtonController#onRotationWatcherChanged".equals(caller)) {
+            return;
+        }
         if (mDeviceStateController.shouldReverseRotationDirectionAroundZAxis(mDisplayContent)) {
             rotation = RotationUtils.reverseRotationDirectionAroundZAxis(rotation);
         }
@@ -906,7 +931,121 @@ public class DisplayRotation {
 
     void setRotationAtAngleIfAllowed(int rotation, String caller) {
         if (!isRotationChoiceAllowed(rotation)) return;
+        final ActivityRecord app = getRotationApp();
+        if (app != null && "RotationButtonController#onRotateSuggestionClick".equals(caller)) {
+            if (mDeviceStateController.shouldReverseRotationDirectionAroundZAxis(mDisplayContent)) {
+                rotation = RotationUtils.reverseRotationDirectionAroundZAxis(rotation);
+            }
+            mPerAppRotationSettings.setRotation(app.packageName, app.mUserId, rotation);
+            mRotationLockHistory.addRecord(mUserRotationMode, rotation, caller);
+            mRotationChoiceShownToUserForConfirmation = ROTATION_UNDEFINED;
+            mService.updateRotation(false /* alwaysSendConfiguration */, false /* forceRelayout */);
+            return;
+        }
         freezeRotation(rotation, caller);
+    }
+
+    private boolean isPerAppRotationDisplay() {
+        return isDefaultDisplay && mDisplayContent.getIgnoreOrientationRequest()
+                && mDisplayContent.getConfiguration().smallestScreenWidthDp >= 600;
+    }
+
+    @Nullable
+    private ActivityRecord getRotationApp() {
+        if (!isPerAppRotationDisplay() || mDisplayPolicy.isKeyguardShowing()) {
+            return null;
+        }
+        final ActivityRecord app = mDisplayContent.mFocusedApp;
+        if (app == null || !app.isActivityTypeStandard()
+                || app.getWindowingMode() != WINDOWING_MODE_FULLSCREEN) {
+            return null;
+        }
+        final Task task = app.getTask();
+        if (task == null || task.getWindowingMode() != WINDOWING_MODE_FULLSCREEN
+                || task.getRootTask().getWindowingMode() != WINDOWING_MODE_FULLSCREEN) {
+            return null;
+        }
+        return app;
+    }
+
+    @VisibleForTesting
+    int getAppRotation() {
+        final ActivityRecord app = getRotationApp();
+        if (app == null) {
+            return ROTATION_UNDEFINED;
+        }
+        final int rotation = mPerAppRotationSettings.getRotation(app.packageName, app.mUserId);
+        // Retain AOSP's dock, lid, VR and fold posture rotation policies.
+        return rotation != ROTATION_UNDEFINED && isRotationChoiceSupported()
+                ? rotation : ROTATION_UNDEFINED;
+    }
+
+    @ScreenOrientation
+    private int getAppOrientation() {
+        final ActivityRecord app = getRotationApp();
+        if (app == null || !isRotationChoiceSupported()) {
+            return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+        }
+        final int rotation = mPerAppRotationSettings.getRotation(app.packageName, app.mUserId);
+        if (rotation != ROTATION_UNDEFINED) {
+            return isLandscapeOrSeascape(rotation)
+                    ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT;
+        }
+        // Read the app request even when display orientation requests are ignored.
+        final ActivityRecord top = app.getTask().topRunningActivity();
+        if (top == null || top.mAppCompatController.getAspectRatioOverrides()
+                .shouldApplyUserFullscreenOverride()) {
+            return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+        }
+        final int orientation = top.mAppCompatController.getOrientationPolicy()
+                .overrideOrientationIfNeeded(top.getRequestedOrientation());
+        switch (orientation) {
+            case ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:
+            case ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE:
+            case ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE:
+            case ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE:
+                return ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+            case ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:
+            case ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:
+            case ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT:
+            case ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT:
+                return ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT;
+            default:
+                return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+        }
+    }
+
+    private static boolean isAppSensorOrientation(@ScreenOrientation int orientation) {
+        return orientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                || orientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT;
+    }
+
+    void onFocusedAppChanged() {
+        if (!isPerAppRotationDisplay()
+                && mLastAppRotation == ROTATION_UNDEFINED
+                && mLastAppOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+            return;
+        }
+        // Coalesce focus changes and rotate outside the activity/window layout operation.
+        mService.mH.removeCallbacks(mUpdateAppRotation);
+        mService.mH.post(mUpdateAppRotation);
+    }
+
+    private void updateAppRotation() {
+        synchronized (mLock) {
+            updateOrientationListenerLw();
+            updateRotationAndSendNewConfigIfChanged();
+        }
+    }
+
+    void removeAppRotation(String packageName, int userId) {
+        mPerAppRotationSettings.removePackage(packageName, userId);
+        onFocusedAppChanged();
+    }
+
+    void removeAppRotationsForUser(int userId) {
+        mPerAppRotationSettings.removeUser(userId);
     }
 
     boolean isFixedToUserRotation() {
@@ -1053,7 +1192,8 @@ public class DisplayRotation {
      * the user has explicitly disabled sensor based rotation or when the
      * screen is switched off.
      */
-    private boolean needSensorRunning() {
+    @VisibleForTesting
+    boolean needSensorRunning() {
         if (isFixedToUserRotation()) {
             // We are sure we only respect user rotation settings, so we are sure we will not
             // support sensor rotation.
@@ -1062,6 +1202,10 @@ public class DisplayRotation {
 
         if (mFoldController != null && mFoldController.shouldDisableRotationSensor()) {
             return false;
+        }
+
+        if (isAppSensorOrientation(getAppOrientation())) {
+            return true;
         }
 
         if (mSupportAutoRotation) {
@@ -1139,6 +1283,18 @@ public class DisplayRotation {
                 mUserRotationMode == WindowManagerPolicy.USER_ROTATION_LOCKED
                         ? "USER_ROTATION_LOCKED" : "");
 
+        final int appOrientation = getAppOrientation();
+        if (appOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+            orientation = appOrientation;
+            final int appRotation = getAppRotation();
+            if (appRotation != ROTATION_UNDEFINED
+                    && (getRotationApp() != mLastRotationApp
+                            || appRotation != mLastAppRotation
+                            || appOrientation != mLastAppOrientation)) {
+                // Use the saved choice until the sensor proposes a rotation in its group.
+                lastRotation = appRotation;
+            }
+        }
         if (isFixedToUserRotation()) {
             return mUserRotation;
         }
@@ -1235,8 +1391,10 @@ public class DisplayRotation {
                 || orientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT) {
             // Otherwise, use sensor only if requested by the application or enabled
             // by default for USER or UNSPECIFIED modes.  Does not apply to NOSENSOR.
+            // Both rotations in an app's orientation group are allowed.
             boolean allowed = true;
-            if (orientation != ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            if (!isAppSensorOrientation(appOrientation)
+                    && orientation != ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
                     && orientation != ActivityInfo.SCREEN_ORIENTATION_FULL_USER) {
                 allowed = RotationPolicy.isRotationAllowed(sensorRotation, mUserRotationAngles,
                         getAllowAllRotations() != ALLOW_ALL_ROTATIONS_DISABLED);
@@ -1395,17 +1553,7 @@ public class DisplayRotation {
         return mFoldController != null && mFoldController.overrideFrozenRotation();
     }
 
-    private boolean isRotationChoiceAllowed(@Surface.Rotation final int proposedRotation) {
-        final boolean isRotationLockEnforced = mCompatPolicyForImmersiveApps != null
-                && mCompatPolicyForImmersiveApps.isRotationLockEnforced(proposedRotation);
-
-        // Don't show rotation choice button if
-        if (!isRotationLockEnforced // not enforcing locked rotation
-                // and the screen rotation is not locked by the user.
-                && mUserRotationMode != WindowManagerPolicy.USER_ROTATION_LOCKED) {
-            return false;
-        }
-
+    private boolean isRotationChoiceSupported() {
         // Don't show rotation choice if we are in tabletop or book modes.
         if (isTabletopAutoRotateOverrideEnabled()) return false;
 
@@ -1455,6 +1603,22 @@ public class DisplayRotation {
             return false;
         }
 
+        return true;
+    }
+
+    private boolean isRotationChoiceAllowed(@Surface.Rotation final int proposedRotation) {
+        if (!isRotationChoiceSupported()) return false;
+
+        // A focused app can constrain the sensor even while auto-rotate is enabled.
+        if (isAppSensorOrientation(getAppOrientation())) return true;
+
+        final boolean isRotationLockEnforced = mCompatPolicyForImmersiveApps != null
+                && mCompatPolicyForImmersiveApps.isRotationLockEnforced(proposedRotation);
+        if (!isRotationLockEnforced
+                && mUserRotationMode != WindowManagerPolicy.USER_ROTATION_LOCKED) {
+            return false;
+        }
+
         // Ensure that some rotation choice is possible for the given orientation.
         switch (mCurrentAppOrientation) {
             case ActivityInfo.SCREEN_ORIENTATION_FULL_USER:
@@ -1501,12 +1665,17 @@ public class DisplayRotation {
     }
 
     public void onUserSwitch() {
+        synchronized (mLock) {
+            mPerAppRotationSettings.invalidate();
+            onFocusedAppChanged();
+        }
         if (mSettingsObserver != null) {
             mSettingsObserver.onChange(false);
         }
     }
 
     void onDisplayRemoved() {
+        mService.mH.removeCallbacks(mUpdateAppRotation);
         removeDefaultDisplayRotationChangedCallback();
         if (mFoldController != null) {
             mFoldController.onDisplayRemoved();
@@ -1585,6 +1754,7 @@ public class DisplayRotation {
      * Called from {@link ActivityRecord#setRequestedOrientation(int)}
      */
     void onSetRequestedOrientation() {
+        onFocusedAppChanged();
         if (mCompatPolicyForImmersiveApps == null
                 || mRotationChoiceShownToUserForConfirmation == ROTATION_UNDEFINED) {
             return;
@@ -1616,6 +1786,7 @@ public class DisplayRotation {
         pw.print(prefix + "  mUserRotationMode="
                 + WindowManagerPolicy.userRotationModeToString(mUserRotationMode));
         pw.print(" mUserRotation=" + Surface.rotationToString(mUserRotation));
+        pw.print(" mAppRotation=" + Surface.rotationToString(getAppRotation()));
         pw.print(" mCameraRotationMode=" + mCameraRotationMode);
         pw.println(" mAllowAllRotations=" + allowAllRotationsToString(mAllowAllRotations));
 
@@ -2113,7 +2284,17 @@ public class DisplayRotation {
             // Send interaction power boost to improve redraw performance.
             mService.mPowerManagerInternal.setPowerBoost(Boost.INTERACTION, 0);
             dispatchProposedRotation(rotation);
-            if (isRotationChoiceAllowed(rotation)) {
+            final int appOrientation = getAppOrientation();
+            if (isAppSensorOrientation(appOrientation)) {
+                final boolean isInGroup =
+                        appOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                ? isLandscapeOrSeascape(rotation) : isAnyPortrait(rotation);
+                mRotationChoiceShownToUserForConfirmation =
+                        isInGroup ? ROTATION_UNDEFINED : rotation;
+                sendProposedRotationChangeToStatusBarInternal(rotation, !isInGroup);
+                mService.updateRotation(false /* alwaysSendConfiguration */,
+                        false /* forceRelayout */);
+            } else if (isRotationChoiceAllowed(rotation)) {
                 mRotationChoiceShownToUserForConfirmation = rotation;
                 final boolean isValid = isValidRotationChoice(rotation);
                 sendProposedRotationChangeToStatusBarInternal(rotation, isValid);
@@ -2156,6 +2337,8 @@ public class DisplayRotation {
         void observe() {
             final ContentResolver resolver = mContext.getContentResolver();
             resolver.registerContentObserver(Settings.Secure.getUriFor(
+                    PerAppRotationSettings.SETTING_NAME), false, this, UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.Secure.getUriFor(
                     Settings.Secure.SHOW_ROTATION_SUGGESTIONS), false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(Settings.System.getUriFor(
@@ -2172,6 +2355,18 @@ public class DisplayRotation {
                     UserHandle.USER_ALL);
 
             updateSettings();
+        }
+
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            if (Settings.Secure.getUriFor(PerAppRotationSettings.SETTING_NAME).equals(uri)) {
+                synchronized (mLock) {
+                    mPerAppRotationSettings.invalidate();
+                    onFocusedAppChanged();
+                }
+                return;
+            }
+            onChange(selfChange);
         }
 
         @Override
