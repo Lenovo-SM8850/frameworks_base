@@ -19,14 +19,9 @@ package com.android.systemui.qs.tiles;
 
 import static com.android.internal.logging.MetricsLogger.VIEW_UNKNOWN;
 
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
 import android.os.SystemClock;
 import android.service.quicksettings.Tile;
 
@@ -45,6 +40,7 @@ import com.android.systemui.qs.QsEventLogger;
 import com.android.systemui.qs.logging.QSLogger;
 import com.android.systemui.qs.tileimpl.QSTileImpl;
 import com.android.systemui.res.R;
+import com.android.systemui.statusbar.policy.CaffeineController;
 
 import javax.inject.Inject;
 
@@ -56,9 +52,8 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
     @Nullable
     private Icon mIcon = null;
 
-    private final PowerManager.WakeLock mWakeLock;
-    private int mSecondsRemaining;
-    private int mDuration;
+    private final CaffeineController mCaffeineController;
+    private final Runnable mCallback = this::refreshState;
     private static int[] DURATIONS = new int[] {
         5 * 60,   // 5 min
         10 * 60,  // 10 min
@@ -66,9 +61,7 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
         -1,       // infinity
     };
     private static final int INFINITE_DURATION_INDEX = DURATIONS.length - 1;
-    private CountDownTimer mCountdownTimer = null;
     public long mLastClickTime = -1;
-    private final Receiver mReceiver = new Receiver();
 
     @Inject
     public CaffeineTile(
@@ -80,13 +73,13 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
             MetricsLogger metricsLogger,
             StatusBarStateController statusBarStateController,
             ActivityStarter activityStarter,
-            QSLogger qsLogger
+            QSLogger qsLogger,
+            CaffeineController caffeineController
     ) {
         super(host, uiEventLogger, backgroundLooper, mainHandler, falsingManager, metricsLogger,
                 statusBarStateController, activityStarter, qsLogger);
-        mWakeLock = mContext.getSystemService(PowerManager.class).newWakeLock(
-                PowerManager.FULL_WAKE_LOCK, "CaffeineTile");
-        mReceiver.init();
+        mCaffeineController = caffeineController;
+        mCaffeineController.addCallback(mCallback);
     }
 
     @Override
@@ -97,11 +90,7 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
     @Override
     protected void handleDestroy() {
         super.handleDestroy();
-        stopCountDown();
-        mReceiver.destroy();
-        if (mWakeLock.isHeld()) {
-            mWakeLock.release();
-        }
+        mCaffeineController.removeCallback(mCallback);
     }
 
     @Override
@@ -110,37 +99,22 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
 
     @Override
     protected void handleClick(@Nullable Expandable expandable) {
-        // If last user clicks < 5 seconds
-        // we cycle different duration
-        // otherwise toggle on/off
-        if (mWakeLock.isHeld() && (mLastClickTime != -1) &&
-                (SystemClock.elapsedRealtime() - mLastClickTime < 5000)) {
-            // cycle duration
-            mDuration++;
-            if (mDuration >= DURATIONS.length) {
-                // all durations cycled, turn if off
-                mDuration = -1;
-                stopCountDown();
-                if (mWakeLock.isHeld()) {
-                    mWakeLock.release();
-                }
+        // Rapid clicks cycle through the same durations, including infinity and off.
+        if (mCaffeineController.isEnabled() && mLastClickTime != -1
+                && SystemClock.elapsedRealtime() - mLastClickTime < 5000) {
+            int duration = 0;
+            while (duration < DURATIONS.length
+                    && DURATIONS[duration] != mCaffeineController.getDurationSeconds()) {
+                duration++;
+            }
+            duration++;
+            if (duration >= DURATIONS.length) {
+                mCaffeineController.setEnabled(false);
             } else {
-                // change duration
-                startCountDown(DURATIONS[mDuration]);
-                if (!mWakeLock.isHeld()) {
-                    mWakeLock.acquire();
-                }
+                mCaffeineController.start(DURATIONS[duration]);
             }
         } else {
-            // toggle
-            if (mWakeLock.isHeld()) {
-                mWakeLock.release();
-                stopCountDown();
-            } else {
-                mWakeLock.acquire();
-                mDuration = 0;
-                startCountDown(DURATIONS[mDuration]);
-            }
+            mCaffeineController.setEnabled(!mCaffeineController.isEnabled());
         }
         mLastClickTime = SystemClock.elapsedRealtime();
         refreshState();
@@ -148,15 +122,11 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
 
     @Override
     protected void handleLongClick(@Nullable Expandable expandable) {
-        if (mWakeLock.isHeld()) {
-            if (mDuration == INFINITE_DURATION_INDEX) {
-                return;
-            }
-        } else {
-            mWakeLock.acquire();
+        if (mCaffeineController.isEnabled()
+                && mCaffeineController.getDurationSeconds() == DURATIONS[INFINITE_DURATION_INDEX]) {
+            return;
         }
-        mDuration = INFINITE_DURATION_INDEX;
-        startCountDown(DURATIONS[INFINITE_DURATION_INDEX]);
+        mCaffeineController.start(DURATIONS[INFINITE_DURATION_INDEX]);
         refreshState();
     }
 
@@ -175,48 +145,17 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
         return VIEW_UNKNOWN;
     }
 
-    private void startCountDown(long duration) {
-        stopCountDown();
-        mSecondsRemaining = (int) duration;
-        if (duration == -1) {
-            // infinity timing, no need to start timer
-            return;
-        }
-        mCountdownTimer = new CountDownTimer(duration * 1000, 1000) {
-            @Override
-            public void onTick(long millisUntilFinished) {
-                mSecondsRemaining = (int) (millisUntilFinished / 1000);
-                refreshState();
-            }
-
-            @Override
-            public void onFinish() {
-                if (mWakeLock.isHeld()) {
-                    mWakeLock.release();
-                }
-                refreshState();
-            }
-
-        }.start();
-    }
-
-    private void stopCountDown() {
-        if (mCountdownTimer != null) {
-            mCountdownTimer.cancel();
-            mCountdownTimer = null;
-        }
-    }
-
     private String formatValueWithRemainingTime() {
-        if (mSecondsRemaining == -1) {
+        int secondsRemaining = mCaffeineController.getSecondsRemaining();
+        if (secondsRemaining == -1) {
             return "\u221E"; // infinity
         }
-        return String.format("%02d:%02d", mSecondsRemaining / 60 % 60, mSecondsRemaining % 60);
+        return String.format("%02d:%02d", secondsRemaining / 60 % 60, secondsRemaining % 60);
     }
 
     @Override
     protected void handleUpdateState(BooleanState state, Object arg) {
-        state.value = mWakeLock.isHeld();
+        state.value = mCaffeineController.isEnabled();
         if (mIcon == null) {
             mIcon = maybeLoadResourceIcon(R.drawable.ic_qs_caffeine);
         }
@@ -236,29 +175,4 @@ public class CaffeineTile extends QSTileImpl<BooleanState> {
         }
     }
 
-    private final class Receiver extends BroadcastReceiver {
-        public void init() {
-            // Register for Intent broadcasts for...
-            IntentFilter filter = new IntentFilter();
-            filter.addAction(Intent.ACTION_SCREEN_OFF);
-            mContext.registerReceiver(this, filter, null, mHandler);
-        }
-
-        public void destroy() {
-            mContext.unregisterReceiver(this);
-        }
-
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (Intent.ACTION_SCREEN_OFF.equals(action)) {
-                // disable caffeine if user force off (power button)
-                stopCountDown();
-                if (mWakeLock.isHeld()) {
-                    mWakeLock.release();
-                }
-                refreshState();
-            }
-        }
-    }
 }

@@ -23,6 +23,7 @@ import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.policy.BatteryController
 import com.android.systemui.statusbar.policy.ConfigurationController
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 @SysUISingleton
@@ -32,7 +33,7 @@ class AxPlatformFeatureMapper @Inject constructor(
     configurationController: ConfigurationController
 ) : AxPlatformStateManager.LabelProvider {
 
-    private val labelCache = mutableMapOf<String, String>()
+    private val labelCache = ConcurrentHashMap<String, String>()
 
     init {
         configurationController.addCallback(object : ConfigurationController.ConfigurationListener {

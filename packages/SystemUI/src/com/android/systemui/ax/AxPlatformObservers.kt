@@ -702,18 +702,12 @@ class AxPlatformObservers @Inject constructor(
     }
 
     private fun registerCaffeine() {
-        stateManager.broadcastBool(
-            AxPlatformClient.FEATURE_CAFFEINE,
-            featureController.wakeLock.isHeld
-        )
-        broadcastDispatcher.registerReceiver(object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                if (featureController.wakeLock.isHeld) {
-                    featureController.wakeLock.release()
-                    stateManager.broadcastBool(AxPlatformClient.FEATURE_CAFFEINE, false)
-                }
-            }
-        }, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        featureController.caffeineController.addCallback {
+            stateManager.broadcastBool(
+                AxPlatformClient.FEATURE_CAFFEINE,
+                featureController.caffeineController.isEnabled
+            )
+        }
     }
 
     private val vpnCallback = object : SecurityController.SecurityControllerCallback {
