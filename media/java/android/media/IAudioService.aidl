@@ -892,4 +892,11 @@ interface IAudioService {
     @EnforcePermission("MODIFY_PHONE_STATE")
     IAudioModeSession createAudioModeSession(in AudioModeSessionRequest request,
             in IAudioModeSessionCallback callback);
+
+    // Append Java-only methods to preserve existing native transaction IDs.
+    @EnforcePermission("MODIFY_AUDIO_ROUTING")
+    int setAppVolume(String packageName, float volume, int userId);
+
+    @EnforcePermission("MODIFY_AUDIO_ROUTING")
+    int setAppMute(String packageName, boolean mute, int userId);
 }
