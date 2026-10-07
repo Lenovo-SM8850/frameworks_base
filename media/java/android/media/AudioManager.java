@@ -1204,14 +1204,22 @@ public class AudioManager {
     @UnsupportedAppUsage
     @RequiresPermission(android.Manifest.permission.MODIFY_AUDIO_ROUTING)
     public int setAppVolume(String packageName, float volume) {
-        return AudioSystem.setAppVolume(packageName, volume);
+        try {
+            return getService().setAppVolume(packageName, volume, getContext().getUserId());
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
     }
 
     /** @hide */
     @UnsupportedAppUsage
     @RequiresPermission(android.Manifest.permission.MODIFY_AUDIO_ROUTING)
     public int setAppMute(String packageName, boolean mute) {
-        return AudioSystem.setAppMute(packageName, mute);
+        try {
+            return getService().setAppMute(packageName, mute, getContext().getUserId());
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
     }
 
     /** @hide */
