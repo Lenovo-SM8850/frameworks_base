@@ -7292,6 +7292,7 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
                 mCompatModePackages.handlePackageDataClearedLocked(name);
                 mAppWarnings.onPackageDataCleared(name, userId);
                 mPackageConfigPersister.onPackageDataCleared(name, userId);
+                removeAppRotation(name, userId);
             }
         }
 
@@ -7301,8 +7302,17 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
                 mAppWarnings.onPackageUninstalled(name, userId);
                 mCompatModePackages.handlePackageUninstalledLocked(name);
                 mPackageConfigPersister.onPackageUninstall(name, userId);
+                removeAppRotation(name, userId);
             }
             mWindowStyleCache.invalidatePackage(name);
+        }
+
+        private void removeAppRotation(String packageName, int userId) {
+            if (mRootWindowContainer == null) return;
+            final DisplayContent display = mRootWindowContainer.getDefaultDisplay();
+            if (display != null) {
+                display.getDisplayRotation().removeAppRotation(packageName, userId);
+            }
         }
 
         @Override
@@ -8020,6 +8030,10 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
             synchronized (mGlobalLock) {
                 mRootWindowContainer.removeUser(userId);
                 mPackageConfigPersister.removeUser(userId);
+                final DisplayContent display = mRootWindowContainer.getDefaultDisplay();
+                if (display != null) {
+                    display.getDisplayRotation().removeAppRotationsForUser(userId);
+                }
             }
         }
 
