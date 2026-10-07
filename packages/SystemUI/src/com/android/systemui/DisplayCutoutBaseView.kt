@@ -21,6 +21,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.Dimension
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
@@ -29,6 +30,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.util.AttributeSet
+import android.util.DisplayUtils
 import android.view.Display
 import android.view.DisplayCutout
 import android.view.DisplayInfo
@@ -36,6 +38,7 @@ import android.view.Surface
 import android.view.View
 import androidx.annotation.VisibleForTesting
 import com.android.app.animation.Interpolators
+import com.android.internal.R
 import com.android.systemui.RegionInterceptingFrameLayout.RegionInterceptableView
 import com.android.systemui.util.asIndenting
 import java.io.PrintWriter
@@ -99,6 +102,7 @@ open class DisplayCutoutBaseView : View, RegionInterceptableView {
     fun updateConfiguration(newDisplayUniqueId: String?) {
         val info = DisplayInfo()
         context.display?.getDisplayInfo(info)
+        updateDisplayCutoutForDecorations(resources, info)
         val oldMode: Display.Mode? = displayMode
         displayMode = info.mode
 
@@ -189,6 +193,7 @@ open class DisplayCutoutBaseView : View, RegionInterceptableView {
         }
         cutoutPath.reset()
         context.display?.getDisplayInfo(displayInfo)
+        updateDisplayCutoutForDecorations(resources, displayInfo)
         displayInfo.displayCutout?.cutoutPath?.let { path -> cutoutPath.set(path) }
         invalidate()
     }
@@ -319,6 +324,34 @@ open class DisplayCutoutBaseView : View, RegionInterceptableView {
 
     companion object {
         const val HIDDEN_CAMERA_PROTECTION_SCALE = 0.0f
+
+        /** Retain the physical fill path when WindowManager hides landscape cutout insets. */
+        @JvmStatic
+        fun updateDisplayCutoutForDecorations(resources: Resources, info: DisplayInfo) {
+            if (
+                info.displayCutout != null ||
+                    info.type != Display.TYPE_INTERNAL ||
+                    (info.rotation != Surface.ROTATION_90 &&
+                        info.rotation != Surface.ROTATION_270) ||
+                    !resources.getBoolean(R.bool.config_hideDisplayCutoutInLandscape) ||
+                    !DisplayCutout.getFillBuiltInDisplayCutout(resources, info.uniqueId)
+            ) {
+                return
+            }
+            val width = info.naturalWidth
+            val height = info.naturalHeight
+            val mode = DisplayUtils.getMaximumResolutionDisplayMode(info.supportedModes)
+            info.displayCutout =
+                DisplayCutout.fromResourcesRectApproximation(
+                        resources,
+                        info.uniqueId,
+                        mode?.physicalWidth ?: width,
+                        mode?.physicalHeight ?: height,
+                        width,
+                        height,
+                    )
+                    ?.getRotated(width, height, Surface.ROTATION_0, info.rotation)
+        }
 
         @JvmStatic
         protected fun transformPhysicalToLogicalCoordinates(
