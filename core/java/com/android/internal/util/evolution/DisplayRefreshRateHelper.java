@@ -45,7 +45,8 @@ public class DisplayRefreshRateHelper {
         final Display.Mode[] modes = mContext.getDisplay().getSupportedModes();
         for (Display.Mode m : modes) {
             if (m.getPhysicalWidth() == mode.getPhysicalWidth() &&
-                    m.getPhysicalHeight() == mode.getPhysicalHeight()) {
+                    m.getPhysicalHeight() == mode.getPhysicalHeight() &&
+                    m.getRefreshRate() >= DEFAULT_REFRESH_RATE) {
                 mRefreshRateList.add((int) m.getRefreshRate());
             }
         }
@@ -63,7 +64,8 @@ public class DisplayRefreshRateHelper {
         final int ret = (int) Settings.System.getFloatForUser(mContext.getContentResolver(),
                 MIN_REFRESH_RATE, defaultRefreshRate, UserHandle.USER_SYSTEM);
         if (mRefreshRateList.size() != 0 && !mRefreshRateList.contains(ret)) {
-            return mRefreshRateList.get(mRefreshRateList.size() - 1);
+            return ret < mRefreshRateList.get(0) ? mRefreshRateList.get(0)
+                    : mRefreshRateList.get(mRefreshRateList.size() - 1);
         }
         return ret;
     }
