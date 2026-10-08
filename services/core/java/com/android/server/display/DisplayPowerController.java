@@ -1401,6 +1401,10 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
             mustNotify = !mDisplayReadyLocked;
         }
 
+        // Release ambient constraints as soon as policy changes, before making wake visible.
+        mBlanker.onDisplayPowerStateChanged(mDisplayId, mPowerRequest.policy,
+                mPowerState == null ? Display.STATE_UNKNOWN : mPowerState.getScreenState());
+
         final DisplayState displayState = mDisplayStateController.updateDisplayState(
                 mPowerRequest, mIsEnabled, mIsInTransition);
         int state = displayState.state();
@@ -1417,6 +1421,7 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
                 state, displayState.reason(),
                 mDisplayStateController.shouldPerformScreenOffTransition());
         state = mPowerState.getScreenState();
+        mBlanker.onDisplayPowerStateChanged(mDisplayId, mPowerRequest.policy, state);
 
         // Disable button and keyboard lights when screen off or dozing
         if (state == Display.STATE_OFF || state == Display.STATE_DOZE ||

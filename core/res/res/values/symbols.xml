@@ -4745,6 +4745,8 @@
 
   <!-- For high refresh rate displays -->
   <java-symbol type="integer" name="config_defaultRefreshRate" />
+  <java-symbol type="integer" name="config_dozeRefreshRate" />
+  <java-symbol type="integer" name="config_dozeRefreshRateDelayMillis" />
   <java-symbol type="integer" name="config_defaultPeakRefreshRate" />
   <java-symbol type="integer" name="config_externalDisplayPeakRefreshRate" />
   <java-symbol type="integer" name="config_externalDisplayPeakWidth" />

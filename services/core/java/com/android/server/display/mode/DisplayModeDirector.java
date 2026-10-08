@@ -42,6 +42,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.hardware.display.BrightnessInfo;
 import android.hardware.display.DisplayManager;
+import android.hardware.display.DisplayManagerInternal.DisplayPowerRequest;
 import android.hardware.display.DisplayManagerInternal;
 import android.hardware.display.DisplayManagerInternal.RefreshRateLimitation;
 import android.hardware.fingerprint.IUdfpsRefreshRateRequestCallback;
@@ -138,6 +139,18 @@ public class DisplayModeDirector {
     private static final int MSG_USER_PREFERRED_HDR_MODE = 10;
 
     private final Object mLock = new Object();
+    private final int mDozeRefreshRate;
+    private final int mDozeRefreshRateDelayMillis;
+    @GuardedBy("mLock")
+    private Runnable mPendingDozeVote;
+    @GuardedBy("mLock")
+    private int mDozePowerPolicy;
+    @GuardedBy("mLock")
+    private int mDozeDisplayState = Display.STATE_UNKNOWN;
+    @GuardedBy("mLock")
+    private Display.Mode mDozeResolutionMode;
+    @GuardedBy("mLock")
+    private Display.Mode mDozeMode;
     private final Context mContext;
 
     private final DisplayModeDirectorHandler mHandler;
@@ -214,6 +227,9 @@ public class DisplayModeDirector {
         mDisplayManagerFlags = displayManagerFlags;
         mDisplayDeviceConfigProvider = displayDeviceConfigProvider;
         mContext = context;
+        mDozeRefreshRate = context.getResources().getInteger(R.integer.config_dozeRefreshRate);
+        mDozeRefreshRateDelayMillis = context.getResources().getInteger(
+                R.integer.config_dozeRefreshRateDelayMillis);
         mHandler = new DisplayModeDirectorHandler(handler.getLooper());
         mInjector = injector;
         mVotesStatsReporter = injector.getVotesStatsReporter();
@@ -228,7 +244,7 @@ public class DisplayModeDirector {
                 displayManagerFlags);
         mDefaultDisplayDeviceConfig = null;
         mUdfpsObserver = new UdfpsObserver();
-        mVotesStorage = new VotesStorage(this::notifyDesiredDisplayModeSpecsChangedLocked,
+        mVotesStorage = new VotesStorage(this::onVotesChanged,
                 mVotesStatsReporter);
         mDisplayObserver = new DisplayObserver(context, handler, mVotesStorage, injector,
                 modeRequestManager);
@@ -327,7 +343,7 @@ public class DisplayModeDirector {
             int lowestConsideredPriority = Vote.MIN_PRIORITY;
             int highestConsideredPriority = Vote.MAX_PRIORITY;
 
-            if (mAlwaysRespectAppRequest) {
+            if (mAlwaysRespectAppRequest && votes.get(Vote.PRIORITY_DOZE) == null) {
                 lowestConsideredPriority = Vote.PRIORITY_APP_REQUEST_RENDER_FRAME_RATE_RANGE;
                 highestConsideredPriority = Vote.PRIORITY_APP_REQUEST_SIZE;
             }
@@ -608,6 +624,9 @@ public class DisplayModeDirector {
      * Called when the user switches.
      */
     public void onSwitchUser() {
+        synchronized (mLock) {
+            clearDozeVoteLocked();
+        }
         mHandler.obtainMessage(MSG_SWITCH_USER).sendToTarget();
     }
 
@@ -634,6 +653,12 @@ public class DisplayModeDirector {
             }
             pw.println("  mModeSwitchingType: " + switchingTypeToString(mModeSwitchingType));
             pw.println("  mAlwaysRespectAppRequest: " + mAlwaysRespectAppRequest);
+            pw.println("  Doze refresh rate: configured=" + mDozeRefreshRate
+                    + " policy=" + DisplayPowerRequest.policyToString(mDozePowerPolicy)
+                    + " state=" + Display.stateToString(mDozeDisplayState)
+                    + " mode=" + mDozeMode
+                    + " delayMillis=" + mDozeRefreshRateDelayMillis
+                    + " pending=" + (mPendingDozeVote != null));
             mSettingsObserver.dumpLocked(pw);
             mAppRequestObserver.dumpLocked(pw);
             mBrightnessObserver.dumpLocked(pw);
@@ -643,6 +668,105 @@ public class DisplayModeDirector {
         }
         mVotesStorage.dump(pw);
         mSensorObserver.dump(pw);
+    }
+
+    /** Called by the display power path; no display-manager queries or polling are needed. */
+    public void onDisplayPowerStateChanged(int displayId, int policy, int state) {
+        if (displayId != Display.DEFAULT_DISPLAY) {
+            return;
+        }
+        synchronized (mLock) {
+            mDozePowerPolicy = policy;
+            mDozeDisplayState = state;
+            updateDozeVoteLocked();
+        }
+    }
+
+    private void onVotesChanged() {
+        synchronized (mLock) {
+            // Mode rejections must also release the higher-priority ambient constraint.
+            updateDozeVoteLocked();
+            notifyDesiredDisplayModeSpecsChangedLocked();
+        }
+    }
+
+    @GuardedBy("mLock")
+    private void clearDozeVoteLocked() {
+        cancelPendingDozeVoteLocked();
+        mDozeDisplayState = Display.STATE_UNKNOWN;
+        mDozePowerPolicy = DisplayPowerRequest.POLICY_BRIGHT;
+        mDozeMode = null;
+        mVotesStorage.updateVote(Display.DEFAULT_DISPLAY, Vote.PRIORITY_DOZE, null);
+    }
+
+    @GuardedBy("mLock")
+    private void cancelPendingDozeVoteLocked() {
+        if (mPendingDozeVote != null) {
+            mHandler.removeCallbacks(mPendingDozeVote);
+            mPendingDozeVote = null;
+        }
+    }
+
+    @GuardedBy("mLock")
+    private void updateDozeVoteLocked() {
+        updateDozeVoteLocked(false);
+    }
+
+    @GuardedBy("mLock")
+    private void updateDozeVoteLocked(boolean delayElapsed) {
+        Display.Mode candidate = null;
+        Display.Mode resolution = mDozeResolutionMode != null ? mDozeResolutionMode
+                : mDefaultModeByDisplay.get(Display.DEFAULT_DISPLAY);
+        Display.Mode[] modes = mSupportedModesByDisplay.get(Display.DEFAULT_DISPLAY);
+        Vote rejected = mVotesStorage.getVotes(Display.DEFAULT_DISPLAY)
+                .get(Vote.PRIORITY_REJECTED_MODES);
+        if (mDozeRefreshRate > 0 && mDozePowerPolicy == DisplayPowerRequest.POLICY_DOZE
+                && mDozeDisplayState != Display.STATE_OFF
+                && mDozeDisplayState != Display.STATE_UNKNOWN && resolution != null
+                && modes != null) {
+            for (Display.Mode mode : modes) {
+                if (!mode.isSynthetic()
+                        && mode.getPhysicalWidth() == resolution.getPhysicalWidth()
+                        && mode.getPhysicalHeight() == resolution.getPhysicalHeight()
+                        && Math.abs(mode.getRefreshRate() - mDozeRefreshRate)
+                                <= SurfaceControl.RefreshRateRange.FLOAT_TOLERANCE
+                        && (!(rejected instanceof RejectedModesVote rejectedModes)
+                                || !rejectedModes.mSfModeIds.contains(mode.getSfModeId()))) {
+                    candidate = mode;
+                    break;
+                }
+            }
+        }
+        if (candidate == null) {
+            cancelPendingDozeVoteLocked();
+        } else if (mDozeMode == null && mDozeRefreshRateDelayMillis > 0 && !delayElapsed) {
+            if (mPendingDozeVote == null) {
+                mPendingDozeVote = new Runnable() {
+                    @Override
+                    public void run() {
+                        synchronized (mLock) {
+                            // A cancelled callback may already have been dequeued.
+                            if (mPendingDozeVote != this) {
+                                return;
+                            }
+                            mPendingDozeVote = null;
+                            updateDozeVoteLocked(true);
+                        }
+                    }
+                };
+                mHandler.postDelayed(mPendingDozeVote, mDozeRefreshRateDelayMillis);
+            }
+            return;
+        }
+        mDozeMode = candidate;
+        Vote vote = candidate == null ? null : Vote.forVotes(List.of(
+                Vote.forPhysicalRefreshRates(candidate.getRefreshRate()),
+                Vote.forRenderFrameRates(0f, candidate.getRefreshRate()),
+                Vote.forSize(candidate.getPhysicalWidth(), candidate.getPhysicalHeight()),
+                new SupportedRefreshRatesVote(List.of(
+                        new SupportedRefreshRatesVote.RefreshRates(candidate.getRefreshRate(),
+                                candidate.getVsyncRate())))));
+        mVotesStorage.updateVote(Display.DEFAULT_DISPLAY, Vote.PRIORITY_DOZE, vote);
     }
 
     @GuardedBy("mLock")
@@ -1553,6 +1677,10 @@ public class DisplayModeDirector {
         @Override
         public void onDisplayRemoved(int displayId) {
             synchronized (mLock) {
+                if (displayId == Display.DEFAULT_DISPLAY) {
+                    mDozeResolutionMode = null;
+                    clearDozeVoteLocked();
+                }
                 mSupportedModesByDisplay.remove(displayId);
                 mDefaultModeByDisplay.remove(displayId);
                 mDisplayDeviceConfigByDisplay.remove(displayId);
@@ -1821,6 +1949,10 @@ public class DisplayModeDirector {
                 if (!Objects.equals(mDefaultModeByDisplay.get(displayId), info.getDefaultMode())) {
                     changed = true;
                     mDefaultModeByDisplay.put(displayId, info.getDefaultMode());
+                }
+                if (displayId == Display.DEFAULT_DISPLAY) {
+                    mDozeResolutionMode = info.getMode();
+                    updateDozeVoteLocked();
                 }
                 if (changed) {
                     notifyDesiredDisplayModeSpecsChangedLocked();
