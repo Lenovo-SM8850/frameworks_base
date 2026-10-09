@@ -2252,6 +2252,10 @@ class DatabaseHelper extends SQLiteOpenHelper {
             loadIntegerSetting(stmt, Settings.Secure.SLEEP_TIMEOUT,
                     R.integer.def_sleep_timeout);
 
+            // Prebuilt launchers may not resolve the framework's default resource correctly.
+            loadBooleanSetting(stmt, Settings.Secure.SEARCH_ALL_ENTRYPOINTS_ENABLED,
+                    com.android.internal.R.bool.config_searchAllEntrypointsEnabledDefault);
+
             /*
              * IMPORTANT: Do not add any more upgrade steps here as the global,
              * secure, and system settings are no longer stored in a database
