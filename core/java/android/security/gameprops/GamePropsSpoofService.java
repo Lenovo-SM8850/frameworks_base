@@ -132,6 +132,7 @@ public final class GamePropsSpoofService {
             { "MI14P",    "Xiaomi",      "23116PN5BC",        "Xiaomi",       "shennong",        "Xiaomi/shennong/shennong:15/AQ3A.240627.003/OS2.0.202.0.VNBCNXM:user/release-keys",                   "shennong"    },
             { "OP12",     "OnePlus",     "CPH2581",           "OnePlus",      "OP594DL1",        "OnePlus/OP594DL1/OP594DL1:14/UKQ1.230917.001/1702951307528:user/release-keys",                        "OP594DL1"    },
             { "OP13",     "OnePlus",     "PJZ110",            "OnePlus",      "OP5D0DL1",        "OnePlus/PJZ110/OP5D0DL1:15/AP3A.240617.008/V.1bd19a1-1-2:user/release-keys",                          "PJZ110"      },
+            { "OP15",     "OnePlus",     "PLK110",            "OnePlus",      null,              null,                                                                                                  "infiniti"    },
             { "PXL11PXL", "google",      "Pixel 11 Pro XL",   "Google",       "kodiak",          "google/kodiak/kodiak:17/CD1A.260714.001.A9/15938155:user/release-keys",                               "kodiak"      },
             { "RM9P",     "nubia",       "NX769J",            "ZTE",          "NX769J",          "nubia/NX769J/NX769J:14/UKQ1.230917.001/20240813.173312:user/release-keys",                            "NX769J"      },
             { "RM10P",    "nubia",       "NX789J",            "ZTE",          "NX789J",          "nubia/NX789J-UN/NX789J:15/AQ3A.240812.002/20241212.194919:user/release-keys",                         "NX789J"      },
@@ -147,14 +148,14 @@ public final class GamePropsSpoofService {
         }
     }
 
-    /** Convenience builder for a profile map. Null fp/product are skipped. */
+    /** Convenience builder for a profile map. Null device/fp/product are skipped. */
     private static Map<String, Object> profile(String brand, String model, String manufacturer,
             String device, String fingerprint, String product) {
         Map<String, Object> m = new HashMap<>();
         m.put("BRAND",        brand);
         m.put("MODEL",        model);
         m.put("MANUFACTURER", manufacturer);
-        m.put("DEVICE",       device);
+        if (device      != null) m.put("DEVICE",       device);
         if (fingerprint != null) m.put("FINGERPRINT", fingerprint);
         if (product     != null) m.put("PRODUCT",     product);
         return m;
