@@ -19,6 +19,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.service.quicksettings.Tile;
+import android.telephony.TelephonyManager;
 import android.widget.Switch;
 
 import androidx.annotation.Nullable;
@@ -85,6 +86,12 @@ public class DataSaverTile extends SecureQSTile<BooleanState> implements
         mSystemUIDialogFactory = systemUIDialogFactory;
         mShadeDialogContextInteractor = shadeDialogContextInteractor;
         mDataSaverController.observe(getLifecycle(), this);
+    }
+
+    @Override
+    public boolean isAvailable() {
+        TelephonyManager telephony = mContext.getSystemService(TelephonyManager.class);
+        return telephony != null && telephony.isDataCapable();
     }
 
     @Override
