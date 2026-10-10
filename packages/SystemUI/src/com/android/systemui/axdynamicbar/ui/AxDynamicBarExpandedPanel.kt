@@ -2,6 +2,7 @@ package com.android.systemui.axdynamicbar.ui
 
 import android.content.Context
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.ViewTreeObserver
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
@@ -30,12 +32,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 
 import androidx.activity.OnBackPressedDispatcher
@@ -91,18 +95,46 @@ constructor(
     private var imeVisible = false
     private var imeHeight = 0
 
+    // Laid out size of the visible expanded panel and notification alert card, null when absent.
+    // Both are centered horizontally and start at [contentTop] below the window top.
+    private var expandedSize: IntSize? = null
+    private var alertSize: IntSize? = null
+    private var contentTop = 0
+
     private val touchableInsetsListener =
         ViewTreeObserver.OnComputeInternalInsetsListener { info ->
-            if (!replyCaptureActive) return@OnComputeInternalInsetsListener
             val v = overlayView ?: return@OnComputeInternalInsetsListener
-            val touchableBottom = when {
-                !imeVisible -> v.height
-                imeHeight > 0 -> v.height - imeHeight
-                else -> v.height / 2 // IME height unknown: never cover the keyboard
-            }
             info.setTouchableInsets(ViewTreeObserver.InternalInsetsInfo.TOUCHABLE_INSETS_REGION)
-            info.touchableRegion.set(0, 0, v.width, touchableBottom.coerceAtLeast(0))
+            if (replyCaptureActive) {
+                val touchableBottom = when {
+                    !imeVisible -> v.height
+                    imeHeight > 0 -> v.height - imeHeight
+                    else -> v.height / 2 // IME height unknown: never cover the keyboard
+                }
+                info.touchableRegion.set(0, 0, v.width, touchableBottom.coerceAtLeast(0))
+                return@OnComputeInternalInsetsListener
+            }
+            // The window spans the whole screen width, so only the visible cards may take touches.
+            // The rest of the band has to reach the app below, e.g. in games.
+            info.touchableRegion.setEmpty()
+            expandedSize?.let { info.touchableRegion.union(contentBounds(v.width, it)) }
+            alertSize?.let { info.touchableRegion.union(contentBounds(v.width, it)) }
         }
+
+    private fun contentBounds(windowWidth: Int, size: IntSize): Rect {
+        val left = (windowWidth - size.width) / 2
+        return Rect(left, contentTop, left + size.width, contentTop + size.height)
+    }
+
+    private fun onContentSizeChanged(expanded: Boolean, size: IntSize?, top: Int) {
+        val view = overlayView ?: return
+        val current = if (expanded) expandedSize else alertSize
+        if (current == size && contentTop == top) return
+        if (expanded) expandedSize = size else alertSize = size
+        contentTop = top
+        // Recompute the touchable region, it is only queried when the window gets laid out
+        view.post { overlayView?.requestLayout() }
+    }
 
     fun init() {
         viewModel.interactor.onCollapseRequested = { viewModel.statusBarExpansion.collapse() }
@@ -169,7 +201,16 @@ constructor(
             .top > 0
 
         val view = ComposeView(context).apply {
-            setContent { PlatformTheme { OverlayContent(viewModel, statusBarTop, hasCutout) } }
+            setContent {
+                PlatformTheme {
+                    OverlayContent(
+                        viewModel,
+                        statusBarTop,
+                        hasCutout,
+                        ::onContentSizeChanged,
+                    )
+                }
+            }
             setOnTouchListener { _, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_OUTSIDE -> {
@@ -244,6 +285,8 @@ constructor(
         }
         overlayView = null
         panelLifecycleOwner = null
+        expandedSize = null
+        alertSize = null
         replyCaptureActive = false
         imeVisible = false
         imeHeight = 0
@@ -298,13 +341,19 @@ constructor(
 }
 
 @Composable
-private fun OverlayContent(viewModel: AxDynamicBarChipViewModel, statusBarHeightPx: Int, hasCutout: Boolean) {
+private fun OverlayContent(
+    viewModel: AxDynamicBarChipViewModel,
+    statusBarHeightPx: Int,
+    hasCutout: Boolean,
+    onContentSizeChanged: (expanded: Boolean, size: IntSize?, top: Int) -> Unit,
+) {
     val density = LocalDensity.current
     val isLargeScreen = Utilities.isLargeScreen(LocalContext.current)
 
     val largeScreenExtra = if (isLargeScreen) 4.dp else 0.dp
     val topPad = if (hasCutout) largeScreenExtra
         else with(density) { statusBarHeightPx.toDp() } + largeScreenExtra
+    val topPadPx = with(density) { topPad.roundToPx() }
     val chipState by viewModel.chipState.collectAsStateWithLifecycle()
     val isExpanded by viewModel.isExpanded.collectAsStateWithLifecycle()
     val uiState by viewModel.interactor.uiState.collectAsStateWithLifecycle()
@@ -403,12 +452,16 @@ private fun OverlayContent(viewModel: AxDynamicBarChipViewModel, statusBarHeight
                 if (filtered.isEmpty()) return@let
                 Box(
                     modifier =
-                        Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {}
-                        )
-                ) {                
+                        Modifier.onSizeChanged { onContentSizeChanged(true, it, topPadPx) }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {}
+                            )
+                ) {
+                    DisposableEffect(Unit) {
+                        onDispose { onContentSizeChanged(true, null, topPadPx) }
+                    }
                    ExpandedIslandContent(
                     events = filtered,
                     interactor = viewModel.interactor,
@@ -450,8 +503,12 @@ private fun OverlayContent(viewModel: AxDynamicBarChipViewModel, statusBarHeight
                     modifier =
                         Modifier.widthIn(max = ExpandedMaxWidth)
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
+                            .padding(horizontal = 12.dp)
+                            .onSizeChanged { onContentSizeChanged(false, it, topPadPx) },
                 )
+                DisposableEffect(Unit) {
+                    onDispose { onContentSizeChanged(false, null, topPadPx) }
+                }
             }
         }
     }
