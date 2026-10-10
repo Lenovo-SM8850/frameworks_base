@@ -95,7 +95,10 @@ constructor(
     }
 
     override fun isAvailable(): Boolean {
-        return controlsComponent.getControlsController().isPresent
+        return controlsComponent.getControlsController().isPresent &&
+            controlsComponent.getControlsListingController()
+                .map { it.getCurrentServices().isNotEmpty() }
+                .orElse(false)
     }
 
     override fun newTileState(): QSTile.State {
