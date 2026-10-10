@@ -711,7 +711,9 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
             clock.setBackgroundResource(0)
             clock.setPaddingRelative(padding.start, padding.top, padding.end, padding.bottom)
             clock.setMaskTextMode(false)
-            // Reset text color - Clock will handle it via DarkIconDispatcher
+            // Drop the static white text color of the filled chip styles, otherwise the clock
+            // ignores the dark icon tint after the chip is disabled or moved to another clock
+            clock.setStaticColor(false)
         }
 
         fun apply(clock: Clock, style: Int) {
