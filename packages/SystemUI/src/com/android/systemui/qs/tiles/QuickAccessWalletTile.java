@@ -196,6 +196,11 @@ public class QuickAccessWalletTile extends QSTileImpl<QSTile.State> {
 
     @Override
     public boolean isAvailable() {
+        // Recheck the provider after apps are installed, disabled or removed.
+        mController.reCreateWalletClient();
+        if (!mController.getWalletClient().isWalletServiceAvailable()) {
+            return false;
+        }
         if (isWalletRoleAvailable()) {
             return !mPackageManager.hasSystemFeature(FEATURE_CHROME_OS);
         }
