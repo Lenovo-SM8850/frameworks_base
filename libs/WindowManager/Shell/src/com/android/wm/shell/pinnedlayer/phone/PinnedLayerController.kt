@@ -113,7 +113,7 @@ class PinnedLayerController(
             if (displayId == DEFAULT_DISPLAY && from != to) {
                 getPinnedTasks().forEach { task ->
                     presentationController.getRotationBounds(task, from, to)?.let { bounds ->
-                        wct.setBounds(task.token, bounds)
+                        presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
                         minimizeState.entries[task.taskId]?.bounds?.set(bounds)
                     }
                 }
@@ -127,7 +127,7 @@ class PinnedLayerController(
     }
 
     private fun addMinimizeHandle(task: TaskInfo, right: Boolean = true) {
-        val bounds = task.configuration.windowConfiguration.bounds
+        val bounds = task.floatingWindowRestoreBounds
         minimizeState.minimize(task.taskId, task.userId, bounds, right, .5f)
         minimizeHandles?.update()
     }
@@ -152,7 +152,8 @@ class PinnedLayerController(
         visiblePinnedTasks += taskId
         currentPinnedTaskId = taskId
         removeMinimizeHandle(taskId)
-        wct.merge(getLayerPinnedWct(task.token, bounds), true)
+        wct.merge(getLayerPinnedWct(task.token), true)
+        presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
         wct.setHidden(task.token, false).reorder(task.token, true)
         transitions.startTransition(TRANSIT_CHANGE, wct, null)
     }
@@ -311,7 +312,8 @@ class PinnedLayerController(
         visiblePinnedTasks += task.taskId
         minimizedTasks -= task.taskId
         removeMinimizeHandle(task.taskId)
-        wct.merge(getLayerPinnedWct(task.token, bounds), true)
+        wct.merge(getLayerPinnedWct(task.token), true)
+        presentationController.applyPresentation(task, bounds, wct)
         wct.setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
         return true
     }
@@ -386,7 +388,7 @@ class PinnedLayerController(
                 } else {
                     presentationController.clampToDisplay(
                         task,
-                        task.configuration.windowConfiguration.bounds,
+                        task.floatingWindowRestoreBounds,
                     )
                 }
             transitions += ActiveTransition.Pin(task, remoteCallback)
@@ -394,7 +396,8 @@ class PinnedLayerController(
             visiblePinnedTasks += task.taskId
             minimizedTasks -= task.taskId
             removeMinimizeHandle(task.taskId)
-            merge(getLayerPinnedWct(task.token, bounds), /* transfer= */ true)
+            merge(getLayerPinnedWct(task.token), /* transfer= */ true)
+            bounds?.let { presentationController.applyPresentation(task, it, this) }
             setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
 
         }
@@ -427,6 +430,7 @@ class PinnedLayerController(
             UnpinStrategy.CLOSE ->
                 getLayerUnpinnedWct(task.token, isMinimizing = unpinStrategy == UnpinStrategy.HIDE)
             UnpinStrategy.CLEAN -> getRemovedFromLayerWct(task.token)
+                .setBounds(task.token, task.presentationBounds)
         }
     }
 
@@ -606,6 +610,16 @@ class PinnedLayerController(
     ): Boolean {
         if (isNotPinned(taskInfo.taskId)) return false
 
+        if (taskInfo.isFloatingWindow) {
+            val base = taskInfo.floatingWindowRestoreBounds
+            val moved = FloatingWindowGeometry.movedBaseBounds(base, dragStartBounds, dragEndBounds)
+                ?: return true
+            val destination = presentationController.clampToDisplay(taskInfo, moved) ?: base
+            shellTaskOrganizer.applyTransaction(WindowContainerTransaction()
+                .setFloatingWindowPresentation(taskInfo.token,
+                    android.graphics.Point(destination.left, destination.top), taskInfo.floatingWindowScale))
+            return true
+        }
         val isCrossDisplayDrag = taskInfo.displayId != displayId
         if (
             isCrossDisplayDrag &&
@@ -680,7 +694,10 @@ class PinnedLayerController(
     ) {
         val newBounds =
             presentationController.calculateNewTaskBounds(triggerTask, requestedLocation) ?: return
-        outWct.setBounds(triggerTask.token, newBounds)
+        if (triggerTask.isFloatingWindow) {
+            presentationController.applyPresentation(triggerTask, newBounds, outWct,
+                triggerTask.floatingWindowScale)
+        } else outWct.setBounds(triggerTask.token, newBounds)
     }
 
     // TODO(b/449681882): Remove when Handler introduces its own state management for animations.

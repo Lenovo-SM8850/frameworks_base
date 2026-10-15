@@ -52,6 +52,7 @@ import android.app.ActivityTaskManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.ContentObserver;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -632,6 +633,27 @@ public class Transitions implements RemoteCallable<Transitions>,
             }
             final SurfaceControl leash = change.getLeash();
             final int mode = change.getMode();
+            if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow) {
+                applyFloatingWindowTransform(change, t);
+                applyFloatingWindowTransform(change, finishT);
+                boolean isOpening = isOpeningType(info.getType());
+                if (com.android.window.flags.Flags.crossDisplayTransitionV2()) {
+                    if (isClosingType(mode)
+                            || change.getStartDisplayId() != change.getEndDisplayId()) {
+                        isRevealingOnDisplay.put(change.getStartDisplayId(), true);
+                    }
+                    isOpening = !isRevealingOnDisplay.get(change.getEndDisplayId())
+                            && change.hasFlags(FLAG_MOVED_TO_TOP | FLAG_BACK_GESTURE_ANIMATED);
+                }
+                if (isClosingType(mode)) finishT.hide(leash);
+                else {
+                    t.show(leash).setAlpha(leash,
+                            isOpeningType(mode) && isOpening ? 0f : 1f);
+                    if (mode == TRANSIT_OPEN || mode == TRANSIT_TO_FRONT
+                            || isOpening && mode == TRANSIT_CHANGE) finishT.show(leash);
+                }
+                continue;
+            }
 
             if (mode == TRANSIT_TO_FRONT) {
                 // When the window is moved to front, make sure the crop is updated to prevent it
@@ -717,6 +739,17 @@ public class Transitions implements RemoteCallable<Transitions>,
         for (int i = info.getChanges().size() - 1; i >= 0; --i) {
             setUpSurface(info.getChanges().get(i), info, i, t);
         }
+    }
+
+    /** Restores floating presentation after a transition resets its task leash. */
+    public static void applyFloatingWindowTransform(TransitionInfo.Change change,
+            SurfaceControl.Transaction t) {
+        final android.app.TaskInfo task = change.getTaskInfo();
+        if (task == null || !task.isFloatingWindow) return;
+        final Rect logical = task.configuration.windowConfiguration.getBounds();
+        t.setMatrix(change.getLeash(), task.floatingWindowScale, 0, 0, task.floatingWindowScale);
+        t.setPosition(change.getLeash(), task.positionInParent.x, task.positionInParent.y);
+        t.setWindowCrop(change.getLeash(), logical.width(), logical.height());
     }
 
     private static int findByToken(ArrayList<ActiveTransition> list, IBinder token) {

@@ -359,7 +359,7 @@ private constructor(
     private fun updateHandleMenuPillPositions(captionX: Int, captionY: Int) {
         val menuX: Int
         val menuY: Int
-        val taskBounds = taskInfo.getConfiguration().windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         globalMenuPosition.set(
             calculateMenuPosition(
                 splitScreenController,

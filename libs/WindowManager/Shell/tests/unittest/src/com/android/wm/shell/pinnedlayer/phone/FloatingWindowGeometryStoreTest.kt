@@ -15,6 +15,44 @@ import org.junit.runner.RunWith
 @SmallTest
 @RunWith(AndroidJUnit4::class)
 class FloatingWindowGeometryStoreTest {
+    @Test fun storeRestore_keepsVisibleGeometryAndScaleAcrossInstances() {
+        for (scale in listOf(.5f, 1f / 1.3f, 1f)) {
+            repository().store("scaled.app", 10, 1, bounds, stable, 1200, 1920, 320,
+                true, false, scale)
+            val restored = repository().restore("scaled.app", 10, 1, stable, 1200, 1920, 320)!!
+            assertThat(restored.bounds).isEqualTo(bounds)
+            assertThat(restored.scale).isEqualTo(scale)
+        }
+    }
+
+    @Test fun store_rejectsInvalidScaleWithoutOverwritingGeometry() {
+        val store = repository()
+        store.store("scaled.app", 0, 1, bounds, stable, 1200, 1920, 320, false, false, .7f)
+        for (scale in listOf(Float.NaN, Float.POSITIVE_INFINITY, 0f, .4f, 1.01f)) {
+            store.store("scaled.app", 0, 1, Rect(0, 0, 100, 100), stable, 1200, 1920,
+                320, false, false, scale)
+        }
+        val restored = repository().restore("scaled.app", 0, 1, stable, 1200, 1920, 320)!!
+        assertThat(restored.bounds).isEqualTo(bounds)
+        assertThat(restored.scale).isEqualTo(.7f)
+    }
+
+    @Test fun store_coalescesPendingSnapshotsAndSkipsDuplicateGeometry() {
+        val writes = java.util.ArrayDeque<Runnable>()
+        val store = FloatingWindowGeometryStore(temporaryFolder.root, Executor { writes.add(it) })
+        val latest = Rect(bounds).apply { offset(20, 30) }
+        store.store("scaled.app", 0, 1, bounds, stable, 1200, 1920, 320, false, false, .75f)
+        store.store("scaled.app", 0, 1, latest, stable, 1200, 1920, 320, false, false, .8f)
+        store.store("scaled.app", 0, 1, latest, stable, 1200, 1920, 320, false, false, .8f)
+        assertThat(writes.size).isEqualTo(1)
+        writes.removeFirst().run()
+        val restored = repository().restore("scaled.app", 0, 1, stable, 1200, 1920, 320)!!
+        assertThat(restored.bounds).isEqualTo(latest)
+        assertThat(restored.scale).isEqualTo(.8f)
+        store.store("scaled.app", 0, 1, latest, stable, 1200, 1920, 320, false, false, .8f)
+        assertThat(writes).isEmpty()
+    }
+
     @get:Rule val temporaryFolder = TemporaryFolder()
     private fun repository() = FloatingWindowGeometryStore(
         temporaryFolder.root, Executor { it.run() })

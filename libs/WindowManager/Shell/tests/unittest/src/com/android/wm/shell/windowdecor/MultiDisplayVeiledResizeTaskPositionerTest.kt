@@ -20,6 +20,7 @@ import android.app.WindowConfiguration
 import android.content.res.Configuration
 import android.graphics.Point
 import android.graphics.Rect
+import android.graphics.Region
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -151,8 +152,12 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
             .getStableBounds(any())
         whenever(mockTransactionFactory.get()).thenReturn(mockTransaction)
         whenever(mockWindowDecoration.taskSurface).thenReturn(mockSurfaceControl)
+        whenever(mockWindowDecoration.exclusionRegion).thenReturn(Region())
         whenever(mockTransaction.setPosition(any(), any(), any())).thenReturn(mockTransaction)
         whenever(mockTransaction.setAlpha(any(), any())).thenReturn(mockTransaction)
+        whenever(mockTransaction.setFrameTimeline(any())).thenReturn(mockTransaction)
+        whenever(mockTransaction.setMatrix(any(), any<Float>(), any(), any(), any()))
+            .thenReturn(mockTransaction)
         whenever(mockWindowDecoration.taskInfo)
             .thenReturn(
                 ActivityManager.RunningTaskInfo().apply {
@@ -1056,6 +1061,168 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         verify(changeMock).endRelOffset
     }
 
+    private fun beginFloatingCorner() {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.positionInParent = Point(100, 100)
+        task.floatingWindowPosition.set(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
+            DISPLAY_ID_0, 700f, 1000f, INPUT_METHOD_TYPE_UNKNOWN)
+    }
+
+    @Test
+    fun floatingBoundsTransition_consumedRestoresCommittedDecorations() = runOnUiThread {
+        verifyFloatingBoundsTransitionConsumed(false)
+    }
+
+    @Test
+    fun floatingBoundsTransition_abortedRestoresCommittedDecorations() = runOnUiThread {
+        verifyFloatingBoundsTransitionConsumed(true)
+    }
+
+    private fun verifyFloatingBoundsTransitionConsumed(aborted: Boolean) {
+        beginFloatingCorner()
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1100f, 1600f)
+        verify(mockTransitions).startTransition(eq(TRANSIT_CHANGE), any(), eq(taskPositioner))
+        Assert.assertTrue(taskPositioner.isResizingOrAnimating)
+        val committed = ActivityManager.RunningTaskInfo(mockWindowDecoration.taskInfo).apply {
+            floatingWindowScale = 1f
+            configuration.windowConfiguration.setBounds(Rect(100, 100, 1100, 1600))
+        }
+        val change = mock<TransitionInfo.Change>()
+        whenever(change.taskInfo).thenReturn(committed)
+        whenever(change.leash).thenReturn(mockSurfaceControl)
+        whenever(mockTransitionInfo.changes).thenReturn(listOf(change))
+        val finish = mock<Transaction>()
+        whenever(finish.setMatrix(any(), any<Float>(), any(), any(), any())).thenReturn(finish)
+        whenever(finish.setPosition(any(), any(), any())).thenReturn(finish)
+        taskPositioner.onTransitionReady(mockResizeBinder, mockTransitionInfo,
+            mockTransaction, finish)
+        org.mockito.Mockito.clearInvocations(mockWindowDecoration)
+        taskPositioner.onTransitionConsumed(mockResizeBinder, aborted, finish)
+        verify(mockWindowDecoration).finishFloatingWindowPreview()
+        verify(mockWindowDecoration).relayout(eq(committed), any(), eq(finish),
+            eq(false), eq(false), any(), any(), eq(true), org.mockito.kotlin.isNull())
+        verify(mockWindowDecoration).updateFloatingWindowChildScale(eq(finish), eq(1f))
+        verify(finish).setMatrix(eq(mockSurfaceControl), eq(1f), eq(0f), eq(0f), eq(1f))
+        verify(mockTransaction).setMatrix(eq(mockSurfaceControl), eq(1f), eq(0f), eq(0f), eq(1f))
+        verify(mockTransaction, never()).setPosition(eq(mockSurfaceControl), any(), any())
+        Assert.assertFalse(taskPositioner.isResizingOrAnimating)
+    }
+
+    @Test
+    fun floatingCorner_incomingTransitionCancelsRemainingDrag() = runOnUiThread {
+        beginFloatingCorner()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 780f, 1120f)
+        taskPositioner.flushFloatingResizePreview()
+        Assert.assertTrue(taskPositioner.isResizingOrAnimating)
+        val change = mock<TransitionInfo.Change>()
+        whenever(change.taskInfo).thenReturn(mockWindowDecoration.taskInfo)
+        whenever(mockTransitionInfo.changes).thenReturn(listOf(change))
+        val start = mock<Transaction>()
+        val finish = mock<Transaction>()
+        taskPositioner.onTransitionReady(mockTransitionBinder, mockTransitionInfo, start, finish)
+        Assert.assertFalse(taskPositioner.isResizingOrAnimating)
+        org.mockito.Mockito.clearInvocations(mockWindowDecoration, mockShellTaskOrganizer)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 800f, 1200f)
+        taskPositioner.flushFloatingResizePreview()
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 800f, 1200f)
+        verify(mockWindowDecoration, never()).updateFloatingWindowPreview(any(), any(), any())
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        verify(start, never()).setPosition(eq(mockSurfaceControl), any(), any())
+    }
+
+    @Test
+    fun floatingCorner_motionSamplesCoalesceAndUnchangedReleaseDoesNotPreviewAgain() = runOnUiThread {
+        beginFloatingCorner()
+        for (delta in listOf(20f, 40f, 60f, 80f)) {
+            taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 700f + delta, 1000f + delta * 1.5f)
+        }
+        verify(mockWindowDecoration, never()).updateFloatingWindowPreview(any(), any(), any())
+        Assert.assertTrue(taskPositioner.isResizingOrAnimating)
+        taskPositioner.flushFloatingResizePreview()
+        verify(mockWindowDecoration, times(1)).updateFloatingWindowPreview(any(), eq(.85f), any())
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 780f, 1120f)
+        taskPositioner.flushFloatingResizePreview()
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 780f, 1120f)
+        verify(mockWindowDecoration, times(1)).updateFloatingWindowPreview(any(), any(), any())
+    }
+
+    @Test
+    fun floatingScaledCorner_closeCancelsPreviewWithoutRelayoutOrPresentationCommit() = runOnUiThread {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.positionInParent = Point(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
+            DISPLAY_ID_0, 700f, 1000f, INPUT_METHOD_TYPE_UNKNOWN)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 780f, 1120f)
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer, mockWindowDecoration)
+        taskPositioner.close()
+        verify(mockWindowDecoration).cancelFloatingWindowPreview(any())
+        verify(mockWindowDecoration, never()).updateFloatingWindowPreview(any(), any(), any())
+        verify(mockShellTaskOrganizer).applyTransaction(argThat {
+            changes[taskBinder]?.changeMask?.and(
+                android.window.WindowContainerTransaction.Change.CHANGE_FLOATING_WINDOW_PRESENTATION) == 0
+        })
+    }
+
+    @Test
+    fun floatingScaledCorner_previewsLocallyAndCommitsOnceAtRelease() = runOnUiThread {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.positionInParent = Point(100, 100)
+        task.floatingWindowPosition.set(100, 300)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
+            DISPLAY_ID_0, 700f, 1000f, INPUT_METHOD_TYPE_UNKNOWN)
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+        for (delta in listOf(20f, 40f, 60f, 80f)) {
+            taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 700f + delta, 1000f + delta * 1.5f)
+        }
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        taskPositioner.flushFloatingResizePreview()
+        verify(mockWindowDecoration, times(1))
+            .updateFloatingWindowPreview(any(), any(), any())
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 780f, 1120f)
+        verify(mockShellTaskOrganizer, times(1)).applyTransaction(argThat {
+            changes[taskBinder]?.let { change ->
+                change.windowSetMask and WindowConfiguration.WINDOW_CONFIG_BOUNDS == 0 &&
+                    kotlin.math.abs(change.floatingWindowScale - .85f) < .001f &&
+                    change.floatingWindowPosition == Point(100, 300)
+            } == true
+        })
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+    }
+
+    @Test
+    fun floatingScaledCorner_updatesPresentationWithoutBoundsTransaction() = runOnUiThread {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.positionInParent = android.graphics.Point(100, 100)
+        task.floatingWindowPosition.set(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
+            DISPLAY_ID_0, 700f, 1000f, INPUT_METHOD_TYPE_UNKNOWN)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 780f, 1120f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 780f, 1120f)
+        verify(mockShellTaskOrganizer, org.mockito.Mockito.atLeastOnce()).applyTransaction(argThat {
+            changes[taskBinder]?.let { change ->
+                change.windowSetMask and WindowConfiguration.WINDOW_CONFIG_BOUNDS == 0 &&
+                    kotlin.math.abs(change.floatingWindowScale - .85f) < .001f
+            } == true
+        })
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        verify(mockWindowDecoration, never()).showResizeVeil(any())
+        Assert.assertEquals(Rect(100, 100, 900, 1300), task.configuration.windowConfiguration.bounds)
+    }
+
     @Test
     fun floatingCorner_preservesAspectAndCommitsOnlyAtRelease() = runOnUiThread {
         val initial = Rect(100, 100, 500, 900)
@@ -1067,6 +1234,7 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         val outline = taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 600f, 1100f)
         Assert.assertEquals(Rect(100, 100, 600, 1100), outline)
         Assert.assertEquals(initial, task.configuration.windowConfiguration.bounds)
+        taskPositioner.flushFloatingResizePreview()
         verify(mockWindowDecoration).showResizeVeil(outline)
         verify(mockTransitions, never()).startTransition(any(), any(), any())
         taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 600f, 1100f)

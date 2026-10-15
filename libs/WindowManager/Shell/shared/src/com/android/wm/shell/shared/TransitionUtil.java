@@ -333,6 +333,14 @@ public class TransitionUtil {
                     change.getStartAbsBounds().left - root.getOffset().x,
                     change.getStartAbsBounds().top - root.getOffset().y);
         }
+        if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow) {
+            final android.app.TaskInfo task = change.getTaskInfo();
+            final Rect logical = task.configuration.windowConfiguration.getBounds();
+            t.setMatrix(leash, task.floatingWindowScale, 0, 0, task.floatingWindowScale)
+                    .setWindowCrop(leash, logical.width(), logical.height())
+                    .setPosition(leash, task.positionInParent.x - root.getOffset().x,
+                            task.positionInParent.y - root.getOffset().y);
+        }
         final int layer =
                 calculateAnimLayer(change, order, info.getChanges().size(), info.getType());
         t.setLayer(leash, layer);
@@ -409,8 +417,12 @@ public class TransitionUtil {
         t.reparent(leash, info.getRoot(rootIdx).getLeash());
         final Rect absBounds =
                 (mode == TRANSIT_OPEN) ? change.getEndAbsBounds() : change.getStartAbsBounds();
-        t.setPosition(leash, absBounds.left - info.getRoot(rootIdx).getOffset().x,
-                absBounds.top - info.getRoot(rootIdx).getOffset().y);
+        final android.app.TaskInfo task = change.getTaskInfo();
+        final boolean floating = task != null && task.isFloatingWindow;
+        final int left = floating ? task.positionInParent.x : absBounds.left;
+        final int top = floating ? task.positionInParent.y : absBounds.top;
+        t.setPosition(leash, left - info.getRoot(rootIdx).getOffset().x,
+                top - info.getRoot(rootIdx).getOffset().y);
 
         if (isExpandedFloatingWindow(change)) {
             t.setLayer(leash, info.getChanges().size() * 3 + 1 - layer);
@@ -487,6 +499,13 @@ public class TransitionUtil {
             // for the transition. In case the position being wrong after the transition finished.
             t.setPosition(change.getLeash(), 0, 0);
         }
+        final android.app.TaskInfo task = change.getTaskInfo();
+        if (task != null && task.isFloatingWindow) {
+            final Rect logical = task.configuration.windowConfiguration.getBounds();
+            t.setMatrix(change.getLeash(), task.floatingWindowScale, 0, 0,
+                    task.floatingWindowScale);
+            t.setWindowCrop(change.getLeash(), logical.width(), logical.height());
+        }
         t.setLayer(change.getLeash(), 0);
         t.show(change.getLeash());
         return leashSurface;
@@ -552,6 +571,17 @@ public class TransitionUtil {
 
         Rect localBounds = new Rect(change.getEndAbsBounds());
         localBounds.offsetTo(change.getEndRelOffset().x, change.getEndRelOffset().y);
+        final Rect screenBounds = new Rect(change.getEndAbsBounds());
+        final Rect startBounds = new Rect(change.getStartAbsBounds());
+        if (taskInfo != null && taskInfo.isFloatingWindow) {
+            screenBounds.set(taskInfo.getPresentationBounds());
+            localBounds.set(screenBounds);
+            startBounds.offsetTo(taskInfo.positionInParent.x, taskInfo.positionInParent.y);
+            startBounds.right = startBounds.left
+                    + Math.round(startBounds.width() * taskInfo.floatingWindowScale);
+            startBounds.bottom = startBounds.top
+                    + Math.round(startBounds.height() * taskInfo.floatingWindowScale);
+        }
 
         RemoteAnimationTarget target = new RemoteAnimationTarget(
                 taskId,
@@ -566,11 +596,11 @@ public class TransitionUtil {
                 order,
                 null,
                 localBounds,
-                new Rect(change.getEndAbsBounds()),
+                screenBounds,
                 windowConfiguration,
                 isNotInRecents,
                 null,
-                new Rect(change.getStartAbsBounds()),
+                startBounds,
                 taskInfo,
                 change.isAllowEnterPip(),
                 INVALID_WINDOW_TYPE

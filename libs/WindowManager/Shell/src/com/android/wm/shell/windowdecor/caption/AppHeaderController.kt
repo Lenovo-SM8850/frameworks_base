@@ -250,7 +250,7 @@ class AppHeaderController(
             return 0
         }
         val displayInsetsState = displayController.getInsetsState(taskInfo.displayId)
-        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         val systemBarInsets =
             displayInsetsState.calculateInsets(
                 /* frame= */ taskBounds,
@@ -276,7 +276,7 @@ class AppHeaderController(
 
     private fun notifyAppHeaderStateChanged() {
         val appChipPositionInWindow = viewHolder.getAppChipLocationInWindow()
-        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         val appChipGlobalPosition =
             Rect(
                 taskBounds.left + appChipPositionInWindow.left,
@@ -559,7 +559,7 @@ class AppHeaderController(
     override fun createManageWindowsMenu(snapshotList: ArrayList<Pair<Int, TaskSnapshot>>) {
         // The menu uses display-wide coordinates for positioning, so make position the sum
         // of task position and caption position.
-        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         manageWindowsMenu =
             DesktopHeaderManageWindowsMenu(
                 callerTaskInfo = taskInfo,
@@ -650,7 +650,7 @@ class AppHeaderController(
             resources.getDimensionPixelSize(R.dimen.freeform_required_visible_empty_space_in_header)
         val rightButtonsWidth =
             resources.getDimensionPixelSize(R.dimen.desktop_mode_right_edge_buttons_width)
-        val taskWidth = taskInfo.configuration.windowConfiguration.bounds.width()
+        val taskWidth = taskInfo.presentationBounds.width()
         val layout = displayController.getDisplayLayout(taskInfo.displayId) ?: return Rect()
         val displayWidth = layout.width()
         val stableBounds = Rect()
@@ -705,7 +705,7 @@ class AppHeaderController(
     override fun getCaptionHeight(): Int = dimensions.height + getCaptionTopPadding()
 
     override fun getCaptionWidth(): Int =
-        taskInfo.getConfiguration().windowConfiguration.bounds.width()
+        taskInfo.presentationBounds.width()
 
     override val occludingElements: List<OccludingElement>
         get() = viewHolder.getOccludingElements()

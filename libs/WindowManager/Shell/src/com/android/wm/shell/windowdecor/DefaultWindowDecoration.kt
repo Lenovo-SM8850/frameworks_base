@@ -201,7 +201,7 @@ constructor(
         get() = desktopUserRepositories.current.isTaskInFullImmersiveState(taskInfo.taskId)
 
     private val taskBounds
-        get() = taskInfo.getConfiguration().windowConfiguration.bounds
+        get() = taskInfo.presentationBounds
 
     private val taskWidth
         get() = taskBounds.width()
@@ -408,7 +408,7 @@ constructor(
                     desktopModeCompatPolicy.shouldExcludeCaptionFromAppBounds(taskInfo),
                     desktopConfig,
                     inSyncWithTransition,
-                )
+                ).let { if (floatingWindowPreview) it.copy(floatingWindowPreview = true) else it }
 
             val wct = windowContainerTransactionSupplier.invoke()
             val oldDecorationSurface = decorationContainerSurface
@@ -423,7 +423,7 @@ constructor(
 
             // After this line, [WindowDecoration2.taskInfo] is up-to-date and should be
             // used instead of the taskInfo passed to the relayout method.
-            if (!wct.isEmpty) {
+            if (!floatingWindowPreview && !wct.isEmpty) {
                 if (relayoutParams.shouldSetAppBounds) {
                     // When expanding from PiP to freeform, we need to start a Transition for
                     // applying
@@ -623,7 +623,7 @@ constructor(
             applyStartTransactionOnDraw = applyStartTransactionOnDraw,
             setTaskVisibilityPositionAndCrop = shouldSetTaskVisibilityPositionAndCrop,
             hasGlobalFocus = hasGlobalFocus,
-            shouldSetAppBounds = shouldSetAppBounds,
+            shouldSetAppBounds = shouldSetAppBounds && !taskInfo.isFloatingWindow,
             shouldSetBackground = shouldSetBackground,
             shouldUpdateTaskSurfaceOutline = shouldUpdateTaskSurfaceOutline,
             inSyncWithTransition = inSyncWithTransition,
@@ -953,6 +953,12 @@ constructor(
     }
 
     /** Fade the resize veil out. */
+    fun updateFloatingWindowChildScale(t: SurfaceControl.Transaction, scale: Float) {
+        val inverse = 1f / scale
+        decorationContainerSurface?.let { t.setMatrix(it, inverse, 0f, 0f, inverse) }
+        resizeVeil?.updateParentScale(t, scale)
+    }
+
     fun hideResizeVeil() {
         resizeVeil?.hideVeil()
     }

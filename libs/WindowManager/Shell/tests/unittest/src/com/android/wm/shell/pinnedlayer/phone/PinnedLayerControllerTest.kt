@@ -162,6 +162,43 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun floatingDragEnded_preservesPreImeBasePosition() {
+        val task = setupTask(bounds = Rect(100, 100, 900, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            floatingWindowPosition.set(100, 300)
+            positionInParent = android.graphics.Point(100, 120)
+        }
+        pinTask(task)
+        org.mockito.Mockito.clearInvocations(shellTaskOrganizer, transitions)
+        val start = task.presentationBounds
+        val end = Rect(start).apply { offset(60, 80) }
+        assertTrue(pinnedLayerController.onDragEnded(leash, task, start, end))
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(wct.capture())
+        val change = wct.firstValue.changes[task.token.asBinder()]!!
+        assertEquals(android.graphics.Point(160, 380), change.floatingWindowPosition)
+        assertEquals(.75f, change.floatingWindowScale)
+        assertEquals(0, change.windowSetMask and WindowConfiguration.WINDOW_CONFIG_BOUNDS)
+    }
+
+    @Test
+    fun floatingDragEnded_withoutMovementDoesNotCommitImeOffset() {
+        val task = setupTask(bounds = Rect(100, 100, 900, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            floatingWindowPosition.set(100, 300)
+            positionInParent = android.graphics.Point(100, 120)
+        }
+        pinTask(task)
+        org.mockito.Mockito.clearInvocations(shellTaskOrganizer, transitions)
+        val bounds = task.presentationBounds
+        assertTrue(pinnedLayerController.onDragEnded(leash, task, bounds, Rect(bounds)))
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
+        verify(transitions, never()).startTransition(any(), any(), anyOrNull())
+    }
+
+    @Test
     fun dragEnded_notPinnedTask_doNothing() {
         val task = setupTask()
         val dragStartBounds = Rect(DEFAULT_TASK_BOUNDS)

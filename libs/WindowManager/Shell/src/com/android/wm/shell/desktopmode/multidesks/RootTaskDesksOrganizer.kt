@@ -280,7 +280,7 @@ class RootTaskDesksOrganizer(
                             userId)
                 }
                 .forEach { task ->
-                    val bounds = Rect(task.configuration.windowConfiguration.bounds)
+                    val bounds = task.presentationBounds
                     val minimized = !task.configuration.windowConfiguration.isAlwaysOnTop
                     moveTaskToDesk(wct, deskId, task, minimized)
                     wct.merge(PinnedLayerUtils.getRemovedFromLayerWct(task.token), true)
@@ -375,6 +375,10 @@ class RootTaskDesksOrganizer(
         val root = deskRootsByDeskId[deskId] ?: error("Root not found for desk: $deskId")
         if (task is RecentTaskInfo) {
             wct.startTask(task.taskId, createActivityOptionsForStartTask(deskId, this).toBundle())
+        }
+        if (task.isFloatingWindow) {
+            wct.merge(PinnedLayerUtils.getRemovedFromLayerWct(task.token), true)
+            wct.setBounds(task.token, task.presentationBounds)
         }
         wct.setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED)
         if (!minimized) {

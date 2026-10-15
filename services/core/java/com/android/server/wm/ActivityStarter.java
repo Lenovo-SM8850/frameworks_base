@@ -1918,7 +1918,7 @@ class ActivityStarter {
                 }
                 floatingTask.setWindowingMode(WINDOWING_MODE_FREEFORM);
                 floatingTask.setDisablePip(true);
-                floatingTask.setFloatingWindow(true);
+                final boolean wasFloating = floatingTask.isFloatingWindow();
                 if (options.getLaunchBounds() != null) {
                     final Rect bounds = new Rect(options.getLaunchBounds());
                     final Rect stable = new Rect();
@@ -1932,9 +1932,14 @@ class ActivityStarter {
                             Math.max(stable.top - bounds.top,
                             Math.min(0, stable.bottom - bounds.bottom)));
                     floatingTask.setBounds(bounds);
-                } else if (!mLaunchParams.mBounds.isEmpty()) {
+                } else if (!wasFloating && !mLaunchParams.mBounds.isEmpty()) {
                     floatingTask.setBounds(mLaunchParams.mBounds);
                 }
+                if (wasFloating && options.getLaunchBounds() != null) {
+                    floatingTask.setFloatingWindowBounds(new Rect(floatingTask.getBounds()),
+                            floatingTask.getFloatingWindowScale());
+                }
+                floatingTask.setFloatingWindow(true);
                 floatingTask.setForceHidden(Task.FLAG_FORCE_HIDDEN_FOR_TASK_ORG, false);
                 floatingTask.setAlwaysOnTop(true);
             }

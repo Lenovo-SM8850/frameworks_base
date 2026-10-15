@@ -565,7 +565,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         relayout(mRelayoutParams, startT, finishT, wct, oldRootView, taskSurface, mResult);
         // After this line, mTaskInfo is up-to-date and should be used instead of taskInfo
 
-        if (!wct.isEmpty()) {
+        if (!mFloatingWindowPreview && !wct.isEmpty()) {
             if (mRelayoutParams.mShouldSetAppBounds) {
                 // When expanding from PiP to freeform, we need to start a Transition for applying
                 // the inset changes so that PiP receives the insets for the final bounds. This is
@@ -901,7 +901,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
             return;
         }
         final Rect appChipPositionInWindow = appHeader.getAppChipLocationInWindow();
-        final Rect taskBounds = mTaskInfo.configuration.windowConfiguration.getBounds();
+        final Rect taskBounds = mTaskInfo.getPresentationBounds();
         final Rect appChipGlobalPosition = new Rect(
                 taskBounds.left + appChipPositionInWindow.left,
                 taskBounds.top + appChipPositionInWindow.top,
@@ -1185,7 +1185,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 relayoutParams.mInsetSourceFlags |= FLAG_FORCE_CONSUMING_OPAQUE_CAPTION_BAR;
             }
             if (inFullImmersiveMode) {
-                final Rect taskBounds = taskInfo.getConfiguration().windowConfiguration.getBounds();
+                final Rect taskBounds = taskInfo.getPresentationBounds();
                 final Insets systemBarInsets = displayInsetsState.calculateInsets(
                         taskBounds, taskBounds,
                         WindowInsets.Type.systemBars() & ~WindowInsets.Type.captionBar(),
@@ -1273,6 +1273,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         // from being visible if freeform task window above is translucent.
         // Otherwise if fluid resize is enabled, add a background to freeform tasks.
         relayoutParams.mShouldSetBackground = desktopConfig.shouldSetBackground(taskInfo);
+        if (taskInfo.isFloatingWindow) relayoutParams.mShouldSetAppBounds = false;
     }
 
     private static int getCornerRadiusId(int layoutResId) {
@@ -1425,6 +1426,14 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
     /**
      * Fade the resize veil out.
      */
+    void updateFloatingWindowChildScale(SurfaceControl.Transaction t, float scale) {
+        final float inverse = 1f / scale;
+        if (mDecorationContainerSurface != null) {
+            t.setMatrix(mDecorationContainerSurface, inverse, 0, 0, inverse);
+        }
+        if (mResizeVeil != null) mResizeVeil.updateParentScale(t, scale);
+    }
+
     public void hideResizeVeil() {
         mResizeVeil.hideVeil();
     }
@@ -1452,7 +1461,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 R.dimen.freeform_required_visible_empty_space_in_header);
         final int rightButtonsWidth = loadDimensionPixelSize(mContext.getResources(),
                 R.dimen.desktop_mode_right_edge_buttons_width);
-        final int taskWidth = mTaskInfo.configuration.windowConfiguration.getBounds().width();
+        final int taskWidth = mTaskInfo.getPresentationBounds().width();
         final DisplayLayout layout = mDisplayController.getDisplayLayout(mTaskInfo.displayId);
         final int displayWidth = layout.width();
         final Rect stableBounds = new Rect();
@@ -1695,7 +1704,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         if (mTaskInfo.isFreeform()) {
             // The menu uses display-wide coordinates for positioning, so make position the sum
             // of task position and caption position.
-            final Rect taskBounds = mTaskInfo.configuration.windowConfiguration.getBounds();
+            final Rect taskBounds = mTaskInfo.getPresentationBounds();
             mManageWindowsMenu = new DesktopHeaderManageWindowsMenu(
                     mTaskInfo,
                     /* x= */ taskBounds.left + mResult.mCaptionX,

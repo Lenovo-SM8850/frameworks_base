@@ -148,10 +148,10 @@ class AppPinnedController(
         ) + getCaptionTopPadding()
 
     override fun getCaptionWidth(): Int =
-        taskInfo.getConfiguration().windowConfiguration.bounds.width()
+        taskInfo.presentationBounds.width()
 
     override fun calculateValidDragArea(): Rect? {
-        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         val displayLayout = displayController.getDisplayLayout(taskInfo.displayId) ?: return Rect()
         val stableBounds = Rect().also { displayLayout.getStableBounds(it) }
 

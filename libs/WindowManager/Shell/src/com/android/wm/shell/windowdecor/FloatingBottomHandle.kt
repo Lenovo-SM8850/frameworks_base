@@ -22,11 +22,14 @@ class FloatingBottomHandle(private val context: Context,
     private var host: SurfaceControlViewHost? = null
     private var surface: SurfaceControl? = null
     private var parent: SurfaceControl? = null
+    private var hostWidth = 0
+    private var hostHeight = 0
 
-    fun update(task: RunningTaskInfo, taskSurface: SurfaceControl) {
+    fun update(task: RunningTaskInfo, taskSurface: SurfaceControl,
+        transaction: SurfaceControl.Transaction? = null) {
         if (!task.isFloatingWindow) { close(); return }
         val display = context.display ?: return
-        val bounds = task.configuration.windowConfiguration.bounds
+        val bounds = task.presentationBounds
         if (bounds.isEmpty) return
         val density = context.resources.displayMetrics.density
         val width = minOf(bounds.width(), (72 * density).roundToInt())
@@ -69,10 +72,20 @@ class FloatingBottomHandle(private val context: Context,
                     setTitle("Floating bottom handle ${task.taskId}")
                 })
             host = viewHost
-        } else host?.relayout(width, height)
-        SurfaceControl.Transaction().use { t ->
-            t.setPosition(surface!!, (bounds.width() - width) / 2f,
-                (bounds.height() - height).toFloat()).setLayer(surface!!, Int.MAX_VALUE).show(surface!!).apply()
+        } else if (width != hostWidth || height != hostHeight) {
+            host?.relayout(width, height)
+        }
+        hostWidth = width
+        hostHeight = height
+        val t = transaction ?: SurfaceControl.Transaction()
+        try {
+            val inverse = 1f / task.floatingWindowScale
+            t.setMatrix(surface!!, inverse, 0f, 0f, inverse)
+                .setPosition(surface!!, (bounds.width() - width) / 2f * inverse,
+                (bounds.height() - height) * inverse).setLayer(surface!!, Int.MAX_VALUE).show(surface!!)
+            if (transaction == null) t.apply()
+        } finally {
+            if (transaction == null) t.close()
         }
     }
 
