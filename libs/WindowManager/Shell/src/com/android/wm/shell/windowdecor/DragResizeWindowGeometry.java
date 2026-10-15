@@ -57,10 +57,19 @@ public final class DragResizeWindowGeometry {
     final @NonNull TaskEdges mTaskEdges;
 
     private final DisabledEdge mDisabledEdge;
+    private final boolean mAllowTouchEdgeResize;
 
     DragResizeWindowGeometry(int taskCornerRadius, @NonNull Size taskSize,
             int resizeHandleEdgeOutset, int resizeHandleEdgeInset, int fineCornerSize,
             int largeCornerSize, DisabledEdge disabledEdge) {
+        this(taskCornerRadius, taskSize, resizeHandleEdgeOutset, resizeHandleEdgeInset,
+                fineCornerSize, largeCornerSize, disabledEdge, false);
+    }
+
+    DragResizeWindowGeometry(int taskCornerRadius, @NonNull Size taskSize,
+            int resizeHandleEdgeOutset, int resizeHandleEdgeInset, int fineCornerSize,
+            int largeCornerSize, DisabledEdge disabledEdge, boolean allowTouchEdgeResize) {
+        mAllowTouchEdgeResize = allowTouchEdgeResize;
         mTaskCornerRadius = taskCornerRadius;
         mTaskSize = taskSize;
         mResizeHandleEdgeOutset = resizeHandleEdgeOutset;
@@ -140,9 +149,9 @@ public final class DragResizeWindowGeometry {
         boolean result = isEventFromTouchscreen(e)
                 ? isInCornerBounds(mLargeTaskCorners, x, y)
                 : isInCornerBounds(mFineTaskCorners, x, y);
-        // Check if touch falls within the edge resize handle. Limit edge resizing to stylus and
-        // mouse input.
-        if (!result && isEdgeResizePermitted(e)) {
+        // Floating windows also allow touch on their edges.
+        if (!result && (isEdgeResizePermitted(e)
+                || (mAllowTouchEdgeResize && isEventFromTouchscreen(e)))) {
             result = isInEdgeResizeBounds(x, y);
         }
         return result;
@@ -190,7 +199,8 @@ public final class DragResizeWindowGeometry {
 
         // Check if touch falls within the edge resize handle, since edge resizing can apply
         // for any input source.
-        if (ctrlType == CTRL_TYPE_UNDEFINED && isEdgeResizePermitted) {
+        if (ctrlType == CTRL_TYPE_UNDEFINED && (isEdgeResizePermitted
+                || (mAllowTouchEdgeResize && isTouchscreen))) {
             ctrlType = calculateEdgeResizeCtrlType(x, y);
         }
         return ctrlType;
@@ -285,7 +295,8 @@ public final class DragResizeWindowGeometry {
         if (this == obj) return true;
         if (!(obj instanceof DragResizeWindowGeometry other)) return false;
 
-        return this.mTaskCornerRadius == other.mTaskCornerRadius
+        return this.mAllowTouchEdgeResize == other.mAllowTouchEdgeResize
+                && this.mTaskCornerRadius == other.mTaskCornerRadius
                 && this.mTaskSize.equals(other.mTaskSize)
                 && this.mResizeHandleEdgeOutset == other.mResizeHandleEdgeOutset
                 && this.mResizeHandleEdgeInset == other.mResizeHandleEdgeInset
@@ -297,6 +308,7 @@ public final class DragResizeWindowGeometry {
     @Override
     public int hashCode() {
         return Objects.hash(
+                mAllowTouchEdgeResize,
                 mTaskCornerRadius,
                 mTaskSize,
                 mResizeHandleEdgeOutset,

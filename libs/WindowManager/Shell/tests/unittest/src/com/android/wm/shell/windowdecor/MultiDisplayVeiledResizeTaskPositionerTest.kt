@@ -27,6 +27,7 @@ import android.platform.test.annotations.EnableFlags
 import android.testing.AndroidTestingRunner
 import android.testing.TestableResources
 import android.view.Display
+import android.view.Surface.ROTATION_0
 import android.view.Surface.ROTATION_270
 import android.view.Surface.ROTATION_90
 import android.view.SurfaceControl
@@ -1053,6 +1054,45 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         verify(startTransaction, never()).setPosition(eq(nonTaskLeash), any(), any())
         verify(finishTransaction, never()).setPosition(eq(nonTaskLeash), any(), any())
         verify(changeMock).endRelOffset
+    }
+
+    @Test
+    fun floatingCorner_preservesAspectAndCommitsOnlyAtRelease() = runOnUiThread {
+        val initial = Rect(100, 100, 500, 900)
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.configuration.windowConfiguration.setBounds(initial)
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
+            DISPLAY_ID_0, 500f, 900f, INPUT_METHOD_TYPE_UNKNOWN)
+        val outline = taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 600f, 1100f)
+        Assert.assertEquals(Rect(100, 100, 600, 1100), outline)
+        Assert.assertEquals(initial, task.configuration.windowConfiguration.bounds)
+        verify(mockWindowDecoration).showResizeVeil(outline)
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 600f, 1100f)
+        verify(mockTransitions, times(1)).startTransition(eq(TRANSIT_CHANGE),
+            argThat { changes[taskBinder]?.configuration?.windowConfiguration?.bounds == outline },
+            eq(taskPositioner))
+    }
+
+    @Test
+    fun floatingEdge_infeasibleMinimumBouncesWithoutRecordingManualChoice() = runOnUiThread {
+        val initial = Rect(100, 100, 700, 1700)
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.minWidth = 600
+        task.minHeight = 1400
+        task.configuration.windowConfiguration.displayRotation = ROTATION_0
+        task.configuration.windowConfiguration.setBounds(initial)
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT,
+            DISPLAY_ID_0, 700f, 900f, INPUT_METHOD_TYPE_UNKNOWN)
+        val outline = taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 2100f, 900f)
+        Assert.assertTrue(outline.width() > outline.height())
+        val destination = taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 2100f, 900f)
+        Assert.assertEquals(initial, destination)
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        verify(mockDesktopTasksController, never()).rememberFloatingOrientation(any(), any(), any())
+        taskPositioner.close()
     }
 
     private fun performDrag(startX: Float, startY: Float, endX: Float, endY: Float, ctrlType: Int) {

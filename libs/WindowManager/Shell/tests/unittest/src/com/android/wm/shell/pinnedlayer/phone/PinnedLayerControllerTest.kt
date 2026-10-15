@@ -146,6 +146,22 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun vanishedDesktopTask_doesNotNotifyFloatingListeners() {
+        val init = argumentCaptor<Runnable>()
+        verify(shellInit).addInitCallback(init.capture(), eq(pinnedLayerController))
+        init.firstValue.run()
+        val vanished = argumentCaptor<ShellTaskOrganizer.TaskVanishedListener>()
+        verify(shellTaskOrganizer).addTaskVanishedListener(vanished.capture())
+        val listener = mock<PinnedLayerController.PinnedTasksListener>()
+        pinnedLayerController.addPinnedTasksListener(listener)
+        vanished.firstValue.onTaskVanished(android.app.ActivityManager.RunningTaskInfo().apply {
+            taskId = 77
+            isFloatingWindow = false
+        })
+        verifyNoInteractions(listener)
+    }
+
+    @Test
     fun dragEnded_notPinnedTask_doNothing() {
         val task = setupTask()
         val dragStartBounds = Rect(DEFAULT_TASK_BOUNDS)

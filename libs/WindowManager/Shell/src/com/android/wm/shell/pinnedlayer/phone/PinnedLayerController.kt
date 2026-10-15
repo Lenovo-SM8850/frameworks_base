@@ -18,6 +18,12 @@ package com.android.wm.shell.pinnedlayer.phone
 
 import android.app.ActivityManager.AppTask.WINDOWING_LAYER_PINNED
 import android.app.TaskInfo
+import android.app.ActivityManager.RunningTaskInfo
+import android.content.Context
+import android.content.pm.UserInfo
+import android.content.res.Configuration
+import com.android.wm.shell.common.DisplayController
+import com.android.wm.shell.sysui.UserChangeListener
 import android.app.TaskWindowingLayerRequestHandler.REMOTE_CALLBACK_RESULT_KEY
 import android.app.TaskWindowingLayerRequestHandler.RESULT_APPROVED
 import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
@@ -82,6 +88,74 @@ class PinnedLayerController(
     private var currentPinnedTaskId: Int? = null
     private val visiblePinnedTasks = linkedSetOf<Int>()
     private val minimizedTasks = mutableSetOf<Int>()
+    private val minimizeState = FloatingMinimizeState()
+    private var minimizeHandles: FloatingMinimizeHandles? = null
+
+    fun rememberManualOrientation(task: TaskInfo, landscape: Boolean, bounds: Rect) {
+        if (task.isFloatingWindow) presentationController.setManualOrientation(task, landscape, bounds)
+    }
+
+    fun configureInteractions(context: Context, displayController: DisplayController,
+        mainExecutor: com.android.wm.shell.common.ShellExecutor) {
+        context.registerReceiverForAllUsers(object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: android.content.Intent) {
+                val userId = intent.getIntExtra(android.content.Intent.EXTRA_USER_HANDLE,
+                    android.os.UserHandle.USER_NULL)
+                if (intent.action == android.content.Intent.ACTION_USER_REMOVED &&
+                    userId != android.os.UserHandle.USER_NULL) {
+                    mainExecutor.execute { presentationController.removeUser(userId) }
+                }
+            }
+        }, android.content.IntentFilter(android.content.Intent.ACTION_USER_REMOVED), null, null)
+        minimizeHandles = FloatingMinimizeHandles(context, displayController, minimizeState,
+            { shellTaskOrganizer.getRunningTaskInfo(it) }, ::restoreMinimizedTask)
+        displayController.addDisplayChangingController { displayId, from, to, _, wct ->
+            if (displayId == DEFAULT_DISPLAY && from != to) {
+                getPinnedTasks().forEach { task ->
+                    presentationController.getRotationBounds(task, from, to)?.let { bounds ->
+                        wct.setBounds(task.token, bounds)
+                        minimizeState.entries[task.taskId]?.bounds?.set(bounds)
+                    }
+                }
+            }
+        }
+        displayController.addDisplayWindowListener(object : DisplayController.OnDisplaysChangedListener {
+            override fun onDisplayConfigurationChanged(displayId: Int, configuration: Configuration) {
+                if (displayId == DEFAULT_DISPLAY) minimizeHandles?.update()
+            }
+        })
+    }
+
+    private fun addMinimizeHandle(task: TaskInfo, right: Boolean = true) {
+        val bounds = task.configuration.windowConfiguration.bounds
+        minimizeState.minimize(task.taskId, task.userId, bounds, right, .5f)
+        minimizeHandles?.update()
+    }
+
+    private fun removeMinimizeHandle(taskId: Int) {
+        minimizeState.remove(taskId)
+        minimizeHandles?.update()
+    }
+
+    private fun restoreMinimizedTask(taskId: Int) {
+        if (keyguardShowing || recentsRunning || overviewShowing) return
+        val task = shellTaskOrganizer.getRunningTaskInfo(taskId) ?: run {
+            removeMinimizeHandle(taskId)
+            return
+        }
+        val entry = minimizeState.entries[taskId] ?: return
+        if (!task.isFloatingWindow) { removeMinimizeHandle(taskId); return }
+        val bounds = presentationController.clampToDisplay(task, entry.bounds) ?: return
+        val wct = WindowContainerTransaction()
+        minimizeOldestIfNeeded(task, wct)
+        minimizedTasks -= taskId
+        visiblePinnedTasks += taskId
+        currentPinnedTaskId = taskId
+        removeMinimizeHandle(taskId)
+        wct.merge(getLayerPinnedWct(task.token, bounds), true)
+        wct.setHidden(task.token, false).reorder(task.token, true)
+        transitions.startTransition(TRANSIT_CHANGE, wct, null)
+    }
     private var keyguardShowing = false
     private var recentsRunning = false
     private var overviewShowing = false
@@ -97,6 +171,23 @@ class PinnedLayerController(
 
     private fun onInit() {
         transitions.registerObserver(this)
+        shellTaskOrganizer.addTaskVanishedListener(object : ShellTaskOrganizer.TaskVanishedListener {
+            override fun onTaskVanished(taskInfo: RunningTaskInfo) {
+                if (taskInfo.isFloatingWindow || taskInfo.taskId in pinnedTasks) {
+                    unpin(taskInfo)
+                    presentationController.forgetTask(taskInfo.taskId)
+                }
+            }
+        })
+        shellTaskOrganizer.addTaskInfoChangedListener(object : ShellTaskOrganizer.TaskInfoChangedListener {
+            override fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+                if (taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
+                    presentationController.rememberBounds(taskInfo)
+                } else if (!taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
+                    unpin(taskInfo)
+                }
+            }
+        })
     }
 
     /**
@@ -145,6 +236,14 @@ class PinnedLayerController(
         shellController: ShellController,
         recentsTransitionHandler: RecentsTransitionHandler,
     ) {
+        shellController.addUserChangeListener(object : UserChangeListener {
+            override fun onUserChanged(newUserId: Int, userContext: Context) {
+                minimizeHandles?.setUsers(setOf(newUserId))
+            }
+            override fun onUserProfilesChanged(profiles: List<UserInfo>) {
+                minimizeHandles?.setUsers(profiles.map { it.id }.toSet())
+            }
+        })
         shellController.addKeyguardChangeListener(object : KeyguardChangeListener {
             override fun onKeyguardVisibilityChanged(
                 visible: Boolean, occluded: Boolean, animatingDismiss: Boolean,
@@ -187,6 +286,7 @@ class PinnedLayerController(
 
     private fun updateVisibility() {
         val hidden = keyguardShowing || recentsRunning || overviewShowing
+        minimizeHandles?.setVisible(!hidden)
         val wct = WindowContainerTransaction()
         val focusedTask = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
             .firstOrNull { it.isFocused && (!hidden || !isPinned(it.taskId)) }
@@ -210,6 +310,7 @@ class PinnedLayerController(
         pinnedTasks += task.taskId
         visiblePinnedTasks += task.taskId
         minimizedTasks -= task.taskId
+        removeMinimizeHandle(task.taskId)
         wct.merge(getLayerPinnedWct(task.token, bounds), true)
         wct.setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
         return true
@@ -222,18 +323,21 @@ class PinnedLayerController(
         minimizedTasks += oldestId
         shellTaskOrganizer.getRunningTaskInfo(oldestId)?.let { oldest ->
             presentationController.rememberBounds(oldest)
+            addMinimizeHandle(oldest)
             wct.merge(getLayerUnpinnedWct(oldest.token, isMinimizing = true), true)
             wct.setHidden(oldest.token, true)
         }
     }
 
     /** Minimizes a floating task while retaining its identity for Recents. */
-    fun minimizeTask(task: TaskInfo): Boolean {
+    @JvmOverloads
+    fun minimizeTask(task: TaskInfo, right: Boolean = true): Boolean {
         if (!isPinned(task.taskId)) return false
         presentationController.rememberBounds(task)
         unpin(task, rememberAsPinned = true)
-        transitions.startTransition(
-            TRANSIT_TO_BACK, getLayerUnpinnedWct(task.token, isMinimizing = true), null)
+        addMinimizeHandle(task, right)
+        val wct = getLayerUnpinnedWct(task.token, isMinimizing = true).setHidden(task.token, true)
+        transitions.startTransition(TRANSIT_TO_BACK, wct, null)
         return true
     }
 
@@ -289,6 +393,7 @@ class PinnedLayerController(
             minimizeOldestIfNeeded(task, this)
             visiblePinnedTasks += task.taskId
             minimizedTasks -= task.taskId
+            removeMinimizeHandle(task.taskId)
             merge(getLayerPinnedWct(task.token, bounds), /* transfer= */ true)
             setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
 
@@ -639,6 +744,7 @@ class PinnedLayerController(
                     val wct = WindowContainerTransaction()
                     minimizeOldestIfNeeded(task, wct)
                     minimizedTasks -= task.taskId
+                    removeMinimizeHandle(task.taskId)
                     pin(task)
                     if (restoring) {
                         wct.merge(getLayerPinnedWct(task.token), true)
@@ -652,6 +758,7 @@ class PinnedLayerController(
                     !keyguardShowing && !recentsRunning && !overviewShowing) {
                     visiblePinnedTasks -= task.taskId
                     minimizedTasks += task.taskId
+                    addMinimizeHandle(task)
                 }
                 presentationController.rememberBounds(task)
             } else if (task.taskId in pinnedTasks &&
@@ -666,16 +773,26 @@ class PinnedLayerController(
     override fun onTransitionFinished(transition: IBinder, aborted: Boolean) {
         val pending = activeTransitions.remove(transition).orEmpty()
         if (aborted) {
-            (pinnedTasks + visiblePinnedTasks).toList().forEach { id ->
+            val liveFloatingIds = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
+                .filter { it.isFloatingWindow }.map { it.taskId }
+            (pinnedTasks + visiblePinnedTasks + liveFloatingIds).toList().forEach { id ->
                 val task = shellTaskOrganizer.getRunningTaskInfo(id)
                 if (task == null || !task.isFloatingWindow) {
                     task?.let { unpin(it) }
                     pinnedTasks -= id
                     visiblePinnedTasks -= id
                     minimizedTasks -= id
+                    removeMinimizeHandle(id)
                 } else if (task.configuration.windowConfiguration.isAlwaysOnTop) {
+                    pinnedTasks += id
                     minimizedTasks -= id
+                    removeMinimizeHandle(id)
                     visiblePinnedTasks += id
+                } else {
+                    pinnedTasks += id
+                    visiblePinnedTasks -= id
+                    minimizedTasks += id
+                    if (id !in minimizeState.entries) addMinimizeHandle(task)
                 }
             }
 
@@ -695,9 +812,14 @@ class PinnedLayerController(
 
     private fun unpin(taskInfo: TaskInfo, rememberAsPinned: Boolean = false) {
         visiblePinnedTasks -= taskInfo.taskId
-        if (rememberAsPinned) minimizedTasks += taskInfo.taskId
+        if (rememberAsPinned) {
+            minimizedTasks += taskInfo.taskId
+            addMinimizeHandle(taskInfo)
+        }
         if (!rememberAsPinned) {
             minimizedTasks -= taskInfo.taskId
+            removeMinimizeHandle(taskInfo.taskId)
+            presentationController.forgetTask(taskInfo.taskId)
             pinnedTasks -= taskInfo.taskId
             pinnedTasksListeners.forEach { it.onPinnedTasksRemoved(taskInfo) }
         }

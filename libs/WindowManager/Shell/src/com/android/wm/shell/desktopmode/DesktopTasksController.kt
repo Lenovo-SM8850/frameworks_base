@@ -293,6 +293,10 @@ class DesktopTasksController(
 
     private var pinnedLayerController: PinnedLayerController? = null
 
+    fun rememberFloatingOrientation(task: TaskInfo, landscape: Boolean, bounds: Rect) {
+        pinnedLayerController?.rememberManualOrientation(task, landscape, bounds)
+    }
+
     fun setPinnedLayerController(controller: PinnedLayerController) {
         pinnedLayerController = controller
     }

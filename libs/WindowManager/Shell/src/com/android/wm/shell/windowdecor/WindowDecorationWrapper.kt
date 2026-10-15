@@ -51,6 +51,18 @@ private constructor(
     private val defaultWindowDecor: DefaultWindowDecoration? = null,
     private val captionWindowDecoration: CaptionWindowDecoration? = null,
 ) {
+    private var floatingBottomHandle: FloatingBottomHandle? = null
+
+    fun setFloatingHandleListener(listener: DesktopModeTouchEventListener) {
+        if (captionWindowDecoration == null) {
+            floatingBottomHandle = FloatingBottomHandle(decorWindowContext, listener)
+        }
+    }
+
+    private fun updateFloatingBottomHandle() {
+        floatingBottomHandle?.update(taskInfo, taskSurface)
+    }
+
     private fun requireDefaultWindowDecor(): DefaultWindowDecoration =
         checkNotNull(defaultWindowDecor) { "expected non-null default window decor" }
 
@@ -202,7 +214,7 @@ private constructor(
             }
 
             else -> error("Expected Non-null window decoration")
-        }
+        }.also { updateFloatingBottomHandle() }
 
     /** Updates all window decorations, including any existing caption. */
     fun relayout(
@@ -262,7 +274,7 @@ private constructor(
             }
 
             else -> error("Expected Non-null window decoration")
-        }
+        }.also { updateFloatingBottomHandle() }
 
     /**
      * To be called when exclusion region is changed to allow the window decor to be updated
@@ -286,13 +298,16 @@ private constructor(
         }
 
     /** Closes the window decoration. */
-    fun close() =
+    fun close() {
+        floatingBottomHandle?.close()
+        floatingBottomHandle = null
         when {
             defaultWindowDecor != null -> requireDefaultWindowDecor().close()
             desktopWindowDecor != null -> requireDesktopWindowDecor().close()
             captionWindowDecoration != null -> requireCaptionWindowDecor().close()
             else -> error("Expected Non-null window decoration")
         }
+    }
 
     /** Adds inset for caption if one exists. */
     fun addCaptionInset(wct: WindowContainerTransaction) =

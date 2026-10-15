@@ -147,6 +147,76 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
+    fun rememberedManualBounds_acceptSmallRoundingDifferences() {
+        val task = createTaskInfo(Rect(100, 200, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.geometry", "Main")
+            minWidth = 10
+            minHeight = 10
+        }
+        controller.setManualOrientation(task, true, Rect(200, 300, 900, 900))
+        val actual = Rect(201, 301, 901, 901)
+        task.configuration.windowConfiguration.setBounds(actual)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(actual)
+    }
+
+    @Test
+    fun rememberedManualBounds_mismatchedCallbackDoesNotBlockLaterGeometry() {
+        val task = createTaskInfo(Rect(100, 200, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.geometry", "Main")
+            minWidth = 10
+            minHeight = 10
+        }
+        controller.setManualOrientation(task, true, Rect(200, 300, 900, 900))
+        controller.rememberBounds(task)
+        val actual = Rect(200, 400, 800, 1400)
+        task.configuration.windowConfiguration.setBounds(actual)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(actual)
+    }
+
+    private fun setRealPortraitDisplay() {
+        val info = android.view.DisplayInfo().apply {
+            logicalWidth = 1080
+            logicalHeight = 1920
+            logicalDensityDpi = 320
+            rotation = android.view.Surface.ROTATION_0
+        }
+        val layout = DisplayLayout(info, context.resources, false, false)
+        whenever(displayController.getDisplayLayout(Display.DEFAULT_DISPLAY)).thenReturn(layout)
+    }
+
+    @Test
+    fun deviceRotation_unflippedWindowFollowsDeviceAndKeepsArea() {
+        setRealPortraitDisplay()
+        val initial = Rect(100, 200, 500, 1000)
+        val task = createTaskInfo(initial).apply { isFloatingWindow = true }
+        val rotated = requireNotNull(controller.getRotationBounds(task,
+            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_90))
+        assertThat(rotated.width()).isGreaterThan(rotated.height())
+        assertThat(kotlin.math.abs(rotated.width() * rotated.height() - 320000)).isLessThan(1500)
+        assertThat(Rect(0, 0, 1920, 1080).contains(rotated)).isTrue()
+    }
+
+    @Test
+    fun deviceRotation_manualPortraitChoiceStaysPortrait() {
+        setRealPortraitDisplay()
+        val initial = Rect(100, 200, 500, 1000)
+        val task = createTaskInfo(initial).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.rotation", "Main")
+        }
+        controller.setManualOrientation(task, false, initial)
+        val rotated = requireNotNull(controller.getRotationBounds(task,
+            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_90))
+        assertThat(rotated.width()).isLessThan(rotated.height())
+        assertThat(kotlin.math.abs(rotated.width() * rotated.height() - 320000)).isLessThan(1500)
+        assertThat(Rect(0, 0, 1920, 1080).contains(rotated)).isTrue()
+    }
+
+    @Test
     fun getPinEntryDestinationBounds_noDisplayLayout_returnsNull() {
         whenever(displayController.getDisplayLayout(Display.DEFAULT_DISPLAY)).thenReturn(null)
         val task = createTaskInfo(Rect(0, 0, 500, 600))

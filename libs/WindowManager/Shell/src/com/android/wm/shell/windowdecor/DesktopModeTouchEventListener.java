@@ -42,6 +42,7 @@ import android.view.PointerIcon;
 import android.view.SurfaceControl;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.VelocityTracker;
 import android.view.ViewGroup;
 
 import androidx.annotation.Nullable;
@@ -114,6 +115,9 @@ public class DesktopModeTouchEventListener
     private boolean mDragInterrupted;
     private boolean mLongClickDisabled;
     private int mDragPointerId = -1;
+    private VelocityTracker mFloatingVelocity;
+    private float mFloatingDownX;
+    private float mFloatingDownY;
     private DesktopModeEventLogger.Companion.InputMethod mInputMethod =
             getInputMethodType(UNKNOWN_INPUT_METHOD);
     private int mCurrentPointerIconType = PointerIcon.TYPE_ARROW;
@@ -172,6 +176,7 @@ public class DesktopModeTouchEventListener
         final int id = view.getId();
         if (id == R.id.back_button) return "back_button";
         if (id == R.id.caption_handle) return "caption_handle";
+        if (id == R.id.floating_bottom_handle) return "floating_bottom_handle";
         if (id == R.id.close_window) return "close_window";
         if (id == R.id.desktop_mode_caption) return "desktop_mode_caption";
         if (id == R.id.maximize_window) return "maximize_window";
@@ -199,7 +204,8 @@ public class DesktopModeTouchEventListener
             mWindowDecorationActions.onClose(decoration.getTaskInfo());
         } else if (id == R.id.back_button) {
             mTaskOperations.injectBackKey(decoration.getTaskInfo().displayId);
-        } else if (id == R.id.caption_handle || id == R.id.open_menu_button) {
+        } else if (id == R.id.caption_handle || id == R.id.floating_bottom_handle
+                || id == R.id.open_menu_button) {
             if (id == R.id.caption_handle && !decoration.getTaskInfo().isFreeform()) {
                 // Clicking the App Handle.
                 mDesktopModeUiEventLogger.log(decoration.getTaskInfo(),
@@ -261,7 +267,8 @@ public class DesktopModeTouchEventListener
         WdLog.motionEventLogD(TAG, mTaskId, "%s(%s) isTouchscreen=%b longClickDisabled=%b",
                 tag, viewName, touchscreenSource, mLongClickDisabled);
 
-        if (id != R.id.caption_handle && id != R.id.desktop_mode_caption
+        if (id != R.id.caption_handle && id != R.id.floating_bottom_handle
+                && id != R.id.desktop_mode_caption
                 && id != R.id.open_menu_button && id != R.id.close_window
                 && id != R.id.maximize_window && id != R.id.minimize_window) {
             WdLog.motionEventLogD(TAG, mTaskId, "%s(%s) unsupported view, ignoring", tag,
@@ -293,15 +300,17 @@ public class DesktopModeTouchEventListener
             // to offset position relative to caption as a whole.
             int[] viewLocation = new int[2];
             v.getLocationInWindow(viewLocation);
-            mIsResizeGesture = decoration.shouldResizeListenerHandleEvent(e,
-                    new Point(viewLocation[0], viewLocation[1]));
+            mIsResizeGesture = id != R.id.floating_bottom_handle
+                    && decoration.shouldResizeListenerHandleEvent(e,
+                            new Point(viewLocation[0], viewLocation[1]));
             // The caption window may be a spy window when the caption background is
             // transparent, which means events will fall through to the app window. Make
             // sure to cancel these events if they do not happen in the intersection of the
             // customizable region and what the app reported as exclusion areas, because
             // the drag-move or other caption gestures should take priority outside those
             // regions.
-            mIsCustomHeaderGesture = downInCustomizableCaptionRegion
+            mIsCustomHeaderGesture = id != R.id.floating_bottom_handle
+                    && downInCustomizableCaptionRegion
                     && downInExclusionRegion && isTransparentCaption;
 
             WdLog.motionEventLogD(TAG, mTaskId,
@@ -519,7 +528,26 @@ public class DesktopModeTouchEventListener
         WdLog.motionEventLogD(TAG, mTaskId, "handleFreeformMotionEvent(%s)", viewName);
         updateTouchStatus(e);
         final int id = v.getId();
+        if (taskInfo.isFloatingWindow && e.isFromSource(SOURCE_TOUCHSCREEN)) {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                if (mFloatingVelocity != null) mFloatingVelocity.recycle();
+                mFloatingVelocity = VelocityTracker.obtain();
+                mFloatingDownX = e.getRawX();
+                mFloatingDownY = e.getRawY();
+            }
+            if (mFloatingVelocity != null) {
+                final MotionEvent screenEvent = MotionEvent.obtain(e);
+                screenEvent.setLocation(e.getRawX(), e.getRawY());
+                mFloatingVelocity.addMovement(screenEvent);
+                screenEvent.recycle();
+            }
+        }
         if (mGestureDetector.onTouchEvent(e)) {
+            if ((e.getActionMasked() == ACTION_UP || e.getActionMasked() == ACTION_CANCEL)
+                    && mFloatingVelocity != null) {
+                mFloatingVelocity.recycle();
+                mFloatingVelocity = null;
+            }
             WdLog.motionEventLogD(TAG, mTaskId,
                     "handleFreeformMotionEvent(%s) handled by gesture detector", viewName);
             return true;
@@ -663,6 +691,18 @@ public class DesktopModeTouchEventListener
                 // resizing or transforming to fullscreen) before setting new task bounds.
                 final Rect validDragArea = decoration.getValidDragArea();
                 final boolean needDragIndicatorCleanup;
+                if (taskInfo.isFloatingWindow && mPinnedLayerController != null
+                        && finishFloatingGesture(taskInfo, e, touchingButton)) {
+                    try (SurfaceControl.Transaction t = mTransactionFactory.get()) {
+                        t.setPosition(decoration.getTaskSurface(),
+                                mOnDragStartInitialBounds.left, mOnDragStartInitialBounds.top);
+                        mMultiDisplayDragMoveIndicatorController.onDragEnd(taskInfo.taskId, t);
+                        t.apply();
+                    }
+                    updateDragStatus(decoration, e);
+                    v.setPressed(false);
+                    return true;
+                }
                 if (isPinned(taskInfo)) {
                     needDragIndicatorCleanup =
                             mPinnedLayerController.onDragEnded(
@@ -716,6 +756,32 @@ public class DesktopModeTouchEventListener
             }
         }
         return true;
+    }
+
+    private boolean finishFloatingGesture(ActivityManager.RunningTaskInfo task,
+            MotionEvent e, boolean touchingButton) {
+        if (mFloatingVelocity == null) return false;
+        final ViewConfiguration config = ViewConfiguration.get(mContext);
+        mFloatingVelocity.computeCurrentVelocity(1000, config.getScaledMaximumFlingVelocity());
+        final float vx = mFloatingVelocity.getXVelocity(mDragPointerId);
+        final float vy = mFloatingVelocity.getYVelocity(mDragPointerId);
+        mFloatingVelocity.recycle();
+        mFloatingVelocity = null;
+        if (touchingButton || e.getActionMasked() != ACTION_UP) return false;
+        final float dx = e.getRawX() - mFloatingDownX;
+        final float dy = e.getRawY() - mFloatingDownY;
+        final int slop = config.getScaledTouchSlop();
+        final int minimumVelocity = config.getScaledMinimumFlingVelocity();
+        if (Math.abs(dy) > 2 * slop && Math.abs(dy) > Math.abs(dx)
+                && Math.abs(vy) >= minimumVelocity && dy * vy > 0) {
+            return dy > 0 ? mPinnedLayerController.maximizeTask(task)
+                    : mPinnedLayerController.minimizeTask(task);
+        }
+        if (Math.abs(dx) > 2 * slop && Math.abs(dx) > Math.abs(dy)
+                && Math.abs(vx) >= minimumVelocity && dx * vx > 0) {
+            return mPinnedLayerController.minimizeTask(task, vx > 0);
+        }
+        return false;
     }
 
     private void updatePointerIcon(MotionEvent e, int dragPointerIdx, @Nullable IBinder inputToken,

@@ -652,6 +652,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (decoration == null) return;
         final RunningTaskInfo oldTaskInfo = decoration.getTaskInfo();
+        if (oldTaskInfo.isFloatingWindow != taskInfo.isFloatingWindow) {
+            try (SurfaceControl.Transaction t = mTransactionFactory.get()) {
+                recreateWindowDecoration(taskInfo, decoration.getTaskSurface(), t, t);
+                t.apply();
+            }
+            return;
+        }
 
         if (taskInfo.displayId != oldTaskInfo.displayId
                 && !DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) {
@@ -661,8 +668,10 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         // Pass the current global focus status to avoid updates outside of a ShellTransition.
         decoration.relayout(
                 taskInfo, decoration.getHasGlobalFocus(), decoration.getExclusionRegion());
-        mActivityOrientationChangeHandler.ifPresent(handler ->
-                handler.handleActivityOrientationChange(oldTaskInfo, taskInfo));
+        if (!taskInfo.isFloatingWindow) {
+            mActivityOrientationChangeHandler.ifPresent(handler ->
+                    handler.handleActivityOrientationChange(oldTaskInfo, taskInfo));
+        }
     }
 
     @Override
@@ -695,9 +704,14 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             return;
         }
 
-        if (decoration == null) {
-            createWindowDecoration(taskInfo, taskSurface, startT, finishT);
-            initializeTiling(taskInfo);
+        if (decoration == null
+                || decoration.getTaskInfo().isFloatingWindow != taskInfo.isFloatingWindow) {
+            if (decoration == null) {
+                createWindowDecoration(taskInfo, taskSurface, startT, finishT);
+            } else {
+                recreateWindowDecoration(taskInfo, taskSurface, startT, finishT);
+            }
+            if (!taskInfo.isFloatingWindow) initializeTiling(taskInfo);
         } else {
             decoration.relayout(taskInfo, startT, finishT, false /* applyStartTransactionOnDraw */,
                     false /* shouldSetTaskPositionAndCrop */,
@@ -1818,6 +1832,19 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                 /* isKeyguardVisAndOccluded */ false);
     }
 
+    private void recreateWindowDecoration(
+            RunningTaskInfo taskInfo,
+            SurfaceControl taskSurface,
+            SurfaceControl.Transaction startT,
+            SurfaceControl.Transaction finishT) {
+        final SurfaceControl retainedSurface = new SurfaceControl(taskSurface, TAG);
+        try {
+            createWindowDecoration(taskInfo, retainedSurface, startT, finishT);
+        } finally {
+            retainedSurface.release();
+        }
+    }
+
     private void createWindowDecoration(
             ActivityManager.RunningTaskInfo taskInfo,
             SurfaceControl taskSurface,
@@ -1825,8 +1852,12 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             SurfaceControl.Transaction finishT) {
         final WindowDecorationWrapper oldDecoration = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (oldDecoration != null) {
-            // close the old decoration if it exists to avoid two window decorations being added
+            final int oldDisplayId = oldDecoration.getTaskInfo().displayId;
+            // Close the old decoration before attaching its replacement.
             oldDecoration.close();
+            if (!DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) {
+                removeTaskFromEventReceiver(oldDisplayId);
+            }
         }
         final WindowDecorationWrapper windowDecoration;
         final Context context =
@@ -1947,6 +1978,7 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                         mAppHandleMotionEventHandler, mPinnedLayerController);
         windowDecoration.setCaptionListeners(
                 touchEventListener, touchEventListener, touchEventListener, touchEventListener);
+        windowDecoration.setFloatingHandleListener(touchEventListener);
         windowDecoration.setExclusionRegionListener(mExclusionRegionListener);
         windowDecoration.setDragPositioningCallback(taskPositioner);
         windowDecoration.addDragResizeListener(mDragEventListener);
@@ -2372,8 +2404,8 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             final boolean isFluidResizeEnabledPerApp = packageName != null
                     && Flags.enableFluidResizingForListedApps()
                     && CompatChanges.isChangeEnabled(ENABLE_FLUID_RESIZING, packageName, user);
-            final boolean veiledResizing =
-                    desktopConfig.isVeiledResizeEnabled() && !isFluidResizeEnabledPerApp;
+            final boolean veiledResizing = taskInfo.isFloatingWindow
+                    || (desktopConfig.isVeiledResizeEnabled() && !isFluidResizeEnabledPerApp);
             final TaskPositioner taskPositioner = veiledResizing
                     ? new MultiDisplayVeiledResizeTaskPositioner(
                             taskOrganizer,
@@ -2407,8 +2439,8 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                             interactionJankMonitor,
                             handler);
 
-            return new FixedAspectRatioTaskPositionerDecorator(windowDecoration,
-                        taskPositioner);
+            return taskInfo.isFloatingWindow ? taskPositioner
+                    : new FixedAspectRatioTaskPositionerDecorator(windowDecoration, taskPositioner);
         }
     }
 }
