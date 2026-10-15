@@ -4290,15 +4290,24 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 return false;
             }
 
+            final Task task = w.getTask();
+            int logicalX = x;
+            int logicalY = y;
+            if (task != null && task.isFloatingWindow()) {
+                task.getFloatingWindowBounds(mTmpRect);
+                final float scale = task.getFloatingWindowScale();
+                logicalX = task.getBounds().left + Math.round((x - mTmpRect.left) / scale);
+                logicalY = task.getBounds().top + Math.round((y - mTmpRect.top) / scale);
+            }
             w.getVisibleBounds(mTmpRect);
-            if (!mTmpRect.contains(x, y)) {
+            if (!mTmpRect.contains(logicalX, logicalY)) {
                 return false;
             }
 
             w.getTouchableRegion(mTmpRegion);
 
             final int touchFlags = flags & (FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL);
-            return mTmpRegion.contains(x, y) || touchFlags == 0;
+            return mTmpRegion.contains(logicalX, logicalY) || touchFlags == 0;
         });
 
         return touchedWin;
@@ -6329,6 +6338,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             // Get the touchable region of the window, and intersect with where the screen is still
             // touchable, i.e. touchable regions on top are not covering it yet.
             w.getEffectiveTouchableRegion(touchableRegion);
+            final Task task = w.getTask();
+            if (task != null && task.isFloatingWindow()) {
+                task.mapFloatingWindowRegion(touchableRegion);
+            }
             touchableRegion.op(unhandled, Op.INTERSECT);
 
             if (w.isImplicitlyExcludingAllSystemGestures()) {
@@ -6340,6 +6353,9 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 local.scale(w.mGlobalScale);
                 final Rect frame = w.getWindowFrames().mFrame;
                 local.translate(frame.left, frame.top);
+                if (task != null && task.isFloatingWindow()) {
+                    task.mapFloatingWindowRegion(local);
+                }
 
                 // A window can only exclude system gestures where it is actually touchable
                 local.op(touchableRegion, Op.INTERSECT);

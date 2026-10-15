@@ -140,7 +140,7 @@ abstract class CaptionController<T>(
             val viewHolder = getOrCreateViewHolder()
             isCaptionVisible = taskInfo.isVisible && params.isCaptionVisible
             val viewHost = getOrCreateViewHost(decorWindowContext, display)
-            val taskBounds = taskInfo.getConfiguration().windowConfiguration.bounds
+            val taskBounds = taskInfo.presentationBounds
             val captionTopPadding = getCaptionTopPadding()
             val captionHeight = getCaptionHeight()
             val captionWidth = getCaptionWidth()
@@ -352,9 +352,22 @@ abstract class CaptionController<T>(
         taskBounds: Rect,
         localCaptionBounds: Rect,
     ) {
+        if (params.floatingWindowPreview) return
         if (!isCaptionVisible || !params.isInsetSource) {
             captionInsets?.remove(wct)
             captionInsets = null
+        }
+        if (taskInfo.isFloatingWindow) {
+            val logical = Rect(taskInfo.configuration.windowConfiguration.bounds).apply {
+                bottom = top + kotlin.math.ceil(captionHeight / taskInfo.floatingWindowScale).toInt()
+            }
+            val insets = WindowDecorationInsets(taskInfo.token, insetsOwner, logical,
+                flags = params.insetSourceFlags, shouldAddCaptionInset = params.isInsetSource)
+            if (insets != captionInsets) {
+                captionInsets = insets
+                insets.update(wct)
+            }
+            return
         }
         // Caption inset is the full width of the task with the |captionHeight| and
         // positioned at the top of the task bounds, also in absolute coordinates.

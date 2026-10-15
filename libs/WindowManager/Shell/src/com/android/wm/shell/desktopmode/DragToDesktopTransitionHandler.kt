@@ -925,10 +925,20 @@ sealed class DragToDesktopTransitionHandler(
                     startTransaction.show(change.leash)
                     finishTransaction.show(change.leash)
                     state.draggedTaskChange = change
+                    if (change.taskInfo?.isFloatingWindow == true) {
+                        Transitions.applyFloatingWindowTransform(change, finishTransaction)
+                        state.startTransitionFinishTransaction?.let {
+                            Transitions.applyFloatingWindowTransform(change, it)
+                        }
+                    }
                     // Restoring the dragged leash layer as it gets reset in the merge transition
                     state.surfaceLayers?.let {
                         startTransaction.setLayer(change.leash, it.dragLayer)
                     }
+                }
+                change.taskInfo?.isFloatingWindow == true -> {
+                    Transitions.applyFloatingWindowTransform(change, startTransaction)
+                    Transitions.applyFloatingWindowTransform(change, finishTransaction)
                 }
                 // Other desktop tasks that are being restored go behind the dragged task.
                 change.taskInfo?.windowingMode == WINDOWING_MODE_FREEFORM
@@ -1412,14 +1422,17 @@ constructor(
         val draggedTaskLeash = draggedTaskChange.leash
         val freeformTaskChanges = state.freeformTaskChanges
         val startBounds = draggedTaskChange.startAbsBounds
-        val endBounds = draggedTaskChange.endAbsBounds
+        val floatingTask = draggedTaskChange.taskInfo?.takeIf { it.isFloatingWindow }
+        val endScale = floatingTask?.floatingWindowScale ?: 1f
+        val endBounds = Rect(draggedTaskChange.endAbsBounds).apply {
+            floatingTask?.let { offsetTo(it.positionInParent.x, it.positionInParent.y) }
+        }
         val currentVelocity = state.dragAnimator.computeCurrentVelocity()
 
         // Cancel any animation that may be currently playing; we will use the relevant
         // details of that animation here.
         state.dragAnimator.cancelAnimator()
-        // We still apply scale to task bounds; as we animate the bounds to their
-        // end value, animate scale to 1.
+        // Animate logical bounds and presentation scale together.
         val startScale = state.dragAnimator.scale
         val startPosition = state.dragAnimator.position
         val startBoundsWithOffset =
@@ -1471,7 +1484,7 @@ constructor(
                         endBounds = endBounds,
                         animBounds = animBounds,
                     )
-                val animScale = startScale + animFraction * (1 - startScale)
+                val animScale = startScale + animFraction * (endScale - startScale)
                 // Freeform animation starts with freeform animation offset relative to the commit
                 // animation and plays until the commit animation ends. For instance:
                 // - if the freeform animation offset is `0.0` the freeform tasks animate alongside

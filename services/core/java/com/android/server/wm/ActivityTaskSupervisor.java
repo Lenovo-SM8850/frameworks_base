@@ -3023,7 +3023,7 @@ public class ActivityTaskSupervisor implements RecentTasks.Callbacks {
                         && task.getDisplayId() == android.view.Display.DEFAULT_DISPLAY) {
                     if (!task.isRootTask()) task.reparent(task.getDisplayArea(), true);
                     task.setWindowingMode(WINDOWING_MODE_FREEFORM);
-                    task.setFloatingWindow(true);
+                    final boolean wasFloating = task.isFloatingWindow();
                     task.setDisablePip(true);
                     task.setAlwaysOnTop(true);
                     task.setForceHidden(Task.FLAG_FORCE_HIDDEN_FOR_TASK_ORG, false);
@@ -3040,7 +3040,10 @@ public class ActivityTaskSupervisor implements RecentTasks.Callbacks {
                                 Math.max(stable.top - bounds.top,
                                 Math.min(0, stable.bottom - bounds.bottom)));
                         task.setBounds(bounds);
+                        if (wasFloating) task.setFloatingWindowBounds(bounds,
+                                task.getFloatingWindowScale());
                     }
+                    task.setFloatingWindow(true);
                 }
 
                 if (task.getRootTask() != null

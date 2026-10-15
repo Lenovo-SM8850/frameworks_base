@@ -1295,6 +1295,11 @@ class Transition implements BLASTSyncEngine.TransactionReadyListener {
             t.setWindowCrop(targetLeash, clipRect.width(), clipRect.height());
         }
         t.setMatrix(targetLeash, 1, 0, 0, 1);
+        final Task task = target.asTask();
+        if (task != null && task.isFloatingWindow()) {
+            task.applyFloatingWindowTransform(t, targetLeash);
+            return;
+        }
         // The bounds sent to the transition is always a real bounds. This means we lose
         // information about "null" bounds (inheriting from parent). Core will fix-up
         // non-organized window surface bounds; however, since Core can't touch organized

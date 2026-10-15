@@ -383,6 +383,12 @@ constructor(
         relayout(newBounds, t)
     }
 
+    fun updateParentScale(t: SurfaceControl.Transaction, scale: Float) {
+        val veil = veilSurface ?: return
+        val inverse = 1f / scale
+        t.setMatrix(veil, inverse, 0f, 0f, inverse)
+    }
+
     /** Animate veil's alpha to 0, fading it out. */
     fun hideVeil() {
         if (!isVisible) {

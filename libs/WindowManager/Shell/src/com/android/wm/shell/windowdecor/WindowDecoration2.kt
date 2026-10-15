@@ -94,6 +94,8 @@ abstract class WindowDecoration2<T>(
     },
 ) : AutoCloseable where T : View, T : TaskFocusStateConsumer {
 
+    var floatingWindowPreview = false
+
     @VisibleForTesting var captionController: CaptionController<T>? = null
     /** Returns the display associated with the task. */
     var display: Display? = displayController.getDisplay(taskInfo.displayId)
@@ -220,7 +222,7 @@ abstract class WindowDecoration2<T>(
                 return null
             }
 
-            val taskBounds = taskInfo.getConfiguration().windowConfiguration.bounds
+            val taskBounds = taskInfo.presentationBounds
             val taskWidth = taskBounds.width()
             val taskHeight = taskBounds.height()
 
@@ -363,7 +365,14 @@ abstract class WindowDecoration2<T>(
         shadowRadius: Int,
         cornerRadius: Int,
     ) {
-        if (params.setTaskVisibilityPositionAndCrop) {
+        if (taskInfo.isFloatingWindow && params.setTaskVisibilityPositionAndCrop) {
+            val logical = taskInfo.configuration.windowConfiguration.bounds
+            val scale = taskInfo.floatingWindowScale
+            startT.setMatrix(taskSurface, scale, 0f, 0f, scale)
+                .setWindowCrop(taskSurface, logical.width(), logical.height())
+            finishT.setMatrix(taskSurface, scale, 0f, 0f, scale)
+                .setWindowCrop(taskSurface, logical.width(), logical.height())
+        } else if (params.setTaskVisibilityPositionAndCrop) {
             val taskPosition = taskInfo.positionInParent
             startT.setWindowCrop(taskSurface, taskWidth, taskHeight)
             finishT
@@ -432,7 +441,7 @@ abstract class WindowDecoration2<T>(
         shadowRadius: Int,
         cornerRadius: Int,
     ) {
-        if (!params.inSyncWithTransition) {
+        if (!params.inSyncWithTransition && !taskInfo.isFloatingWindow) {
             // Update these outline properties only when the relayout is driven by Transition
             // callbacks because they must be updated together with some of other properties (e.g.,
             // position) which is set by transition handler although the outline properties are
@@ -458,13 +467,15 @@ abstract class WindowDecoration2<T>(
         }
 
         if (shadowRadius != INVALID_SHADOW_RADIUS) {
-            startT.setShadowRadius(taskSurface, shadowRadius.toFloat())
-            finishT.setShadowRadius(taskSurface, shadowRadius.toFloat())
+            val radius = shadowRadius / if (taskInfo.isFloatingWindow) taskInfo.floatingWindowScale else 1f
+            startT.setShadowRadius(taskSurface, radius)
+            finishT.setShadowRadius(taskSurface, radius)
         }
 
         if (cornerRadius != INVALID_CORNER_RADIUS) {
-            startT.setCornerRadius(taskSurface, cornerRadius.toFloat())
-            finishT.setCornerRadius(taskSurface, cornerRadius.toFloat())
+            val radius = cornerRadius / if (taskInfo.isFloatingWindow) taskInfo.floatingWindowScale else 1f
+            startT.setCornerRadius(taskSurface, radius)
+            finishT.setCornerRadius(taskSurface, radius)
         }
     }
 
@@ -498,6 +509,8 @@ abstract class WindowDecoration2<T>(
     }
 
     /** Updates an existing decoration container surface. */
+    private var floatingWindowDecorScaled = false
+
     private fun updateDecorationContainerSurface(
         startT: SurfaceControl.Transaction,
         taskWidth: Int,
@@ -518,6 +531,11 @@ abstract class WindowDecoration2<T>(
         }
 
         getOrCreateDecorationSurface(taskInfo, startT).let {
+            if (taskInfo.isFloatingWindow || floatingWindowDecorScaled) {
+                val scale = if (taskInfo.isFloatingWindow) 1f / taskInfo.floatingWindowScale else 1f
+                startT.setMatrix(it, scale, 0f, 0f, scale)
+                floatingWindowDecorScaled = taskInfo.isFloatingWindow
+            }
             startT.setWindowCrop(it, taskWidth, taskHeight).show(it)
         }
     }
@@ -668,6 +686,7 @@ abstract class WindowDecoration2<T>(
         val shouldUpdateTaskSurfaceOutline: Boolean = true,
         val inSyncWithTransition: Boolean = false,
         val isDecorationSurfaceNeeded: Boolean = true,
+        val floatingWindowPreview: Boolean = false,
     )
 
     /** Data calculated and retrieved during a [relayout] call. */

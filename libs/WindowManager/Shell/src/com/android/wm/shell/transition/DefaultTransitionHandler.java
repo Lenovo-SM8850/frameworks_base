@@ -405,6 +405,12 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 continue;
             }
             final boolean isTask = change.getTaskInfo() != null;
+            if (isTask && change.getTaskInfo().isFloatingWindow
+                    && change.getMode() == TRANSIT_CHANGE) {
+                Transitions.applyFloatingWindowTransform(change, startTransaction);
+                Transitions.applyFloatingWindowTransform(change, finishTransaction);
+                continue;
+            }
             final boolean isFreeform = isTask && change.getTaskInfo().isFreeform();
             final int mode = change.getMode();
             boolean isSeamlessDisplayChange = false;
@@ -612,6 +618,10 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                         boundsForOffset.left - animRoot.getOffset().x,
                         boundsForOffset.top - animRoot.getOffset().y);
 
+                if (isTask && change.getTaskInfo().isFloatingWindow) {
+                    animRelOffset.set(change.getTaskInfo().positionInParent.x - animRoot.getOffset().x,
+                            change.getTaskInfo().positionInParent.y - animRoot.getOffset().y);
+                }
                 final boolean isActivity = change.getActivityComponent() != null;
                 if (isActivity) {
                     // For appcompat letterbox: we intentionally report the task-bounds so that we
@@ -832,9 +842,25 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
             @NonNull Transitions.TransitionFinishCallback finishCallback) {
         ArrayList<WindowAnimation> animations = mTransitionAnimators.get(mergeTarget);
         if (animations == null) return;
+        boolean hasFloating = false;
+        for (int i = 0; i < info.getChanges().size(); ++i) {
+            if (isFloatingChange(info.getChanges().get(i))) {
+                hasFloating = true;
+                break;
+            }
+        }
+        if (!hasFloating) {
+            for (int i = 0; i < animations.size(); ++i) {
+                if (isFloatingChange(animations.get(i).mChange)) {
+                    hasFloating = true;
+                    break;
+                }
+            }
+        }
         if (!Flags.enableMergeAnimations() || !MergeTransitionHelper.canCreateMergeAnimation(
                 info)) {
-            endAllAnimations(animations);
+            if (hasFloating) endFloatingAnimations(animations);
+            else endAllAnimations(animations);
             return;
         }
 
@@ -846,6 +872,20 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
 
         var conflictingWindowAnimationsMap = MergeTransitionHelper.getMergeConflicts(animations,
                 info);
+
+        if (hasFloating) {
+            for (int i = 0; i < conflictingWindowAnimationsMap.size(); ++i) {
+                if (isFloatingChange(conflictingWindowAnimationsMap.keyAt(i).mChange)
+                        || isFloatingChange(conflictingWindowAnimationsMap.valueAt(i))) {
+                    endFloatingAnimations(animations);
+                    return;
+                }
+            }
+            if (conflictingWindowAnimationsMap.isEmpty()) {
+                endFloatingAnimations(animations);
+                return;
+            }
+        }
 
         Consumer<WindowAnimation> onAnimFinish = (wa) -> {
             animations.remove(wa);
@@ -913,6 +953,17 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 final WindowAnimation winAnim = animations.get(i);
                 mAnimExecutor.execute(winAnim::end);
             }
+        }
+    }
+
+    private static boolean isFloatingChange(TransitionInfo.Change change) {
+        return change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow;
+    }
+
+    private void endFloatingAnimations(List<WindowAnimation> animations) {
+        for (int i = animations.size() - 1; i >= 0; --i) {
+            final WindowAnimation animation = animations.get(i);
+            if (isFloatingChange(animation.mChange)) mAnimExecutor.execute(animation::end);
         }
     }
 

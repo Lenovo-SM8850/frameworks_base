@@ -14,6 +14,63 @@ import org.junit.runner.RunWith
 @SmallTest
 @RunWith(AndroidJUnit4::class)
 class FloatingWindowGeometryTest {
+    @Test fun scaledEntry_defaultsAndClampsBothAxes() {
+        val visible = Rect(100, 200, 500, 1000)
+        val stable = Rect(0, 80, 1200, 1840)
+        assertThat(FloatingWindowGeometry.entryScale(visible, stable))
+            .isWithin(.0001f).of(1f / 1.3f)
+        assertThat(FloatingWindowGeometry.logicalBounds(visible, stable, 1f / 1.3f))
+            .isEqualTo(Rect(100, 200, 620, 1240))
+        assertThat(FloatingWindowGeometry.entryScale(Rect(0, 0, 1000, 1000), stable))
+            .isWithin(.0001f).of(1f / 1.2f)
+        assertThat(FloatingWindowGeometry.entryScale(stable, stable)).isEqualTo(1f)
+    }
+
+    @Test fun scaledCorner_preservesLogicalBoundsThroughoutScaleRange() {
+        val logical = Rect(100, 100, 900, 1300)
+        val start = Rect(100, 100, 700, 1000)
+        val stable = Rect(0, 0, 2400, 2400)
+        for ((dx, dy, scale) in listOf(Triple(-200f, -300f, .5f),
+            Triple(0f, 0f, .75f), Triple(200f, 300f, 1f))) {
+            val result = FloatingWindowGeometry.scaledCorner(start, logical, stable,
+                CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM, dx, dy, 200, 300)
+            assertThat(result.logical).isEqualTo(logical)
+            assertThat(result.commitsBounds).isFalse()
+            assertThat(result.scale).isWithin(.001f).of(scale)
+        }
+    }
+
+    @Test fun scaledCorner_commitsNewLogicalSizeOnlyBeyondLimits() {
+        val logical = Rect(100, 100, 900, 1300)
+        val start = Rect(100, 100, 700, 1000)
+        val stable = Rect(0, 0, 2400, 2400)
+        for ((dx, dy, scale) in listOf(Triple(-300f, -450f, .5f),
+            Triple(300f, 450f, 1f))) {
+            val result = FloatingWindowGeometry.scaledCorner(start, logical, stable,
+                CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM, dx, dy, 200, 300)
+            assertThat(result.commitsBounds).isTrue()
+            assertThat(result.scale).isEqualTo(scale)
+            assertThat(result.logical).isNotEqualTo(logical)
+            assertThat(stable.contains(result.logical)).isTrue()
+            assertThat(abs(result.logical.width() * 1.5f - result.logical.height())).isLessThan(2f)
+        }
+    }
+
+    @Test fun scaledAspect_keepsScaleAndLogicalMinimumsWhenRefitting() {
+        val stable = Rect(0, 50, 1200, 1870)
+        val logical = Rect(100, 100, 900, 1300)
+        val visible = Rect(100, 100, 700, 1000)
+        val flipped = requireNotNull(FloatingWindowGeometry.scaledAspectBounds(
+            visible, logical, stable, 1.6f, .75f, 300, 400))
+        val fitted = FloatingWindowGeometry.logicalBounds(flipped, stable, .75f)
+        assertThat(stable.contains(fitted)).isTrue()
+        assertThat(fitted.width()).isAtLeast(300)
+        assertThat(fitted.height()).isAtLeast(400)
+        assertThat(abs(fitted.width().toFloat() / fitted.height() - 1.6f)).isLessThan(.005f)
+        assertThat(FloatingWindowGeometry.scaledAspectBounds(visible, logical, stable,
+            1.6f, .75f, 600, 1000)).isNull()
+    }
+
     @Test fun hysteresis_crossesOnlyOuterThresholds() {
         assertThat(FloatingWindowGeometry.selectLandscape(false, 1.08f, false)).isFalse()
         assertThat(FloatingWindowGeometry.selectLandscape(false, 1.081f, false)).isTrue()

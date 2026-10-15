@@ -142,6 +142,7 @@ import android.content.res.Configuration;
 import android.graphics.Matrix;
 import android.graphics.Point;
 import android.graphics.Rect;
+import android.graphics.Region;
 import android.internal.perfetto.protos.Windowmanagerservice.TaskProto;
 import android.os.Binder;
 import android.os.Debug;
@@ -160,6 +161,7 @@ import android.util.DisplayMetrics;
 import android.util.Slog;
 import android.util.proto.ProtoOutputStream;
 import android.view.DisplayInfo;
+import android.view.InsetsSource;
 import android.view.InsetsState;
 import android.view.SurfaceControl;
 import android.view.WindowInsets;
@@ -678,6 +680,10 @@ class Task extends TaskFragment {
     /** @see #isDisablePip() */
     private boolean mDisablePip;
     private boolean mFloatingWindow;
+    private float mFloatingWindowScale = 1f;
+    private final Point mFloatingWindowPosition = new Point();
+    private int mFloatingWindowImeOffset;
+    private boolean mFloatingWindowTransformDirty;
 
     /** @see #isForceOpaque() */
     private final boolean mIsForceOpaque;
@@ -2547,6 +2553,7 @@ class Task extends TaskFragment {
         super.migrateToNewSurfaceControl(t);
         mLastSurfaceSize.x = 0;
         mLastSurfaceSize.y = 0;
+        mFloatingWindowTransformDirty = true;
         updateSurfaceSize(t);
     }
 
@@ -3445,6 +3452,8 @@ class Task extends TaskFragment {
         if (mTaskInputSink != null && isVisible() && mSyncState == SYNC_STATE_NONE) {
             mTaskInputSink.applyChangesToSurfaceIfChanged(getPendingTransaction());
         }
+        updateFloatingWindowImeOffset();
+        updateFloatingWindowSurface(getSyncTransaction());
         super.prepareSurfaces();
     }
 
@@ -3474,6 +3483,8 @@ class Task extends TaskFragment {
         info.userId = getUserId();
         info.taskId = mTaskId;
         info.isFloatingWindow = hasFloatingWindowIdentity();
+        info.floatingWindowScale = info.isFloatingWindow ? mFloatingWindowScale : 1f;
+        info.floatingWindowPosition.set(mFloatingWindowPosition);
         info.effectiveUid = effectiveUid;
         info.displayId = getDisplayId();
         info.displayAreaFeatureId = tda != null ? tda.mFeatureId : FEATURE_UNDEFINED;
@@ -4822,11 +4833,171 @@ class Task extends TaskFragment {
     }
 
     void setFloatingWindow(boolean floating) {
-        if (mFloatingWindow && !floating) {
+        setFloatingWindow(floating, true);
+    }
+
+    void setFloatingWindow(boolean floating, boolean initialize) {
+        final boolean entering = floating && !mFloatingWindow;
+        final boolean leaving = !floating && mFloatingWindow;
+        mFloatingWindow = floating;
+        mFloatingWindowTransformDirty = true;
+        if (entering && initialize && getDisplayContent() != null) {
+            final Rect visible = new Rect(getBounds());
+            final Rect stable = new Rect();
+            getDisplayContent().getStableRect(stable);
+            if (!visible.isEmpty() && !stable.isEmpty()) {
+                setFloatingWindowBounds(visible, defaultFloatingWindowScale(visible, stable));
+            }
+        } else if (leaving) {
             setAlwaysOnTop(false);
             setDisablePip(false);
+            mFloatingWindowScale = 1f;
+            mFloatingWindowImeOffset = 0;
+            if (mSurfaceControl != null) {
+                getSyncTransaction().setMatrix(mSurfaceControl, 1, 0, 0, 1);
+            }
         }
-        mFloatingWindow = floating;
+        dispatchTaskInfoChangedIfNeeded(true);
+    }
+
+    void setFloatingWindowBounds(Rect visible, float scale) {
+        final Rect stable = new Rect();
+        getDisplayContent().getStableRect(stable);
+        if (stable.isEmpty() || visible.isEmpty()) return;
+        mFloatingWindowScale = Math.max(scale, Math.max((float) visible.width() / stable.width(),
+                (float) visible.height() / stable.height()));
+        mFloatingWindowScale = Math.min(1f, mFloatingWindowScale);
+        mFloatingWindowPosition.set(visible.left, visible.top);
+        final int width = Math.min(stable.width(), Math.round(visible.width() / mFloatingWindowScale));
+        final int height = Math.min(stable.height(), Math.round(visible.height() / mFloatingWindowScale));
+        final int left = Math.max(stable.left, Math.min(visible.left, stable.right - width));
+        final int top = Math.max(stable.top, Math.min(visible.top, stable.bottom - height));
+        setBounds(new Rect(left, top, left + width, top + height));
+        mFloatingWindowTransformDirty = true;
+    }
+
+    @VisibleForTesting
+    static float defaultFloatingWindowScale(Rect visible, Rect stable) {
+        if (visible.isEmpty() || stable.isEmpty()) return 1f;
+        final float factor = Math.max(1f, Math.min(1.3f,
+                Math.min((float) stable.width() / visible.width(),
+                        (float) stable.height() / visible.height())));
+        return 1f / factor;
+    }
+
+    void setFloatingWindowPresentation(Point position, float scale) {
+        if (!mFloatingWindow || mCreatedByOrganizer) return;
+        if (!Float.isFinite(scale) || scale <= 0f || scale > 1f) {
+            throw new IllegalArgumentException("Invalid floating window scale " + scale);
+        }
+        mFloatingWindowScale = scale;
+        mFloatingWindowPosition.set(position);
+        mFloatingWindowTransformDirty = true;
+        updateFloatingWindowSurface(getSyncTransaction());
+        dispatchTaskInfoChangedIfNeeded(true);
+        if (getDisplayContent() != null) {
+            getDisplayContent().getInputMonitor().setUpdateInputWindowsNeededLw();
+        }
+        mWmService.scheduleAnimationLocked();
+    }
+
+    @Override
+    void getRelativePosition(Point outPos) {
+        if (isFloatingWindow()) {
+            outPos.set(mFloatingWindowPosition.x,
+                    mFloatingWindowPosition.y + mFloatingWindowImeOffset);
+        } else {
+            super.getRelativePosition(outPos);
+        }
+    }
+
+    void applyFloatingWindowTransform(SurfaceControl.Transaction t, SurfaceControl leash) {
+        if (!isFloatingWindow()) return;
+        t.setMatrix(leash, mFloatingWindowScale, 0, 0, mFloatingWindowScale);
+        t.setPosition(leash, mFloatingWindowPosition.x,
+                mFloatingWindowPosition.y + mFloatingWindowImeOffset);
+        t.setWindowCrop(leash, getBounds().width(), getBounds().height());
+    }
+
+    float getFloatingWindowScale() {
+        return isFloatingWindow() ? mFloatingWindowScale : 1f;
+    }
+
+    void getFloatingWindowBounds(Rect out) {
+        out.set(mFloatingWindowPosition.x, mFloatingWindowPosition.y + mFloatingWindowImeOffset,
+                mFloatingWindowPosition.x + Math.round(getBounds().width() * mFloatingWindowScale),
+                mFloatingWindowPosition.y + mFloatingWindowImeOffset
+                        + Math.round(getBounds().height() * mFloatingWindowScale));
+    }
+
+    void mapFloatingWindowRegion(Region region) {
+        region.translate(-getBounds().left, -getBounds().top);
+        region.scale(mFloatingWindowScale);
+        region.translate(mFloatingWindowPosition.x,
+                mFloatingWindowPosition.y + mFloatingWindowImeOffset);
+    }
+
+    @VisibleForTesting
+    void updateFloatingWindowImeOffset() {
+        if (!isFloatingWindow()) return;
+        final DisplayContent dc = getDisplayContent();
+        final InsetsSource imeSource = dc.getInsetsStateController()
+                .getImeSourceProvider().getSource();
+        final InputTarget target = dc.getImeInputTarget();
+        int offset = 0;
+        if (imeSource.isVisible() && !imeSource.getFrame().isEmpty() && target != null
+                && target.getWindowState() != null && target.getWindowState().getTask() == this) {
+            final Rect stable = mTmpRect;
+            dc.getStableRect(stable);
+            final int bottom = mFloatingWindowPosition.y
+                    + Math.round(getBounds().height() * mFloatingWindowScale);
+            final Rect keyboard = imeSource.getVisibleFrame() != null
+                    ? imeSource.getVisibleFrame() : imeSource.getFrame();
+            final int right = mFloatingWindowPosition.x
+                    + Math.round(getBounds().width() * mFloatingWindowScale);
+            if (!keyboard.isEmpty() && right > keyboard.left
+                    && mFloatingWindowPosition.x < keyboard.right) {
+                offset = Math.min(0, Math.max(stable.top - mFloatingWindowPosition.y,
+                        Math.min(0, keyboard.top - bottom)));
+            }
+        }
+        if (mFloatingWindowImeOffset != offset) {
+            mFloatingWindowImeOffset = offset;
+            mFloatingWindowTransformDirty = true;
+            dispatchTaskInfoChangedIfNeeded(true);
+            forAllWindows(WindowState::notifyInsetsChanged, true);
+            dc.getInputMonitor().setUpdateInputWindowsNeededLw();
+        }
+    }
+
+    InsetsState adjustFloatingWindowInsets(InsetsState original) {
+        if (!isFloatingWindow()) return original;
+        final InsetsSource source = original.peekSource(InsetsSource.ID_IME);
+        if (source == null) return original;
+        final InsetsState state = new InsetsState(original);
+        final InsetsSource mapped = new InsetsSource(source);
+        mapped.setFrame(floatingWindowInsetFrame(source.getFrame()));
+        if (source.getVisibleFrame() != null) {
+            mapped.setVisibleFrame(floatingWindowInsetFrame(source.getVisibleFrame()));
+        }
+        state.addSource(mapped);
+        return state;
+    }
+
+    private Rect floatingWindowInsetFrame(Rect frame) {
+        final Rect result = new Rect(frame);
+        result.offset(-mFloatingWindowPosition.x,
+                -mFloatingWindowPosition.y - mFloatingWindowImeOffset);
+        result.scale(1f / mFloatingWindowScale);
+        result.offset(getBounds().left, getBounds().top);
+        return result;
+    }
+
+    private void updateFloatingWindowSurface(SurfaceControl.Transaction t) {
+        if (!mFloatingWindowTransformDirty || !isFloatingWindow() || mSurfaceControl == null
+                || inTransition() || mSurfaceAnimator.hasLeash() || mDragResizing) return;
+        applyFloatingWindowTransform(t, mSurfaceControl);
+        mFloatingWindowTransformDirty = false;
     }
 
     void setDisablePip(boolean disablePip) {
@@ -4943,7 +5114,7 @@ class Task extends TaskFragment {
         }
 
         if (mFloatingWindow && windowingMode != WINDOWING_MODE_FREEFORM) {
-            mFloatingWindow = false;
+            setFloatingWindow(false, false);
             setDisablePip(false);
             setAlwaysOnTop(false);
         }

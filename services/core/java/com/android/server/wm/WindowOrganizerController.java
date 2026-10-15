@@ -1078,12 +1078,20 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
 
         if ((c.getChangeMask()
                 & WindowContainerTransaction.Change.CHANGE_FLOATING_WINDOW) != 0) {
-            tr.setFloatingWindow(c.getFloatingWindow());
+            tr.setFloatingWindow(c.getFloatingWindow(), (c.getChangeMask()
+                    & WindowContainerTransaction.Change.CHANGE_FLOATING_WINDOW_PRESENTATION) == 0);
         }
 
         if ((c.getChangeMask()
                 & WindowContainerTransaction.Change.CHANGE_DISABLE_LAUNCH_ADJACENT) != 0) {
             tr.setLaunchAdjacentDisabled(c.getDisableLaunchAdjacent());
+        }
+
+        if ((c.getChangeMask()
+                & WindowContainerTransaction.Change.CHANGE_FLOATING_WINDOW_PRESENTATION) != 0) {
+            tr.setFloatingWindowPresentation(c.getFloatingWindowPosition(),
+                    c.getFloatingWindowScale());
+            effects |= TRANSACT_EFFECTS_CLIENT_CONFIG;
         }
 
         effects |= applyTaskCascadingChanges(tr, c, chain);

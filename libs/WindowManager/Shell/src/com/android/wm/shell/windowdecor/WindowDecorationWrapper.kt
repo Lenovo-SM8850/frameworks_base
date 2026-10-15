@@ -59,8 +59,8 @@ private constructor(
         }
     }
 
-    private fun updateFloatingBottomHandle() {
-        floatingBottomHandle?.update(taskInfo, taskSurface)
+    private fun updateFloatingBottomHandle(t: SurfaceControl.Transaction? = null) {
+        floatingBottomHandle?.update(decorTaskInfo, taskSurface, t)
     }
 
     private fun requireDefaultWindowDecor(): DefaultWindowDecoration =
@@ -74,6 +74,17 @@ private constructor(
 
     /** Returns the window decor's [RunningTaskInfo]. */
     val taskInfo: RunningTaskInfo
+        get() = floatingPreviewSource ?: decorTaskInfo
+
+    private var floatingPreviewSource: RunningTaskInfo? = null
+    private var floatingPreviewBounds: Rect? = null
+    private var floatingPreviewScale = 1f
+    private val floatingPreviewRect = Rect()
+    private val floatingPreviewLogical = Rect()
+    private var floatingPreviewInfo: RunningTaskInfo? = null
+    var floatingWindowTransitionListener: (() -> Unit)? = null
+
+    private val decorTaskInfo: RunningTaskInfo
         get() =
             when {
                 defaultWindowDecor != null -> requireDefaultWindowDecor().taskInfo
@@ -81,6 +92,69 @@ private constructor(
                 captionWindowDecoration != null -> requireCaptionWindowDecor().mTaskInfo
                 else -> error("Expected Non-null window decoration")
             }
+
+    private fun resolveFloatingPreview(info: RunningTaskInfo): RunningTaskInfo {
+        if (!info.isFloatingWindow) finishFloatingWindowPreview()
+        val bounds = floatingPreviewBounds ?: run {
+            floatingPreviewSource = null
+            return info
+        }
+        val drawingInfo = if (floatingPreviewSource === info) floatingPreviewInfo else null
+        floatingPreviewSource = info
+        return (drawingInfo ?: RunningTaskInfo(info).also { floatingPreviewInfo = it }).apply {
+            floatingWindowScale = floatingPreviewScale
+            if (positionInParent == null) positionInParent = Point()
+            positionInParent.set(bounds.left, bounds.top)
+            floatingPreviewLogical.set(info.configuration.windowConfiguration.bounds)
+            floatingPreviewLogical.right = floatingPreviewLogical.left +
+                kotlin.math.round(bounds.width() / floatingPreviewScale).toInt()
+            floatingPreviewLogical.bottom = floatingPreviewLogical.top +
+                kotlin.math.round(bounds.height() / floatingPreviewScale).toInt()
+            configuration.windowConfiguration.setBounds(floatingPreviewLogical)
+        }
+    }
+
+    fun updateFloatingWindowPreview(bounds: Rect, scale: Float, t: SurfaceControl.Transaction) {
+        val original = taskInfo
+        floatingPreviewRect.set(bounds)
+        floatingPreviewBounds = floatingPreviewRect
+        floatingPreviewScale = scale
+        defaultWindowDecor?.floatingWindowPreview = true
+        desktopWindowDecor?.mFloatingWindowPreview = true
+        relayout(original, t, t, false, false, hasGlobalFocus, exclusionRegion, false, null)
+        updateFloatingWindowChildScale(t, scale)
+        val logical = decorTaskInfo.configuration.windowConfiguration.bounds
+        t.setMatrix(taskSurface, scale, 0f, 0f, scale)
+            .setPosition(taskSurface, bounds.left.toFloat(), bounds.top.toFloat())
+            .setWindowCrop(taskSurface, logical.width(), logical.height())
+    }
+
+    fun updateFloatingWindowChildScale(t: SurfaceControl.Transaction, scale: Float) {
+        defaultWindowDecor?.updateFloatingWindowChildScale(t, scale)
+        desktopWindowDecor?.updateFloatingWindowChildScale(t, scale)
+    }
+
+    fun cancelFloatingWindowPreview(t: SurfaceControl.Transaction) {
+        val original = taskInfo
+        val scale = original.floatingWindowScale
+        floatingBottomHandle?.update(original, taskSurface, t)
+        updateFloatingWindowChildScale(t, scale)
+        if (taskSurface.isValid) {
+            val bounds = original.presentationBounds
+            val logical = original.configuration.windowConfiguration.bounds
+            t.setMatrix(taskSurface, scale, 0f, 0f, scale)
+                .setPosition(taskSurface, bounds.left.toFloat(), bounds.top.toFloat())
+                .setWindowCrop(taskSurface, logical.width(), logical.height())
+        }
+        finishFloatingWindowPreview()
+    }
+
+    fun finishFloatingWindowPreview() {
+        floatingPreviewBounds = null
+        floatingPreviewInfo = null
+        defaultWindowDecor?.floatingWindowPreview = false
+        desktopWindowDecor?.mFloatingWindowPreview = false
+    }
 
     /** Returns the [SurfaceControl] of the task associated with the window decor. */
     val taskSurface: SurfaceControl
@@ -202,11 +276,11 @@ private constructor(
     fun relayout(taskInfo: RunningTaskInfo, isFocused: Boolean, exclusionRegion: Region) =
         when {
             defaultWindowDecor != null -> {
-                requireDefaultWindowDecor().relayout(taskInfo, isFocused, exclusionRegion)
+                requireDefaultWindowDecor().relayout(resolveFloatingPreview(taskInfo), isFocused, exclusionRegion)
             }
 
             desktopWindowDecor != null -> {
-                requireDesktopWindowDecor().relayout(taskInfo, isFocused, exclusionRegion)
+                requireDesktopWindowDecor().relayout(resolveFloatingPreview(taskInfo), isFocused, exclusionRegion)
             }
 
             captionWindowDecoration != null -> {
@@ -227,12 +301,16 @@ private constructor(
         displayExclusionRegion: Region,
         inSyncWithTransition: Boolean,
         taskSurface: SurfaceControl?,
-    ) =
+    ) {
+        if (inSyncWithTransition && floatingPreviewBounds != null) {
+            finishFloatingWindowPreview()
+            floatingWindowTransitionListener?.invoke()
+        }
         when {
             defaultWindowDecor != null -> {
                 requireDefaultWindowDecor()
                     .relayout(
-                        taskInfo,
+                        resolveFloatingPreview(taskInfo),
                         startT,
                         finishT,
                         applyStartTransactionOnDraw,
@@ -247,7 +325,7 @@ private constructor(
             desktopWindowDecor != null -> {
                 requireDesktopWindowDecor()
                     .relayout(
-                        taskInfo,
+                        resolveFloatingPreview(taskInfo),
                         startT,
                         finishT,
                         applyStartTransactionOnDraw,
@@ -274,7 +352,14 @@ private constructor(
             }
 
             else -> error("Expected Non-null window decoration")
-        }.also { updateFloatingBottomHandle() }
+        }.also {
+            updateFloatingBottomHandle(startT)
+            if (inSyncWithTransition && taskInfo.isFloatingWindow) {
+                updateFloatingWindowChildScale(startT, taskInfo.floatingWindowScale)
+                updateFloatingWindowChildScale(finishT, taskInfo.floatingWindowScale)
+            }
+        }
+    }
 
     /**
      * To be called when exclusion region is changed to allow the window decor to be updated

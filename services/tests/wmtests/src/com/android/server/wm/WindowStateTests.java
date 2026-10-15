@@ -1556,6 +1556,31 @@ public class WindowStateTests extends WindowTestsBase {
         assertFalse(notificationShade.needsRelativeLayeringToIme());
     }
 
+    @SetupWindows(addWindows = { W_ACTIVITY })
+    @Test
+    public void testFloatingFrozenInsetsAreMappedOnce() {
+        mAtm.mSupportsFreeformWindowManagement = true;
+        final Task task = mAppWindow.getTask();
+        task.setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM);
+        task.setBounds(new Rect(100, 100, 900, 1300));
+        task.setFloatingWindow(true, false);
+        task.setFloatingWindowPresentation(new android.graphics.Point(200, 300), .5f);
+        final InsetsSource source = new InsetsSource(ID_IME, ime());
+        source.setFrame(0, 1400, 1200, 1920).setVisible(true);
+        mAppWindow.mAboveInsetsState.addSource(source);
+        final Rect expected = new Rect(mAppWindow.getInsetsState().peekSource(ID_IME).getFrame());
+        assertFalse(source.getFrame().equals(expected));
+        mAppWindow.freezeInsetsState();
+        for (int i = 0; i < 3; i++) {
+            assertEquals(expected, mAppWindow.getInsetsState().peekSource(ID_IME).getFrame());
+            assertEquals(expected, mAppWindow.getFrozenInsetsState().peekSource(ID_IME).getFrame());
+        }
+        task.setFloatingWindowPresentation(new android.graphics.Point(200, 400), .5f);
+        assertEquals(expected, mAppWindow.getInsetsState().peekSource(ID_IME).getFrame());
+        mAppWindow.clearFrozenInsetsState();
+        assertFalse(expected.equals(mAppWindow.getInsetsState().peekSource(ID_IME).getFrame()));
+    }
+
     @Test
     public void testSetFreezeInsetsState() {
         final WindowState app = newWindowBuilder("app", TYPE_APPLICATION).build();

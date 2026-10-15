@@ -1678,8 +1678,11 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
                 mFrozenInsetsState != null ? mFrozenInsetsState : getMergedInsetsState();
         final InsetsState insetsStateForWindow = insetsPolicy.enforceInsetsPolicyForTarget(this,
                 rawInsetsState);
-        return insetsPolicy.adjustInsetsForWindow(this, insetsStateForWindow,
+        final InsetsState adjusted = insetsPolicy.adjustInsetsForWindow(this, insetsStateForWindow,
                 includeTransient);
+        final Task task = getTask();
+        return task != null && mFrozenInsetsState == null
+                ? task.adjustFloatingWindowInsets(adjusted) : adjusted;
     }
 
     private InsetsState getMergedInsetsState() {
@@ -5244,6 +5247,16 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
             final Rect parentBounds = parent.getBounds();
             x += parentBounds.left;
             y += parentBounds.top;
+        }
+        final Task task = getTask();
+        if (task != null && task.isFloatingWindow()) {
+            final float scale = task.getFloatingWindowScale();
+            final Rect visible = mTmpRect;
+            task.getFloatingWindowBounds(visible);
+            x = visible.left + Math.round((x - task.getBounds().left) * scale);
+            y = visible.top + Math.round((y - task.getBounds().top) * scale);
+            float9[Matrix.MSCALE_X] *= scale;
+            float9[Matrix.MSCALE_Y] *= scale;
         }
         float9[Matrix.MTRANS_X] = x;
         float9[Matrix.MTRANS_Y] = y;
