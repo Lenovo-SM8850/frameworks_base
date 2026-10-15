@@ -106,7 +106,7 @@ class DesktopTasksTransitionObserver(
     private fun containsClosingTaskInDesktop(info: TransitionInfo): Boolean {
         for (change in info.changes) {
             val taskInfo = change.taskInfo
-            if (taskInfo == null || taskInfo.taskId == -1) {
+            if (taskInfo == null || taskInfo.taskId == -1 || taskInfo.isFloatingWindow) {
                 continue
             }
             val desktopRepository = desktopUserRepositories.getProfile(taskInfo.userId)
@@ -129,7 +129,7 @@ class DesktopTasksTransitionObserver(
         // TODO: 380868195 - Smooth animation for wallpaper activity closing just by itself
         for (change in info.changes) {
             val taskInfo = change.taskInfo
-            if (taskInfo == null || taskInfo.taskId == -1) {
+            if (taskInfo == null || taskInfo.taskId == -1 || taskInfo.isFloatingWindow) {
                 continue
             }
 
@@ -202,7 +202,9 @@ class DesktopTasksTransitionObserver(
             .filter { it.mode == TRANSIT_CLOSE }
             .mapNotNull { it.taskInfo }
             .forEach { taskInfo ->
-                if (taskInfo.windowingMode != WINDOWING_MODE_FREEFORM) return@forEach
+                if (taskInfo.windowingMode != WINDOWING_MODE_FREEFORM ||
+                    taskInfo.isFloatingWindow ||
+                    pinnedLayerController?.isPinned(taskInfo.taskId) == true) return@forEach
                 wct.removeTask(taskInfo.token, /* removeFromRecents= */ true, killProcess)
                 ProtoLog.d(
                     WM_SHELL_DESKTOP_MODE,

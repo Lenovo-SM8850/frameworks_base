@@ -804,6 +804,9 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             for (int i = 0; i < info.getChanges().size(); ++i) {
                 final TransitionInfo.Change change = info.getChanges().get(i);
                 if (TransitionUtil.isWallpaper(change)) continue;
+                if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow) {
+                    continue;
+                }
                 if (TransitionUtil.isClosingType(change.getMode())) {
                     hasPausingTasks = true;
                     continue;
@@ -882,6 +885,11 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             for (int i = 0; i < info.getChanges().size(); ++i) {
                 final TransitionInfo.Change change = info.getChanges().get(i);
                 final ActivityManager.RunningTaskInfo taskInfo = change.getTaskInfo();
+                if (taskInfo != null && taskInfo.isFloatingWindow) {
+                    // Floating windows are hidden during Overview and are not remote targets.
+                    t.hide(change.getLeash());
+                    continue;
+                }
                 if (TransitionUtil.isWallpaper(change)) {
                     final RemoteAnimationTarget target = TransitionUtil.newTarget(change,
                             // wallpapers go into the "below" layer space
@@ -1201,6 +1209,13 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             for (int i = 0; i < info.getChanges().size(); ++i) {
                 final TransitionInfo.Change change = info.getChanges().get(i);
                 final ActivityManager.RunningTaskInfo taskInfo = change.getTaskInfo();
+                if (taskInfo != null && taskInfo.isFloatingWindow) {
+                    startT.hide(change.getLeash());
+                    if (TransitionUtil.isOpeningType(change.getMode())) {
+                        mState = STATE_NEW_TASK;
+                    }
+                    continue;
+                }
                 if (taskInfo != null && mBubbleHelper.isBubbleTask(taskInfo)) {
                     ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
                             "[%d]   Canceling due to bubble task", mInstanceId);
@@ -1592,6 +1607,10 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
         private void mergeActivityOnly(TransitionInfo info, SurfaceControl.Transaction t) {
             for (int i = 0; i < info.getChanges().size(); ++i) {
                 final TransitionInfo.Change change = info.getChanges().get(i);
+                if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow) {
+                    t.hide(change.getLeash());
+                    continue;
+                }
                 if (TransitionUtil.isOpeningType(change.getMode())) {
                     t.show(change.getLeash());
                     t.setAlpha(change.getLeash(), 1.f);

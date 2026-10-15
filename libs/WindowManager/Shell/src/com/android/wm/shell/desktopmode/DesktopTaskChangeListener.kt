@@ -419,7 +419,9 @@ class DesktopTaskChangeListener(
         taskInfo.isFreeform && !isTaskPinned(taskInfo)
 
     private fun isTaskPinned(taskInfo: RunningTaskInfo) =
-        pinnedController?.isPinned(taskInfo.taskId) ?: false
+        taskInfo.isFloatingWindow ||
+            (desksOrganizer.getDeskIdFromTaskInfo(taskInfo) == null &&
+                pinnedController?.isPinned(taskInfo.taskId) == true)
 
     @VisibleForTesting fun isTaskPerceptible(taskId: Int): Boolean = taskId in perceptibleTasks
 

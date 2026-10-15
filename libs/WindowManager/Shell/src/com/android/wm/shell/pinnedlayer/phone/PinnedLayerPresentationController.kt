@@ -19,12 +19,13 @@ package com.android.wm.shell.pinnedlayer.phone
 import android.app.TaskInfo
 import android.app.WindowConfiguration
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Rect
 import android.util.Slog
 import android.util.SparseArray
 import android.util.TypedValue
+import android.view.Display.DEFAULT_DISPLAY
 import android.window.TransitionRequestInfo
-import com.android.wm.shell.R
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.DisplayLayout
 import com.android.wm.shell.shared.desktopmode.DesktopState
@@ -39,41 +40,62 @@ class PinnedLayerPresentationController(
     private val desktopState: DesktopState,
 ) {
 
-    private val entryBoundsPadding: Int =
-        context.resources.getDimensionPixelSize(R.dimen.pinned_window_init_padding)
+    private val rememberedBounds = mutableMapOf<Triple<String, Int, Int>, Rect>()
 
     // Stores the tasks' initial and overridden bounds, which are used as a reference for
     // subsequent resize operations to prevent implicit movement of the task by resizing it in
     // various ways (e.g., by expanding or contracting against display boundaries).
     private val overriddenBounds: SparseArray<OverridableBounds> = SparseArray()
 
-    /**
-     * Calculates the entry destination bounds for a task window which is pinned.
-     *
-     * The size of the window is calculated based on the task's original bounds, adjusted to fit
-     * within the defined constraints (min 220dp, max 70% of display dimensions). The aspect ratio
-     * of the task is preserved.
-     *
-     * As a security mitigation -- to limit the app's ability to position the pinned window -- the
-     * task is moved into the right bottom corner of the display, everytime it's pinned.
-     *
-     * @param task The task for which to calculate the bounds.
-     * @return A [Rect] with the calculated bounds, or an empty Rect if calculation is not possible.
-     */
+    /** Returns remembered package bounds, or a centered window matching display orientation. */
     fun getPinEntryDestinationBounds(task: TaskInfo, displayId: Int = task.displayId): Rect? {
-        val displayDetails = getDisplayDetails(displayId) ?: return null
+        val details = getDisplayDetails(displayId) ?: return null
+        val stable = details.stableBounds()
+        val key = boundsKey(task, details)
+        val remembered = key?.let { rememberedBounds[it] }
+        if (remembered != null) return clampFloatingBounds(task, Rect(remembered), details)
+        val landscape = details.layout.width() > details.layout.height()
+        val shortEdge = (max(details.layout.width(), details.layout.height()) * .30f).toInt()
+        val longEdge = max(shortEdge,
+            (min(details.layout.width(), details.layout.height()) * .72f).toInt())
+        val width = if (landscape) longEdge else shortEdge
+        val height = if (landscape) shortEdge else longEdge
+        val bounds = Rect(0, 0, width, height)
+        bounds.offset(stable.centerX() - width / 2, stable.centerY() - height / 2)
+        return clampFloatingBounds(task, bounds, details)
+    }
 
-        val taskBounds = task.configuration.windowConfiguration.getBounds()
-        val clampedBounds = clampSizeToConstraints(taskBounds, displayDetails) ?: return null
+    /** Remembers user geometry independently for each package, user, and device orientation. */
+    fun rememberBounds(task: TaskInfo) {
+        if (!task.isFloatingWindow) return
+        val details = getDisplayDetails(task.displayId) ?: return
+        val key = boundsKey(task, details) ?: return
+        val bounds = task.configuration.windowConfiguration.bounds
+        if (!bounds.isEmpty) rememberedBounds[key] = Rect(bounds)
+    }
 
-        // Calculate the bounds based on the final size, stable insets and padding.
-        val displayLayout = displayDetails.layout
-        val stableInsets = displayLayout.stableInsets()
-        val right = displayLayout.width() - stableInsets.right - entryBoundsPadding
-        val bottom = displayLayout.height() - stableInsets.bottom - entryBoundsPadding
-        val left = right - clampedBounds.width()
-        val top = bottom - clampedBounds.height()
-        return Rect(left, top, right, bottom).also { ensureNotOffscreen(it, displayDetails) }
+    private fun boundsKey(task: TaskInfo, details: DisplayDetails): Triple<String, Int, Int>? {
+        val packageName = task.baseActivity?.packageName ?: task.realActivity?.packageName
+            ?: task.baseIntent?.component?.packageName ?: return null
+        val orientation = if (details.layout.width() > details.layout.height()) {
+            Configuration.ORIENTATION_LANDSCAPE
+        } else {
+            Configuration.ORIENTATION_PORTRAIT
+        }
+        return Triple(packageName, task.userId, orientation)
+    }
+
+    private fun clampFloatingBounds(task: TaskInfo, bounds: Rect, details: DisplayDetails): Rect {
+        val stable = details.stableBounds()
+        val density = details.context.resources.displayMetrics.density
+        val defaultMin = (max(task.defaultMinSize, 1) * density).toInt()
+        val minWidth = if (task.minWidth > 0) task.minWidth else defaultMin
+        val minHeight = if (task.minHeight > 0) task.minHeight else defaultMin
+        val width = bounds.width().coerceAtLeast(minWidth).coerceAtMost(stable.width())
+        val height = bounds.height().coerceAtLeast(minHeight).coerceAtMost(stable.height())
+        val left = bounds.left.coerceIn(stable.left, stable.right - width)
+        val top = bounds.top.coerceIn(stable.top, stable.bottom - height)
+        return Rect(left, top, left + width, top + height)
     }
 
     /**
@@ -83,12 +105,13 @@ class PinnedLayerPresentationController(
      * @return True if the task is supported, false otherwise.
      */
     fun isTaskSupportedForPinning(task: TaskInfo): Boolean {
-        // Freeform ensures tasks is not in pip/split/fullscreen/bubble.
-        val isFreeform = task.windowingMode == WindowConfiguration.WINDOWING_MODE_FREEFORM
-        // Limit to pining only in same display and require desktop mode support.
-        val displaySupportsDesktopMode =
+        val mode = task.windowingMode
+        return task.displayId == DEFAULT_DISPLAY && task.isResizeable &&
+            task.activityType == WindowConfiguration.ACTIVITY_TYPE_STANDARD &&
+            (mode == WindowConfiguration.WINDOWING_MODE_FREEFORM ||
+                mode == WindowConfiguration.WINDOWING_MODE_FULLSCREEN ||
+                mode == WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW) &&
             desktopState.isDesktopModeSupportedOnDisplay(task.displayId)
-        return isFreeform && displaySupportsDesktopMode
     }
 
     /**
@@ -104,6 +127,9 @@ class PinnedLayerPresentationController(
     fun clampToDisplay(task: TaskInfo, bounds: Rect, displayId: Int = task.displayId): Rect? {
         val displayDetails = getDisplayDetails(displayId) ?: return null
 
+        if (task.isFloatingWindow) {
+            return clampFloatingBounds(task, Rect(bounds), displayDetails)
+        }
         return clampSizeToConstraints(bounds, displayDetails)?.also {
             ensureNotOffscreen(it, displayDetails)
         }

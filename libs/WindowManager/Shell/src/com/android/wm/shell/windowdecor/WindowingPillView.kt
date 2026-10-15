@@ -34,11 +34,12 @@ import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.core.view.isGone
+import com.android.internal.annotations.VisibleForTesting
+import com.android.internal.policy.DesktopModeCompatPolicy
 import com.android.window.flags.Flags
 import com.android.wm.shell.R
 import com.android.wm.shell.common.split.SplitScreenUtils
 import com.android.wm.shell.desktopmode.DesktopModeUiEventLogger
-import com.android.wm.shell.shared.bubbles.BubbleFlagHelper
 import com.android.wm.shell.shared.desktopmode.DesktopModeTransitionSource
 import com.android.wm.shell.windowdecor.common.DecorThemeUtil
 import com.android.wm.shell.windowdecor.common.DrawableInsets
@@ -101,6 +102,8 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private val floatingBtn: ImageButton
     private val desktopBtn: ImageButton
 
+    @VisibleForTesting var desktopModeCompatPolicy = DesktopModeCompatPolicy(context)
+
     private lateinit var taskInfo: RunningTaskInfo
     private lateinit var windowDecorationActions: WindowDecorationActions
     private lateinit var desktopModeUiEventLogger: DesktopModeUiEventLogger
@@ -115,6 +118,13 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         fullscreenBtn = requireViewById<ImageButton>(R.id.fullscreen_button)
         splitscreenBtn = requireViewById<ImageButton>(R.id.split_screen_button)
         floatingBtn = requireViewById<ImageButton>(R.id.floating_button)
+        floatingBtn.contentDescription = context.getString(R.string.float_button_text)
+        ViewCompat.replaceAccessibilityAction(
+            floatingBtn,
+            AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CLICK,
+            context.getString(R.string.float_button_text),
+            null,
+        )
         desktopBtn = requireViewById<ImageButton>(R.id.desktop_button)
     }
 
@@ -259,9 +269,11 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
 
         background.setTint(style.backgroundColor)
 
-        if (!BubbleFlagHelper.enableBubbleToFullscreen() || taskInfo.isFreeform) {
-            floatingBtn.visibility = View.GONE
-        }
+        floatingBtn.isGone = taskInfo.displayId != DEFAULT_DISPLAY ||
+            !taskInfo.isResizeable || taskInfo.isFloatingWindow ||
+            desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(taskInfo) ||
+            taskInfo.activityType != android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD ||
+            (!taskInfo.isFullscreen && !isInSplitScreen)
 
         if (!Flags.enableNonDefaultDisplaySplitBugfix() && taskInfo.displayId != DEFAULT_DISPLAY) {
             splitscreenBtn.visibility = View.GONE
@@ -279,7 +291,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         floatingBtn.isSelected = taskInfo.isPinned
         floatingBtn.isEnabled = !taskInfo.isPinned
         floatingBtn.imageTintList = style.buttonColor
-        desktopBtn.isGone = !shouldShowDesktopModeButton
+        desktopBtn.isGone = true
         desktopBtn.isSelected = taskInfo.isFreeform
         desktopBtn.isEnabled = !taskInfo.isFreeform
         desktopBtn.imageTintList = style.buttonColor

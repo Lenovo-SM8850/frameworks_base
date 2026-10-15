@@ -68,7 +68,7 @@ class FreeformFallbackTransitionObserver(
             val repository = desktopUserRepositories.getProfile(taskInfo.userId)
             // Ignore change if task is pinned or associated with a desk already.
             if (
-                repository.isActiveTask(taskInfo.taskId) ||
+                taskInfo.isFloatingWindow || repository.isActiveTask(taskInfo.taskId) ||
                     pinnedLayerController.orElse(null)?.isPinned(taskInfo.taskId) ?: false
             ) {
                 continue
@@ -91,6 +91,8 @@ class FreeformFallbackTransitionObserver(
                 val runAllOnTransitStart: MutableSet<RunOnTransitStart> = mutableSetOf()
                 val pendingDeskActivations: MutableSet<Int> = mutableSetOf()
                 for (task in pendingMoveToDeskTasks) {
+                    if (task.isFloatingWindow ||
+                        pinnedLayerController.orElse(null)?.isPinned(task.taskId) == true) continue
                     val repository = desktopUserRepositories.getProfile(task.userId)
                     // Create desk if one does not exit for display.
                     val targetDeskId: Int? =

@@ -3018,6 +3018,31 @@ public class ActivityTaskSupervisor implements RecentTasks.Callbacks {
                 }
 
 
+                if (activityOptions != null && activityOptions.getLaunchFloatingWindow()
+                        && task.isResizeable() && task.isActivityTypeStandardOrUndefined()
+                        && task.getDisplayId() == android.view.Display.DEFAULT_DISPLAY) {
+                    if (!task.isRootTask()) task.reparent(task.getDisplayArea(), true);
+                    task.setWindowingMode(WINDOWING_MODE_FREEFORM);
+                    task.setFloatingWindow(true);
+                    task.setDisablePip(true);
+                    task.setAlwaysOnTop(true);
+                    task.setForceHidden(Task.FLAG_FORCE_HIDDEN_FOR_TASK_ORG, false);
+                    if (activityOptions.getLaunchBounds() != null) {
+                        final Rect bounds = new Rect(activityOptions.getLaunchBounds());
+                        final Rect stable = new Rect();
+                        task.getDisplayContent().getStableRect(stable);
+                        bounds.right = bounds.left + Math.min(stable.width(),
+                                Math.max(bounds.width(), task.mMinWidth));
+                        bounds.bottom = bounds.top + Math.min(stable.height(),
+                                Math.max(bounds.height(), task.mMinHeight));
+                        bounds.offset(Math.max(stable.left - bounds.left,
+                                Math.min(0, stable.right - bounds.right)),
+                                Math.max(stable.top - bounds.top,
+                                Math.min(0, stable.bottom - bounds.bottom)));
+                        task.setBounds(bounds);
+                    }
+                }
+
                 if (task.getRootTask() != null
                         && task.getRootTask().getWindowingMode() == WINDOWING_MODE_MULTI_WINDOW) {
                     // Don't move home forward if task is in multi window mode

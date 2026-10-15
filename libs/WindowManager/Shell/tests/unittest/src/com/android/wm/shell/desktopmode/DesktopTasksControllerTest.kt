@@ -3043,6 +3043,38 @@ class DesktopTasksControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun startFloatingIntent_usesWmRequestPathForResolvedTaskPreparation() {
+        val pendingIntent = mock(PendingIntent::class.java)
+        whenever(pendingIntent.isActivity).thenReturn(true)
+        whenever(pendingIntent.creatorUserHandle).thenReturn(UserHandle.of(10))
+        whenever(pendingIntent.intent).thenReturn(Intent())
+        val options = argumentCaptor<Bundle>()
+
+        controller.startFloatingIntent(pendingIntent)
+
+        verify(pendingIntent).send(
+            eq(context), eq(0), anyOrNull(), anyOrNull(), eq(mockHandler), anyOrNull(),
+            options.capture(),
+        )
+        assertThat(ActivityOptions.fromBundle(options.firstValue).launchFloatingWindow).isTrue()
+        verify(transitions, never()).startTransition(anyInt(), any(), anyOrNull())
+    }
+
+    @Test
+    fun handleRequest_floatingTask_doesNotActivateOrPopulateDesk() {
+        val task = setUpFreeformTask()
+        taskRepository.removeTask(task.taskId)
+        task.isFloatingWindow = true
+
+        val result = controller.handleRequest(Binder(), createTransition(task, TRANSIT_OPEN))
+
+        assertThat(result).isNull()
+        assertThat(taskRepository.isActiveTask(task.taskId)).isFalse()
+        verify(desksOrganizer, never()).activateDesk(any(), any(), any())
+        verify(desksOrganizer, never()).moveTaskToDesk(any(), any(), any(), any())
+    }
+
+    @Test
     fun handleRequest_freeformTask_launchBringsToFront() {
         val deskId = 5
         taskRepository.addDesk(displayId = DEFAULT_DISPLAY, deskId = deskId)
@@ -6687,7 +6719,10 @@ class DesktopTasksControllerTest : ShellTestCase() {
     }
 
     @Test
-    fun dragToDesktop_landscapeDevice_resizable_undefinedOrientation_defaultLandscapeBounds() {
+    fun dragToFloating_landscapeDevice_resizable_undefinedOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6702,12 +6737,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(DEFAULT_LANDSCAPE_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_landscapeDevice_resizable_landscapeOrientation_defaultLandscapeBounds() {
+    fun dragToFloating_landscapeDevice_resizable_landscapeOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6722,12 +6759,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(DEFAULT_LANDSCAPE_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_landscapeDevice_resizable_portraitOrientation_resizablePortraitBounds() {
+    fun dragToFloating_landscapeDevice_resizable_portraitOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6746,12 +6785,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(RESIZABLE_PORTRAIT_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_landscapeDevice_unResizable_landscapeOrientation_defaultLandscapeBounds() {
+    fun dragToFloating_landscapeDevice_unResizable_landscapeOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6770,12 +6811,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(DEFAULT_LANDSCAPE_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_landscapeDevice_unResizable_portraitOrientation_unResizablePortraitBounds() {
+    fun dragToFloating_landscapeDevice_unResizable_portraitOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6794,12 +6837,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(UNRESIZABLE_PORTRAIT_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_portraitDevice_resizable_undefinedOrientation_defaultPortraitBounds() {
+    fun dragToFloating_portraitDevice_resizable_undefinedOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6814,12 +6859,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(DEFAULT_PORTRAIT_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_portraitDevice_resizable_portraitOrientation_defaultPortraitBounds() {
+    fun dragToFloating_portraitDevice_resizable_portraitOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6838,12 +6885,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(DEFAULT_PORTRAIT_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_portraitDevice_resizable_landscapeOrientation_resizableLandscapeBounds() {
+    fun dragToFloating_portraitDevice_resizable_landscapeOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6863,12 +6912,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(RESIZABLE_LANDSCAPE_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_portraitDevice_unResizable_portraitOrientation_defaultPortraitBounds() {
+    fun dragToFloating_portraitDevice_unResizable_portraitOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6888,12 +6939,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(DEFAULT_PORTRAIT_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_portraitDevice_unResizable_landscapeOrientation_unResizableLandscapeBounds() {
+    fun dragToFloating_portraitDevice_unResizable_landscapeOrientation_delegatesEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6914,12 +6967,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             task,
             mockSurface,
         )
-        val wct = getLatestDragToDesktopWct()
-        assertThat(findBoundsChange(wct, task)).isEqualTo(UNRESIZABLE_LANDSCAPE_BOUNDS)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
     }
 
     @Test
-    fun dragToDesktop_movesTaskToDesk() {
+    fun dragToFloating_doesNotMoveTaskToDesk() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6933,12 +6988,15 @@ class DesktopTasksControllerTest : ShellTestCase() {
             mockSurface,
         )
 
-        val wct = getLatestDragToDesktopWct()
-        verify(desksOrganizer).moveTaskToDesk(wct, deskId = 0, task)
+        verify(floatingController).prepareFloatingTask(eq(task), any())
+        verify(desksOrganizer, never()).moveTaskToDesk(any(), any(), any(), any())
     }
 
     @Test
-    fun dragToDesktop_activatesDesk() {
+    fun dragToFloating_doesNotActivateDesk() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6952,12 +7010,14 @@ class DesktopTasksControllerTest : ShellTestCase() {
             mockSurface,
         )
 
-        val wct = getLatestDragToDesktopWct()
-        verify(desksOrganizer).activateDesk(wct, deskId = 0)
+        verify(desksOrganizer, never()).activateDesk(any(), any(), any())
     }
 
     @Test
-    fun dragToDesktop_triggersEnterDesktopListener() {
+    fun dragToFloating_doesNotNotifyDesktopEntry() {
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(spyController.getVisualIndicator()).thenReturn(desktopModeVisualIndicator)
         whenever(desktopModeVisualIndicator.updateIndicatorType(any(), anyOrNull()))
@@ -6971,12 +7031,15 @@ class DesktopTasksControllerTest : ShellTestCase() {
             mockSurface,
         )
 
-        verify(desktopRemoteListener).onEnterDesktopModeTransitionStarted(TO_DESKTOP_ANIM_DURATION)
+        verify(desktopRemoteListener, never()).onEnterDesktopModeTransitionStarted(any())
     }
 
     @Test
-    fun dragToDesktop_multipleDesks_addsPendingTransition() {
+    fun dragToFloating_multipleDesks_doesNotAddDeskTransition() {
         val transition = Binder()
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(dragToDesktopTransitionHandler.finishDragToDesktopTransition(any()))
             .thenReturn(transition)
@@ -6992,15 +7055,7 @@ class DesktopTasksControllerTest : ShellTestCase() {
             mockSurface,
         )
 
-        verify(desksTransitionsObserver)
-            .addPendingTransition(
-                argThat {
-                    this is DeskTransition.ActivateDeskWithTask &&
-                        this.token == transition &&
-                        this.deskId == 0 &&
-                        this.enterTaskId == task.taskId
-                }
-            )
+        verify(desksTransitionsObserver, never()).addPendingTransition(any())
     }
 
     @Test

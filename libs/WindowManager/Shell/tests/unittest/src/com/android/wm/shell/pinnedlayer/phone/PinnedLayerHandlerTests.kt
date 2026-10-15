@@ -32,6 +32,7 @@ import android.testing.TestableLooper
 import android.view.SurfaceControl
 import android.view.WindowManager.TRANSIT_CHANGE
 import android.view.WindowManager.TRANSIT_CLOSE
+import android.view.WindowManager.TRANSIT_OPEN
 import android.view.WindowManager.TRANSIT_TO_BACK
 import android.view.WindowManager.TRANSIT_TO_FRONT
 import android.view.WindowManager.TransitionType
@@ -169,6 +170,23 @@ class PinnedLayerHandlerTests : ShellTestCase() {
         whenever(desktopRepository.getActiveDeskId(DISPLAY_ID_0)).thenReturn(DESK_ID_0)
         whenever(desktopRepository.getDefaultDeskId(DISPLAY_ID_0)).thenReturn(DESK_ID_0)
         whenever(desktopRepository.getDeskIdForTask(TASK_ID_0)).thenReturn(DESK_ID_0)
+    }
+
+    @Test
+    fun floatingLaunchRequest_preparesResolvedTaskAndSplitExit() {
+        val layered = setupWindowingLayerTransition(
+            WINDOWING_LAYER_PINNED, mock(), triggerTaskId = TASK_ID_0,
+        )
+        val task = requireNotNull(layered.triggerTask).apply { isFloatingWindow = true }
+        val request = TransitionRequestInfo(TRANSIT_OPEN, task, null)
+
+        val wct = requireNotNull(pinnedLayerHandler.handleRequest(mock(), request))
+
+        verify(desktopTasksController).addExitSplitForFloating(any(), eq(task))
+        assertFalse(requireNotNull(wct.changes[task.token.asBinder()]).hidden)
+        assertTrue(wct.hierarchyOps.any {
+            it.isReparent && it.container == task.token.asBinder() && it.toTop
+        })
     }
 
     @Test
@@ -626,7 +644,7 @@ class PinnedLayerHandlerTests : ShellTestCase() {
     }
 
     @Test
-    fun augmentToDismissPinnedTask_hasActivePinnedTask_unpinsTask() {
+    fun augmentToDismissPinnedTask_keepsFloatingTask() {
         val pinTransition = mock<IBinder>()
         val pinCallback = mock<IRemoteCallback>()
         val pinRequestInfo =
@@ -657,20 +675,9 @@ class PinnedLayerHandlerTests : ShellTestCase() {
             wct,
         )
 
-        // After augmenting, start the animation to process the unpin
-        val backRequestInfo = sendTransitionRequest(TRANSIT_TO_BACK, triggerTaskId = TASK_ID_0)
-        val backTransitionInfo = TransitionInfo(TRANSIT_TO_BACK, FLAG_NONE)
-        backTransitionInfo.addChange(
-            buildChange(TRANSIT_TO_BACK, requireNotNull(backRequestInfo.triggerTask))
-        )
-        pinnedLayerController.onTransitionReady(
-            dismissTransition,
-            backTransitionInfo,
-            startTransaction,
-            finishTransaction,
-        )
-
-        assertFalse(pinnedLayerHandler.hasActivePinnedTask())
+        assertTrue(wct.isEmpty)
+        assertTrue(pinnedLayerController.isPinned(TASK_ID_0))
+        assertTrue(pinnedLayerHandler.hasActivePinnedTask())
     }
 
     @Test
@@ -909,6 +916,12 @@ class PinnedLayerHandlerTests : ShellTestCase() {
                 taskId = triggerTaskId
                 displayId = DISPLAY_ID_0
                 userId = USER_ID_0
+                isResizeable = true
+                parentTaskId = android.app.ActivityTaskManager.INVALID_TASK_ID
+                configuration.windowConfiguration.windowingMode =
+                    android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
+                configuration.windowConfiguration.activityType =
+                    android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD
             }
         shellTaskOrganizer.stub { on { getRunningTaskInfo(triggerTaskId) } doReturn triggerTask }
         return TransitionRequestInfo(

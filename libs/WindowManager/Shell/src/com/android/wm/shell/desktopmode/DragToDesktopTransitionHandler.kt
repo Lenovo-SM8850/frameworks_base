@@ -901,13 +901,21 @@ sealed class DragToDesktopTransitionHandler(
     ) {
         val state = requireTransitionState()
         val freeformTaskChanges = mutableListOf<Change>()
+        val enteringFloating = info.changes.any {
+            it.taskInfo?.taskId == state.draggedTaskId && it.taskInfo?.isFloatingWindow == true
+        }
         info.changes.forEachIndexed { i, change ->
             when {
                 state is TransitionState.FromSplit &&
                     change.taskInfo?.taskId == state.otherSplitTask -> {
-                    // If we're exiting split, hide the remaining split task.
-                    startTransaction.hide(change.leash)
-                    finishTransaction.hide(change.leash)
+                    if (enteringFloating) {
+                        startTransaction.show(change.leash)
+                        finishTransaction.show(change.leash)
+                    } else {
+                        // Desktop entry hides the remaining split task.
+                        startTransaction.hide(change.leash)
+                        finishTransaction.hide(change.leash)
+                    }
                 }
                 change.mode == TRANSIT_CLOSE -> {
                     startTransaction.hide(change.leash)

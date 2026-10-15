@@ -214,7 +214,7 @@ private constructor(
                     shouldShowManageWindowsButton = shouldShowManageWindowsButton,
                     shouldShowChangeAspectRatioButton = shouldShowChangeAspectRatioButton,
                     shouldShowGameControlsButton = shouldShowGameControlsButton,
-                    shouldShowDesktopModeButton = shouldShowDesktopModeButton,
+                    shouldShowDesktopModeButton = false,
                     shouldShowRestartButton = shouldShowRestartButton,
                     appToWebData = appToWebData,
                     splitScreenController = splitScreenController,
