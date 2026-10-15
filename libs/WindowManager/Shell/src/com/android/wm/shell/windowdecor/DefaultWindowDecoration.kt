@@ -610,7 +610,7 @@ constructor(
             runningTaskInfo = taskInfo,
             captionType = captionType,
             inputFeatures = inputFeatures,
-            isInsetSource = isInsetSource,
+            isInsetSource = isInsetSource && !taskInfo.isFloatingWindow,
             insetSourceFlags = insetSourceFlags,
             displayExclusionRegion = Region.obtain(displayExclusionRegion),
             shadowRadiusId = getShadowRadiusId(captionType, hasGlobalFocus),

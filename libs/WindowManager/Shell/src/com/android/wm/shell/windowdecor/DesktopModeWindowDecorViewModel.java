@@ -2224,6 +2224,10 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         public void onMinimize(@NonNull RunningTaskInfo taskInfo) {
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to minimize task=%d",
                     taskInfo.taskId);
+            if (taskInfo.isFloatingWindow && mViewModel.mPinnedLayerController != null) {
+                mViewModel.mPinnedLayerController.minimizeTask(taskInfo);
+                return;
+            }
             mDesktopTasksController.minimizeTask(taskInfo, MinimizeReason.MINIMIZE_BUTTON);
         }
 

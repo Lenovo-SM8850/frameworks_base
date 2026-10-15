@@ -27,7 +27,10 @@ class FloatingMinimizeHandles(
     private val taskForId: (Int) -> TaskInfo?,
     private val onRestore: (Int) -> Unit,
 ) {
-    private data class Handle(val view: ImageView, val params: WindowManager.LayoutParams)
+    private data class Handle(val view: ImageView, val params: WindowManager.LayoutParams) {
+        // A view only reports attachment after its next traversal, so track it ourselves.
+        var added = false
+    }
     private val windowContext = context.createWindowContext(
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
     private val wm = windowContext.getSystemService(WindowManager::class.java)
@@ -47,7 +50,7 @@ class FloatingMinimizeHandles(
         val peek = (24 * density).roundToInt()
         val wanted = state.entries.values.filter { visible && it.userId in users && taskForId(it.taskId) != null }
         handles.keys.toList().filter { id -> wanted.none { it.taskId == id } }.forEach { id ->
-            handles.remove(id)?.let { wm.removeViewImmediate(it.view) }
+            handles.remove(id)?.let { if (it.added) wm.removeViewImmediate(it.view) }
         }
         for (right in listOf(false, true)) {
             val ordered = wanted.filter { it.right == right }.sortedBy { it.fractionY }
@@ -62,8 +65,12 @@ class FloatingMinimizeHandles(
                     x = if (right) layout.width() - peek else peek - size
                     y = positions[index]
                 }
-                if (handle.view.isAttachedToWindow) wm.updateViewLayout(handle.view, handle.params)
-                else wm.addView(handle.view, handle.params)
+                if (handle.added) {
+                    wm.updateViewLayout(handle.view, handle.params)
+                } else {
+                    wm.addView(handle.view, handle.params)
+                    handle.added = true
+                }
             }
         }
     }

@@ -305,7 +305,7 @@ abstract class CaptionController<T>(
             .setWindowCrop(captionSurface, captionWidth, captionHeight)
             .setPosition(captionSurface, captionX.toFloat(), /* y= */ 0f)
             .setLayer(captionSurface, CAPTION_LAYER_Z_ORDER)
-            .show(captionSurface)
+            .setVisibility(captionSurface, !taskInfo.isFloatingWindow)
         val layers = arrayOf<SurfaceControl?>(captionSurface)
         clearExcludeLayerJob()
         setExcludeLayerJob =
@@ -353,22 +353,11 @@ abstract class CaptionController<T>(
         localCaptionBounds: Rect,
     ) {
         if (params.floatingWindowPreview) return
-        if (!isCaptionVisible || !params.isInsetSource) {
+        if (taskInfo.isFloatingWindow || !isCaptionVisible || !params.isInsetSource) {
             captionInsets?.remove(wct)
             captionInsets = null
         }
-        if (taskInfo.isFloatingWindow) {
-            val logical = Rect(taskInfo.configuration.windowConfiguration.bounds).apply {
-                bottom = top + kotlin.math.ceil(captionHeight / taskInfo.floatingWindowScale).toInt()
-            }
-            val insets = WindowDecorationInsets(taskInfo.token, insetsOwner, logical,
-                flags = params.insetSourceFlags, shouldAddCaptionInset = params.isInsetSource)
-            if (insets != captionInsets) {
-                captionInsets = insets
-                insets.update(wct)
-            }
-            return
-        }
+        if (taskInfo.isFloatingWindow) return
         // Caption inset is the full width of the task with the |captionHeight| and
         // positioned at the top of the task bounds, also in absolute coordinates.
         // So just reuse the task bounds and adjust the bottom coordinate.

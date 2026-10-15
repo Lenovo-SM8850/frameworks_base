@@ -146,6 +146,22 @@
                 android:focusable="false"
                 android:scaleType="centerCrop"/>
         </LinearLayout>
+
+        <com.android.wm.shell.windowdecor.HandleMenuActionButton
+            android:id="@+id/floating_minimize_button"
+            android:contentDescription="@string/floating_window_minimize"
+            android:text="@string/floating_window_minimize"
+            android:src="@drawable/desktop_mode_header_ic_minimize"
+            android:visibility="gone"
+            style="@style/DesktopModeHandleMenuActionButton"/>
+
+        <com.android.wm.shell.windowdecor.HandleMenuActionButton
+            android:id="@+id/floating_close_button"
+            android:contentDescription="@string/floating_window_close"
+            android:text="@string/floating_window_close"
+            android:src="@drawable/desktop_mode_ic_handle_menu_close"
+            android:visibility="gone"
+            style="@style/DesktopModeHandleMenuActionButton"/>
     </LinearLayout>
 
     <LinearLayout

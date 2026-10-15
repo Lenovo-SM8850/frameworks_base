@@ -108,7 +108,7 @@ private constructor(
     private val shouldShowRestartButton: Boolean,
     private val appToWebData: AppToWebData?,
     private val desktopModeUiEventLogger: DesktopModeUiEventLogger,
-    private val captionView: View,
+    private var captionView: View,
     private val captionWidth: Int,
     private val captionHeight: Int,
     captionX: Int,
@@ -119,7 +119,8 @@ private constructor(
     private val decorThemeUtilFactory: DecorThemeUtil.Factory,
 ) {
     private val isViewAboveStatusBar: Boolean
-        get() = (DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue() && !taskInfo.isFreeform)
+        get() = taskInfo.isFloatingWindow ||
+            (DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue() && !taskInfo.isFreeform)
 
     private val pillTopMargin: Int =
         loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_pill_spacing_margin)
@@ -152,12 +153,21 @@ private constructor(
                 shouldShowManageWindowsButton ||
                 shouldShowChangeAspectRatioButton ||
                 shouldShowGameControlsButton ||
-                shouldShowRestartButton
+                shouldShowRestartButton ||
+                taskInfo.isFloatingWindow
 
     private var loadAppInfoJob: Job? = null
 
+    private var floatingBottomAnchor = false
+
     init {
         updateHandleMenuPillPositions(captionX, captionY)
+    }
+
+    fun setFloatingMenuAnchor(view: View) {
+        captionView = view
+        floatingBottomAnchor = view.id == R.id.floating_bottom_handle
+        updateHandleMenuPillPositions(0, 0)
     }
 
     fun show(
@@ -256,7 +266,8 @@ private constructor(
         val lpFlags = LayoutParams.FLAG_NOT_FOCUSABLE or LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
         handleMenuViewContainer =
             if (
-                (!taskInfo.isFreeform && DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) ||
+                taskInfo.isFloatingWindow ||
+                    (!taskInfo.isFreeform && DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) ||
                     forceShowSystemBars
             ) {
                 AdditionalSystemViewContainer(
@@ -360,6 +371,24 @@ private constructor(
         val menuX: Int
         val menuY: Int
         val taskBounds = taskInfo.presentationBounds
+        if (taskInfo.isFloatingWindow) {
+            val metrics = context.getSystemService(android.view.WindowManager::class.java)
+                .maximumWindowMetrics
+            val stable = Rect(metrics.bounds)
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(systemBars())
+            stable.inset(insets)
+            val width = menuWidth + 2 * marginMenuPadding
+            val height = menuHeight + marginMenuPadding
+            val handleHeight = (24 * context.resources.displayMetrics.density).toInt()
+            val x = (taskBounds.centerX() - width / 2)
+                .coerceIn(stable.left, maxOf(stable.left, stable.right - width))
+            val y = (if (floatingBottomAnchor) taskBounds.bottom - handleHeight - height
+                else taskBounds.top + handleHeight)
+                .coerceIn(stable.top, maxOf(stable.top, stable.bottom - height))
+            globalMenuPosition.set(x, y)
+            handleMenuPosition.set(x.toFloat(), y.toFloat())
+            return
+        }
         globalMenuPosition.set(
             calculateMenuPosition(
                 splitScreenController,
@@ -512,6 +541,9 @@ private constructor(
                 loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_open_in_browser_pill_height)
             menuHeight -= pillTopMargin
         }
+        if (taskInfo.isFloatingWindow) {
+            menuHeight += 2 * loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_new_window_height)
+        }
         return menuHeight
     }
 
@@ -632,6 +664,11 @@ private constructor(
         private val gameControlsBtn =
             moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.game_controls_button)
 
+        private val minimizeBtn =
+            moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.floating_minimize_button)
+        private val closeBtn =
+            moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.floating_close_button)
+
         // Restart Pill.
         private val restartPill = rootView.requireViewById<View>(R.id.handle_menu_restart_pill)
         private val restartBtn =
@@ -649,6 +686,8 @@ private constructor(
 
         private val menuButtons =
             listOf(
+                minimizeBtn,
+                closeBtn,
                 newWindowBtn,
                 changeAspectRatioBtn,
                 gameControlsBtn,
@@ -691,6 +730,8 @@ private constructor(
 
         override fun onClick(v: View) {
             when (v.id) {
+                R.id.floating_minimize_button -> windowDecorationActions.onMinimize(taskInfo)
+                R.id.floating_close_button -> windowDecorationActions.onClose(taskInfo)
                 R.id.new_window_button -> {
                     windowDecorationActions.onNewWindow(taskInfo.taskId)
                 }
@@ -749,6 +790,11 @@ private constructor(
 
         /** Animates the menu opening. */
         fun animateOpenMenu() {
+            if (taskInfo.isFloatingWindow) {
+                rootView.alpha = 0f
+                rootView.animate().alpha(1f).setDuration(150).start()
+                return
+            }
             if (taskInfo.isFullscreen || taskInfo.isMultiWindow) {
                 animator.animateCaptionHandleExpandToOpen(captionView)
             } else {
@@ -758,6 +804,10 @@ private constructor(
 
         /** Animates the menu closing. */
         fun animateCloseMenu(onAnimFinish: () -> Unit) {
+            if (taskInfo.isFloatingWindow) {
+                rootView.animate().alpha(0f).setDuration(100).withEndAction(onAnimFinish).start()
+                return
+            }
             if (taskInfo.isFullscreen || taskInfo.isMultiWindow) {
                 animator.animateCollapseIntoHandleClose(captionView, onAnimFinish)
             } else {
@@ -829,6 +879,8 @@ private constructor(
                     changeAspectRatioBtn to shouldShowChangeAspectRatioButton,
                     gameControlsBtn to shouldShowGameControlsButton,
                     restartBtn to shouldShowRestartButton,
+                    minimizeBtn to taskInfo.isFloatingWindow,
+                    closeBtn to taskInfo.isFloatingWindow,
                 )
             val firstVisible = buttons.find { it.second }?.first
             val lastVisible = buttons.findLast { it.second }?.first

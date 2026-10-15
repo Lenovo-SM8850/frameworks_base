@@ -5496,6 +5496,12 @@ class DesktopTasksController(
      * animation; see {@link onDesktopSplitSelectChoice}
      */
     private fun addMoveToSplitChanges(wct: WindowContainerTransaction, taskInfo: RunningTaskInfo) {
+        if (taskInfo.isFloatingWindow) {
+            wct.merge(com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils
+                .getRemovedFromLayerWct(taskInfo.token), true)
+            wct.setWindowingMode(taskInfo.token, WINDOWING_MODE_FULLSCREEN)
+                .setBounds(taskInfo.token, Rect())
+        }
         // The task's density may have been overridden in freeform; revert it here as we don't
         // want it overridden in multi-window.
         if (desktopConfig.useDesktopOverrideDensity) {
@@ -6312,7 +6318,7 @@ class DesktopTasksController(
                 splitScreenController.requestEnterSplitSelect(
                     taskInfo,
                     if (leftOrTop) SPLIT_POSITION_TOP_OR_LEFT else SPLIT_POSITION_BOTTOM_OR_RIGHT,
-                    taskInfo.configuration.windowConfiguration.bounds,
+                    taskInfo.presentationBounds,
                     /* startRecents = */ true,
                     /* withRecentsWct = */ wct,
                 )
