@@ -91,6 +91,8 @@ object PinnedLayerModule {
         shellInit: ShellInit,
         transitions: Transitions,
         displayController: DisplayController,
+        @com.android.wm.shell.shared.annotations.ShellBackgroundThread backgroundExecutor: ShellExecutor,
+        @ShellMainThread mainExecutor: ShellExecutor,
         shellTaskOrganizer: ShellTaskOrganizer,
         desktopState: ShellDesktopState,
         windowDragTransitionHandler: WindowDragTransitionHandler,
@@ -108,7 +110,9 @@ object PinnedLayerModule {
                     taskDisplayAreaOrganizer = rootTaskDisplayAreaOrganizer,
                     shellTaskOrganizer = shellTaskOrganizer,
                     presentationController =
-                        PinnedLayerPresentationController(context, displayController, desktopState),
+                        PinnedLayerPresentationController(context, displayController, desktopState,
+                            com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometryStore(
+                                context.filesDir, backgroundExecutor)),
                     windowDragTransitionHandler = windowDragTransitionHandler,
                     windowRepositionAnimationHandler = windowRepositionAnimationHandler,
                     windowRepositionAnimator = windowRepositionAnimator,
@@ -116,7 +120,7 @@ object PinnedLayerModule {
                     desktopState = desktopState,
                     multiDisplayDragMoveIndicatorController =
                         multiDisplayDragMoveIndicatorController,
-                )
+                ).also { it.configureInteractions(context, displayController, mainExecutor) }
             )
         }
         return Optional.empty()

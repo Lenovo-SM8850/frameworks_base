@@ -25,6 +25,7 @@ import android.util.Slog
 import android.util.SparseArray
 import android.util.TypedValue
 import android.view.Display.DEFAULT_DISPLAY
+import com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometry.displayAspect
 import android.window.TransitionRequestInfo
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.DisplayLayout
@@ -38,9 +39,75 @@ class PinnedLayerPresentationController(
     context: Context,
     private val displayController: DisplayController,
     private val desktopState: DesktopState,
+    private val geometryStore: FloatingWindowGeometryStore =
+        FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() }),
 ) {
 
-    private val rememberedBounds = mutableMapOf<Triple<String, Int, Int>, Rect>()
+    private data class Choice(val manual: Boolean, val landscape: Boolean)
+    private val choices = mutableMapOf<Int, Choice>()
+    private val rotationBounds = mutableMapOf<Int, Rect>()
+
+    fun setManualOrientation(task: TaskInfo, landscape: Boolean, bounds: Rect) {
+        choices[task.taskId] = Choice(true, landscape)
+        rotationBounds[task.taskId] = Rect(bounds)
+        rememberBounds(task, bounds)
+    }
+
+    fun removeUser(userId: Int) {
+        geometryStore.removeUser(userId)
+    }
+
+    fun forgetTask(taskId: Int) {
+        choices.remove(taskId)
+        rotationBounds.remove(taskId)
+        overriddenBounds.remove(taskId)
+    }
+
+    /** Rotates geometry in the display WCT without changing a manually selected orientation. */
+    fun getRotationBounds(task: TaskInfo, fromRotation: Int, toRotation: Int): Rect? {
+        if (!task.isFloatingWindow) return null
+        val details = getDisplayDetails(task.displayId) ?: return null
+        val oldLayout = DisplayLayout(details.layout).apply { rotateTo(details.context.resources, fromRotation) }
+        val newLayout = DisplayLayout(details.layout).apply { rotateTo(details.context.resources, toRotation) }
+        val oldStable = Rect().also { oldLayout.getStableBounds(it) }
+        val stable = Rect().also { newLayout.getStableBounds(it) }
+        if (oldStable.isEmpty || stable.isEmpty) return null
+        val start = task.configuration.windowConfiguration.bounds
+        if (start.isEmpty) return null
+        val choice = choices[task.taskId] ?: restoreChoice(task, DisplayDetails(oldLayout, details.context))
+        rememberBounds(task, start, DisplayDetails(oldLayout, details.context))
+        val landscape = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation, start)
+            ?: choice?.takeIf { it.manual }?.landscape
+            ?: (newLayout.width() > newLayout.height())
+        val x = stable.left + (start.exactCenterX() - oldStable.left) / oldStable.width() * stable.width()
+        val y = stable.top + (start.exactCenterY() - oldStable.top) / oldStable.height() * stable.height()
+        val result = FloatingWindowGeometry.aspectBounds(start, stable,
+            displayAspect(newLayout.width(), newLayout.height(), landscape),
+            minWidth(task, details), minHeight(task, details), x, y) ?: return null
+        choices[task.taskId] = Choice(choice?.manual == true, landscape)
+        rotationBounds[task.taskId] = Rect(result)
+        rememberBounds(task, result, DisplayDetails(newLayout, details.context))
+        return result
+    }
+
+    private fun restoreChoice(task: TaskInfo, details: DisplayDetails): Choice? {
+        val entry = restored(task, details) ?: return null
+        return Choice(entry.manual, entry.landscape).also { choices[task.taskId] = it }
+    }
+
+    private fun restored(task: TaskInfo, details: DisplayDetails): FloatingWindowGeometryStore.Entry? {
+        val key = boundsKey(task, details) ?: return null
+        return geometryStore.restore(key.first, key.second, key.third, details.stableBounds(),
+            details.layout.width(), details.layout.height(), details.context.resources.displayMetrics.densityDpi)
+    }
+
+    private fun minWidth(task: TaskInfo, details: DisplayDetails): Int =
+        if (task.minWidth > 0) task.minWidth else
+            (max(task.defaultMinSize, 1) * details.context.resources.displayMetrics.density).toInt()
+
+    private fun minHeight(task: TaskInfo, details: DisplayDetails): Int =
+        if (task.minHeight > 0) task.minHeight else
+            (max(task.defaultMinSize, 1) * details.context.resources.displayMetrics.density).toInt()
 
     // Stores the tasks' initial and overridden bounds, which are used as a reference for
     // subsequent resize operations to prevent implicit movement of the task by resizing it in
@@ -51,10 +118,21 @@ class PinnedLayerPresentationController(
     fun getPinEntryDestinationBounds(task: TaskInfo, displayId: Int = task.displayId): Rect? {
         val details = getDisplayDetails(displayId) ?: return null
         val stable = details.stableBounds()
-        val key = boundsKey(task, details)
-        val remembered = key?.let { rememberedBounds[it] }
-        if (remembered != null) return clampFloatingBounds(task, Rect(remembered), details)
-        val landscape = details.layout.width() > details.layout.height()
+        val remembered = restored(task, details)
+        if (remembered != null) {
+            choices[task.taskId] = Choice(remembered.manual, remembered.landscape)
+            val fixed = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
+                remembered.bounds)
+            val bounds = if (fixed != null && fixed != remembered.landscape) {
+                FloatingWindowGeometry.aspectBounds(remembered.bounds, stable,
+                    displayAspect(details.layout.width(), details.layout.height(), fixed),
+                    minWidth(task, details), minHeight(task, details)) ?: remembered.bounds
+            } else remembered.bounds
+            return clampFloatingBounds(task, bounds, details)
+        }
+        val landscape = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
+            task.configuration.windowConfiguration.bounds) ?: (details.layout.width() > details.layout.height())
+        choices[task.taskId] = Choice(false, landscape)
         val shortEdge = (max(details.layout.width(), details.layout.height()) * .30f).toInt()
         val longEdge = max(shortEdge,
             (min(details.layout.width(), details.layout.height()) * .72f).toInt())
@@ -68,10 +146,29 @@ class PinnedLayerPresentationController(
     /** Remembers user geometry independently for each package, user, and device orientation. */
     fun rememberBounds(task: TaskInfo) {
         if (!task.isFloatingWindow) return
-        val details = getDisplayDetails(task.displayId) ?: return
-        val key = boundsKey(task, details) ?: return
         val bounds = task.configuration.windowConfiguration.bounds
-        if (!bounds.isEmpty) rememberedBounds[key] = Rect(bounds)
+        val pending = rotationBounds.remove(task.taskId)
+        if (pending != null && !boundsMatch(pending, bounds)) return
+        val details = getDisplayDetails(task.displayId) ?: return
+        rememberBounds(task, bounds, details)
+    }
+
+    private fun boundsMatch(expected: Rect, actual: Rect): Boolean =
+        kotlin.math.abs(expected.left - actual.left) <= 2 &&
+            kotlin.math.abs(expected.top - actual.top) <= 2 &&
+            kotlin.math.abs(expected.right - actual.right) <= 2 &&
+            kotlin.math.abs(expected.bottom - actual.bottom) <= 2
+
+    private fun rememberBounds(task: TaskInfo, bounds: Rect,
+        details: DisplayDetails? = getDisplayDetails(task.displayId)) {
+        details ?: return
+        val key = boundsKey(task, details) ?: return
+        val previous = choices[task.taskId] ?: restoreChoice(task, details)
+        val choice = Choice(previous?.manual == true, bounds.width() > bounds.height())
+        choices[task.taskId] = choice
+        geometryStore.store(key.first, key.second, key.third, bounds, details.stableBounds(),
+            details.layout.width(), details.layout.height(), details.context.resources.displayMetrics.densityDpi,
+            choice.manual, choice.landscape)
     }
 
     private fun boundsKey(task: TaskInfo, details: DisplayDetails): Triple<String, Int, Int>? {

@@ -3519,6 +3519,8 @@ class Task extends TaskFragment {
         info.positionInParent = getRelativePosition();
 
         info.topActivityInfo = top != null ? top.info : null;
+        info.topActivityRequestedOrientation = top != null ? top.getRequestedOrientation()
+                : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
         info.pictureInPictureParams = getPictureInPictureParams(top);
         info.launchIntoPipHostTaskId = (info.pictureInPictureParams != null
                 && info.pictureInPictureParams.isLaunchIntoPip()

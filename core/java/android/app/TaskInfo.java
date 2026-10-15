@@ -284,6 +284,12 @@ public class TaskInfo {
     public ActivityInfo topActivityInfo;
 
     /**
+     * The top activity's runtime requested orientation.
+     * @hide
+     */
+    public int topActivityRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+
+    /**
      * Whether this task is resizable. Unlike {@link #resizeMode} (which is what the top activity
      * supports), this is what the system actually uses for resizability based on other policy and
      * developer options.
@@ -509,6 +515,7 @@ public class TaskInfo {
         topActivityInfo = other.topActivityInfo != null
                 ? new ActivityInfo(other.topActivityInfo)
                 : null;
+        topActivityRequestedOrientation = other.topActivityRequestedOrientation;
         isResizeable = other.isResizeable;
         isFloatingWindow = other.isFloatingWindow;
         minWidth = other.minWidth;
@@ -666,6 +673,8 @@ public class TaskInfo {
         }
         return topActivityType == that.topActivityType
                 && isResizeable == that.isResizeable
+                && (!isFloatingWindow
+                    || topActivityRequestedOrientation == that.topActivityRequestedOrientation)
                 && isFloatingWindow == that.isFloatingWindow
                 && supportsMultiWindow == that.supportsMultiWindow
                 && supportsMultiWindowWithoutConstraints
@@ -755,6 +764,7 @@ public class TaskInfo {
         lastParentTaskIdBeforePip = source.readInt();
         displayCutoutInsets = source.readTypedObject(Rect.CREATOR);
         topActivityInfo = source.readTypedObject(ActivityInfo.CREATOR);
+        topActivityRequestedOrientation = source.readInt();
         isResizeable = source.readBoolean();
         isFloatingWindow = source.readBoolean();
         minWidth = source.readInt();
@@ -819,6 +829,7 @@ public class TaskInfo {
         dest.writeInt(lastParentTaskIdBeforePip);
         dest.writeTypedObject(displayCutoutInsets, flags);
         dest.writeTypedObject(topActivityInfo, flags);
+        dest.writeInt(topActivityRequestedOrientation);
         dest.writeBoolean(isResizeable);
         dest.writeBoolean(isFloatingWindow);
         dest.writeInt(minWidth);

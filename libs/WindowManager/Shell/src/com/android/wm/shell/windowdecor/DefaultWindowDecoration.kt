@@ -311,6 +311,7 @@ constructor(
     }
 
     private fun isFluidResizingApp(): Boolean {
+        if (taskInfo.isFloatingWindow) return false
         if (!desktopConfig.isVeiledResizeEnabled) {
             return true
         }
@@ -839,6 +840,7 @@ constructor(
                 getFineResizeCornerSize(res),
                 getLargeResizeCornerSize(res),
                 disabledResizingEdge,
+                taskInfo.isFloatingWindow,
             )
         listener.addInitializedCallback {
             onUpdateFinished.invoke(listener.setGeometry(newGeometry, touchSlop))

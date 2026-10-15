@@ -455,7 +455,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         // transitions to resize the task, so onTaskInfoChanged relayouts is the only way to make
         // sure the crop is set correctly.
         final boolean shouldSetTaskVisibilityPositionAndCrop =
-                !mDesktopConfig.isVeiledResizeEnabled()
+                !taskInfo.isFloatingWindow && !mDesktopConfig.isVeiledResizeEnabled()
                         && mTaskDragResizer.isResizingOrAnimating();
         // For headers only (i.e. in freeform): use |applyStartTransactionOnDraw| so that the
         // transaction (that applies task crop) is synced with the buffer transaction (that draws
@@ -795,7 +795,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 new Size(mResult.mWidth, mResult.mHeight),
                 getResizeEdgeHandleSize(res), getResizeHandleEdgeInset(res),
                 getFineResizeCornerSize(res), getLargeResizeCornerSize(res),
-                mDisabledResizingEdge);
+                mDisabledResizingEdge, mTaskInfo.isFloatingWindow);
         newListener.addInitializedCallback(() -> {
             onUpdateFinished.accept(newListener.setGeometry(newGeometry, touchSlop));
         });

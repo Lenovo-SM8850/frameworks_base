@@ -7500,6 +7500,9 @@ final class ActivityRecord extends WindowToken {
             }
         }
 
+        if (task.isFloatingWindow() && task.getTopNonFinishingActivity() == this) {
+            task.dispatchTaskInfoChangedIfNeeded(false /* force */);
+        }
         mAtmService.getTaskChangeNotificationController().notifyActivityRequestedOrientationChanged(
                 task.mTaskId, requestedOrientation);
 
