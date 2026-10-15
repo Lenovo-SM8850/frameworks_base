@@ -396,6 +396,8 @@
 
         </LinearLayout>
 
+        <include layout="@layout/notification_floating_button" />
+
         <RelativeLayout
             android:id="@+id/bottom_buttons"
             android:layout_width="match_parent"

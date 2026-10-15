@@ -5066,4 +5066,6 @@
 
     <!-- Quick Settings tile for the desktop session. -->
     <string name="quick_settings_desktop_mode_label">Desktop mode</string>
+    <!-- Notification guts action to open the app in a floating window. -->
+    <string name="notification_open_floating">Open in floating window</string>
 </resources>

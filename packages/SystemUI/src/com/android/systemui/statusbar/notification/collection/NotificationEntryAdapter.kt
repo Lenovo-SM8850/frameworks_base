@@ -227,6 +227,10 @@ class NotificationEntryAdapter(
         notificationActivityStarter.onNotificationClicked(entry, row)
     }
 
+    override fun onEntryFloatingWindowClicked(row: ExpandableNotificationRow) {
+        notificationActivityStarter.onNotificationFloatingWindowClicked(entry, row)
+    }
+
     override fun getRemoteInputEntryAdapter(): RemoteInputEntryAdapter {
         return entry.getRemoteInputEntryAdapter()
     }

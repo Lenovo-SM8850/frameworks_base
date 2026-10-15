@@ -37,6 +37,9 @@ interface NotificationActivityStarter {
     /** Called when the user clicks on the surface of a notification. */
     fun onNotificationClicked(entry: NotificationEntry, row: ExpandableNotificationRow)
 
+    /** Called when the user chooses to open a notification in a floating window. */
+    fun onNotificationFloatingWindowClicked(entry: NotificationEntry, row: ExpandableNotificationRow)
+
     /** Called when the user clicks on a button in the notification guts which fires an intent. */
     fun startNotificationGutsIntent(intent: Intent, appUid: Int, row: ExpandableNotificationRow)
 

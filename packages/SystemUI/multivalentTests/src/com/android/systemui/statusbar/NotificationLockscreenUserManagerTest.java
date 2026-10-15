@@ -31,6 +31,7 @@ import static android.provider.Settings.Secure.LOCK_SCREEN_SHOW_NOTIFICATIONS;
 import static com.android.systemui.statusbar.NotificationLockscreenUserManager.REDACTION_TYPE_NONE;
 import static com.android.systemui.statusbar.NotificationLockscreenUserManager.REDACTION_TYPE_PUBLIC;
 import static com.android.systemui.statusbar.NotificationLockscreenUserManager.REDACTION_TYPE_OTP;
+import static com.android.systemui.statusbar.phone.StatusBarRemoteInputCallback.EXTRA_NOTIFICATION_ACTIVITY_OPTIONS;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertFalse;
@@ -1054,6 +1055,45 @@ public class NotificationLockscreenUserManagerTest extends SysuiTestCase {
                 new Intent(ACTION_DEVICE_POLICY_MANAGER_STATE_CHANGED));
 
         assertFalse(mLockscreenUserManager.userAllowsNotificationsInPublic(mCurrentUser.id));
+    }
+
+    @Test
+    public void testWorkChallengePreservesFloatingOptions() throws Exception {
+        assertWorkChallengeLaunchOptions(true);
+    }
+
+    @Test
+    public void testWorkChallengeWithoutOptionsKeepsNormalLaunch() throws Exception {
+        assertWorkChallengeLaunchOptions(false);
+    }
+
+    private void assertWorkChallengeLaunchOptions(boolean floating) throws Exception {
+        Context context = Mockito.spy(mContext);
+        Mockito.doNothing().when(context).startIntentSender(
+                any(), any(), anyInt(), anyInt(), anyInt(), any());
+        TestNotificationLockscreenUserManager manager =
+                new TestNotificationLockscreenUserManager(context);
+        android.content.IntentSender sender = mock(android.content.IntentSender.class);
+        Intent intent = new Intent(
+                NotificationLockscreenUserManager.NOTIFICATION_UNLOCKED_BY_WORK_CHALLENGE_ACTION);
+        intent.putExtra(Intent.EXTRA_INTENT, sender);
+        if (floating) {
+            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+            options.setLaunchFloatingWindow(true);
+            intent.putExtra(EXTRA_NOTIFICATION_ACTIVITY_OPTIONS, options.toBundle());
+        }
+
+        manager.getBaseBroadcastReceiverForTest().onReceive(context, intent);
+
+        org.mockito.ArgumentCaptor<Bundle> options =
+                org.mockito.ArgumentCaptor.forClass(Bundle.class);
+        verify(context).startIntentSender(eq(sender), any(), eq(0), eq(0), eq(0), options.capture());
+        android.app.ActivityOptions activityOptions =
+                android.app.ActivityOptions.fromBundle(options.getValue());
+        assertEquals(floating, activityOptions.getLaunchFloatingWindow());
+        assertEquals(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                activityOptions.getPendingIntentBackgroundActivityStartMode());
+        mBackgroundExecutor.runAllReady();
     }
 
     @Test

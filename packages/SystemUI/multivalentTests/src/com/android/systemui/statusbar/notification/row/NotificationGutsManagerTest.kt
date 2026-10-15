@@ -34,6 +34,7 @@ import android.platform.test.flag.junit.FlagsParameterization
 import android.provider.Settings
 import android.testing.TestableLooper.RunWithLooper
 import android.util.ArraySet
+import android.view.Display
 import android.view.View
 import android.view.accessibility.AccessibilityManager
 import androidx.test.filters.SmallTest
@@ -70,6 +71,7 @@ import com.android.systemui.shared.system.activityManagerWrapper
 import com.android.systemui.statusbar.NotificationLockscreenUserManager
 import com.android.systemui.statusbar.NotificationPresenter
 import com.android.systemui.statusbar.notification.NotificationActivityStarter
+import com.android.systemui.statusbar.notification.mockNotificationActivityStarter
 import com.android.systemui.statusbar.notification.collection.NotificationEntry
 import com.android.systemui.statusbar.notification.collection.NotificationEntryBuilder
 import com.android.systemui.statusbar.notification.collection.buildNotificationEntry
@@ -241,6 +243,65 @@ class NotificationGutsManagerTest(flags: FlagsParameterization) : SysuiTestCase(
         )
         gutsManager.setNotificationActivityStarter(notificationActivityStarter)
         gutsManager.start()
+    }
+
+    @Test
+    fun testFloatingButtonWithActivityIntentIsVisibleAndDispatches() {
+        assertEquals(Display.DEFAULT_DISPLAY, mContext.displayId)
+        val row = createTestNotificationRow()
+        row.ensureGutsInflated()
+        row.entryAdapter.sbn!!.notification.contentIntent =
+            android.app.PendingIntent.getActivity(
+                mContext, 0, Intent("test_activity"), android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        whenever(manager.supportsFloatingWindows()).thenReturn(true)
+
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+
+        val button =
+            (item.gutsContent as GutsContent).contentView.findViewById<View>(
+                com.android.systemui.res.R.id.notification_open_floating
+            )
+        assertEquals(View.VISIBLE, button.visibility)
+        assertTrue(button.performClick())
+        verify(kosmos.mockNotificationActivityStarter)
+            .onNotificationFloatingWindowClicked(any(), eq(row))
+    }
+
+    @Test
+    fun testFloatingButtonWithoutContentIntentIsHidden() {
+        val row = createTestNotificationRow()
+        val item = createTestMenuItem(row)
+
+        gutsManager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+
+        val button =
+            (item.gutsContent as GutsContent).contentView.findViewById<View>(
+                com.android.systemui.res.R.id.notification_open_floating
+            )
+        assertEquals(View.GONE, button.visibility)
+        assertFalse(button.hasOnClickListeners())
+    }
+
+    @Test
+    fun testFloatingButtonWithNonActivityIntentIsHidden() {
+        val row = createTestNotificationRow()
+        row.entryAdapter.sbn!!.notification.contentIntent =
+            android.app.PendingIntent.getBroadcast(
+                mContext, 0, Intent("test_activity"), android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+        val item = createTestMenuItem(row)
+
+        gutsManager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+
+        val button =
+            (item.gutsContent as GutsContent).contentView.findViewById<View>(
+                com.android.systemui.res.R.id.notification_open_floating
+            )
+        assertEquals(View.GONE, button.visibility)
+        assertFalse(button.hasOnClickListeners())
     }
 
     @Test

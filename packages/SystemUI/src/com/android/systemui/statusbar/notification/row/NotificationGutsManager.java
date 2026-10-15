@@ -19,8 +19,10 @@ import static android.app.AppOpsManager.OP_CAMERA;
 import static android.app.AppOpsManager.OP_RECORD_AUDIO;
 import static android.app.AppOpsManager.OP_SYSTEM_ALERT_WINDOW;
 
+import android.app.ActivityTaskManager;
 import android.app.INotificationManager;
 import android.app.NotificationChannel;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.LauncherApps;
@@ -39,6 +41,7 @@ import android.service.notification.StatusBarNotification;
 import android.util.ArraySet;
 import android.util.IconDrawableFactory;
 import android.util.Log;
+import android.view.Display;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.accessibility.AccessibilityManager;
@@ -339,11 +342,41 @@ public class NotificationGutsManager implements NotifGutsViewManager, CoreStarta
                 // BundledNotificationInfo inherit from NotificationInfo.
                 initializeNotificationInfo(row, sbn, ranking, ni);
             }
+            bindFloatingWindowButton(row, sbn, item);
             return true;
         } catch (Exception e) {
             Log.e(TAG, "error binding guts", e);
             return false;
         }
+    }
+
+    @VisibleForTesting
+    void bindFloatingWindowButton(ExpandableNotificationRow row, StatusBarNotification sbn,
+            NotificationMenuRowPlugin.MenuItem item) {
+        if (!(item.getGutsContent() instanceof NotificationGuts.GutsContent content)) {
+            return;
+        }
+        View button = content.getContentView().findViewById(R.id.notification_open_floating);
+        if (button == null) {
+            return;
+        }
+        PendingIntent intent = sbn != null ? sbn.getNotification().contentIntent : null;
+        boolean available = intent != null && intent.isActivity()
+                && mContext.getDisplayId() == Display.DEFAULT_DISPLAY
+                && supportsFloatingWindows();
+        button.setVisibility(available ? View.VISIBLE : View.GONE);
+        button.setOnClickListener(available ? v -> {
+            row.getGuts().resetFalsingCheck();
+            closeAndSaveGuts(false /* removeLeavebehind */, false /* force */,
+                    true /* removeControls */, -1 /* x */, -1 /* y */, true /* resetMenu */);
+            row.getEntryAdapter().onEntryFloatingWindowClicked(row);
+        } : null);
+    }
+
+    @VisibleForTesting
+    boolean supportsFloatingWindows() {
+        return ActivityTaskManager.supportsMultiWindow(mContext)
+                && com.android.window.flags.Flags.enableInteractivePictureInPicture();
     }
 
     /**
