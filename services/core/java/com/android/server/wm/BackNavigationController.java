@@ -220,6 +220,12 @@ class BackNavigationController {
                         ? currentTask.getWindow(WindowState::isFocused) : null;
             }
 
+            if (window != null && window.getTask() != null
+                    && window.getTask().isFloatingWindow()) {
+                // Preserve floating focus while an edge DOWN is waiting to move focus.
+                wmService.clearPointerDownOutsideFocusRunnable();
+            }
+
             if (window == null) {
                 Slog.e(TAG, "Window is null, returning null.");
                 return null;

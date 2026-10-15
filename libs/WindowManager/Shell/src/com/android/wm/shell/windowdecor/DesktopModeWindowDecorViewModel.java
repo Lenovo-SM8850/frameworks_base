@@ -827,6 +827,10 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         if (decoration == null) {
             return;
         }
+        if (mPinnedLayerController != null
+                && mPinnedLayerController.maximizeTask(decoration.getTaskInfo())) {
+            return;
+        }
         final ToggleTaskSizeInteraction interaction =
                 createToggleSizeInteraction(decoration, source, inputMethod);
         if (interaction == null) {
@@ -1021,10 +1025,9 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         if (decoration == null) {
             return;
         }
-        // When the app enters float, the handle will no longer be visible, meaning
-        // we shouldn't receive input for it any longer.
-        decoration.disposeStatusBarInputLayer();
-        mDesktopTasksController.requestFloat(decoration.getTaskInfo());
+        if (mDesktopTasksController.moveToFloating(taskId)) {
+            decoration.disposeStatusBarInputLayer();
+        }
     }
 
     private void launchNewWindow(int taskId) {

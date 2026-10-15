@@ -578,16 +578,17 @@ constructor(
                         return desktopStableBounds
                     }
                     IndicatorType.TO_DESKTOP_INDICATOR -> {
-                        val adjustmentPercentage = (1f - DESKTOP_MODE_INITIAL_BOUNDS_SCALE)
+                        val landscape = layout.width() > layout.height()
+                        val shortEdge = (maxOf(layout.width(), layout.height()) * .30f).toInt()
+                        val longEdge = maxOf(shortEdge,
+                            (minOf(layout.width(), layout.height()) * .72f).toInt())
+                        val width = if (landscape) longEdge else shortEdge
+                        val height = if (landscape) shortEdge else longEdge
                         return Rect(
-                            (adjustmentPercentage * desktopStableBounds.width() / 2).toInt(),
-                            (adjustmentPercentage * desktopStableBounds.height() / 2).toInt(),
-                            (desktopStableBounds.width() -
-                                    (adjustmentPercentage * desktopStableBounds.width() / 2))
-                                .toInt(),
-                            (desktopStableBounds.height() -
-                                    (adjustmentPercentage * desktopStableBounds.height() / 2))
-                                .toInt(),
+                            desktopStableBounds.centerX() - width / 2,
+                            desktopStableBounds.centerY() - height / 2,
+                            desktopStableBounds.centerX() + (width + 1) / 2,
+                            desktopStableBounds.centerY() + (height + 1) / 2,
                         )
                     }
                     IndicatorType.TO_SPLIT_LEFT_INDICATOR -> {

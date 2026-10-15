@@ -801,13 +801,15 @@ public abstract class WMShellModule {
     @Provides
     @DynamicOverride
     static DesksOrganizer provideDesksOrganizer(
+            Context context,
             @NonNull ShellInit shellInit,
             @NonNull ShellCommandHandler shellCommandHandler,
             @NonNull ShellTaskOrganizer shellTaskOrganizer,
             @NonNull LaunchAdjacentController launchAdjacentController,
             @NonNull RootTaskDisplayAreaOrganizer rootTaskDisplayAreaOrganizer) {
         return new RootTaskDesksOrganizer(shellInit, shellCommandHandler, shellTaskOrganizer,
-                launchAdjacentController, rootTaskDisplayAreaOrganizer);
+                launchAdjacentController, rootTaskDisplayAreaOrganizer,
+                context.getSystemService(android.os.UserManager.class));
     }
 
     @WMSingleton

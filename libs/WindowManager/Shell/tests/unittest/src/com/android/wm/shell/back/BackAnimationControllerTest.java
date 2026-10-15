@@ -48,6 +48,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import android.app.ActivityManager;
+import android.app.ActivityTaskManager;
 import android.app.IActivityTaskManager;
 import android.app.WindowConfiguration;
 import android.content.pm.ApplicationInfo;
@@ -375,6 +376,48 @@ public class BackAnimationControllerTest extends ShellTestCase {
         verify(mActivityTaskManager, never()).startBackNavigation(any(), any());
         doMotionEvent(MotionEvent.ACTION_MOVE, 100);
         verify(mActivityTaskManager).startBackNavigation(any(), any());
+    }
+
+    @Test
+    public void focusedFloatingTask_keepsBackOnAppFocusedBeforeEdgeDown()
+            throws RemoteException {
+        ActivityTaskManager.RootTaskInfo task = new ActivityTaskManager.RootTaskInfo();
+        task.displayId = DEFAULT_DISPLAY;
+        task.taskId = 42;
+        task.isFloatingWindow = true;
+        doReturn(task).when(mActivityTaskManager).getFocusedRootTaskInfo();
+        createNavigationInfo(BackNavigationInfo.TYPE_CALLBACK, false, false);
+        doMotionEvent(MotionEvent.ACTION_DOWN, 0);
+        verify(mActivityTaskManager, never()).startBackNavigation(any(), any());
+        doMotionEvent(MotionEvent.ACTION_MOVE, 100);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(mActivityTaskManager);
+        order.verify(mActivityTaskManager).setFocusedTask(42);
+        order.verify(mActivityTaskManager).startBackNavigation(any(), any());
+        verify(mActivityTaskManager, times(1)).startBackNavigation(any(), any());
+    }
+
+    @Test
+    public void focusedFloatingTask_edgeTapDoesNotPreventFullscreenRefocus()
+            throws RemoteException {
+        ActivityTaskManager.RootTaskInfo task = new ActivityTaskManager.RootTaskInfo();
+        task.displayId = DEFAULT_DISPLAY;
+        task.taskId = 42;
+        task.isFloatingWindow = true;
+        doReturn(task).when(mActivityTaskManager).getFocusedRootTaskInfo();
+        doMotionEvent(MotionEvent.ACTION_DOWN, 0);
+        doMotionEvent(MotionEvent.ACTION_UP, 0);
+        verify(mActivityTaskManager, never()).setFocusedTask(anyInt());
+        verify(mActivityTaskManager, never()).startBackNavigation(any(), any());
+    }
+
+    @Test
+    public void focusedFloatingTask_onAnotherDisplayKeepsNormalBackStart() throws RemoteException {
+        ActivityTaskManager.RootTaskInfo task = new ActivityTaskManager.RootTaskInfo();
+        task.displayId = DEFAULT_DISPLAY + 1;
+        task.isFloatingWindow = true;
+        doReturn(task).when(mActivityTaskManager).getFocusedRootTaskInfo();
+        doMotionEvent(MotionEvent.ACTION_DOWN, 0);
+        verify(mActivityTaskManager, never()).startBackNavigation(any(), any());
     }
 
     @Test

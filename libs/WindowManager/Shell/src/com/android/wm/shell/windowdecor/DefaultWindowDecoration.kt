@@ -488,7 +488,7 @@ constructor(
         val captionType =
             when {
                 !shouldCreateCaption -> CaptionController.CaptionType.NO_CAPTION
-                isPinnedLayer -> CaptionController.CaptionType.APP_PINNED
+                isPinnedLayer -> CaptionController.CaptionType.APP_HEADER
                 taskInfo.isFreeform -> CaptionController.CaptionType.APP_HEADER
                 isFullscreenDesktop(taskInfo) -> CaptionController.CaptionType.FULLSCREEN_HEADER
                 else -> CaptionController.CaptionType.APP_HANDLE

@@ -345,6 +345,9 @@ public class TransitionUtil {
      */
     public static int calculateAnimLayer(@NonNull TransitionInfo.Change change, int order,
             int numChanges, @WindowManager.TransitionType int transitType) {
+        if (isExpandedFloatingWindow(change)) {
+            return numChanges * 3 + 1 - order;
+        }
         // Put animating stuff above this line and put static stuff below it.
         final int zSplitLine = numChanges + 1;
         final boolean isOpening = isOpeningType(transitType);
@@ -383,6 +386,12 @@ public class TransitionUtil {
         }
     }
 
+    private static boolean isExpandedFloatingWindow(TransitionInfo.Change change) {
+        return change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow
+                && change.getTaskInfo().configuration.windowConfiguration.isAlwaysOnTop()
+                && !isClosingType(change.getMode());
+    }
+
     /**
      * Very similar to Transitions#setupAnimHierarchy but specialized for leashes.
      */
@@ -402,6 +411,11 @@ public class TransitionUtil {
                 (mode == TRANSIT_OPEN) ? change.getEndAbsBounds() : change.getStartAbsBounds();
         t.setPosition(leash, absBounds.left - info.getRoot(rootIdx).getOffset().x,
                 absBounds.top - info.getRoot(rootIdx).getOffset().y);
+
+        if (isExpandedFloatingWindow(change)) {
+            t.setLayer(leash, info.getChanges().size() * 3 + 1 - layer);
+            return;
+        }
 
         if (isDividerBar(change)) {
             if (isOpeningType(mode)) {

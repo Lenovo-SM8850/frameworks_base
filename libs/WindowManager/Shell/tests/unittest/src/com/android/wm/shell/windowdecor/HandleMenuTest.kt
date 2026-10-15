@@ -297,6 +297,65 @@ class HandleMenuTest : ShellTestCase() {
     }
 
     @Test
+    fun windowingPill_fullscreenTask_showsFloatingAndHidesDesktop() {
+        val root = LayoutInflater.from(context)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+        val pill = root.requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.desktopModeCompatPolicy = mock()
+        pill.initialize(mock(), mock(), true, {})
+        val task = TestRunningTaskInfoBuilder()
+            .setDisplayId(DEFAULT_DISPLAY)
+            .setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
+            .build()
+
+        pill.bind(task, false)
+
+        assertThat(pill.requireViewById<View>(R.id.floating_button).visibility)
+            .isEqualTo(View.VISIBLE)
+        assertThat(pill.requireViewById<View>(R.id.desktop_button).visibility)
+            .isEqualTo(View.GONE)
+        assertThat(pill.requireViewById<View>(R.id.floating_button).contentDescription.toString())
+            .isEqualTo("Floating window")
+    }
+
+    @Test
+    fun windowingPill_blockedTask_hidesEntry() {
+        val root = LayoutInflater.from(context)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+        val pill = root.requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.desktopModeCompatPolicy = mock()
+        val task = TestRunningTaskInfoBuilder()
+            .setDisplayId(DEFAULT_DISPLAY)
+            .setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
+            .build()
+        whenever(pill.desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(task)).thenReturn(true)
+        pill.initialize(mock(), mock(), true, {})
+
+        pill.bind(task, false)
+
+        assertThat(pill.requireViewById<View>(R.id.floating_button).visibility).isEqualTo(View.GONE)
+    }
+
+    @Test
+    fun windowingPill_floatingTask_hidesEntry() {
+        val root = LayoutInflater.from(context)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+        val pill = root.requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.desktopModeCompatPolicy = mock()
+        pill.initialize(mock(), mock(), true, {})
+        val task = TestRunningTaskInfoBuilder()
+            .setDisplayId(DEFAULT_DISPLAY)
+            .setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM)
+            .build()
+        task.isFloatingWindow = true
+
+        pill.bind(task, false)
+
+        assertThat(pill.requireViewById<View>(R.id.floating_button).visibility)
+            .isEqualTo(View.GONE)
+    }
+
+    @Test
     fun testWindowingPill_shownWhenConfigured() = runTest {
         createTaskInfo(WINDOWING_MODE_FREEFORM)
         handleMenu = createAndShowHandleMenu(shouldShowWindowingPill = true)

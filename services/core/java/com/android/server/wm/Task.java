@@ -677,6 +677,7 @@ class Task extends TaskFragment {
 
     /** @see #isDisablePip() */
     private boolean mDisablePip;
+    private boolean mFloatingWindow;
 
     /** @see #isForceOpaque() */
     private final boolean mIsForceOpaque;
@@ -3472,6 +3473,7 @@ class Task extends TaskFragment {
 
         info.userId = getUserId();
         info.taskId = mTaskId;
+        info.isFloatingWindow = hasFloatingWindowIdentity();
         info.effectiveUid = effectiveUid;
         info.displayId = getDisplayId();
         info.displayAreaFeatureId = tda != null ? tda.mFeatureId : FEATURE_UNDEFINED;
@@ -4459,7 +4461,7 @@ class Task extends TaskFragment {
          * Avoid reparenting SurfaceControl of the organized tasks that are always on top, since
          * the surfaces should be controlled by the organizer itself, like bubbles.
          */
-        if (isOrganized() && isAlwaysOnTop()) {
+        if (isOrganized() && isAlwaysOnTop() && !isFloatingWindow()) {
             return;
         }
         super.reparentSurfaceControl(t, newParent);
@@ -4806,6 +4808,25 @@ class Task extends TaskFragment {
         return false;
     }
 
+    /** Keeps owned floating identity while a recent task is detached from its display. */
+    boolean hasFloatingWindowIdentity() {
+        return mFloatingWindow && !mCreatedByOrganizer && (getParent() == null || isRootTask());
+    }
+
+    /** Identifies floating tasks currently attached to the default display. */
+    boolean isFloatingWindow() {
+        return hasFloatingWindowIdentity() && inFreeformWindowingMode() && isRootTask()
+                && getDisplayId() == android.view.Display.DEFAULT_DISPLAY;
+    }
+
+    void setFloatingWindow(boolean floating) {
+        if (mFloatingWindow && !floating) {
+            setAlwaysOnTop(false);
+            setDisablePip(false);
+        }
+        mFloatingWindow = floating;
+    }
+
     void setDisablePip(boolean disablePip) {
         mDisablePip = disablePip;
     }
@@ -4917,6 +4938,12 @@ class Task extends TaskFragment {
                     topTask)) {
                 windowingMode = WINDOWING_MODE_UNDEFINED;
             }
+        }
+
+        if (mFloatingWindow && windowingMode != WINDOWING_MODE_FREEFORM) {
+            mFloatingWindow = false;
+            setDisablePip(false);
+            setAlwaysOnTop(false);
         }
 
         if (currentMode == windowingMode) {

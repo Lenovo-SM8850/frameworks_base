@@ -40,9 +40,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mock
+import org.mockito.Mockito.`when` as whenever
 import org.mockito.Mockito.any
 import org.mockito.Mockito.anyInt
-import org.mockito.Mockito.`when` as whenever
 
 /**
  * Unit tests against [PinnedLayerPresentationController]
@@ -88,87 +88,62 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
-    fun getPinEntryDestinationBounds_taskWithinLimits_noScaling() {
-        // minSize = 220dp * 2.0 = 440px
-        // maxWidth = 1080 * 0.7 = 756px
-        // maxHeight = 1920 * 0.7 = 1344px
-        // Task size (500x600) is within these limits.
+    fun getPinEntryDestinationBounds_portrait_centeredAndSizedToDisplay() {
+        val bounds = requireNotNull(
+            controller.getPinEntryDestinationBounds(createTaskInfo(Rect(0, 0, 500, 600)))
+        )
+
+        assertThat(bounds.width()).isEqualTo(576)
+        assertThat(bounds.height()).isEqualTo(777)
+        assertThat(bounds.centerX()).isEqualTo(540)
+        assertThat(bounds.centerY()).isEqualTo(985)
+    }
+
+    @Test
+    fun getPinEntryDestinationBounds_respectsAppMinimumSize() {
         val task = createTaskInfo(Rect(0, 0, 500, 600))
+        task.minWidth = 800
+        task.minHeight = 900
 
-        val bounds = controller.getPinEntryDestinationBounds(task)
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
 
-        // Expected position: bottom-right corner considering stable insets
-        // right = 1080 - 0 (inset) - 10 (padding) = 1070
-        // bottom = 1920 - 50 (inset) - 10 (padding) = 1860
-        // left = 1070 - 500 = 570
-        // top = 1860 - 600 = 1260
-        val expected = Rect(570, 1260, 1070, 1860)
-        assertThat(bounds).isEqualTo(expected)
+        assertThat(bounds.width()).isAtLeast(800)
+        assertThat(bounds.height()).isAtLeast(900)
+        assertThat(Rect(0, 100, 1080, 1870).contains(bounds)).isTrue()
     }
 
     @Test
-    fun getPinEntryDestinationBounds_taskTooSmall_scalesUp() {
-        // minSize = 220dp * 2.0 = 440px
-        // Task size (200x300) is smaller than minSize.
-        val task = createTaskInfo(Rect(0, 0, 200, 300))
+    fun getPinEntryDestinationBounds_remembersPackageAndUser() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000))
+        task.baseActivity = android.content.ComponentName("test.floating", "Main")
+        task.isFloatingWindow = true
+        task.userId = 10
+        controller.rememberBounds(task)
 
-        val bounds = controller.getPinEntryDestinationBounds(task)
-
-        // w0=200, h0=300. minScale = max(440/200, 440/300) = 2.2
-        // finalWidth = 200 * 2.2 = 440
-        // finalHeight = 300 * 2.2 = 660
-        // right = 1070, bottom = 1860
-        // left = 1070 - 440 = 630
-        // top = 1860 - 660 = 1200
-        val expected = Rect(630, 1200, 1070, 1860)
-        assertThat(bounds).isEqualTo(expected)
+        assertThat(controller.getPinEntryDestinationBounds(task))
+            .isEqualTo(Rect(100, 200, 700, 1000))
+        task.userId = 11
+        assertThat(controller.getPinEntryDestinationBounds(task))
+            .isNotEqualTo(Rect(100, 200, 700, 1000))
     }
 
     @Test
-    fun getPinEntryDestinationBounds_taskTooLarge_scalesDown() {
-        // maxWidth = 1080 * 0.7 = 756px
-        // maxHeight = 1920 * 0.7 = 1344px
-        // Task size (1000x1500) is larger than max size.
-        val task = createTaskInfo(Rect(0, 0, 1000, 1500))
+    fun getPinEntryDestinationBounds_landscape_usesSeparateGeometry() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000))
+        task.baseActivity = android.content.ComponentName("test.floating", "Main")
+        task.isFloatingWindow = true
+        controller.rememberBounds(task)
+        whenever(displayLayout.width()).thenReturn(1920)
+        whenever(displayLayout.height()).thenReturn(1080)
+        whenever(displayLayout.getStableBounds(any())).thenAnswer {
+            it.getArgument<Rect>(0).set(0, 100, 1920, 1030)
+        }
 
-        val bounds = controller.getPinEntryDestinationBounds(task)
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
 
-        // w0=1000, h0=1500. maxScale = min(756/1000, 1344/1500) = 0.756
-        // finalWidth = 1000 * 0.756 = 756
-        // finalHeight = 1500 * 0.756 = 1134
-        // right = 1070, bottom = 1860
-        // left = 1070 - 756 = 314
-        // top = 1860 - 1134 = 726
-        val expected = Rect(314, 726, 1070, 1860)
-        assertThat(bounds).isEqualTo(expected)
-    }
-
-    @Test
-    fun getPinEntryDestinationBounds_conflictingConstraints_prioritizesMaxSize() {
-        // Setup a smaller display where min size in px is larger than max size in px
-        whenever(displayLayout.width()).thenReturn(500)
-        whenever(displayLayout.height()).thenReturn(800)
-        whenever(displayLayout.stableInsets()).thenReturn(Rect()) // No insets
-
-        // minSize = 220dp * 2.0 = 440px
-        // maxWidth = 500 * 0.7 = 350px -> Conflict!
-        // maxHeight = 800 * 0.7 = 560px
-        val task = createTaskInfo(Rect(0, 0, 300, 400))
-
-        val bounds = controller.getPinEntryDestinationBounds(task)
-
-        // w0=300, h0=400
-        // minScale = max(440/300, 440/400) = 1.466
-        // maxScale = min(350/300, 560/400) = 1.166
-        // minScale > maxScale, so scale should be maxScale.
-        // finalWidth = 300 * 1.166... = 350
-        // finalHeight = 400 * 1.166... = 466
-        // right = 500 - 0 (inset) - 10 (padding) = 490
-        // bottom = 800 - 0 (inset) - 10 (padding) = 790
-        // left = 490 - 350 = 140
-        // top = 790 - 466 = 324
-        val expected = Rect(140, 324, 490, 790)
-        assertThat(bounds).isEqualTo(expected)
+        assertThat(bounds.width()).isEqualTo(777)
+        assertThat(bounds.height()).isEqualTo(576)
+        assertThat(bounds.centerX()).isEqualTo(960)
     }
 
     @Test
@@ -192,12 +167,12 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
-    fun getPinEntryDestinationBounds_invalidTaskBounds_returnsNull() {
+    fun getPinEntryDestinationBounds_emptySourceBounds_usesDisplayDefault() {
         val task = createTaskInfo(Rect(0, 0, 0, 100)) // Zero width
 
         val bounds = controller.getPinEntryDestinationBounds(task)
 
-        assertThat(bounds).isNull()
+        assertThat(bounds).isNotNull()
     }
 
     @Test
@@ -211,13 +186,13 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
-    fun isTaskSupportedForPinning_notFreeform_returnsFalse() {
+    fun isTaskSupportedForPinning_fullscreen_returnsTrue() {
         val task =
             TestRunningTaskInfoBuilder()
                 .setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
                 .build()
 
-        assertThat(controller.isTaskSupportedForPinning(task)).isFalse()
+        assertThat(controller.isTaskSupportedForPinning(task)).isTrue()
     }
 
     @Test
@@ -458,6 +433,28 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         val newBounds = controller.calculateNewTaskBounds(task, requestedLocation)
 
         assertThat(newBounds).isEqualTo(task.configuration.windowConfiguration.bounds)
+    }
+
+    @Test
+    fun isTaskSupportedForPinning_split_returnsTrue() {
+        val task = TestRunningTaskInfoBuilder()
+            .setWindowingMode(WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW).build()
+        assertThat(controller.isTaskSupportedForPinning(task)).isTrue()
+    }
+
+    @Test
+    fun isTaskSupportedForPinning_nonResizable_returnsFalse() {
+        val task = TestRunningTaskInfoBuilder()
+            .setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN).build()
+        task.isResizeable = false
+        assertThat(controller.isTaskSupportedForPinning(task)).isFalse()
+    }
+
+    @Test
+    fun isTaskSupportedForPinning_secondaryDisplay_returnsFalse() {
+        val task = TestRunningTaskInfoBuilder().setDisplayId(1)
+            .setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN).build()
+        assertThat(controller.isTaskSupportedForPinning(task)).isFalse()
     }
 
     private fun createTaskInfo(bounds: Rect, taskId: Int = 44): TaskInfo {

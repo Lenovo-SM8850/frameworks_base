@@ -294,7 +294,7 @@
     <!-- Accessibility text for the handle more options button [CHAR LIMIT=NONE] -->
     <string name="more_button_text">More</string>
     <!-- Accessibility text for the handle floating window button [CHAR LIMIT=NONE] -->
-    <string name="float_button_text">Float</string>
+    <string name="float_button_text">Floating window</string>
     <!-- Accessibility text for the handle menu select button [CHAR LIMIT=NONE] -->
     <string name="select_text">Select</string>
     <!-- Accessibility text for the handle menu screenshot button [CHAR LIMIT=NONE] -->

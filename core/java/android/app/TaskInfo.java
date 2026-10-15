@@ -292,6 +292,12 @@ public class TaskInfo {
     public boolean isResizeable;
 
     /**
+     * Whether this task belongs to the Shell floating layer.
+     * @hide
+     */
+    public boolean isFloatingWindow;
+
+    /**
      * Minimal width of the task when it's resizeable.
      * @hide
      */
@@ -504,6 +510,7 @@ public class TaskInfo {
                 ? new ActivityInfo(other.topActivityInfo)
                 : null;
         isResizeable = other.isResizeable;
+        isFloatingWindow = other.isFloatingWindow;
         minWidth = other.minWidth;
         minHeight = other.minHeight;
         defaultMinSize = other.defaultMinSize;
@@ -659,6 +666,7 @@ public class TaskInfo {
         }
         return topActivityType == that.topActivityType
                 && isResizeable == that.isResizeable
+                && isFloatingWindow == that.isFloatingWindow
                 && supportsMultiWindow == that.supportsMultiWindow
                 && supportsMultiWindowWithoutConstraints
                 == that.supportsMultiWindowWithoutConstraints
@@ -748,6 +756,7 @@ public class TaskInfo {
         displayCutoutInsets = source.readTypedObject(Rect.CREATOR);
         topActivityInfo = source.readTypedObject(ActivityInfo.CREATOR);
         isResizeable = source.readBoolean();
+        isFloatingWindow = source.readBoolean();
         minWidth = source.readInt();
         minHeight = source.readInt();
         defaultMinSize = source.readInt();
@@ -811,6 +820,7 @@ public class TaskInfo {
         dest.writeTypedObject(displayCutoutInsets, flags);
         dest.writeTypedObject(topActivityInfo, flags);
         dest.writeBoolean(isResizeable);
+        dest.writeBoolean(isFloatingWindow);
         dest.writeInt(minWidth);
         dest.writeInt(minHeight);
         dest.writeInt(defaultMinSize);

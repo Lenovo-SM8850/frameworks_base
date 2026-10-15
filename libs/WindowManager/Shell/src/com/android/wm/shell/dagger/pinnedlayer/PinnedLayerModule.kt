@@ -38,8 +38,10 @@ import com.android.wm.shell.pinnedlayer.phone.PinnedLayerPresentationController
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUiState
 import com.android.wm.shell.pinnedlayer.phone.PinnedWindowRepositionAnimationHandler
 import com.android.wm.shell.pinnedlayer.phone.PinnedWindowRepositionAnimator
+import com.android.wm.shell.recents.RecentsTransitionHandler
 import com.android.wm.shell.shared.TransactionPool
 import com.android.wm.shell.shared.annotations.ShellMainThread
+import com.android.wm.shell.sysui.ShellController
 import com.android.wm.shell.sysui.ShellInit
 import com.android.wm.shell.transition.Transitions
 import dagger.Module
@@ -54,6 +56,8 @@ object PinnedLayerModule {
     fun providePinnedLayerHandler(
         shellInit: ShellInit,
         transitions: Transitions,
+        shellController: ShellController,
+        recentsTransitionHandler: RecentsTransitionHandler,
         pinnedLayerController: Optional<PinnedLayerController>,
         pinnedLayerUiState: Optional<PinnedLayerUiState>,
         // observer is unused here, but required to inject to make sure it is created so it can
@@ -64,6 +68,7 @@ object PinnedLayerModule {
         desktopUserRepositories: Optional<DesktopUserRepositories>,
     ): Optional<PinnedLayerHandler> {
         if (PinnedLayerFlags.isPinnedLayerEnabled()) {
+            pinnedLayerController.get().configureVisibility(shellController, recentsTransitionHandler)
             return Optional.of(
                 PinnedLayerHandler(
                     shellInit = shellInit,

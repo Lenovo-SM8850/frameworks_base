@@ -20,21 +20,19 @@ import android.app.ActivityManager.AppTask.WINDOWING_LAYER_PINNED
 import android.app.TaskInfo
 import android.app.TaskWindowingLayerRequestHandler.REMOTE_CALLBACK_RESULT_KEY
 import android.app.TaskWindowingLayerRequestHandler.RESULT_APPROVED
+import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
 import android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.IBinder
 import android.os.IRemoteCallback
 import android.os.RemoteException
+import android.view.Display.DEFAULT_DISPLAY
 import android.view.SurfaceControl
 import android.view.WindowManager.TRANSIT_CHANGE
 import android.view.WindowManager.TRANSIT_CLOSE
-import android.view.WindowManager.TRANSIT_OPEN
 import android.view.WindowManager.TRANSIT_TO_BACK
-import android.view.WindowManager.TRANSIT_TO_FRONT
 import android.window.TransitionInfo
-import android.window.TransitionInfo.FLAG_IS_WALLPAPER
-import android.window.TransitionInfo.FLAG_SHOW_WALLPAPER
 import android.window.TransitionRequestInfo
 import android.window.WindowContainerTransaction
 import com.android.wm.shell.RootTaskDisplayAreaOrganizer
@@ -48,14 +46,19 @@ import com.android.wm.shell.pinnedlayer.phone.PinnedLayerLogs.logW
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.getLayerPinnedWct
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.getLayerUnpinnedWct
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.getRemovedFromLayerWct
+import com.android.wm.shell.recents.RecentsTransitionHandler
+import com.android.wm.shell.recents.RecentsTransitionStateListener
 import com.android.wm.shell.shared.TransactionPool
+import com.android.wm.shell.shared.TransitionUtil
+import com.android.wm.shell.sysui.KeyguardChangeListener
+import com.android.wm.shell.sysui.OverviewVisibilityChangeListener
+import com.android.wm.shell.sysui.ShellController
 import com.android.wm.shell.sysui.ShellInit
 import com.android.wm.shell.transition.Transitions
 import com.android.wm.shell.windowdecor.OnTaskRepositionAnimationListener
 
 /**
- * A controller that is responsible for managing [WINDOWING_LAYER_PINNED] layer that has PiP
- * policies like single window and always-on-top.
+ * Manages up to five visible freeform tasks in the always-on-top [WINDOWING_LAYER_PINNED] layer.
  *
  * The controller is the main decider when the task is pinned and it's responsible for dispatching
  * callbacks.
@@ -77,6 +80,11 @@ class PinnedLayerController(
     // Stores ids of pinned TaskInfo.
     private val pinnedTasks = mutableSetOf<Int>()
     private var currentPinnedTaskId: Int? = null
+    private val visiblePinnedTasks = linkedSetOf<Int>()
+    private val minimizedTasks = mutableSetOf<Int>()
+    private var keyguardShowing = false
+    private var recentsRunning = false
+    private var overviewShowing = false
 
     private val pinnedTasksListeners = mutableSetOf<PinnedTasksListener>()
 
@@ -106,7 +114,9 @@ class PinnedLayerController(
      * @return a pinned [TaskInfo].
      */
     fun getCurrentPinnedTask(): TaskInfo? {
-        return currentPinnedTaskId?.let { shellTaskOrganizer.getRunningTaskInfo(it) }
+        return (currentPinnedTaskId?.takeIf { it in visiblePinnedTasks }
+                ?: visiblePinnedTasks.lastOrNull())
+            ?.let { shellTaskOrganizer.getRunningTaskInfo(it) }
     }
 
     /**
@@ -119,7 +129,127 @@ class PinnedLayerController(
      * @return `true` when the task is pinned, `false` otherwise.
      * @see Transitions.TransitionObserver.onTransitionReady
      */
-    fun isPinned(taskId: Int): Boolean = pinnedTasks.contains(taskId)
+    fun isPinned(taskId: Int): Boolean =
+        shellTaskOrganizer.getRunningTaskInfo(taskId)?.isFloatingWindow == true ||
+            pinnedTasks.contains(taskId) ||
+            activeTransitions.values.any { pending ->
+                pending.any { it is ActiveTransition.Pin && it.taskInfo.taskId == taskId }
+            }
+
+    /** Returns all live floating tasks, including minimized tasks. */
+    fun getPinnedTasks(): List<TaskInfo> =
+        pinnedTasks.mapNotNull { shellTaskOrganizer.getRunningTaskInfo(it) }
+
+    /** Registers visibility policy after Shell dependencies have been constructed. */
+    fun configureVisibility(
+        shellController: ShellController,
+        recentsTransitionHandler: RecentsTransitionHandler,
+    ) {
+        shellController.addKeyguardChangeListener(object : KeyguardChangeListener {
+            override fun onKeyguardVisibilityChanged(
+                visible: Boolean, occluded: Boolean, animatingDismiss: Boolean,
+            ) {
+                keyguardShowing = visible
+                updateVisibility()
+            }
+        })
+        shellController.addOverviewVisibilityChangeListener(
+            object : OverviewVisibilityChangeListener {
+                override fun onOverviewShown(displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    overviewShowing = true
+                    updateVisibility()
+                }
+
+                override fun onOverviewHidden(displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    overviewShowing = false
+                    updateVisibility()
+                }
+            }
+        )
+        recentsTransitionHandler.addTransitionStateListener(
+            object : RecentsTransitionStateListener {
+                override fun onTransitionStateChanged(state: Int, displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    recentsRunning = RecentsTransitionStateListener.isRunning(state)
+                    overviewShowing = shellController.isOverviewVisible(displayId)
+                    if (recentsRunning) {
+                        updateVisibility()
+                    } else {
+                        // Restore after Recents has applied its final surface transaction.
+                        transitions.runOnIdle { updateVisibility() }
+                    }
+                }
+            }
+        )
+    }
+
+    private fun updateVisibility() {
+        val hidden = keyguardShowing || recentsRunning || overviewShowing
+        val wct = WindowContainerTransaction()
+        val focusedTask = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
+            .firstOrNull { it.isFocused && (!hidden || !isPinned(it.taskId)) }
+        getPinnedTasks().filter { it.taskId !in minimizedTasks }.forEach {
+            wct.setHidden(it.token, hidden)
+        }
+        if (!wct.isEmpty) {
+            focusedTask?.let { wct.reorder(it.token, true) }
+            shellTaskOrganizer.applyTransaction(wct)
+        }
+    }
+
+    fun getFloatingLaunchBounds(task: TaskInfo): Rect? =
+        presentationController.getPinEntryDestinationBounds(task)
+
+    /** Adds entry properties before starting a Shell-owned transition. */
+    fun prepareFloatingTask(task: TaskInfo, wct: WindowContainerTransaction): Boolean {
+        if (!isPinningSupported(task)) return false
+        val bounds = presentationController.getPinEntryDestinationBounds(task) ?: return false
+        minimizeOldestIfNeeded(task, wct)
+        pinnedTasks += task.taskId
+        visiblePinnedTasks += task.taskId
+        minimizedTasks -= task.taskId
+        wct.merge(getLayerPinnedWct(task.token, bounds), true)
+        wct.setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
+        return true
+    }
+
+    private fun minimizeOldestIfNeeded(task: TaskInfo, wct: WindowContainerTransaction) {
+        if (task.taskId in visiblePinnedTasks || visiblePinnedTasks.size < 5) return
+        val oldestId = visiblePinnedTasks.first()
+        visiblePinnedTasks -= oldestId
+        minimizedTasks += oldestId
+        shellTaskOrganizer.getRunningTaskInfo(oldestId)?.let { oldest ->
+            presentationController.rememberBounds(oldest)
+            wct.merge(getLayerUnpinnedWct(oldest.token, isMinimizing = true), true)
+            wct.setHidden(oldest.token, true)
+        }
+    }
+
+    /** Minimizes a floating task while retaining its identity for Recents. */
+    fun minimizeTask(task: TaskInfo): Boolean {
+        if (!isPinned(task.taskId)) return false
+        presentationController.rememberBounds(task)
+        unpin(task, rememberAsPinned = true)
+        transitions.startTransition(
+            TRANSIT_TO_BACK, getLayerUnpinnedWct(task.token, isMinimizing = true), null)
+        return true
+    }
+
+    /** Leaves the floating layer when maximizing, without replacing the task. */
+    fun maximizeTask(task: TaskInfo): Boolean {
+        if (!isPinned(task.taskId)) return false
+        presentationController.rememberBounds(task)
+        unpin(task)
+        val wct = getRemovedFromLayerWct(task.token)
+            .setHidden(task.token, false)
+            .setWindowingMode(task.token, WINDOWING_MODE_FULLSCREEN)
+            .setBounds(task.token, Rect())
+            .reorder(task.token, true)
+        transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        return true
+    }
 
     /**
      * Pins a task and adds it to the active transitions for the given transition token.
@@ -146,9 +276,8 @@ class PinnedLayerController(
         )
         return WindowContainerTransaction().apply {
             val transitions = activeTransitions.getOrPut(transition) { mutableSetOf() }
-            transitions += ActiveTransition.Pin(task, remoteCallback)
             val bounds =
-                if (!isPinned(task.taskId)) {
+                if (task.taskId !in pinnedTasks) {
                     presentationController.getPinEntryDestinationBounds(task)
                 } else {
                     presentationController.clampToDisplay(
@@ -156,12 +285,13 @@ class PinnedLayerController(
                         task.configuration.windowConfiguration.bounds,
                     )
                 }
+            transitions += ActiveTransition.Pin(task, remoteCallback)
+            minimizeOldestIfNeeded(task, this)
+            visiblePinnedTasks += task.taskId
+            minimizedTasks -= task.taskId
             merge(getLayerPinnedWct(task.token, bounds), /* transfer= */ true)
+            setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
 
-            val pinnedTask = getCurrentPinnedTask()
-            if (pinnedTask != null && pinnedTask.token != task.token) {
-                merge(unpinTask(transition, pinnedTask, UnpinStrategy.CLOSE), /* transfer= */ true)
-            }
         }
     }
 
@@ -185,7 +315,7 @@ class PinnedLayerController(
             unpinStrategy,
         )
         val transitions = activeTransitions.getOrPut(transition) { mutableSetOf() }
-        transitions += ActiveTransition.Unpin(task)
+        transitions += ActiveTransition.Unpin(task, unpinStrategy == UnpinStrategy.HIDE)
 
         return when (unpinStrategy) {
             UnpinStrategy.HIDE,
@@ -288,7 +418,8 @@ class PinnedLayerController(
         val isPinned = isPinned(task.taskId)
         val isSameDisplay = task.displayId == displayId
         val isDisplayUnavailable = displayAreaInfo == null
-        val isDisplayEligibleTarget = desktopState.isEligibleWindowDropTarget(displayId)
+        val isDisplayEligibleTarget = displayId == DEFAULT_DISPLAY &&
+            desktopState.isEligibleWindowDropTarget(displayId)
         logD(
             "moveToDisplay: task=%d, displayId=%d, isPinned=%b, isSameDisplayRequest=%b, " +
                 "isDisplayUnavailable=%b, isDisplayEligibleDropTarget=%b",
@@ -474,7 +605,10 @@ class PinnedLayerController(
             logV("onTransitionReady: Pin layer transition ready: %s", transition)
             when (transition) {
                 is ActiveTransition.Pin -> {
-                    pin(transition.taskInfo)
+                    val updatedTask = info.changes
+                        .firstOrNull { it.taskInfo?.taskId == transition.taskInfo.taskId }?.taskInfo
+                        ?: transition.taskInfo
+                    pin(updatedTask)
 
                     // Only send result if the transition caused by an API request.
                     if (transition.resultCallback != null) {
@@ -487,53 +621,83 @@ class PinnedLayerController(
                             it.taskInfo?.token == transition.taskInfo.token &&
                                 it.mode == TRANSIT_TO_BACK
                         }
-                    unpin(transition.taskInfo, rememberAsPinned = isMovingToBack)
+                    unpin(
+                        transition.taskInfo,
+                        rememberAsPinned = transition.minimized || isMovingToBack,
+                    )
                 }
             }
         }
-        checkFullscreenTaskOpenedAndClosePinnedIfNeeded(info)
+        info.changes.forEach { change ->
+            val task = change.taskInfo ?: return@forEach
+            if (task.isFloatingWindow && change.mode != TRANSIT_CLOSE) {
+                val restoring = task.taskId in minimizedTasks &&
+                    (TransitionUtil.isOpeningType(change.mode) ||
+                        (change.mode == TRANSIT_CHANGE &&
+                            task.configuration.windowConfiguration.isAlwaysOnTop))
+                if (task.taskId !in pinnedTasks || restoring) {
+                    val wct = WindowContainerTransaction()
+                    minimizeOldestIfNeeded(task, wct)
+                    minimizedTasks -= task.taskId
+                    pin(task)
+                    if (restoring) {
+                        wct.merge(getLayerPinnedWct(task.token), true)
+                        wct.setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
+                        wct.reorder(task.token, true)
+                    }
+                    if (!wct.isEmpty) shellTaskOrganizer.applyTransaction(wct)
+                }
+                if (!restoring && !task.configuration.windowConfiguration.isAlwaysOnTop &&
+                    task.taskId in visiblePinnedTasks &&
+                    !keyguardShowing && !recentsRunning && !overviewShowing) {
+                    visiblePinnedTasks -= task.taskId
+                    minimizedTasks += task.taskId
+                }
+                presentationController.rememberBounds(task)
+            } else if (task.taskId in pinnedTasks &&
+                (change.mode == TRANSIT_CLOSE || task.windowingMode != WINDOWING_MODE_FREEFORM ||
+                    task.hasParentTask())) {
+                unpin(task)
+            }
+        }
+        if (keyguardShowing || recentsRunning || overviewShowing) updateVisibility()
     }
 
-    /**
-     * Pinned tasks does not work well over the fullscreen tasks yet: b/488007558 In order to not
-     * break windowing state, pinned tasks are going to be closed if fullscreen task appears on the
-     * same display.
-     */
-    private fun checkFullscreenTaskOpenedAndClosePinnedIfNeeded(info: TransitionInfo) {
-        val pinnedTask = getCurrentPinnedTask() ?: return
-
-        val changeWithFullscreenTask =
-            info.changes.firstOrNull { change ->
-                val taskInfo = change.taskInfo
-                taskInfo != null &&
-                    !isPinned(taskInfo.taskId) &&
-                    taskInfo.displayId == pinnedTask.displayId &&
-                    taskInfo.windowingMode == WINDOWING_MODE_FULLSCREEN &&
-                    !(change.hasFlags(FLAG_IS_WALLPAPER or FLAG_SHOW_WALLPAPER)) &&
-                    (change.mode == TRANSIT_OPEN ||
-                        change.mode == TRANSIT_TO_FRONT ||
-                        change.mode == TRANSIT_CHANGE)
+    override fun onTransitionFinished(transition: IBinder, aborted: Boolean) {
+        val pending = activeTransitions.remove(transition).orEmpty()
+        if (aborted) {
+            (pinnedTasks + visiblePinnedTasks).toList().forEach { id ->
+                val task = shellTaskOrganizer.getRunningTaskInfo(id)
+                if (task == null || !task.isFloatingWindow) {
+                    task?.let { unpin(it) }
+                    pinnedTasks -= id
+                    visiblePinnedTasks -= id
+                    minimizedTasks -= id
+                } else if (task.configuration.windowConfiguration.isAlwaysOnTop) {
+                    minimizedTasks -= id
+                    visiblePinnedTasks += id
+                }
             }
 
-        if (changeWithFullscreenTask != null) {
-            logD(
-                "Closing pinned task as fullscreen task appeared on same display. " +
-                    "Pinned task id=%d, caused by change=%s",
-                pinnedTask.taskId,
-                changeWithFullscreenTask,
-            )
-            closeTask(pinnedTask)
+            pending.filterIsInstance<ActiveTransition.Pin>().forEach {
+                val task = shellTaskOrganizer.getRunningTaskInfo(it.taskInfo.taskId)
+                if (task?.isFloatingWindow != true) unpin(it.taskInfo)
+            }
         }
     }
 
     private fun pin(taskInfo: TaskInfo) {
         pinnedTasks += taskInfo.taskId
+        if (taskInfo.taskId !in minimizedTasks) visiblePinnedTasks += taskInfo.taskId
         currentPinnedTaskId = taskInfo.taskId
         pinnedTasksListeners.forEach { it.onPinnedTasksAdded(taskInfo) }
     }
 
     private fun unpin(taskInfo: TaskInfo, rememberAsPinned: Boolean = false) {
+        visiblePinnedTasks -= taskInfo.taskId
+        if (rememberAsPinned) minimizedTasks += taskInfo.taskId
         if (!rememberAsPinned) {
+            minimizedTasks -= taskInfo.taskId
             pinnedTasks -= taskInfo.taskId
             pinnedTasksListeners.forEach { it.onPinnedTasksRemoved(taskInfo) }
         }

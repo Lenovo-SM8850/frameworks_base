@@ -268,6 +268,25 @@ public class WindowManagerServiceTests extends WindowTestsBase {
     }
 
     @Test
+    public void testFloatingFocusDelaysFullscreenTouchForBack() {
+        final Task task = createTask(mDefaultDisplay, WINDOWING_MODE_FREEFORM,
+                ACTIVITY_TYPE_STANDARD);
+        task.setFloatingWindow(true);
+        final WindowState floating = createAppWindow(task, TYPE_APPLICATION, "Floating");
+        final IBinder token = new Binder();
+        doReturn(floating).when(mWm).getInputTargetFromToken(token);
+        doReturn(floating).when(mWm).getFocusedWindowLocked();
+        mWm.reportFocusChanged(null, token);
+        final Task fullscreenTask = createTask(mDefaultDisplay, WINDOWING_MODE_FULLSCREEN,
+                ACTIVITY_TYPE_STANDARD);
+        final WindowState fullscreen = createAppWindow(fullscreenTask, TYPE_APPLICATION, "Fullscreen");
+        assertTrue(mWm.shouldDelayTouchOutside(fullscreen));
+        assertFalse(mWm.shouldDelayTouchOutside(floating));
+        doReturn(fullscreen).when(mWm).getFocusedWindowLocked();
+        assertFalse(mWm.shouldDelayTouchOutside(fullscreen));
+    }
+
+    @Test
     public void testTaskFocusChange_rootTaskNotHomeType_focusChanges() throws RemoteException {
         DisplayContent display = createNewDisplay();
         // Current focused window
