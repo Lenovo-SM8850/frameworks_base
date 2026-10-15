@@ -54,6 +54,8 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager2.widget.ViewPager2;
 
+import com.google.android.material.appbar.AppBarLayout;
+import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.checkbox.MaterialCheckBox;
@@ -170,6 +172,7 @@ public class AppDataBackupActivity extends Activity {
         mTextColorVariant = themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant);
         mTextColorSelected = themeColor(com.google.android.material.R.attr.colorOnPrimaryContainer);
         setupHeroSurfaces();
+        setupCollapsingTitle();
 
         setupFloatingToolbar();
         setupBackupsToolbar();
@@ -370,6 +373,25 @@ public class AppDataBackupActivity extends Activity {
 
     private int themeColor(int attr) {
         return MaterialColors.getColor(this, attr, Color.MAGENTA);
+    }
+
+    // Fades the toolbar title in as the large title scrolls under the toolbar.
+    private void setupCollapsingTitle() {
+        final AppBarLayout appBar = findViewById(R.id.app_bar);
+        final MaterialToolbar toolbar = findViewById(R.id.toolbar);
+        final View hero = findViewById(R.id.header_hero);
+        final View title = findViewById(R.id.header_title);
+        final int color = themeColor(com.google.android.material.R.attr.colorOnSurface);
+        toolbar.setTitleTextColor(Color.TRANSPARENT);
+        appBar.addOnOffsetChangedListener((layout, offset) -> {
+            final int height = title.getHeight();
+            if (height == 0) return;
+            // The large title sits just below the toolbar until the scroll passes its top margin.
+            final int start = title.getTop() - hero.getPaddingTop();
+            final float progress = Math.max(0f, Math.min(1f, (-offset - start) / (float) height));
+            toolbar.setTitleTextColor(Color.argb(Math.round(Color.alpha(color) * progress),
+                    Color.red(color), Color.green(color), Color.blue(color)));
+        });
     }
 
     private void setupHeroSurfaces() {
@@ -629,10 +651,10 @@ public class AppDataBackupActivity extends Activity {
             return;
         }
         final View view = buildPassphraseView();
+        setDialogMessage(view, "This backup is encrypted. Enter its passphrase to verify.");
         final TextInputEditText input = view.findViewById(R.id.et_passphrase);
         new MaterialAlertDialogBuilder(this)
                 .setTitle("Verify encrypted backup")
-                .setMessage("This backup is encrypted. Enter its passphrase to verify.")
                 .setView(view)
                 .setPositiveButton(R.string.verify, (d, w) -> {
                     final String pass = input.getText() != null
@@ -661,9 +683,18 @@ public class AppDataBackupActivity extends Activity {
         final View view = LayoutInflater.from(this)
                 .inflate(R.layout.dialog_backup_options, null, false);
         view.findViewById(R.id.til_passphrase_confirm).setVisibility(View.GONE);
-        view.findViewById(R.id.til_keep).setVisibility(View.GONE);
+        view.findViewById(R.id.tv_section_include).setVisibility(View.GONE);
         view.findViewById(R.id.chip_group_components).setVisibility(View.GONE);
+        view.findViewById(R.id.tv_section_retention).setVisibility(View.GONE);
+        view.findViewById(R.id.til_keep).setVisibility(View.GONE);
         return view;
+    }
+
+    // Shows the message inside the dialog's scrolling content so it scrolls with the rest.
+    private void setDialogMessage(View view, CharSequence message) {
+        final TextView messageView = view.findViewById(R.id.tv_message);
+        messageView.setText(message);
+        messageView.setVisibility(View.VISIBLE);
     }
 
     private void startBatchRestore() {
@@ -686,9 +717,13 @@ public class AppDataBackupActivity extends Activity {
         final boolean encrypted = anyEncrypted;
         final View view = LayoutInflater.from(this)
                 .inflate(R.layout.dialog_backup_options, null, false);
+        view.findViewById(R.id.tv_section_retention).setVisibility(View.GONE);
         view.findViewById(R.id.til_keep).setVisibility(View.GONE);
         view.findViewById(R.id.til_passphrase_confirm).setVisibility(View.GONE);
-        if (!encrypted) view.findViewById(R.id.til_passphrase).setVisibility(View.GONE);
+        if (!encrypted) {
+            view.findViewById(R.id.tv_section_encryption).setVisibility(View.GONE);
+            view.findViewById(R.id.til_passphrase).setVisibility(View.GONE);
+        }
         final TextInputEditText passInput = view.findViewById(R.id.et_passphrase);
         final Chip apkBox = view.findViewById(R.id.chip_apk);
         final Chip ceBox = view.findViewById(R.id.chip_ce);
@@ -706,13 +741,13 @@ public class AppDataBackupActivity extends Activity {
             message.append("\n\n")
                     .append(getString(R.string.restore_downgrade_warning, downgrades));
         }
+        setDialogMessage(view, message);
         final String title = records.size() == 1
                 ? getString(R.string.confirm_restore_title, records.get(0).getLabel())
                 : getString(R.string.confirm_restore_selected_title, records.size());
 
         new MaterialAlertDialogBuilder(this)
                 .setTitle(title)
-                .setMessage(message)
                 .setView(view)
                 .setPositiveButton(R.string.restore, (d, w) -> {
                     int components = 0;
@@ -781,10 +816,10 @@ public class AppDataBackupActivity extends Activity {
             return;
         }
         final View view = buildPassphraseView();
+        setDialogMessage(view, getString(R.string.verify_all_message));
         final TextInputEditText input = view.findViewById(R.id.et_passphrase);
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.verify_all)
-                .setMessage(R.string.verify_all_message)
                 .setView(view)
                 .setPositiveButton(R.string.verify, (d, w) -> {
                     final String pass = input.getText() != null
@@ -1190,7 +1225,7 @@ public class AppDataBackupActivity extends Activity {
                 holder.contents.setText("\u26a0 " + getString(R.string.verify_failed_badge)
                         + "  \u00b7  " + buildContents(record));
                 holder.contents.setTextColor(
-                        themeColor(android.R.attr.colorError));
+                        themeColor(androidx.appcompat.R.attr.colorError));
             } else {
                 holder.contents.setText(buildContents(record));
                 holder.contents.setTextColor(mTextColorVariant);
