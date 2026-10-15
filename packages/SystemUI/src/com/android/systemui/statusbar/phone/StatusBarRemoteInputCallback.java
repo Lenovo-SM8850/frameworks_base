@@ -27,6 +27,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.IntentSender;
+import android.os.Bundle;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.view.View;
@@ -69,6 +70,9 @@ import javax.inject.Inject;
 @SysUISingleton
 public class StatusBarRemoteInputCallback implements Callback, Callbacks,
         StatusBarStateController.StateListener {
+
+    public static final String EXTRA_NOTIFICATION_ACTIVITY_OPTIONS =
+            "com.android.systemui.extra.NOTIFICATION_ACTIVITY_OPTIONS";
 
     private final KeyguardStateController mKeyguardStateController;
     private final SysuiStatusBarStateController mStatusBarStateController;
@@ -261,6 +265,11 @@ public class StatusBarRemoteInputCallback implements Callback, Callbacks,
 
     boolean startWorkChallengeIfNecessary(int userId, IntentSender intendSender,
             String notificationKey) {
+        return startWorkChallengeIfNecessary(userId, intendSender, notificationKey, null);
+    }
+
+    boolean startWorkChallengeIfNecessary(int userId, IntentSender intendSender,
+            String notificationKey, Bundle activityOptions) {
         // Clear pending remote view, as we do not want to trigger pending remote input view when
         // it's called by other code
         mPendingWorkRemoteInputView = null;
@@ -273,6 +282,7 @@ public class StatusBarRemoteInputCallback implements Callback, Callbacks,
         final Intent callBackIntent = new Intent(NOTIFICATION_UNLOCKED_BY_WORK_CHALLENGE_ACTION);
         callBackIntent.putExtra(Intent.EXTRA_INTENT, intendSender);
         callBackIntent.putExtra(Intent.EXTRA_INDEX, notificationKey);
+        callBackIntent.putExtra(EXTRA_NOTIFICATION_ACTIVITY_OPTIONS, activityOptions);
         callBackIntent.setPackage(mContext.getPackageName());
 
         PendingIntent callBackPendingIntent = PendingIntent.getBroadcast(

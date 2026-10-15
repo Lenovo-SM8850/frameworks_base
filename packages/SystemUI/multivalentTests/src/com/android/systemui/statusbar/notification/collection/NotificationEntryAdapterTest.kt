@@ -532,6 +532,17 @@ class NotificationEntryAdapterTest : SysuiTestCase() {
     }
 
     @Test
+    fun onEntryFloatingWindowClicked() {
+        val entry = NotificationEntryBuilder().build()
+        val row: ExpandableNotificationRow = mock()
+        underTest = factory.create(entry) as NotificationEntryAdapter
+
+        underTest.onEntryFloatingWindowClicked(row)
+
+        verify(kosmos.mockNotificationActivityStarter).onNotificationFloatingWindowClicked(entry, row)
+    }
+
+    @Test
     fun registerFutureDismissal() {
         val notification: Notification =
             Notification.Builder(mContext, "")

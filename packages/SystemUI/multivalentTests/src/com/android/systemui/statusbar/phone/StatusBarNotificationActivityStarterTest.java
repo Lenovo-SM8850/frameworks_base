@@ -37,13 +37,16 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import android.app.ActivityManager;
+import android.app.ActivityOptions;
 import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.IntentSender;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ResolveInfo;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.RemoteException;
 import android.os.UserHandle;
@@ -53,6 +56,7 @@ import android.platform.test.flag.junit.FlagsParameterization;
 import android.service.dreams.IDreamManager;
 import android.service.notification.StatusBarNotification;
 import android.testing.TestableLooper;
+import android.view.Display;
 
 import androidx.test.filters.SmallTest;
 
@@ -161,6 +165,12 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
     @Mock
     private KeyguardStateController mKeyguardStateController;
     @Mock
+    private KeyguardManager mKeyguardManager;
+    @Mock
+    private LockPatternUtils mLockPatternUtils;
+    @Mock
+    private StatusBarRemoteInputCallback mRemoteInputCallback;
+    @Mock
     private Handler mHandler;
     @Mock
     private BubblesManager mBubblesManager;
@@ -263,7 +273,7 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
                         mCommandQueue,
                         mClickNotifier,
                         mStatusBarKeyguardViewManager,
-                        mock(KeyguardManager.class),
+                        mKeyguardManager,
                         mock(IDreamManager.class),
                         Optional.of(mBubblesManager),
                         () -> mAssistManager,
@@ -271,8 +281,8 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
                         mock(NotificationLockscreenUserManager.class),
                         mShadeController,
                         mKeyguardStateController,
-                        mock(LockPatternUtils.class),
-                        mock(StatusBarRemoteInputCallback.class),
+                        mLockPatternUtils,
+                        mRemoteInputCallback,
                         mActivityIntentHelper,
                         mKosmos.getActivityIntentRepository(),
                         mock(MetricsLogger.class),
@@ -291,7 +301,8 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
                         mock(LaunchFullScreenIntentProvider.class),
                         mPowerInteractor,
                         mUserTracker,
-                        mFrameworkStatsLogWrapper
+                        mFrameworkStatsLogWrapper,
+                        mock(com.axion.applocker.AxAppLockerHelper.class)
                 );
 
         // set up dismissKeyguardThenExecute to synchronously invoke the OnDismissAction arg
@@ -310,6 +321,154 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
         // set up Handler to synchronously invoke the Runnable arg
         doAnswer(answerVoid(Runnable::run))
                 .when(mHandler).post(any(Runnable.class));
+    }
+
+    @Test
+    @DisableFlags(Flags.FLAG_ANIMATION_LIBRARY_SHELL_MIGRATION)
+    public void testFloatingNotification_legacyOptionsAndClickSideEffects() throws Exception {
+        mUnderTest.onNotificationFloatingWindowClicked(mNotificationEntry, mNotificationRow);
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+
+        ArgumentCaptor<ActivityTransitionAnimator.LegacyPendingIntentStarter> starter =
+                ArgumentCaptor.forClass(ActivityTransitionAnimator.LegacyPendingIntentStarter.class);
+        verify(mActivityTransitionAnimator).startPendingIntentWithAnimation(
+                any(), eq(false), any(), starter.capture());
+        starter.getValue().startPendingIntent(null);
+        mUiBgExecutor.runAllReady();
+
+        assertFloatingOptionsAndClickSideEffects();
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ANIMATION_LIBRARY_SHELL_MIGRATION)
+    public void testFloatingNotification_shellOptionsAndClickSideEffects() throws Exception {
+        mUnderTest.onNotificationFloatingWindowClicked(mNotificationEntry, mNotificationRow);
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+
+        ArgumentCaptor<ActivityTransitionAnimator.PendingIntentStarter> starter =
+                ArgumentCaptor.forClass(ActivityTransitionAnimator.PendingIntentStarter.class);
+        verify(mActivityTransitionAnimator).startPendingIntentWithAnimation(
+                any(), any(), eq(false), starter.capture());
+        starter.getValue().startPendingIntent(null);
+        mUiBgExecutor.runAllReady();
+
+        assertFloatingOptionsAndClickSideEffects();
+    }
+
+    private void assertFloatingOptionsAndClickSideEffects() throws Exception {
+        ArgumentCaptor<Bundle> options =
+                ArgumentCaptor.forClass(Bundle.class);
+        verify(mContentIntent).sendAndReturnResult(
+                any(), eq(0), any(), any(), any(), any(), options.capture());
+        ActivityOptions activityOptions =
+                ActivityOptions.fromBundle(options.getValue());
+        assertThat(activityOptions.getLaunchFloatingWindow()).isTrue();
+        assertThat(activityOptions.getLaunchDisplayId()).isEqualTo(Display.DEFAULT_DISPLAY);
+        assertThat(activityOptions.getPendingIntentBackgroundActivityStartMode())
+                .isEqualTo(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+        verify(mOnUserInteractionCallback).registerFutureDismissal(mNotificationEntry, REASON_CLICK);
+        verify(mClickNotifier).onNotificationClick(eq(mNotificationEntry.getKey()), any());
+        verify(mShadeController).collapseShadeForActivityStart();
+    }
+
+    @Test
+    public void testFloatingNotification_requiresUnlockBeforeCollapsingShade() {
+        when(mKeyguardStateController.isShowing()).thenReturn(true);
+        when(mActivityIntentHelper.wouldPendingShowOverLockscreen(any(), anyInt())).thenReturn(true);
+        doNothing().when(mActivityStarter).dismissKeyguardThenExecute(any(), any(), anyBoolean());
+
+        mUnderTest.onNotificationFloatingWindowClicked(mNotificationEntry, mNotificationRow);
+        mMainExecutor.runAllReady();
+
+        ArgumentCaptor<OnDismissAction> action = ArgumentCaptor.forClass(OnDismissAction.class);
+        verify(mActivityStarter).dismissKeyguardThenExecute(action.capture(), any(), anyBoolean());
+        verify(mShadeController, never()).collapseShadeForActivityStart();
+        action.getValue().onDismiss();
+        verify(mShadeController).collapseShadeForActivityStart();
+    }
+
+    @Test
+    public void testFloatingNotification_waitsForShadeCollapse() {
+        doNothing().when(mShadeController).addPostCollapseAction(any());
+
+        mUnderTest.onNotificationFloatingWindowClicked(mNotificationEntry, mNotificationRow);
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+
+        verify(mShadeController).collapseShadeForActivityStart();
+        verify(mClickNotifier, never()).onNotificationClick(any(), any());
+        ArgumentCaptor<Runnable> action = ArgumentCaptor.forClass(Runnable.class);
+        verify(mShadeController).addPostCollapseAction(action.capture());
+        action.getValue().run();
+        mUiBgExecutor.runAllReady();
+        verify(mClickNotifier).onNotificationClick(eq(mNotificationEntry.getKey()), any());
+    }
+
+    @Test
+    public void testFloatingNotification_nonActivityIntentIgnored() {
+        when(mContentIntent.isActivity()).thenReturn(false);
+
+        mUnderTest.onNotificationFloatingWindowClicked(mNotificationEntry, mNotificationRow);
+
+        verify(mActivityStarter, never()).dismissKeyguardThenExecute(any(), any(), anyBoolean());
+    }
+
+    @Test
+    public void testFloatingNotification_nonAutoCancelLockedProfilePreservesOptions()
+            throws Exception {
+        mNotificationEntry.getSbn().getNotification().flags &= ~Notification.FLAG_AUTO_CANCEL;
+        IntentSender sender = mock(IntentSender.class);
+        when(mContentIntent.getIntentSender()).thenReturn(sender);
+        when(mLockPatternUtils.isSeparateProfileChallengeEnabled(1)).thenReturn(true);
+        when(mKeyguardManager.isDeviceLocked(1)).thenReturn(true);
+        when(mRemoteInputCallback.startWorkChallengeIfNecessary(
+                eq(1), eq(sender), eq(mNotificationEntry.getKey()), any(Bundle.class)))
+                .thenReturn(true);
+
+        mUnderTest.onNotificationFloatingWindowClicked(mNotificationEntry, mNotificationRow);
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+
+        ArgumentCaptor<Bundle> options = ArgumentCaptor.forClass(Bundle.class);
+        verify(mRemoteInputCallback).startWorkChallengeIfNecessary(
+                eq(1), eq(sender), eq(mNotificationEntry.getKey()), options.capture());
+        ActivityOptions activityOptions = ActivityOptions.fromBundle(options.getValue());
+        assertThat(activityOptions.getLaunchFloatingWindow()).isTrue();
+        assertThat(activityOptions.getLaunchDisplayId()).isEqualTo(Display.DEFAULT_DISPLAY);
+        verify(mOnUserInteractionCallback, never()).registerFutureDismissal(any(), anyInt());
+        verify(mFutureDismissalRunnable, never()).run();
+        verify(mContentIntent, never()).sendAndReturnResult(
+                any(), anyInt(), any(), any(), any(), any(), any());
+        verify(mClickNotifier, never()).onNotificationClick(any(), any());
+        verify(mShadeController).collapseOnMainThread();
+    }
+
+    @Test
+    @DisableFlags(Flags.FLAG_ANIMATION_LIBRARY_SHELL_MIGRATION)
+    public void testFloatingNotification_bubbleLaunchesActivity() throws Exception {
+        when(mOnUserInteractionCallback.registerFutureDismissal(
+                mBubbleNotificationEntry, REASON_CLICK)).thenReturn(mFutureDismissalRunnable);
+
+        mUnderTest.onNotificationFloatingWindowClicked(
+                mBubbleNotificationEntry, mBubbleNotificationRow);
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+
+        ArgumentCaptor<ActivityTransitionAnimator.LegacyPendingIntentStarter> starter =
+                ArgumentCaptor.forClass(ActivityTransitionAnimator.LegacyPendingIntentStarter.class);
+        verify(mActivityTransitionAnimator).startPendingIntentWithAnimation(
+                any(), eq(false), any(), starter.capture());
+        starter.getValue().startPendingIntent(null);
+        mUiBgExecutor.runAllReady();
+
+        ArgumentCaptor<Bundle> options = ArgumentCaptor.forClass(Bundle.class);
+        verify(mContentIntent).sendAndReturnResult(
+                any(), eq(0), any(), any(), any(), any(), options.capture());
+        assertThat(ActivityOptions.fromBundle(options.getValue()).getLaunchFloatingWindow()).isTrue();
+        verify(mBubblesManager, never()).expandStackAndSelectBubble(any(NotificationEntry.class));
+        verify(mShadeController).collapseShadeForActivityStart();
     }
 
     @EnableFlags(Flags.FLAG_ANIMATION_LIBRARY_SHELL_MIGRATION)

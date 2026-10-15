@@ -28,6 +28,7 @@ import static android.provider.Settings.Secure.LOCK_SCREEN_SHOW_NOTIFICATIONS;
 import static android.provider.Settings.Secure.REDACT_OTP_NOTIFICATION_WHILE_CONNECTED_TO_WIFI;
 
 import static com.android.systemui.DejankUtils.whitelistIpcs;
+import static com.android.systemui.statusbar.phone.StatusBarRemoteInputCallback.EXTRA_NOTIFICATION_ACTIVITY_OPTIONS;
 
 import android.annotation.SuppressLint;
 import android.annotation.UserIdInt;
@@ -44,6 +45,7 @@ import android.content.pm.UserInfo;
 import android.database.ContentObserver;
 import android.database.ExecutorContentObserver;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
@@ -245,7 +247,10 @@ public class NotificationLockscreenUserManagerImpl implements
                 final String notificationKey = intent.getStringExtra(Intent.EXTRA_INDEX);
                 if (intentSender != null) {
                     try {
-                        ActivityOptions options = ActivityOptions.makeBasic();
+                        Bundle activityOptions = intent.getBundleExtra(EXTRA_NOTIFICATION_ACTIVITY_OPTIONS);
+                        ActivityOptions options = activityOptions != null
+                                ? ActivityOptions.fromBundle(activityOptions)
+                                : ActivityOptions.makeBasic();
                         options.setPendingIntentBackgroundActivityStartMode(
                                 ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
                         mContext.startIntentSender(intentSender, null, 0, 0, 0,
