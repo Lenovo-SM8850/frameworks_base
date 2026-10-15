@@ -498,6 +498,107 @@ class DesktopTasksController(
         )
     }
 
+    /** Returns whether desktop mode is supported on the given display. */
+    fun isDesktopModeSupportedOnDisplay(displayId: Int): Boolean =
+        desktopState.isDesktopModeSupportedOnDisplay(displayId)
+
+    /** Toggles a desktop session with the apps currently shown on the display. */
+    fun toggleDesktopMode(displayId: Int) {
+        if (!desktopState.isDesktopModeSupportedOnDisplay(displayId)) return
+        if (lockTaskChangeListener.isTaskLocked) return
+        val userId = shellController.currentUserId
+        val repository = userRepositories.getProfile(userId)
+        repository.getActiveDeskId(displayId)?.let { deskId ->
+            val focusedTask = getFocusedDesktopTask(displayId, userId)
+            if (focusedTask != null) {
+                moveDesktopTaskToFullscreen(
+                    focusedTask,
+                    displayId,
+                    DesktopModeTransitionSource.UNKNOWN,
+                )
+                return
+            }
+            deactivateDesk(
+                deskId = deskId,
+                userId = userId,
+                skipWallpaperAndHomeOrdering = false,
+                exitReason = ExitReason.RETURN_HOME_OR_OVERVIEW,
+            )
+            return
+        }
+
+        val splitTasks =
+            if (splitScreenController.isSplitScreenVisible) {
+                splitScreenController.allTaskInfos.filter { it.displayId == displayId }
+            } else {
+                emptyList()
+            }
+        if (splitTasks.isEmpty()) {
+            val focusedTasks = getFocusedNonDesktopTasks(displayId, userId)
+            val focusedTask = focusedTasks.firstOrNull { task ->
+                task.activityType == ACTIVITY_TYPE_STANDARD &&
+                    focusedTasks.none { it.parentTaskId == task.taskId }
+            }
+            if (focusedTask != null) {
+                moveFullscreenTaskToDesktop(focusedTask, DesktopModeTransitionSource.UNKNOWN)
+                return
+            }
+        } else if (
+            splitTasks.size != 2 ||
+                splitTasks.any { desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(it) }
+        ) {
+            return
+        }
+
+        val splitBounds = splitTasks.associate { task ->
+            task.taskId to Rect(task.configuration.windowConfiguration.bounds)
+        }
+        mainScopeImmediate.launch {
+            val deskId = getOrCreateDefaultDeskIdSuspending(displayId, userId)
+            if (userId != shellController.currentUserId) return@launch
+            if (!desktopState.isDesktopModeSupportedOnDisplay(displayId)) return@launch
+            if (lockTaskChangeListener.isTaskLocked) return@launch
+            val wct = WindowContainerTransaction()
+            if (splitTasks.isNotEmpty()) {
+                exitSplitIfApplicable(wct, splitTasks.first())
+            } else {
+                // Keep retained windows minimized when opening an empty desktop from Home.
+                repository.getExpandedTasksIdsInDeskOrdered(deskId).forEach { taskId ->
+                    shellTaskOrganizer.getRunningTaskInfo(taskId)?.let { task ->
+                        desksOrganizer.minimizeTask(wct, deskId, task)
+                    }
+                    repository.minimizeTaskInDesk(displayId, deskId, taskId)
+                }
+            }
+            val runOnTransitStart =
+                addDeskActivationChanges(
+                    deskId = deskId,
+                    wct = wct,
+                    newTask = splitTasks.lastOrNull(),
+                    userId = userId,
+                    enterReason = EnterReason.UNKNOWN_ENTER,
+                )
+            val stableBounds = Rect()
+            displayController.getDisplayLayout(displayId)
+                ?.getStableBoundsForDesktopMode(stableBounds)
+            splitTasks.forEach { task ->
+                addMoveToDeskTaskChanges(wct, task, deskId)
+                val bounds = splitBounds.getValue(task.taskId)
+                if (!stableBounds.isEmpty && bounds.intersect(stableBounds)) {
+                    wct.setBounds(task.token, bounds)
+                }
+            }
+            // Default Shell animations coordinate both split windows in a single transition.
+            val transition = transitions.startTransition(TRANSIT_CHANGE, wct, null)
+            runOnTransitStart(transition)
+            if (!desktopState.enableMultipleDesktops) {
+                desktopRemoteListener.onEnterDesktopModeTransitionStarted(
+                    desktopAnimationConfiguration.toDesktopAnimationDurationMs
+                )
+            }
+        }
+    }
+
     /** Returns whether the given display has an active desk. */
     @JvmOverloads
     @Deprecated(
@@ -6601,7 +6702,7 @@ class DesktopTasksController(
      * @param listener the listener to remove.
      */
     fun removeDeskChangeListener(listener: DeskChangeListener) {
-        userRepositories.current.removeDeskChangeListener(listener)
+        userRepositories.forAllRepositories { it.removeDeskChangeListener(listener) }
     }
 
     /**

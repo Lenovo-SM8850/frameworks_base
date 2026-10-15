@@ -28,6 +28,7 @@ import com.android.systemui.qs.tiles.CPUInfoTile
 import com.android.systemui.qs.tiles.CaffeineTile
 import com.android.systemui.qs.tiles.CompassTile
 import com.android.systemui.qs.tiles.DataSwitchTile
+import com.android.systemui.qs.tiles.DesktopModeTile
 import com.android.systemui.qs.tiles.FPSInfoTile
 import com.android.systemui.qs.tiles.HeadsUpTile
 import com.android.systemui.qs.tiles.LocaleTile
@@ -105,6 +106,12 @@ interface LineageModule {
     @IntoMap
     @StringKey(DataSwitchTile.TILE_SPEC)
     fun bindDataSwitchTile(dataSwitchTile: DataSwitchTile): QSTileImpl<*>
+
+    /** Inject DesktopModeTile into tileMap in QSModule */
+    @Binds
+    @IntoMap
+    @StringKey(DesktopModeTile.TILE_SPEC)
+    fun bindDesktopModeTile(desktopModeTile: DesktopModeTile): QSTileImpl<*>
 
     /** Inject FPSInfoTile into tileMap in QSModule */
     @Binds
@@ -279,6 +286,21 @@ interface LineageModule {
                     QSTileUIConfig.Resource(
                         iconRes = R.drawable.ic_qs_blur,
                         labelRes = R.string.quick_settings_blur_label
+                    ),
+                instanceId = uiEventLogger.getNewInstanceId(),
+                category = TileCategory.DISPLAY,
+            )
+
+        @Provides
+        @IntoMap
+        @StringKey(DesktopModeTile.TILE_SPEC)
+        fun provideDesktopModeTileConfig(uiEventLogger: QsEventLogger): QSTileConfig =
+            QSTileConfig(
+                tileSpec = TileSpec.create(DesktopModeTile.TILE_SPEC),
+                uiConfig =
+                    QSTileUIConfig.Resource(
+                        iconRes = com.android.wm.shell.R.drawable.desktop_mode_ic_handle_menu_desktop,
+                        labelRes = R.string.quick_settings_desktop_mode_label,
                     ),
                 instanceId = uiEventLogger.getNewInstanceId(),
                 category = TileCategory.DISPLAY,
