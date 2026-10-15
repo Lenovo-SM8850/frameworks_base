@@ -102,6 +102,9 @@ abstract class WindowDecoration2<T>(
     private var windowDecorConfig: Configuration? = null
     /** The decor's context. */
     lateinit var decorWindowContext: Context
+    /** The decor's context, or null before the first relayout creates it. */
+    val decorWindowContextOrNull: Context?
+        get() = if (::decorWindowContext.isInitialized) decorWindowContext else null
     /** Whether the task associated with the decor has global focus. */
     var hasGlobalFocus = false
     /** The exclusion region of the task's display. */

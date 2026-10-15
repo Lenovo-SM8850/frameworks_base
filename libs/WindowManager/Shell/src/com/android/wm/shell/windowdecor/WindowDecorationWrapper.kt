@@ -52,15 +52,18 @@ private constructor(
     private val captionWindowDecoration: CaptionWindowDecoration? = null,
 ) {
     private var floatingBottomHandle: FloatingBottomHandle? = null
+    private var floatingTopHandle: FloatingBottomHandle? = null
 
     fun setFloatingHandleListener(listener: DesktopModeTouchEventListener) {
         if (captionWindowDecoration == null) {
-            floatingBottomHandle = FloatingBottomHandle(decorWindowContext, listener)
+            floatingBottomHandle = FloatingBottomHandle({ currentDecorWindowContext }, listener)
+            floatingTopHandle = FloatingBottomHandle({ currentDecorWindowContext }, listener, false)
         }
     }
 
     private fun updateFloatingBottomHandle(t: SurfaceControl.Transaction? = null) {
         floatingBottomHandle?.update(decorTaskInfo, taskSurface, t)
+        floatingTopHandle?.update(decorTaskInfo, taskSurface, t)
     }
 
     private fun requireDefaultWindowDecor(): DefaultWindowDecoration =
@@ -138,6 +141,7 @@ private constructor(
         val original = taskInfo
         val scale = original.floatingWindowScale
         floatingBottomHandle?.update(original, taskSurface, t)
+        floatingTopHandle?.update(original, taskSurface, t)
         updateFloatingWindowChildScale(t, scale)
         if (taskSurface.isValid) {
             val bounds = original.presentationBounds
@@ -204,6 +208,15 @@ private constructor(
                 desktopWindowDecor != null -> requireDesktopWindowDecor().mDisplay
                 captionWindowDecoration != null -> requireCaptionWindowDecor().mDisplay
                 else -> error("Expected Non-null default or desktop window decoration")
+            }
+
+    /** The window decor's [Context], or null before its first relayout creates it. */
+    private val currentDecorWindowContext: Context?
+        get() =
+            when {
+                defaultWindowDecor != null -> defaultWindowDecor.decorWindowContextOrNull
+                desktopWindowDecor != null -> desktopWindowDecor.mDecorWindowContext
+                else -> null
             }
 
     /** Returns the [Context] of the window decor. */
@@ -386,6 +399,8 @@ private constructor(
     fun close() {
         floatingBottomHandle?.close()
         floatingBottomHandle = null
+        floatingTopHandle?.close()
+        floatingTopHandle = null
         when {
             defaultWindowDecor != null -> requireDefaultWindowDecor().close()
             desktopWindowDecor != null -> requireDesktopWindowDecor().close()

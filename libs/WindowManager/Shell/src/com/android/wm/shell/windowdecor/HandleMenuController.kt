@@ -21,6 +21,9 @@ interface HandleMenuController {
     /** Returns whether the handle menu is currently open. */
     val isHandleMenuActive: Boolean
 
+    /** Selects the floating handle used to anchor the next menu. */
+    fun setFloatingMenuAnchor(view: android.view.View) {}
+
     /** Creates and shows the handle menu. */
     fun createHandleMenu(minimumInstancesFound: Boolean)
 }

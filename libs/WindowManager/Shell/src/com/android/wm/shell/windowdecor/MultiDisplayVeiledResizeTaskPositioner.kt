@@ -657,8 +657,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
         if (!FloatingWindowGeometry.isCorner(ctrlType)) {
             val task = windowDecoration.taskInfo
-            val fixed = ctrlType == CTRL_TYPE_TOP ||
-                FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
+            val fixed = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
                     taskBoundsAtDragStart) != null
             val next = FloatingWindowGeometry.selectLandscape(floatingLandscape,
                 bounds.width().toFloat() / bounds.height().coerceAtLeast(1), fixed)

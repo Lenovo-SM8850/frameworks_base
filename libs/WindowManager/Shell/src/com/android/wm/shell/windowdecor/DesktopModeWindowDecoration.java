@@ -1273,7 +1273,10 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         // from being visible if freeform task window above is translucent.
         // Otherwise if fluid resize is enabled, add a background to freeform tasks.
         relayoutParams.mShouldSetBackground = desktopConfig.shouldSetBackground(taskInfo);
-        if (taskInfo.isFloatingWindow) relayoutParams.mShouldSetAppBounds = false;
+        if (taskInfo.isFloatingWindow) {
+            relayoutParams.mShouldSetAppBounds = false;
+            relayoutParams.mIsInsetSource = false;
+        }
     }
 
     private static int getCornerRadiusId(int layoutResId) {
@@ -1593,6 +1596,13 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         return mLayoutMenu != null;
     }
 
+    private View mFloatingMenuAnchor;
+
+    @Override
+    public void setFloatingMenuAnchor(View view) {
+        mFloatingMenuAnchor = view;
+    }
+
     /**
      * Updates app info and creates and displays handle menu window.
      */
@@ -1670,6 +1680,9 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 mResult.mCaptionY + mResult.mCaptionTopPadding,
                 mDecorThemeUtilFactory
         );
+        if (mTaskInfo.isFloatingWindow && mFloatingMenuAnchor != null) {
+            mHandleMenu.setFloatingMenuAnchor(mFloatingMenuAnchor);
+        }
         mWindowDecorViewHolder.onHandleMenuOpened();
         mHandleMenu.show(
                 /* openInBrowserClickListener= */ (intent) -> {

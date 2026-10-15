@@ -491,7 +491,7 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
                 .setWindowCrop(captionSurface, outResult.mCaptionWidth, outResult.mCaptionHeight)
                 .setPosition(captionSurface, outResult.mCaptionX, 0 /* y */)
                 .setLayer(captionSurface, CAPTION_LAYER_Z_ORDER)
-                .show(captionSurface);
+                .setVisibility(captionSurface, !mTaskInfo.isFloatingWindow);
         SurfaceControl[] layers = {captionSurface};
         mBgExecutor.execute(() -> {
             synchronized (mTaskOrganizer) {
@@ -507,7 +507,7 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
             RelayoutResult<T> outResult, Rect taskBounds, Rect localCaptionBounds,
             Context decorWindowContext) {
         if (mFloatingWindowPreview) return;
-        if (!mIsCaptionVisible || !params.mIsInsetSource) {
+        if (mTaskInfo.isFloatingWindow || !mIsCaptionVisible || !params.mIsInsetSource) {
             if (mWindowDecorationInsets != null) {
                 mWindowDecorationInsets.remove(wct);
                 mWindowDecorationInsets = null;
@@ -517,19 +517,6 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         // Caption inset is the full width of the task with the |captionHeight| and
         // positioned at the top of the task bounds, also in absolute coordinates.
         // So just reuse the task bounds and adjust the bottom coordinate.
-        if (mTaskInfo.isFloatingWindow) {
-            final Rect logical = new Rect(mTaskInfo.configuration.windowConfiguration.getBounds());
-            logical.bottom = logical.top + (int) Math.ceil(outResult.mCaptionHeight
-                    / mTaskInfo.floatingWindowScale);
-            final WindowDecorationInsets insets = new WindowDecorationInsets(mTaskInfo.token,
-                    mOwner, logical, null, Collections.emptyList(), Collections.emptyList(),
-                    params.mInsetSourceFlags, params.mIsInsetSource, false);
-            if (!insets.equals(mWindowDecorationInsets)) {
-                mWindowDecorationInsets = insets;
-                insets.update(wct);
-            }
-            return;
-        }
         final Rect captionInsetsRect = new Rect(taskBounds);
         captionInsetsRect.bottom = captionInsetsRect.top + outResult.mCaptionHeight;
 

@@ -453,6 +453,12 @@ class AppHeaderController(
         viewHolder.onMaximizeWindowHoverEnter()
     }
 
+    private var floatingMenuAnchor: View? = null
+
+    override fun setFloatingMenuAnchor(view: View) {
+        floatingMenuAnchor = view
+    }
+
     /** Updates app info and creates and displays handle menu window. */
     override fun createHandleMenu(minimumInstancesFound: Boolean) {
         if (isHandleMenuActive || handleMenuCreationJob?.isActive == true) return
@@ -503,8 +509,8 @@ class AppHeaderController(
                     layoutResId = R.layout.desktop_mode_app_header,
                     splitScreenController = splitScreenController,
                     shouldShowWindowingPill =
-                        !Flags.enableConsolidatedWindowOptions() &&
-                            desktopState.canEnterDesktopModeOrShowAppHandle,
+                        taskInfo.isFloatingWindow || (!Flags.enableConsolidatedWindowOptions() &&
+                            desktopState.canEnterDesktopModeOrShowAppHandle),
                     shouldShowNewWindowButton = supportsMultiInstance,
                     shouldShowManageWindowsButton = shouldShowManageWindowsButton,
                     shouldShowChangeAspectRatioButton = shouldShowChangeAspectRatioButton,
@@ -525,6 +531,9 @@ class AppHeaderController(
                     decorThemeUtilFactory = decorThemeUtilFactory,
                 )
                 .apply {
+                    if (taskInfo.isFloatingWindow) {
+                        floatingMenuAnchor?.let(::setFloatingMenuAnchor)
+                    }
                     show(
                         openInAppOrBrowserClickListener = { intent ->
                             windowDecorationActions.onOpenInBrowser(taskInfo.taskId, intent)
