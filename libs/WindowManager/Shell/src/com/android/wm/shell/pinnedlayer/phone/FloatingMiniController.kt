@@ -216,8 +216,10 @@ class FloatingMiniController(
         val restore = entry.restore
         val scale = min(restore.scale, min(stable.width().toFloat() / restore.logical.width(),
             stable.height().toFloat() / restore.logical.height()))
-        val destination = FloatingMiniState.clamp(FloatingMiniState.sized(restore.logical, scale,
-            restore.bounds.left, restore.bounds.top), stable)
+        val destination = FloatingMiniState.sized(restore.logical, scale, 0, 0).apply {
+            offsetTo((entry.bounds.exactCenterX() - width() / 2f).roundToInt(),
+                (entry.bounds.exactCenterY() - height() / 2f).roundToInt())
+        }.let { FloatingMiniState.clamp(it, stable) }
         val current = task.configuration.windowConfiguration.bounds
         val drawingTask = if (current.width() != restore.logical.width() ||
             current.height() != restore.logical.height()) {
