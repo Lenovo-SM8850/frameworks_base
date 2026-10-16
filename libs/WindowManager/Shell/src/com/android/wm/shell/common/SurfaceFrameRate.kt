@@ -15,6 +15,7 @@ object SurfaceFrameRate {
         "ro.surface_flinger.enable_frame_rate_override", true)
 
     fun addInteractionListener(listener: () -> Unit) { listeners += listener }
+    fun removeInteractionListener(listener: () -> Unit) { listeners -= listener }
 
     fun setInteracting(owner: Any, active: Boolean) {
         val wasActive = isInteracting

@@ -4,6 +4,7 @@ package com.android.wm.shell.windowdecor
 import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.SurfaceControl
@@ -16,6 +17,8 @@ import android.widget.FrameLayout
 import com.android.wm.shell.R
 import com.android.wm.shell.windowdecor.common.DecorThemeUtil
 import com.android.wm.shell.windowdecor.common.Theme
+import com.android.wm.shell.windowdecor.common.NavigationHandleColor
+import com.android.wm.shell.windowdecor.common.HandleRegionSampler
 import kotlin.math.roundToInt
 
 /**
@@ -32,6 +35,8 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
     private var hostWidth = 0
     private var hostHeight = 0
     private var pill: View? = null
+    private var sampler: HandleRegionSampler? = null
+    private val sampleBounds = Rect()
 
     fun update(task: RunningTaskInfo, taskSurface: SurfaceControl,
         transaction: SurfaceControl.Transaction? = null) {
@@ -72,6 +77,9 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
                 }
                 addView(View(context).apply {
                     pill = this
+                    sampler = HandleRegionSampler(this) { light ->
+                        background?.setTint(NavigationHandleColor.get(context, light))
+                    }
                     background = context.getDrawable(R.drawable.decor_handle_dark)?.mutate()
                 }, FrameLayout.LayoutParams((32 * density).roundToInt(),
                     (4 * density).roundToInt(), Gravity.CENTER))
@@ -88,9 +96,16 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         } else if (width != hostWidth || height != hostHeight) {
             host?.relayout(width, height)
         }
-        val light = DecorThemeUtil(context).getAppTheme(task) == Theme.DARK
-        pill?.background?.setTint(context.getColor(if (light)
-            R.color.desktop_mode_caption_handle_bar_light else R.color.desktop_mode_caption_handle_bar_dark))
+        val appearance = task.taskDescription?.systemBarsAppearance
+        val light = if (appearance != null && appearance != 0) {
+            appearance and android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS == 0
+        } else DecorThemeUtil(context).getAppTheme(task) == Theme.DARK
+        val pillWidth = (32 * density).roundToInt()
+        val pillHeight = (4 * density).roundToInt()
+        val x = bounds.centerX() - pillWidth / 2
+        val y = (if (atBottom) bounds.bottom - height else bounds.top) + (height - pillHeight) / 2
+        sampleBounds.set(x, y, x + pillWidth, y + pillHeight)
+        sampler?.update(sampleBounds, true, light)
         hostWidth = width
         hostHeight = height
         val t = transaction ?: SurfaceControl.Transaction()
@@ -106,6 +121,8 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
     }
 
     override fun close() {
+        sampler?.close()
+        sampler = null
         host?.release()
         host = null
         pill = null
