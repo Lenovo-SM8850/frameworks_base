@@ -847,4 +847,16 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
 
+    @Test
+    fun deskMinimizedEntry_retainsFloatingIdentityAndEdgeRestoreGeometry() {
+        val task = setupTask(bounds = Rect(100, 100, 700, 900))
+        val wct = WindowContainerTransaction()
+        assertTrue(pinnedLayerController.prepareFloatingTask(task, wct,
+            task.configuration.windowConfiguration.bounds, true))
+        assertTrue(pinnedLayerController.isPinned(task.taskId))
+        assertTrue(wct.changes[task.token.asBinder()]!!.hidden)
+        assertEquals(Rect(100, 100, 700, 900), task.configuration.windowConfiguration.bounds)
+        assertTrue(wct.hierarchyOps.any { !it.toTop })
+    }
+
 }

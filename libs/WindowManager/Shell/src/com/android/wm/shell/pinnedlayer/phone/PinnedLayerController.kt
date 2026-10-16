@@ -373,22 +373,44 @@ class PinnedLayerController(
         presentationController.getPinEntryDestinationBounds(task)
 
     /** Adds entry properties before starting a Shell-owned transition. */
-    fun prepareFloatingTask(task: TaskInfo, wct: WindowContainerTransaction): Boolean {
+    fun prepareFloatingTask(task: TaskInfo, wct: WindowContainerTransaction): Boolean =
+        prepareFloatingTask(task, wct, null, false)
+
+    fun prepareFloatingTask(task: TaskInfo, wct: WindowContainerTransaction,
+        visibleBounds: Rect?, minimized: Boolean): Boolean {
         if (!isPinningSupported(task)) return false
-        val bounds = presentationController.getPinEntryDestinationBounds(task) ?: return false
-        minimizeOldestIfNeeded(task, wct)
+        val initial = presentationController.getPinEntryDestinationBounds(task) ?: return false
+        val bounds = visibleBounds?.let { presentationController.getPreservedEntryBounds(task, it) }
+            ?: initial
+        if (!minimized) minimizeOldestIfNeeded(task, wct)
         pinnedTasks += task.taskId
         visiblePinnedTasks += task.taskId
         minimizedTasks -= task.taskId
         removeMinimizeHandle(task.taskId)
         wct.merge(getLayerPinnedWct(task.token), true)
-        presentationController.applyPresentation(task, bounds, wct)
+        val scale = presentationController.entryScale(task)
+        if (visibleBounds != null) {
+            presentationController.setManualOrientation(task, bounds.width() > bounds.height(), bounds)
+        }
+        presentationController.applyPresentation(task, bounds, wct, scale)
         wct.setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
+        if (minimized) {
+            visiblePinnedTasks -= task.taskId
+            minimizedTasks += task.taskId
+            minimizeState.minimize(task.taskId, task.userId, bounds, true,
+                scale)
+            minimizeHandles?.update()
+            wct.merge(getLayerUnpinnedWct(task.token, isMinimizing = true), true)
+        }
         return true
     }
 
+    companion object {
+        const val MAX_VISIBLE_FLOATING_TASKS = 5
+    }
+
     private fun minimizeOldestIfNeeded(task: TaskInfo, wct: WindowContainerTransaction) {
-        if (task.taskId in visiblePinnedTasks || visiblePinnedTasks.size < 5) return
+        if (task.taskId in visiblePinnedTasks || visiblePinnedTasks.size < MAX_VISIBLE_FLOATING_TASKS) return
         val oldestId = visiblePinnedTasks.first()
         visiblePinnedTasks -= oldestId
         minimizedTasks += oldestId

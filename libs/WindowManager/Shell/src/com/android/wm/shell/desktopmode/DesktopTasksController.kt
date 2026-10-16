@@ -360,6 +360,7 @@ class DesktopTasksController(
                 false
             }
         }
+        if (canMoveDeskToFloating(task)) return moveDeskToFloating(task)
         if (desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(task)) return false
         val wct = WindowContainerTransaction()
         if (!controller.prepareFloatingTask(task, wct)) return false
@@ -378,6 +379,49 @@ class DesktopTasksController(
         } else {
             transitions.startTransition(TRANSIT_CHANGE, wct, null)
         }
+        return true
+    }
+
+    fun canMoveDeskToFloating(task: TaskInfo): Boolean {
+        if (task.displayId != DEFAULT_DISPLAY || task.isFloatingWindow ||
+            task.windowingMode != WINDOWING_MODE_FREEFORM ||
+            task.activityType != ACTIVITY_TYPE_STANDARD || pinnedLayerController == null) return false
+        val repository = userRepositories.getProfile(task.userId)
+        val deskId = repository.getActiveDeskId(task.displayId) ?: return false
+        return repository.isActiveTaskInDesk(task.taskId, deskId)
+    }
+
+    private fun moveDeskToFloating(selected: RunningTaskInfo): Boolean {
+        val controller = pinnedLayerController ?: return false
+        val repository = userRepositories.getProfile(selected.userId)
+        val deskId = repository.getActiveDeskId(selected.displayId) ?: return false
+        val tda = rootTaskDisplayAreaOrganizer.getDisplayAreaInfo(selected.displayId) ?: return false
+        val ordered = repository.getFreeformTasksIdsInDeskInZOrder(deskId)
+            .mapNotNull(shellTaskOrganizer::getRunningTaskInfo)
+        val eligible = ordered.filter { task -> task.isResizeable &&
+            task.activityType == ACTIVITY_TYPE_STANDARD &&
+            !desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(task) }
+        val live = eligible.filterNot { repository.isMinimizedTask(it.taskId) }
+            .take(PinnedLayerController.MAX_VISIBLE_FLOATING_TASKS).map { it.taskId }.toSet()
+        val wct = WindowContainerTransaction()
+        val cleanup = performDesktopExitCleanUp(wct, deskId, selected.displayId, selected.userId,
+            willExitDesktop = true, removingLastTaskId = null,
+            exitReason = ExitReason.TASK_MOVED_FROM_DESK)
+        ordered.asReversed().forEach { task ->
+            addMoveToFullscreenChanges(wct, task, willExitDesktop = false,
+                skipSetWindowingMode = true)
+            val minimized = repository.isMinimizedTask(task.taskId)
+            val float = task in eligible && (minimized || task.taskId in live) &&
+                controller.prepareFloatingTask(task, wct,
+                    Rect(task.configuration.windowConfiguration.bounds), minimized)
+            if (!float) {
+                addMoveToFullscreenChanges(wct, task, willExitDesktop = false)
+                wct.setHidden(task.token, false).reparent(task.token, tda.token, false)
+            }
+        }
+        val transition = transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        cleanup?.invoke(transition)
+        ordered.forEach { repository.removeTaskFromDesk(deskId, it.taskId) }
         return true
     }
 

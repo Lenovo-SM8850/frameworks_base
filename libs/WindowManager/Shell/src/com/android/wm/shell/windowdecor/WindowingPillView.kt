@@ -306,11 +306,12 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
             it.background = createBackgroundDrawable(color = style.textColor,
                 cornerRadius = iconButtonRippleRadius, drawableInsets = iconButtonDrawableInsetsBase)
         }
+        val floatDesk = windowDecorationActions.canMoveDeskToFloating(taskInfo)
         floatingBtn.isGone = !showFloatingButton || taskInfo.displayId != DEFAULT_DISPLAY ||
-            !taskInfo.isResizeable || taskInfo.isFloatingWindow ||
-            desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(taskInfo) ||
+            (!taskInfo.isResizeable && !floatDesk) || taskInfo.isFloatingWindow ||
+            (!floatDesk && desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(taskInfo)) ||
             taskInfo.activityType != android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD ||
-            (!taskInfo.isFullscreen && !isInSplitScreen)
+            (!taskInfo.isFullscreen && !isInSplitScreen && !floatDesk)
 
         if (!Flags.enableNonDefaultDisplaySplitBugfix() && taskInfo.displayId != DEFAULT_DISPLAY) {
             splitscreenBtn.visibility = View.GONE

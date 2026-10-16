@@ -11311,6 +11311,76 @@ class DesktopTasksControllerTest : ShellTestCase() {
 
         private const val TO_DESKTOP_ANIM_DURATION = 336
     }
+    @Test fun deskToFloating_oneAndThreeTasksPreserveOrderAndRequestedGeometry() {
+        for (count in listOf(1, 3)) {
+            val floating = mock(PinnedLayerController::class.java)
+            controller.setPinnedLayerController(floating)
+            val deskId = 100 + count
+            taskRepository.addDesk(DEFAULT_DISPLAY, deskId)
+            taskRepository.setActiveDesk(DEFAULT_DISPLAY, deskId)
+            val tasks = (1..count).map { index ->
+                setUpFreeformTask(deskId = deskId,
+                    bounds = Rect(100 * index, 100, 100 * index + 600, 900)).apply {
+                    isResizeable = true
+                }
+            }
+            whenever(floating.prepareFloatingTask(any(), any(), any(), anyBoolean())).thenReturn(true)
+            val expected = taskRepository.getFreeformTasksIdsInDeskInZOrder(deskId).asReversed()
+            assertTrue(controller.moveToFloating(tasks.last().taskId))
+            val order = org.mockito.kotlin.inOrder(floating)
+            expected.forEach { id ->
+                val task = tasks.first { it.taskId == id }
+                order.verify(floating).prepareFloatingTask(eq(task), any(),
+                    eq(task.configuration.windowConfiguration.bounds), eq(false))
+            }
+            verify(desksOrganizer).deactivateDesk(any(), eq(deskId), anyBoolean())
+            assertTrue(taskRepository.getActiveTaskIdsInDesk(deskId).isEmpty())
+        }
+    }
+
+    @Test fun deskToFloating_nonResizableLeavesAsFullscreenInRecents() {
+        val floating = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floating)
+        val deskId = 104
+        taskRepository.addDesk(DEFAULT_DISPLAY, deskId)
+        taskRepository.setActiveDesk(DEFAULT_DISPLAY, deskId)
+        val task = setUpFreeformTask(deskId = deskId).apply { isResizeable = false }
+        assertTrue(controller.moveToFloating(task.taskId))
+        verify(floating, never()).prepareFloatingTask(eq(task), any(), any(), anyBoolean())
+        val transaction = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(eq(TRANSIT_CHANGE), transaction.capture(), isNull())
+        assertTrue(transaction.firstValue.changes[task.token.asBinder()]!!
+            .windowingMode in
+            listOf(WINDOWING_MODE_FULLSCREEN, WINDOWING_MODE_UNDEFINED))
+        assertTrue(transaction.firstValue.hierarchyOps.any {
+            it.container == task.token.asBinder() && !it.toTop
+        })
+        verify(desksOrganizer).deactivateDesk(any(), eq(deskId), anyBoolean())
+    }
+
+    @Test fun deskToFloating_limitKeepsTopFiveAndMinimizedEntryUsesExistingEdgeState() {
+        val floating = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floating)
+        val deskId = 105
+        taskRepository.addDesk(DEFAULT_DISPLAY, deskId)
+        taskRepository.setActiveDesk(DEFAULT_DISPLAY, deskId)
+        val tasks = (1..8).map { setUpFreeformTask(deskId = deskId).apply { isResizeable = true } }
+        taskRepository.minimizeTask(DEFAULT_DISPLAY, tasks.first().taskId)
+        whenever(floating.prepareFloatingTask(any(), any(), any(), anyBoolean())).thenReturn(true)
+        val top = taskRepository.getExpandedTasksIdsInDeskOrdered(deskId).take(5).toSet()
+        assertTrue(controller.moveToFloating(tasks.last().taskId))
+        tasks.forEach { task ->
+            if (task == tasks.first()) {
+                verify(floating).prepareFloatingTask(eq(task), any(), any(), eq(true))
+            } else if (task.taskId in top) {
+                verify(floating).prepareFloatingTask(eq(task), any(), any(), eq(false))
+            } else {
+                verify(floating, never()).prepareFloatingTask(eq(task), any(), any(), anyBoolean())
+            }
+        }
+        verify(desksOrganizer).deactivateDesk(any(), eq(deskId), anyBoolean())
+    }
+
 }
 
 private fun WindowContainerTransaction.assertIndexInBounds(index: Int) {
@@ -11567,4 +11637,5 @@ private fun RootTaskDisplayAreaOrganizer.setTouchFirst(displayId: Int) {
 private fun RootTaskDisplayAreaOrganizer.setDesktopFirst(displayId: Int) {
     val tda = getDisplayAreaInfo(displayId) ?: return
     tda.configuration.windowConfiguration.windowingMode = DESKTOP_FIRST_DISPLAY_WINDOWING_MODE
+
 }
