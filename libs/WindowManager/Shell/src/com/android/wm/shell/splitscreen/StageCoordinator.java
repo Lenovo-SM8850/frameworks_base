@@ -43,6 +43,7 @@ import static com.android.wm.shell.Flags.enableShellModes;
 import static com.android.wm.shell.common.split.SplitLayout.PARALLAX_ALIGN_CENTER;
 import static com.android.wm.shell.common.split.SplitLayout.PARALLAX_FLEX_HYBRID;
 import static com.android.wm.shell.common.split.SplitLayout.RESTING_DIM_LAYER;
+import static com.android.wm.shell.common.split.SplitScreenUtils.allowOffscreenRatios;
 import static com.android.wm.shell.common.split.SplitScreenUtils.getNewParentTokenForStage;
 import static com.android.wm.shell.common.split.SplitScreenUtils.getTargetWindowingModeWhenExitSplit;
 import static com.android.wm.shell.common.split.SplitScreenUtils.reverseSplitPosition;
@@ -54,6 +55,7 @@ import static com.android.wm.shell.shared.TransitionUtil.isClosingType;
 import static com.android.wm.shell.shared.TransitionUtil.isOpeningMode;
 import static com.android.wm.shell.shared.TransitionUtil.isOpeningType;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.FLAG_IS_DIVIDER_BAR;
+import static com.android.wm.shell.shared.split.SplitScreenConstants.NOT_IN_SPLIT;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_10_90;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_50_50;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_90_10;
@@ -192,6 +194,7 @@ import com.google.android.msdl.domain.MSDLPlayer;
 
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -259,6 +262,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     private final Optional<DesktopUserRepositories> mDesktopUserRepositories;
     /** Singleton source of truth for the current state of split screen on this device. */
     private final SplitState mSplitState;
+    @Nullable private final SplitScreenFrameRateController mFrameRateController;
     private final SplitStatusBarHider mStatusBarHider;
     private final DesktopState mDesktopState;
     /** A haptics controller that plays haptic effects. */
@@ -533,6 +537,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 rootDisplayAreaOrganizer);
         mSplitTransitionModifier = new SplitTransitionModifier();
         mActivityTaskManager = activityTaskManager;
+        mFrameRateController = new SplitScreenFrameRateController(context, mainExecutor,
+                mainHandler, taskOrganizer, transitions, displayController,
+                this::updateSplitFrameRates);
+        mSplitState.registerSplitStateChangeListener(state -> updateSplitFrameRates());
+        updateSplitFrameRates();
     }
 
     @VisibleForTesting
@@ -592,6 +601,46 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         mStatusBarHider = new SplitStatusBarHider(taskOrganizer, splitState,
                 rootDisplayAreaOrganizer);
         mSplitTransitionModifier = new SplitTransitionModifier();
+        mFrameRateController = null;
+    }
+
+    private void updateSplitFrameRates() {
+        if (mFrameRateController == null) return;
+        if (mSplitLayout == null || mSplitRootTaskInfo == null || !isSplitActive()
+                || !mDividerVisible || mSplitState.get() == NOT_IN_SPLIT
+                || !allowOffscreenRatios(mContext.getResources())) {
+            clearSplitFrameRates();
+            return;
+        }
+        final List<SplitScreenFrameRateController.Stage> stages = new ArrayList<>();
+        addFrameRateStage(stages, 0, getTopLeftStage());
+        addFrameRateStage(stages, 1, getBottomRightStage());
+        final boolean settled = mSplitState.mAnimatingToState == NOT_IN_SPLIT
+                && !mSplitLayout.isCurrentlyDividerFlinging() && !mSplitLayout.isCurrentlySwapping()
+                && !mIsDividerRemoteAnimating;
+        mFrameRateController.updateStages(stages, mSplitLayout.calculateCurrentSnapPosition(),
+                mSplitRootTaskInfo.displayId, settled);
+    }
+
+    private void addFrameRateStage(List<SplitScreenFrameRateController.Stage> stages, int index,
+            @Nullable StageTaskListener stage) {
+        if (stage == null || stage.mRootTaskInfo == null || stage.mRootLeash == null) return;
+        final List<RunningTaskInfo> children = new ArrayList<>();
+        stage.doForAllChildTaskInfos(children::add);
+        stages.add(new SplitScreenFrameRateController.Stage(index, stage.mRootTaskInfo,
+                stage.mRootLeash, children));
+    }
+
+    private void clearSplitFrameRates() {
+        if (mFrameRateController != null) {
+            mFrameRateController.updateStages(Collections.emptyList(), SNAP_TO_2_50_50,
+                    mDisplayId, false);
+        }
+    }
+
+    @Override
+    public void onDividerInteractionChanged(boolean interacting) {
+        if (mFrameRateController != null) mFrameRateController.setDividerMoving(interacting);
     }
 
     private Toast createSplitUnsupportedToast() {
@@ -2421,6 +2470,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @Override
     public void onChildTaskStatusChanged(StageTaskListener stageListener, int taskId,
             boolean present, boolean visible) {
+        updateSplitFrameRates();
         int stage;
         if (present) {
             if (enableFlexibleSplit()) {
@@ -2467,6 +2517,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onChildTaskMovedToBubble(StageTaskListener stage, int taskId) {
+        updateSplitFrameRates();
         if (stage.getChildCount() != 0) {
             ProtoLog.d(WM_SHELL_SPLIT_SCREEN,
                     "onChildTaskMovedToBubble: task=%d in stage=%s moved to bubble, ignore, "
@@ -2638,6 +2689,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             throw new IllegalArgumentException(this + "\n Unknown task info changed: "
                     + taskInfo);
         }
+        if (mSplitRootTaskInfo.displayId != taskInfo.displayId) clearSplitFrameRates();
         mSplitRootTaskInfo = taskInfo;
         if (mSplitLayout != null
                 && mSplitLayout.updateConfiguration(taskInfo.configuration, taskInfo.displayId)
@@ -2651,6 +2703,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             mSplitLayout.update(null /* t */, false /* resetImePosition */);
             onLayoutSizeChanged(mSplitLayout);
         }
+        updateSplitFrameRates();
     }
 
     @Override
@@ -2679,6 +2732,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @VisibleForTesting
     @Override
     public void onRootTaskAppeared() {
+        updateSplitFrameRates();
         if (enableFlexibleSplit()) {
             ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRootTaskAppeared: rootTask=%s",
                     mSplitRootTaskInfo);
@@ -2747,6 +2801,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onRootTaskVanished() {
+        clearSplitFrameRates();
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRootTaskVanished");
         final WindowContainerTransaction wct = new WindowContainerTransaction();
         mLaunchAdjacentController.clearLaunchAdjacentRoot();
@@ -2828,6 +2883,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         }
 
         mDividerVisible = visible;
+        updateSplitFrameRates();
 
         if (mIsDividerRemoteAnimating) {
             ProtoLog.d(WM_SHELL_SPLIT_SCREEN,
@@ -3015,6 +3071,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         final WindowContainerTransaction wct = new WindowContainerTransaction();
         boolean sizeChanged = updateWindowBounds(layout, wct);
         if (!sizeChanged) {
+            if (mFrameRateController != null) mFrameRateController.setResizing(false);
             // We still need to resize on decor for ensure all current status clear.
             final SurfaceControl.Transaction t = mTransactionPool.acquire();
             if (enableFlexibleSplit()) {
@@ -3043,14 +3100,17 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             }
         }
         sendOnBoundsChanged();
+        if (mFrameRateController != null) mFrameRateController.setResizing(true);
         mSplitLayout.setDividerInteractive(false, false, "onSplitResizeStart");
         mSplitTransitions.startResizeTransition(wct, this, (aborted, finishT) -> {
             mSplitLayout.setDividerInteractive(true, false, "onSplitResizeConsumed");
+            if (mFrameRateController != null) mFrameRateController.setResizing(false);
             for (SplitDecorManager decor : decorManagers) {
                 decor.releaseDecor(finishT);
             }
         }, (finishWct, t) -> {
             mSplitLayout.setDividerInteractive(true, false, "onSplitResizeFinish");
+            if (mFrameRateController != null) mFrameRateController.setResizing(false);
             mSplitLayout.populateTouchZones();
         });
 
@@ -3200,6 +3260,9 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      */
     public void onDisplayChange(int displayId, int fromRotation, int toRotation,
             @Nullable DisplayAreaInfo newDisplayAreaInfo, WindowContainerTransaction wct) {
+        if (mSplitRootTaskInfo != null && mSplitRootTaskInfo.displayId == displayId) {
+            clearSplitFrameRates();
+        }
         if (mSplitRootTaskInfo == null) return;
         boolean splitDisplayRotationAllowed = !enableNonDefaultDisplaySplitBugfix()
                 || mSplitRootTaskInfo.displayId == displayId;
@@ -4112,6 +4175,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Called to clean-up state and do house-keeping after the animation is done. */
     public void onTransitionAnimationComplete() {
+        if (mFrameRateController != null) mFrameRateController.setResizing(false);
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onTransitionAnimationComplete");
         // If still playing, let it finish.
         if (!isSplitActive() && !mIsExiting) {
@@ -4931,6 +4995,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     void notifySplitAnimationStatus(boolean animationRunning) {
+        if (mFrameRateController != null) mFrameRateController.setAnimating(animationRunning);
         if (mSplitInvocationListener == null || mSplitInvocationListenerExecutor == null) {
             return;
         }
