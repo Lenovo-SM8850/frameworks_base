@@ -466,4 +466,22 @@ class VisualIndicatorViewContainerTest : ShellTestCase() {
         private val BUBBLE_INDICATOR_BOUNDS = Rect(800, 200, 900, 900)
         private val BAR_INDICATOR_BOUNDS = Rect(880, 950, 900, 960)
     }
+    @Test fun release_waitsForHostTeardownBeforeRemovingParentAndIsIdempotent() {
+        val host = mock<SurfaceControlViewHost>()
+        whenever(mockSurfaceControlViewHostFactory.create(any(), any(), any(), any())).thenReturn(host)
+        val container = setupSpyViewContainer()
+        mainExecutor.flushAll()
+        org.mockito.kotlin.clearInvocations(host, syncQueue)
+        container.releaseVisualIndicator()
+        container.releaseVisualIndicator()
+        verify(host, never()).release()
+        mainExecutor.flushAll()
+        verify(syncQueue, never()).runInSync(any())
+        desktopExecutor.flushAll()
+        verify(host).release()
+        verify(syncQueue, never()).runInSync(any())
+        mainExecutor.flushAll()
+        verify(syncQueue).runInSync(any())
+    }
+
 }

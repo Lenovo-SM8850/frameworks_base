@@ -80,6 +80,23 @@ class FloatingMiniInputTest : ShellTestCase() {
         }
     }
 
+    @Test fun closeDuringInput_releasesDragOnceAndIgnoresStaleRelease() {
+        val view = view()
+        val time = SystemClock.uptimeMillis()
+        MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 20f, 20f, 0).also {
+            view.dispatchTouchEvent(it)
+            it.recycle()
+        }
+        input.close()
+        input.close()
+        MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_UP, 20f, 20f, 0).also {
+            view.dispatchTouchEvent(it)
+            it.recycle()
+        }
+        verify(controller).endMiniTap(task)
+        verify(controller, never()).restoreMini(task)
+    }
+
     @Test fun dragMovesMiniWithoutRestoring() {
         val view = view()
         val time = SystemClock.uptimeMillis()

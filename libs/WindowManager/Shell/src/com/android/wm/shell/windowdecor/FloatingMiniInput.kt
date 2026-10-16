@@ -3,8 +3,11 @@ package com.android.wm.shell.windowdecor
 
 import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.SurfaceControl
@@ -31,6 +34,9 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var downY = 0f
     private var dragging = false
     private var blockedGesture = false
+    private val handler = Handler(Looper.myLooper() ?: Looper.getMainLooper())
+    private var inputDispatchDepth = 0
+    private var gestureActive = false
     private var hostWidth = 0
     private var hostHeight = 0
     private var hostParams: WindowManager.LayoutParams? = null
@@ -108,7 +114,14 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                 return true
             }
         }).apply { setIsLongpressEnabled(false) }
-        return View(context).apply {
+        return object : View(context) {
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                inputDispatchDepth++
+                return try { super.dispatchTouchEvent(event) }
+                finally { inputDispatchDepth-- }
+            }
+        }.apply {
+                setBackgroundColor(Color.TRANSPARENT)
                 isClickable = true
                 isFocusable = false
                 contentDescription = context.getString(com.android.wm.shell.R.string.floating_window_restore,
@@ -128,6 +141,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                     if (event.actionMasked == MotionEvent.ACTION_DOWN) taps.onTouchEvent(event)
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
+                            gestureActive = true
                             start = controller.beginMiniDrag(current)
                             moved.set(start)
                             downX = event.rawX
@@ -135,6 +149,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             dragging = false
                         }
                         MotionEvent.ACTION_MOVE -> {
+                            if (!gestureActive) return@setOnTouchListener true
                             val dx = event.rawX - downX
                             val dy = event.rawY - downY
                             val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -152,6 +167,8 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             }
                         }
                         MotionEvent.ACTION_UP -> {
+                            if (!gestureActive) return@setOnTouchListener true
+                            gestureActive = false
                             if (dragging) controller.endMiniDrag(current, start, moved)
                             else {
                                 controller.endMiniTap(current)
@@ -159,6 +176,8 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             }
                         }
                         MotionEvent.ACTION_CANCEL -> {
+                            if (!gestureActive) return@setOnTouchListener true
+                            gestureActive = false
                             taps.onTouchEvent(event)
                             controller.endMiniDrag(current, start, start)
                         }
@@ -169,17 +188,29 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     }
 
     override fun close() {
-        host?.release()
+        val oldHost = host
+        val oldSurface = surface
+        val oldTask = task
         host = null
-        hostWidth = 0
-        hostHeight = 0
-        hostParams = null
-        surface?.let {
-            if (it.isValid) SurfaceControl.Transaction().use { t -> t.remove(it).apply() }
-            it.release()
-        }
         surface = null
         parent = null
         task = null
+        hostWidth = 0
+        hostHeight = 0
+        hostParams = null
+        blockedGesture = false
+        if (gestureActive) {
+            gestureActive = false
+            oldTask?.let(controller::endMiniTap)
+        }
+        val release = Runnable {
+            oldHost?.release()
+            oldSurface?.let {
+                if (it.isValid) SurfaceControl.Transaction().use { t -> t.remove(it).apply() }
+                it.release()
+            }
+        }
+        // Finish the input callback before disposing its receiver and rendering surface.
+        if (inputDispatchDepth != 0) handler.post(release) else release.run()
     }
 }
