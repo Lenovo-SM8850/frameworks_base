@@ -40,6 +40,10 @@ public interface RecentsTransitionStateListener {
     default void onTransitionStateChanged(@RecentsTransitionState int state, int displayId) {
     }
 
+    /** Notifies that the remote animation committed to Home. */
+    default void onTransitionFinishedToHome(int displayId) {
+    }
+
     /** Returns whether the recents transition is running. */
     static boolean isRunning(@RecentsTransitionState int state) {
         return state >= TRANSITION_STATE_REQUESTED;
