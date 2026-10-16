@@ -25,9 +25,9 @@ class HandleRegionSampler(private val view: View, private val tint: (Boolean) ->
     private val background = Executor { command ->
         BackgroundThread.getExecutor().execute {
             try { command.run() } catch (e: SecurityException) {
-                handler.post { unavailable = true; stop(); sampledLight = null; tint(fallbackLight) }
+                handler.post { if (!closed) { unavailable = true; stop(); sampledLight = null; tint(fallbackLight) } }
             } catch (e: UnsupportedOperationException) {
-                handler.post { unavailable = true; stop(); sampledLight = null; tint(fallbackLight) }
+                handler.post { if (!closed) { unavailable = true; stop(); sampledLight = null; tint(fallbackLight) } }
             }
         }
     }
@@ -91,6 +91,7 @@ class HandleRegionSampler(private val view: View, private val tint: (Boolean) ->
     }
 
     override fun close() {
+        if (closed) return
         closed = true
         SurfaceFrameRate.removeInteractionListener(motionListener)
         stop()

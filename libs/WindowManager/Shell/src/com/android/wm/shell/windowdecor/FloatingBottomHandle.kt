@@ -34,6 +34,7 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
     private var parent: SurfaceControl? = null
     private var hostWidth = 0
     private var hostHeight = 0
+    private var hostParams: WindowManager.LayoutParams? = null
     private var lastScale = Float.NaN
     private var visibleWidth = 0
     private var visibleHeight = 0
@@ -88,17 +89,23 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
                 }, FrameLayout.LayoutParams((32 * density).roundToInt(),
                     (4 * density).roundToInt(), Gravity.CENTER))
             }
-            viewHost.setView(root, WindowManager.LayoutParams(width, height,
+            val params = WindowManager.LayoutParams(width, height,
                 WindowManager.LayoutParams.TYPE_APPLICATION,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT).apply {
                     setTrustedOverlay()
                     setFitInsetsTypes(0)
                     setTitle("Floating ${if (atBottom) "bottom" else "top"} handle ${task.taskId}")
-                })
+                }
+            hostParams = params
+            viewHost.setView(root, params)
             host = viewHost
         } else if (width != hostWidth || height != hostHeight) {
-            host?.relayout(width, height)
+            hostParams?.let {
+                it.width = width
+                it.height = height
+                host?.relayout(it)
+            }
         }
         val appearance = task.taskDescription?.systemBarsAppearance
         val light = if (appearance != null && appearance != 0) {
@@ -134,10 +141,15 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
     override fun close() {
         sampler?.close()
         sampler = null
-        host?.release()
+        val oldHost = host
+        val oldSurface = surface
         host = null
+        hostParams = null
+        surface = null
+        parent = null
         pill = null
-        surface?.let { leash ->
+        oldHost?.release()
+        oldSurface?.let { leash ->
             if (leash.isValid) SurfaceControl.Transaction().use { it.remove(leash).apply() }
             leash.release()
         }

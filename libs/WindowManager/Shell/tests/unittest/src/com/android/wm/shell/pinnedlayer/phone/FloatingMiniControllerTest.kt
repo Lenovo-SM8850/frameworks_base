@@ -244,4 +244,16 @@ class FloatingMiniControllerTest : ShellTestCase() {
         verify(h.transaction).close()
     }
 
+    @Test fun removedMini_pendingFrameCannotUseClosedTransaction() {
+        val h = Harness()
+        h.controller.beginDrag(h.task)
+        h.controller.move(h.task, Rect(20, 200, 380, 740))
+        val callback = argumentCaptor<Choreographer.FrameCallback>()
+        verify(h.choreographer).postFrameCallback(callback.capture())
+        h.controller.remove(h.task)
+        callback.firstValue.doFrame(6_060_606)
+        verify(h.transaction).close()
+        verify(h.transaction, never()).apply()
+    }
+
 }

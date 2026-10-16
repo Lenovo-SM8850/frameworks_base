@@ -82,7 +82,7 @@ constructor(
     // be accessed from shell main thread. Everything else should be used exclusively
     // from the desktop thread.
     private var indicatorLeash: SurfaceControl? = null
-    private var isReleased = false
+    @Volatile private var isReleased = false
     private var miniPreview = false
     private val miniBounds = Rect()
     private var miniOutline: LayerDrawable? = null
@@ -161,8 +161,7 @@ constructor(
     private fun showIndicator(taskSurface: SurfaceControl, leash: SurfaceControl) {
         mainExecutor.execute {
             if (isReleased) {
-                SurfaceControl.Transaction().use { it.remove(leash).apply() }
-                leash.release()
+                releaseIndicator(leash)
                 return@execute
             }
             indicatorLeash = leash
@@ -394,21 +393,31 @@ constructor(
     @ShellMainThread
     fun releaseVisualIndicator() {
         if (isReleased) return
+        isReleased = true
+        val leash = indicatorLeash
+        indicatorLeash = null
+        releaseIndicator(leash)
+    }
+
+    private fun releaseIndicator(leash: SurfaceControl?) {
         desktopExecutor.execute {
             indicatorView?.animate()?.cancel()
-            indicatorViewHost?.release()
+            val host = indicatorViewHost
             indicatorViewHost = null
-        }
-        indicatorLeash?.let {
-            val tx = SurfaceControl.Transaction()
-            tx.remove(it)
-            indicatorLeash = null
-            syncQueue.runInSync { transaction: SurfaceControl.Transaction ->
-                transaction.merge(tx)
-                tx.close()
+            indicatorView = null
+            host?.release()
+            mainExecutor.execute {
+                leash?.let {
+                    val tx = SurfaceControl.Transaction()
+                    tx.remove(it)
+                    syncQueue.runInSync { transaction: SurfaceControl.Transaction ->
+                        transaction.merge(tx)
+                        tx.close()
+                        it.release()
+                    }
+                }
             }
         }
-        isReleased = true
     }
 
     private fun getOrCreateBubbleBarIndicator(type: IndicatorType): View? {
