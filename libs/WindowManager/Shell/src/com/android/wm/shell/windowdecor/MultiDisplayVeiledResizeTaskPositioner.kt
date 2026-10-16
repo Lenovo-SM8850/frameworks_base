@@ -127,6 +127,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var lastFloatingX = Float.NaN
     private var lastFloatingY = Float.NaN
     private var floatingMovePending = false
+    private var floatingEdgeMove = false
     private val miniPreview = FloatingMiniPreview(desktopTasksController::createFloatingMiniPreview)
     private var miniPreviewCancelled = false
     private val floatingFrameCallback = Choreographer.FrameCallback {
@@ -181,7 +182,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
         miniPreview.close()
         miniPreviewCancelled = false
         windowDecoration.floatingMiniPreviewCancellation = ::onDragPositioningCancel
-        this.ctrlType = ctrlType
+        floatingEdgeMove = windowDecoration.taskInfo.isFloatingWindow &&
+            Integer.bitCount(ctrlType) == 1
+        this.ctrlType = if (floatingEdgeMove) DragPositioningCallback.CTRL_TYPE_UNDEFINED else ctrlType
         startDisplayId = displayId
         hasMovedTaskSurfaceOffScreen = false
         val task = windowDecoration.taskInfo
@@ -501,6 +504,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
             cancelFloatingFrame()
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
+            if (floatingEdgeMove) {
+                windowDecoration.pinnedLayerController?.onDragEnded(windowDecoration.taskSurface,
+                    windowDecoration.taskInfo, Rect(taskBoundsAtDragStart), repositionTaskBounds, displayId)
+                floatingEdgeMove = false
+            }
             taskBoundsAtDragStart.setEmpty()
             ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
             stopFloatingObserver()

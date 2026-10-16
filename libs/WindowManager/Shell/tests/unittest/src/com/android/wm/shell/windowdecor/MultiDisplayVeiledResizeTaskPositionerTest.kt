@@ -1248,26 +1248,26 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
     }
 
     @Test
-    fun floatingTopEdge_changesOnlyScale() = runOnUiThread {
-        verifyFloatingEdgeScale(CTRL_TYPE_TOP, 400f, 100f, 400f, 40f)
+    fun floatingTopEdge_movesWindow() = runOnUiThread {
+        verifyFloatingEdgeMove(CTRL_TYPE_TOP, 400f, 100f, 400f, 40f)
     }
 
     @Test
-    fun floatingRightEdge_changesOnlyScale() = runOnUiThread {
-        verifyFloatingEdgeScale(CTRL_TYPE_RIGHT, 700f, 550f, 740f, 550f)
+    fun floatingRightEdge_movesWindow() = runOnUiThread {
+        verifyFloatingEdgeMove(CTRL_TYPE_RIGHT, 700f, 550f, 740f, 550f)
     }
 
     @Test
-    fun floatingLeftEdge_changesOnlyScale() = runOnUiThread {
-        verifyFloatingEdgeScale(CTRL_TYPE_LEFT, 100f, 550f, 60f, 550f)
+    fun floatingLeftEdge_movesWindow() = runOnUiThread {
+        verifyFloatingEdgeMove(CTRL_TYPE_LEFT, 100f, 550f, 60f, 550f)
     }
 
     @Test
-    fun floatingBottomEdge_changesOnlyScale() = runOnUiThread {
-        verifyFloatingEdgeScale(CTRL_TYPE_BOTTOM, 400f, 1000f, 400f, 1060f)
+    fun floatingBottomEdge_movesWindow() = runOnUiThread {
+        verifyFloatingEdgeMove(CTRL_TYPE_BOTTOM, 400f, 1000f, 400f, 1060f)
     }
 
-    private fun verifyFloatingEdgeScale(ctrl: Int, x: Float, y: Float, endX: Float, endY: Float) {
+    private fun verifyFloatingEdgeMove(ctrl: Int, x: Float, y: Float, endX: Float, endY: Float) {
         val task = mockWindowDecoration.taskInfo
         task.isFloatingWindow = true
         task.floatingWindowScale = .75f
@@ -1276,17 +1276,18 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         val initial = Rect(100, 100, 900, 1300)
         task.configuration.windowConfiguration.setBounds(initial)
         taskPositioner.onDragPositioningStart(ctrl, DISPLAY_ID_0, x, y, INPUT_METHOD_TYPE_UNKNOWN)
+        val pinned = mock<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>()
+        whenever(mockWindowDecoration.pinnedLayerController).thenReturn(pinned)
         val preview = taskPositioner.onDragPositioningMove(DISPLAY_ID_0, endX, endY)
-        Assert.assertEquals(.6667f, preview.width().toFloat() / preview.height(), .002f)
+        Assert.assertEquals(Rect(100 + (endX - x).toInt(), 100 + (endY - y).toInt(),
+            700 + (endX - x).toInt(), 1000 + (endY - y).toInt()), preview)
         taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, endX, endY)
+        verify(pinned).onDragEnded(eq(mockSurfaceControl), eq(task),
+            eq(Rect(100, 100, 700, 1000)), eq(preview), eq(DISPLAY_ID_0))
         Assert.assertEquals(initial, task.configuration.windowConfiguration.bounds)
+        Assert.assertEquals(.75f, task.floatingWindowScale)
+        verify(mockWindowDecoration, never()).showResizeVeil(any())
         verify(mockTransitions, never()).startTransition(any(), any(), any())
-        verify(mockShellTaskOrganizer).applyTransaction(argThat {
-            changes[taskBinder]?.let { change ->
-                kotlin.math.abs(change.floatingWindowScale - .8f) < .001f &&
-                    change.configuration.windowConfiguration.bounds.isEmpty
-            } == true
-        })
         verify(mockDesktopTasksController, never()).rememberFloatingOrientation(any(), any(), any())
     }
 
