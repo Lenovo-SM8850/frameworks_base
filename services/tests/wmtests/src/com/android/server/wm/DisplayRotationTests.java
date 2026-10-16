@@ -2892,4 +2892,24 @@ public class DisplayRotationTests {
             return sCurrentUptimeMillis;
         }
     }
+    @Test
+    public void handleMenuRotation_savesFocusedAppWithoutChangingGlobalAutoRotate() throws Exception {
+        setupManualAppRotation("test.menu", 0);
+        thawRotation();
+        final int global = Settings.System.getInt(mMockResolver, Settings.System.USER_ROTATION);
+        mTarget.setRotationAtAngleIfAllowed(Surface.ROTATION_90, "WindowingPillView#onRotateClick");
+        assertEquals(Surface.ROTATION_90, mTarget.getAppRotation());
+        assertEquals(1, Settings.System.getInt(mMockResolver, Settings.System.ACCELEROMETER_ROTATION));
+        assertEquals(global, Settings.System.getInt(mMockResolver, Settings.System.USER_ROTATION));
+    }
+
+    @Test
+    public void handleMenuRotation_withoutFullscreenAppDoesNotChangeGlobalLock() throws Exception {
+        setupManualAppRotation("test.menu", 0);
+        mMockDisplayContent.mFocusedApp = null;
+        final int rotation = mTarget.getUserRotation();
+        mTarget.setRotationAtAngleIfAllowed(Surface.ROTATION_90, "WindowingPillView#onRotateClick");
+        assertEquals(rotation, mTarget.getUserRotation());
+    }
+
 }

@@ -389,9 +389,31 @@ class PinnedLayerController(
         }
     }
 
+    fun rotateTask(task: TaskInfo): Boolean {
+        val bounds = presentationController.getManualRotationBounds(task) ?: return false
+        val landscape = bounds.width() > bounds.height()
+        presentationController.setManualOrientation(task, landscape, bounds)
+        val wct = WindowContainerTransaction()
+        presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
+        transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        return true
+    }
+
     /** Minimizes a floating task while retaining its identity for Recents. */
     @JvmOverloads
     fun minimizeTask(task: TaskInfo, right: Boolean = true): Boolean {
+        if (!task.isFloatingWindow && task.windowingMode == WINDOWING_MODE_FULLSCREEN) {
+            val bounds = presentationController.getPinEntryDestinationBounds(task) ?: return false
+            val wct = WindowContainerTransaction()
+            if (!prepareFloatingTask(task, wct)) return false
+            visiblePinnedTasks -= task.taskId
+            minimizedTasks += task.taskId
+            minimizeState.minimize(task.taskId, task.userId, bounds, right, .5f)
+            minimizeHandles?.update()
+            wct.merge(getLayerUnpinnedWct(task.token, isMinimizing = true), true)
+            transitions.startTransition(TRANSIT_TO_BACK, wct, null)
+            return true
+        }
         if (!isPinned(task.taskId)) return false
         presentationController.rememberBounds(task)
         unpin(task, rememberAsPinned = true)

@@ -2221,14 +2221,43 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         }
 
         @Override
+        public void onRotate(@NonNull RunningTaskInfo taskInfo) {
+            if (taskInfo.isFloatingWindow && mViewModel.mPinnedLayerController != null) {
+                mViewModel.mPinnedLayerController.rotateTask(taskInfo);
+            } else if (taskInfo.getWindowingMode() == WINDOWING_MODE_FULLSCREEN
+                    && mViewModel.mFocusTransitionObserver.hasGlobalFocus(taskInfo)
+                    && taskInfo.displayId == android.view.Display.DEFAULT_DISPLAY) {
+                try {
+                    android.view.WindowManagerGlobal.getWindowManagerService()
+                            .setRotationAtAngleIfAllowed(
+                                    (taskInfo.configuration.windowConfiguration.getDisplayRotation()
+                                            + 1) % 4, "WindowingPillView#onRotateClick");
+                } catch (android.os.RemoteException e) {
+                    android.util.Slog.w(TAG, "Could not rotate fullscreen task", e);
+                }
+            }
+        }
+
+        @Override
         public void onMinimize(@NonNull RunningTaskInfo taskInfo) {
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to minimize task=%d",
                     taskInfo.taskId);
-            if (taskInfo.isFloatingWindow && mViewModel.mPinnedLayerController != null) {
-                mViewModel.mPinnedLayerController.minimizeTask(taskInfo);
+            if (mViewModel.mPinnedLayerController != null
+                    && taskInfo.isFloatingWindow
+                    && mViewModel.mPinnedLayerController.minimizeTask(taskInfo)) {
                 return;
             }
             mDesktopTasksController.minimizeTask(taskInfo, MinimizeReason.MINIMIZE_BUTTON);
+        }
+
+        @Override
+        public void onMinimizeFromHandleMenu(@NonNull RunningTaskInfo taskInfo) {
+            if (taskInfo.getWindowingMode() == WINDOWING_MODE_FULLSCREEN
+                    && mViewModel.mPinnedLayerController != null
+                    && mViewModel.mPinnedLayerController.minimizeTask(taskInfo)) {
+                return;
+            }
+            onMinimize(taskInfo);
         }
 
         @Override

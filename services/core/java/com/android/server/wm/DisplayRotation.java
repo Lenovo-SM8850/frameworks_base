@@ -930,9 +930,20 @@ public class DisplayRotation {
     }
 
     void setRotationAtAngleIfAllowed(int rotation, String caller) {
-        if (!isRotationChoiceAllowed(rotation)) return;
+        final boolean fromHandleMenu = "WindowingPillView#onRotateClick".equals(caller);
         final ActivityRecord app = getRotationApp();
-        if (app != null && "RotationButtonController#onRotateSuggestionClick".equals(caller)) {
+        if (fromHandleMenu) {
+            if (app == null || !isRotationChoiceSupported() || rotation < Surface.ROTATION_0
+                    || rotation > Surface.ROTATION_270) return;
+            final int requested = app.getRequestedOrientation();
+            if (ActivityInfo.isFixedOrientationPortrait(requested)
+                    || ActivityInfo.isFixedOrientationLandscape(requested)
+                    || requested == ActivityInfo.SCREEN_ORIENTATION_LOCKED) return;
+        } else if (!isRotationChoiceAllowed(rotation)) {
+            return;
+        }
+        if (app != null && (fromHandleMenu
+                || "RotationButtonController#onRotateSuggestionClick".equals(caller))) {
             if (mDeviceStateController.shouldReverseRotationDirectionAroundZAxis(mDisplayContent)) {
                 rotation = RotationUtils.reverseRotationDirectionAroundZAxis(rotation);
             }

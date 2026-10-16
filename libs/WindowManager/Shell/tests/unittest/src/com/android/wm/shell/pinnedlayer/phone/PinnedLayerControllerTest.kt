@@ -801,4 +801,24 @@ class PinnedLayerControllerTest : ShellTestCase() {
                 DISPLAY_HEIGHT - DISPLAY_STABLE_INSETS.bottom,
             )
     }
+    @Test
+    fun fullscreenMinimize_preparesFloatingTaskAndHidesItForEdgeRestore() {
+        val task = setupTask(taskId = 301).apply {
+            configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FULLSCREEN)
+            isFloatingWindow = false
+        }
+        assertTrue(pinnedLayerController.minimizeTask(task))
+        val captor = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(eq(android.view.WindowManager.TRANSIT_TO_BACK),
+            captor.capture(), anyOrNull())
+        val change = requireNotNull(captor.firstValue.changes[task.token.asBinder()])
+        assertTrue(change.floatingWindow)
+        assertTrue(change.hidden)
+        assertEquals(WINDOWING_MODE_FREEFORM, change.windowingMode)
+        assertTrue(pinnedLayerController.isPinned(task.taskId))
+        assertFalse(captor.firstValue.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
+        })
+    }
+
 }

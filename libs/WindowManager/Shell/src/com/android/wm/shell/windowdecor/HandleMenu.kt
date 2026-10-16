@@ -118,6 +118,9 @@ private constructor(
     private val surfaceControlViewHostFactory: SurfaceControlViewHostFactory,
     private val decorThemeUtilFactory: DecorThemeUtil.Factory,
 ) {
+    private val shouldShowFloatAction: Boolean
+        get() = shouldShowFloatAction(taskInfo)
+
     private val isViewAboveStatusBar: Boolean
         get() = taskInfo.isFloatingWindow ||
             (DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue() && !taskInfo.isFreeform)
@@ -154,7 +157,7 @@ private constructor(
                 shouldShowChangeAspectRatioButton ||
                 shouldShowGameControlsButton ||
                 shouldShowRestartButton ||
-                taskInfo.isFloatingWindow
+                shouldShowFloatAction
 
     private var loadAppInfoJob: Job? = null
 
@@ -541,8 +544,8 @@ private constructor(
                 loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_open_in_browser_pill_height)
             menuHeight -= pillTopMargin
         }
-        if (taskInfo.isFloatingWindow) {
-            menuHeight += 2 * loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_new_window_height)
+        if (shouldShowFloatAction) {
+            menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_new_window_height)
         }
         return menuHeight
     }
@@ -664,10 +667,8 @@ private constructor(
         private val gameControlsBtn =
             moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.game_controls_button)
 
-        private val minimizeBtn =
-            moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.floating_minimize_button)
-        private val closeBtn =
-            moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.floating_close_button)
+        private val floatBtn =
+            moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.float_action_button)
 
         // Restart Pill.
         private val restartPill = rootView.requireViewById<View>(R.id.handle_menu_restart_pill)
@@ -686,8 +687,7 @@ private constructor(
 
         private val menuButtons =
             listOf(
-                minimizeBtn,
-                closeBtn,
+                floatBtn,
                 newWindowBtn,
                 changeAspectRatioBtn,
                 gameControlsBtn,
@@ -715,6 +715,7 @@ private constructor(
                 windowDecorationActions,
                 desktopModeUiEventLogger,
                 shouldShowDesktopModeButton,
+                showFloatingButton = false,
                 onPillItemClicked = { onHandleMenuClicked?.invoke() },
             )
             menuButtons.forEach { it.setOnClickListener(this) }
@@ -730,8 +731,7 @@ private constructor(
 
         override fun onClick(v: View) {
             when (v.id) {
-                R.id.floating_minimize_button -> windowDecorationActions.onMinimize(taskInfo)
-                R.id.floating_close_button -> windowDecorationActions.onClose(taskInfo)
+                R.id.float_action_button -> windowDecorationActions.onToFloat(taskInfo.taskId)
                 R.id.new_window_button -> {
                     windowDecorationActions.onNewWindow(taskInfo.taskId)
                 }
@@ -879,8 +879,7 @@ private constructor(
                     changeAspectRatioBtn to shouldShowChangeAspectRatioButton,
                     gameControlsBtn to shouldShowGameControlsButton,
                     restartBtn to shouldShowRestartButton,
-                    minimizeBtn to taskInfo.isFloatingWindow,
-                    closeBtn to taskInfo.isFloatingWindow,
+                    floatBtn to shouldShowFloatAction(taskInfo),
                 )
             val firstVisible = buttons.find { it.second }?.first
             val lastVisible = buttons.findLast { it.second }?.first
@@ -972,6 +971,12 @@ private constructor(
     data class AppToWebData(val isBrowserApp: Boolean, val openInAppOrBrowserIntent: Intent?)
 
     companion object {
+        private fun shouldShowFloatAction(task: RunningTaskInfo): Boolean =
+            !task.isFloatingWindow && task.isResizeable && task.displayId == 0 &&
+                (task.windowingMode == android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN ||
+                    task.windowingMode == android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW) &&
+                task.activityType == android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD
+
         private const val TAG = "HandleMenu"
         private const val SHOULD_SHOW_SCREENSHOT_BUTTON = false
 

@@ -97,6 +97,12 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private val decorThemeUtil = DecorThemeUtil(context)
     private lateinit var style: MenuStyle
 
+    private val rotateBtn: ImageButton
+    private val minimizeBtn: ImageButton
+    private val closeBtn: ImageButton
+    private val rotateDescriptionId = context.resources.getIdentifier(
+        "accessibility_rotate_button", "string", "com.android.systemui")
+    private var showFloatingButton = true
     private val fullscreenBtn: ImageButton
     private val splitscreenBtn: ImageButton
     private val floatingBtn: ImageButton
@@ -115,6 +121,13 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         LayoutInflater.from(context)
             .inflate(R.layout.desktop_mode_window_decor_windowing_pill, this, true)
 
+        rotateBtn = requireViewById(R.id.rotate_window_button)
+        minimizeBtn = requireViewById(R.id.minimize_window_button)
+        closeBtn = requireViewById(R.id.close_window_button)
+        if (rotateDescriptionId != 0) {
+            rotateBtn.contentDescription = context.getString(rotateDescriptionId)
+            rotateBtn.tooltipText = rotateBtn.contentDescription
+        }
         fullscreenBtn = requireViewById<ImageButton>(R.id.fullscreen_button)
         splitscreenBtn = requireViewById<ImageButton>(R.id.split_screen_button)
         floatingBtn = requireViewById<ImageButton>(R.id.floating_button)
@@ -141,13 +154,23 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         desktopModeUiEventLogger: DesktopModeUiEventLogger,
         shouldShowDesktopModeButton: Boolean,
         onPillItemClicked: (() -> Unit),
+    ) = initialize(windowDecorationActions, desktopModeUiEventLogger,
+        shouldShowDesktopModeButton, true, onPillItemClicked)
+
+    fun initialize(
+        windowDecorationActions: WindowDecorationActions,
+        desktopModeUiEventLogger: DesktopModeUiEventLogger,
+        shouldShowDesktopModeButton: Boolean,
+        showFloatingButton: Boolean,
+        onPillItemClicked: (() -> Unit),
     ) {
         this.windowDecorationActions = windowDecorationActions
         this.desktopModeUiEventLogger = desktopModeUiEventLogger
         this.shouldShowDesktopModeButton = shouldShowDesktopModeButton
         this.onPillItemClicked = onPillItemClicked
+        this.showFloatingButton = showFloatingButton
 
-        listOf(fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
+        listOf(rotateBtn, fullscreenBtn, splitscreenBtn, minimizeBtn, closeBtn, desktopBtn, floatingBtn).forEach {
             it.setOnClickListener(this)
         }
 
@@ -243,6 +266,9 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
 
     override fun onClick(v: View) {
         when (v.id) {
+            R.id.rotate_window_button -> windowDecorationActions.onRotate(taskInfo)
+            R.id.minimize_window_button -> windowDecorationActions.onMinimizeFromHandleMenu(taskInfo)
+            R.id.close_window_button -> windowDecorationActions.onClose(taskInfo)
             R.id.fullscreen_button -> {
                 windowDecorationActions.onToFullscreen(taskInfo.taskId)
             }
@@ -269,7 +295,21 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
 
         background.setTint(style.backgroundColor)
 
-        floatingBtn.isGone = taskInfo.displayId != DEFAULT_DISPLAY ||
+        val controls = taskInfo.displayId == DEFAULT_DISPLAY &&
+            (taskInfo.isFloatingWindow || (taskInfo.isFullscreen && !isInSplitScreen))
+        rotateBtn.isGone = !controls || rotateDescriptionId == 0 ||
+            (!taskInfo.isFloatingWindow && taskInfo.configuration.smallestScreenWidthDp < 600) ||
+            com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometry.fixedLandscape(
+                taskInfo.topActivityRequestedOrientation,
+                taskInfo.configuration.windowConfiguration.bounds) != null
+        minimizeBtn.isGone = !controls || !taskInfo.isResizeable
+        closeBtn.isGone = !controls
+        listOf(rotateBtn, minimizeBtn, closeBtn).forEach {
+            it.imageTintList = style.buttonColor
+            it.background = createBackgroundDrawable(color = style.textColor,
+                cornerRadius = iconButtonRippleRadius, drawableInsets = iconButtonDrawableInsetsBase)
+        }
+        floatingBtn.isGone = !showFloatingButton || taskInfo.displayId != DEFAULT_DISPLAY ||
             !taskInfo.isResizeable || taskInfo.isFloatingWindow ||
             desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(taskInfo) ||
             taskInfo.activityType != android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD ||
