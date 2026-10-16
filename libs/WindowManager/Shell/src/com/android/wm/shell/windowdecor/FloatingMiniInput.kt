@@ -33,6 +33,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var blockedGesture = false
     private var hostWidth = 0
     private var hostHeight = 0
+    private var hostParams: WindowManager.LayoutParams? = null
 
     fun update(info: RunningTaskInfo, taskSurface: SurfaceControl,
         transaction: SurfaceControl.Transaction? = null) {
@@ -53,16 +54,10 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
             val manager = WindowlessWindowManager(info.configuration, leash, null)
             val root = createInputView(context, info)
             host = SurfaceControlViewHost(context, display, manager, "FloatingMiniInput").apply {
-                setView(root, WindowManager.LayoutParams(bounds.width(), bounds.height(),
-                    WindowManager.LayoutParams.TYPE_APPLICATION,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
-                        setTrustedOverlay()
-                        setFitInsetsTypes(0)
-                        setTitle("Floating mini input ${info.taskId}")
-                    })
+                setView(root, inputLayoutParams(bounds.width(), bounds.height()))
             }
         } else if (hostWidth != bounds.width() || hostHeight != bounds.height()) {
-            host?.relayout(bounds.width(), bounds.height())
+            host?.let { relayoutInputHost(it, bounds.width(), bounds.height()) }
         }
         hostWidth = bounds.width()
         hostHeight = bounds.height()
@@ -75,6 +70,27 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
         } finally {
             if (transaction == null) t.close()
         }
+    }
+
+    private fun inputLayoutParams(width: Int, height: Int): WindowManager.LayoutParams {
+        val params = hostParams ?: WindowManager.LayoutParams(width, height,
+            WindowManager.LayoutParams.TYPE_APPLICATION,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED, PixelFormat.TRANSLUCENT).apply {
+                setTrustedOverlay()
+                setFitInsetsTypes(0)
+                setTitle("Floating mini input ${task?.taskId}")
+                hostParams = this
+            }
+        params.width = width
+        params.height = height
+        return params
+    }
+
+    @VisibleForTesting
+    fun relayoutInputHost(viewHost: SurfaceControlViewHost, width: Int, height: Int) {
+        // The size-only overload creates focusable parameters.
+        viewHost.relayout(inputLayoutParams(width, height))
     }
 
     @VisibleForTesting
@@ -94,7 +110,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
         }).apply { setIsLongpressEnabled(false) }
         return View(context).apply {
                 isClickable = true
-                isFocusable = true
+                isFocusable = false
                 contentDescription = context.getString(com.android.wm.shell.R.string.floating_window_restore,
                     info.taskDescription?.label ?: info.baseActivity?.packageName.orEmpty())
                 setOnClickListener { task?.let(controller::restoreMini) }
@@ -157,6 +173,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
         host = null
         hostWidth = 0
         hostHeight = 0
+        hostParams = null
         surface?.let {
             if (it.isValid) SurfaceControl.Transaction().use { t -> t.remove(it).apply() }
             it.release()
