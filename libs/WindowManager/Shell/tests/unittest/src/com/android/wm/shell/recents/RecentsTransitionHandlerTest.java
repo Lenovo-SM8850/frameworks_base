@@ -265,6 +265,29 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
     }
 
     @Test
+    public void testSyntheticHomeGestureNotifiesAfterFinish() throws Exception {
+        final RecentsTransitionStateListener state = mock(RecentsTransitionStateListener.class);
+        mRecentsTransitionHandler.addTransitionStateListener(state);
+        final IBinder transition = startRecentsTransition(true);
+        mRecentsTransitionHandler.findController(transition).finish(true, true,
+                mock(IResultReceiver.class));
+        mMainExecutor.flushAll();
+        verify(state).onHomeGestureFinished(anyInt());
+        assertNull(mRecentsTransitionHandler.findController(transition));
+    }
+
+    @Test
+    public void testSyntheticOverviewFinishDoesNotNotifyHomeGesture() throws Exception {
+        final RecentsTransitionStateListener state = mock(RecentsTransitionStateListener.class);
+        mRecentsTransitionHandler.addTransitionStateListener(state);
+        final IBinder transition = startRecentsTransition(true);
+        mRecentsTransitionHandler.findController(transition).finish(true, false,
+                mock(IResultReceiver.class));
+        mMainExecutor.flushAll();
+        verify(state, never()).onHomeGestureFinished(anyInt());
+    }
+
+    @Test
     public void testStartSyntheticRecentsTransition_callsOnAnimationCancel() throws Exception {
         final IRecentsAnimationRunner runner = mock(IRecentsAnimationRunner.class);
 
@@ -1066,8 +1089,18 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
         assertFloatingHomeFinish(count, merge, onlyFloating, false);
     }
 
+    @Test
+    public void testHomeGestureFinishReportsUserLeaveSignal() throws Exception {
+        assertFloatingHomeFinish(1, false, true, false, true);
+    }
+
     private void assertFloatingHomeFinish(int count, boolean merge, boolean onlyFloating,
             boolean closeFirst) throws Exception {
+        assertFloatingHomeFinish(count, merge, onlyFloating, closeFirst, false);
+    }
+
+    private void assertFloatingHomeFinish(int count, boolean merge, boolean onlyFloating,
+            boolean closeFirst, boolean homeGesture) throws Exception {
         final IBinder transition = startRecentsTransition(false);
         final TransitionInfo info = createTransitionInfo();
         final ArrayList<ActivityManager.RunningTaskInfo> floating = new ArrayList<>();
@@ -1112,7 +1145,7 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
             verify(merged).onTransitionFinished(any());
         }
         final IResultReceiver runnerFinish = mock(IResultReceiver.class);
-        mRecentsTransitionHandler.findController(transition).finish(!onlyFloating, false, runnerFinish);
+        mRecentsTransitionHandler.findController(transition).finish(!onlyFloating, homeGesture, runnerFinish);
         mMainExecutor.flushAll();
         final ArgumentCaptor<WindowContainerTransaction> wct =
                 ArgumentCaptor.forClass(WindowContainerTransaction.class);
@@ -1131,6 +1164,11 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
                     any(), any());
         }
         verify(state).onTransitionFinishedToHome(anyInt());
+        if (homeGesture) {
+            verify(state).onHomeGestureFinished(anyInt());
+        } else {
+            verify(state, never()).onHomeGestureFinished(anyInt());
+        }
         assertNull(mRecentsTransitionHandler.findController(transition));
     }
 

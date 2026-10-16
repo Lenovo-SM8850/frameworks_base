@@ -132,4 +132,31 @@ class FloatingMiniStateTest {
         }
     }
 
+    @Test fun tidy_threeWindowsChooseNearestCornerAndStackVertically() {
+        val occupied = mutableListOf<Rect>()
+        repeat(3) {
+            occupied += requireNotNull(FloatingMiniState.tidyBounds(Rect(600, 120, 1200, 1020),
+                Rect(0, 0, 360, 540), stable, 8, occupied))
+        }
+        assertThat(occupied).containsExactly(Rect(832, 108, 1192, 648),
+            Rect(832, 656, 1192, 1196), Rect(832, 1204, 1192, 1744)).inOrder()
+    }
+
+    @Test fun tidy_usesHorizontalEdgeAfterVerticalEdgeFills() {
+        val area = Rect(0, 0, 1000, 800)
+        val occupied = listOf(Rect(690, 10, 990, 310), Rect(690, 320, 990, 620))
+        assertThat(FloatingMiniState.tidyBounds(Rect(700, 20, 990, 310),
+            Rect(0, 0, 300, 300), area, 10, occupied)).isEqualTo(Rect(380, 10, 680, 310))
+    }
+
+    @Test fun tidy_fullCornerEdgesFallBackToAnotherCorner() {
+        val area = Rect(0, 0, 1000, 800)
+        val occupied = listOf(Rect(490, 10, 990, 310), Rect(690, 320, 990, 790),
+            Rect(10, 10, 480, 310))
+        val target = requireNotNull(FloatingMiniState.tidyBounds(Rect(700, 20, 990, 310),
+            Rect(0, 0, 300, 300), area, 10, occupied))
+        assertThat(target).isEqualTo(Rect(380, 490, 680, 790))
+        occupied.forEach { assertThat(Rect.intersects(target, it)).isFalse() }
+    }
+
 }

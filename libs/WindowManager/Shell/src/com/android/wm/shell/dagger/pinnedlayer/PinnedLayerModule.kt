@@ -17,12 +17,15 @@
 package com.android.wm.shell.dagger.pinnedlayer
 
 import android.content.Context
+import android.os.PowerManager
 import android.view.SurfaceControl
 import com.android.wm.shell.RootTaskDisplayAreaOrganizer
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.MultiDisplayDragMoveIndicatorController
 import com.android.wm.shell.common.ShellExecutor
+import com.android.wm.shell.common.TaskStackListenerImpl
+import com.android.wm.shell.pinnedlayer.phone.FloatingTidyController
 import com.android.wm.shell.dagger.WMShellBaseModule
 import com.android.wm.shell.dagger.WMSingleton
 import com.android.wm.shell.desktopmode.DesktopTasksController
@@ -54,6 +57,8 @@ object PinnedLayerModule {
     @WMSingleton
     @Provides
     fun providePinnedLayerHandler(
+        context: Context,
+        taskStackListener: TaskStackListenerImpl,
         shellInit: ShellInit,
         transitions: Transitions,
         shellController: ShellController,
@@ -69,6 +74,9 @@ object PinnedLayerModule {
     ): Optional<PinnedLayerHandler> {
         if (PinnedLayerFlags.isPinnedLayerEnabled()) {
             pinnedLayerController.get().configureVisibility(shellController, recentsTransitionHandler)
+            val powerManager = context.getSystemService(PowerManager::class.java)
+            FloatingTidyController(taskStackListener, recentsTransitionHandler, shellController,
+                transitions, { powerManager.isInteractive }, pinnedLayerController.get()::tidyFloatingWindows)
             return Optional.of(
                 PinnedLayerHandler(
                     shellInit = shellInit,

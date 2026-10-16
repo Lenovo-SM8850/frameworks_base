@@ -323,4 +323,110 @@ class FloatingMiniControllerTest : ShellTestCase() {
         return h
     }
 
+    @Test fun tidy_oneExpandedWindowUsesNearestCornerAndNormalEntryAnimation() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.isVisible = true
+        h.task.floatingWindowScale = .75f
+        h.task.floatingWindowPosition.set(50, 950)
+        h.task.positionInParent = Point(50, 950)
+        h.controller.tidy(listOf(h.task))
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        assertThat(entry.bounds).isEqualTo(Rect(8, 1352, 368, 1892))
+        assertThat(entry.restore.bounds).isEqualTo(Rect(50, 950, 650, 1850))
+        assertThat(entry.restore.scale).isEqualTo(.75f)
+        verify(h.animator).setDuration(300)
+        whenever(h.animator.animatedValue).thenReturn(0f)
+        h.updateListener.onAnimationUpdate(h.animator)
+        verify(h.transaction).setPosition(h.leash, 50f, 950f)
+    }
+
+    @Test fun tidy_threeExpandedWindowsAreMiniWithoutOverlap() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        doAnswer {
+            h.animatorListener.onAnimationEnd(h.animator)
+            null
+        }.whenever(h.animator).start()
+        val tasks = (0..2).map { index ->
+            TestRunningTaskInfoBuilder().setTaskId(42 + index).setDisplayId(0)
+                .setBounds(Rect(0, 0, 800, 1200)).build().apply {
+                    isFloatingWindow = true
+                    isVisible = true
+                    floatingWindowScale = .75f
+                    floatingWindowPosition.set(600, 120)
+                    positionInParent = Point(600, 120)
+                }
+        }
+        h.controller.tidy(tasks)
+        val bounds = tasks.map { requireNotNull(h.state.get(it.userId, it.taskId)).bounds }
+        assertThat(bounds).containsExactly(Rect(832, 108, 1192, 648),
+            Rect(832, 656, 1192, 1196), Rect(832, 1204, 1192, 1744)).inOrder()
+        bounds.forEachIndexed { i, a ->
+            assertThat(Rect(0, 100, 1200, 1900).contains(a)).isTrue()
+            bounds.drop(i + 1).forEach { b -> assertThat(Rect.intersects(a, b)).isFalse() }
+        }
+    }
+
+    @Test fun tidy_existingMiniStashAndHiddenMinimizedWindowAreUntouched() {
+        val h = Harness()
+        h.task.isVisible = true
+        val mini = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        val miniBounds = Rect(mini.bounds)
+        val stash = TestRunningTaskInfoBuilder().setTaskId(43).setDisplayId(0)
+            .setBounds(Rect(0, 0, 800, 1200)).build().apply {
+                isFloatingWindow = true
+                isVisible = true
+            }
+        val stashed = h.state.enter(stash.userId, stash.taskId, mini.restore,
+            Rect(-332, 730, 28, 1270), .45f).apply { edge = FloatingMiniState.Edge.LEFT }
+        val minimized = TestRunningTaskInfoBuilder().setTaskId(44).setDisplayId(0).build().apply {
+            isFloatingWindow = true
+            isVisible = false
+        }
+        h.controller.tidy(listOf(h.task, stash, minimized))
+        assertThat(mini.bounds).isEqualTo(miniBounds)
+        assertThat(stashed.bounds).isEqualTo(Rect(-332, 730, 28, 1270))
+        assertThat(stashed.edge).isEqualTo(FloatingMiniState.Edge.LEFT)
+        assertThat(h.state.get(minimized.userId, minimized.taskId)).isNull()
+        assertThat(h.allocations).isEqualTo(0)
+        verify(h.animator, never()).start()
+    }
+
+    @Test fun tidy_withoutExpandedWindowsDoesNothing() {
+        val h = Harness()
+        h.controller.tidy(emptyList())
+        assertThat(h.allocations).isEqualTo(0)
+        verify(h.organizer, never()).applyTransaction(any())
+        verify(h.animator, never()).start()
+    }
+
+    @Test fun tidy_crowdedEdgesFitAllFiveWithoutOverlapping() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        doAnswer {
+            h.animatorListener.onAnimationEnd(h.animator)
+            null
+        }.whenever(h.animator).start()
+        val tasks = (0..4).map { index ->
+            TestRunningTaskInfoBuilder().setTaskId(42 + index).setDisplayId(0)
+                .setBounds(Rect(0, 0, 1200, 400)).build().apply {
+                    isFloatingWindow = true
+                    isVisible = true
+                    floatingWindowScale = .95f
+                    floatingWindowPosition.set(50, 120)
+                    positionInParent = Point(50, 120)
+                }
+        }
+        h.controller.tidy(tasks)
+        val entries = tasks.map { requireNotNull(h.state.get(it.userId, it.taskId)) }
+        assertThat(entries.last().scale).isLessThan(.9f)
+        entries.forEachIndexed { i, a ->
+            assertThat(Rect(8, 108, 1192, 1892).contains(a.bounds)).isTrue()
+            entries.drop(i + 1).forEach { b ->
+                assertThat(Rect.intersects(a.bounds, b.bounds)).isFalse()
+            }
+        }
+    }
+
 }
