@@ -79,6 +79,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
             whenever(transaction.setPosition(any(), any(), any())).thenReturn(transaction)
             whenever(transaction.setWindowCrop(any(), any<Int>(), any<Int>())).thenReturn(transaction)
             whenever(transaction.setCornerRadius(any(), any())).thenReturn(transaction)
+            whenever(transaction.setFrameTimeline(any())).thenReturn(transaction)
             doAnswer { animatorListener = it.getArgument(0); null }.whenever(animator).addListener(any())
             doAnswer { updateListener = it.getArgument(0); null }.whenever(animator).addUpdateListener(any())
             doAnswer {
@@ -170,9 +171,10 @@ class FloatingMiniControllerTest : ShellTestCase() {
         verify(h.transaction).setPosition(h.leash, 19f, 200f)
         verify(h.transaction).apply()
         h.controller.move(h.task, Rect(20, 200, 380, 740))
-        callback.firstValue.doFrame(1)
+        callback.firstValue.doFrame(6_060_606)
         assertThat(h.allocations).isEqualTo(1)
         verify(h.transaction, times(2)).apply()
+        verify(h.transaction, times(2)).setFrameTimeline(h.choreographer.vsyncId)
         verify(h.organizer, never()).initialTasks
     }
     @Test fun normalReleaseBeyondTopRight_entersMiniOnRealReleaseGeometry() {
