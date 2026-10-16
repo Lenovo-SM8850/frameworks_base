@@ -210,4 +210,15 @@ class FloatingMiniControllerTest : ShellTestCase() {
         }
     }
 
+    @Test fun miniReleasedPastTopOrBottom_returnsFullyInsideWithoutStash() {
+        listOf(Rect(300, -400, 660, 140), Rect(300, 1800, 660, 2340)).forEach { end ->
+            val h = Harness()
+            h.controller.onDragEnded(h.task, h.task.presentationBounds, end)
+            h.interrupt()
+            val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+            assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+            assertThat(Rect(0, 100, 1200, 1900).contains(entry.bounds)).isTrue()
+        }
+    }
+
 }
