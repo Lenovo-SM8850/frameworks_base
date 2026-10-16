@@ -416,6 +416,7 @@
     <string name="show_hw_layers_updates" msgid="5268370750002509767">"Показывать обновления слоев с аппаратной отрисовкой"</string>
     <string name="show_hw_layers_updates_summary" msgid="5850955890493054618">"Выделять слои с аппаратной отрисовкой зеленым при обновлении"</string>
     <string name="debug_hw_overdraw" msgid="8944851091008756796">"Отладка избыточной отрисовки GPU"</string>
+    <string name="debug_hw_renderer">Выбрать GPU-рендерер</string>
     <string name="disable_overlays" msgid="4206590799671557143">"Отключить аппаратные наложения"</string>
     <string name="disable_overlays_summary" msgid="1954852414363338166">"Всегда использовать GPU при компоновке экрана"</string>
     <string name="simulate_color_space" msgid="1206503300335835151">"Имитировать цветовое пространство"</string>
