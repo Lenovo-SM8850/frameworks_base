@@ -85,17 +85,6 @@ object FloatingWindowGeometry {
         else -> null
     }
 
-    fun selectLandscape(landscape: Boolean, ratio: Float, fixed: Boolean): Boolean = when {
-        fixed -> landscape
-        !landscape && ratio > 1.08f -> true
-        landscape && ratio < .92f -> false
-        else -> landscape
-    }
-
-    fun isCorner(ctrl: Int): Boolean =
-        ctrl and (CTRL_TYPE_LEFT or CTRL_TYPE_RIGHT) != 0 &&
-            ctrl and (CTRL_TYPE_TOP or CTRL_TYPE_BOTTOM) != 0
-
     fun corner(start: Rect, stable: Rect, ctrl: Int, dx: Float, dy: Float,
         minWidth: Int, minHeight: Int, out: Rect = Rect()): Rect {
         val w = start.width().toFloat()
@@ -105,7 +94,13 @@ object FloatingWindowGeometry {
         val top = ctrl and CTRL_TYPE_TOP != 0
         val dw = if (left) -dx else dx
         val dh = if (top) -dy else dy
-        val scale = 1f + (dw * w + dh * h) / (w * w + h * h)
+        val horizontal = ctrl and (CTRL_TYPE_LEFT or CTRL_TYPE_RIGHT) != 0
+        val vertical = ctrl and (CTRL_TYPE_TOP or CTRL_TYPE_BOTTOM) != 0
+        val scale = 1f + when {
+            horizontal && vertical -> (dw * w + dh * h) / (w * w + h * h)
+            horizontal -> dw / w
+            else -> dh / h
+        }
         val maxWidth = if (left) start.right - stable.left else stable.right - start.left
         val maxHeight = if (top) start.bottom - stable.top else stable.bottom - start.top
         val maxScale = min(maxWidth / w, maxHeight / h).coerceAtLeast(0.01f)
@@ -117,19 +112,6 @@ object FloatingWindowGeometry {
         val y = if (top) start.bottom - height else start.top
         return out.apply { set(x, y, x + width, y + height) }
     }
-
-    fun outline(start: Rect, ctrl: Int, dx: Float, dy: Float, out: Rect = Rect()): Rect =
-        out.apply {
-            set(start)
-            if (ctrl and CTRL_TYPE_LEFT != 0) left = (start.left + dx).roundToInt()
-                .coerceAtMost(right - 1)
-            if (ctrl and CTRL_TYPE_RIGHT != 0) right = (start.right + dx).roundToInt()
-                .coerceAtLeast(left + 1)
-            if (ctrl and CTRL_TYPE_TOP != 0) top = (start.top + dy).roundToInt()
-                .coerceAtMost(bottom - 1)
-            if (ctrl and CTRL_TYPE_BOTTOM != 0) bottom = (start.bottom + dy).roundToInt()
-                .coerceAtLeast(top + 1)
-        }
 
     fun aspectBounds(start: Rect, stable: Rect, aspect: Float, minWidth: Int,
         minHeight: Int, centerX: Float = start.exactCenterX(),

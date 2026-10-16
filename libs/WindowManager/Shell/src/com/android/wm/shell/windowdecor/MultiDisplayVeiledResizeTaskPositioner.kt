@@ -17,11 +17,6 @@ package com.android.wm.shell.windowdecor
 
 import android.app.ActivityManager.RunningTaskInfo
 import android.graphics.PointF
-import android.os.VibrationEffect
-import android.os.Vibrator
-import androidx.dynamicanimation.animation.FloatValueHolder
-import androidx.dynamicanimation.animation.SpringAnimation
-import androidx.dynamicanimation.animation.SpringForce
 import com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometry
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -106,14 +101,12 @@ class MultiDisplayVeiledResizeTaskPositioner(
     @Surface.Rotation private var rotation = 0
     private var startDisplayId = 0
     private var hasMoved = false
-    private var floatingLandscape = false
     private val floatingLogicalBounds = Rect()
     private var floatingStartScale = 1f
     private var floatingMinimumScale = .5f
     private var floatingMinimumVisibleSize = 0
     private var floatingMinWidth = 1
     private var floatingMinHeight = 1
-    private val floatingSpringBounds = Rect()
     private val floatingBaseBounds = Rect()
     private var floatingPreviewActive = false
     private var floatingDragCancelled = false
@@ -121,7 +114,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var pendingFloatingTransition: IBinder? = null
     private var pendingFloatingChange: TransitionInfo.Change? = null
     private val floatingResizeScratch = FloatingWindowGeometry.ScaledResize(Rect(), Rect(), 1f, false)
-    private val floatingOutlineScratch = Rect()
     private val floatingPreviewBounds = Rect()
     private var floatingPreviewScale = 1f
     private var floatingPreviewVeiled = false
@@ -135,7 +127,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private val floatingFrameCallback = Choreographer.FrameCallback { flushFloatingResizePreview() }
     private var closing = false
     private var floatingResize: FloatingWindowGeometry.ScaledResize? = null
-    private var floatingSpring: SpringAnimation? = null
     private val displayIds = mutableSetOf<Int>()
     private var hasMovedTaskSurfaceOffScreen = false
     private var resizeTrigger = ResizeTrigger.UNKNOWN_RESIZE_TRIGGER
@@ -180,8 +171,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
         y: Float,
         inputMethodType: Int,
     ): Rect {
-        floatingSpring?.cancel()
-        floatingSpring = null
         this.ctrlType = ctrlType
         startDisplayId = displayId
         hasMovedTaskSurfaceOffScreen = false
@@ -233,7 +222,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 )
             }
         }
-        floatingLandscape = taskBoundsAtDragStart.width() > taskBoundsAtDragStart.height()
         repositionStartPoint[x] = y
         hasMoved = false
         inputMethod = getInputMethodType(inputMethodType)
@@ -627,7 +615,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
         closing = true
         pendingFloatingTransition = null
         pendingFloatingChange = null
-        floatingSpring?.cancel()
         resetVeilIfVisible()
         restoreFloatingPresentation()
         stopFloatingObserver()
@@ -650,41 +637,14 @@ class MultiDisplayVeiledResizeTaskPositioner(
         lastFloatingY = y
         val dx = x - repositionStartPoint.x
         val dy = y - repositionStartPoint.y
-        if (FloatingWindowGeometry.isCorner(ctrlType)) {
-            val result = FloatingWindowGeometry.scaledCorner(taskBoundsAtDragStart,
-                floatingLogicalBounds, stableBounds, ctrlType, dx, dy,
-                floatingMinWidth, floatingMinHeight, floatingResizeScratch, floatingMinimumScale,
-                floatingMinimumVisibleSize)
-            floatingResize = result
-            if (result.commitsBounds) {
-                previewFloatingResize(result.visible, 1f, true)
-                repositionTaskBounds.set(result.visible)
-                return Rect(repositionTaskBounds)
-            }
-            repositionTaskBounds.set(result.visible)
-            previewFloatingResize(result.visible, result.scale)
-            return Rect(repositionTaskBounds)
-        }
-        val bounds = run {
-            FloatingWindowGeometry.outline(taskBoundsAtDragStart, ctrlType, dx, dy,
-                floatingOutlineScratch)
-        }
-        if (!FloatingWindowGeometry.isCorner(ctrlType)) {
-            val task = windowDecoration.taskInfo
-            val fixed = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
-                    taskBoundsAtDragStart) != null
-            val next = FloatingWindowGeometry.selectLandscape(floatingLandscape,
-                bounds.width().toFloat() / bounds.height().coerceAtLeast(1), fixed)
-            if (next != floatingLandscape) {
-                floatingLandscape = next
-                windowDecoration.decorWindowContext.getSystemService(Vibrator::class.java)
-                    ?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
-            }
-        }
-        if (bounds != repositionTaskBounds) {
-            previewFloatingResize(bounds, 1f, true)
-            repositionTaskBounds.set(bounds)
-        }
+        val result = FloatingWindowGeometry.scaledCorner(taskBoundsAtDragStart,
+            floatingLogicalBounds, stableBounds, ctrlType, dx, dy,
+            floatingMinWidth, floatingMinHeight, floatingResizeScratch, floatingMinimumScale,
+            floatingMinimumVisibleSize)
+        floatingResize = result
+        previewFloatingResize(result.visible, if (result.commitsBounds) 1f else result.scale,
+            result.commitsBounds)
+        repositionTaskBounds.set(result.visible)
         return Rect(repositionTaskBounds)
     }
 
@@ -747,8 +707,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
         cancelFloatingFrame()
         floatingPreviewActive = false
         windowDecoration.finishFloatingWindowPreview()
-        floatingSpring?.cancel()
-        floatingSpring = null
         resetVeilIfVisible()
         if (pendingFloatingTransition == null) {
             floatingDragCancelled = true
@@ -813,64 +771,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
             floatingResize = null
             return Rect(repositionTaskBounds)
         }
-        val initialLandscape = taskBoundsAtDragStart.width() > taskBoundsAtDragStart.height()
-        val fixed = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
-            taskBoundsAtDragStart) != null
-        val corner = FloatingWindowGeometry.isCorner(ctrlType)
-        val flipped = !corner && !fixed && initialLandscape != floatingLandscape
-        val layout = displayController.getDisplayLayout(task.displayId)
-        val flippedBounds = if (flipped && layout != null) FloatingWindowGeometry.scaledAspectBounds(
-            taskBoundsAtDragStart, floatingLogicalBounds, stableBounds,
-            FloatingWindowGeometry.displayAspect(layout.width(), layout.height(), floatingLandscape),
-            floatingStartScale, floatingMinWidth, floatingMinHeight) else null
-        val destination = if (corner) Rect(repositionTaskBounds)
-            else flippedBounds ?: Rect(taskBoundsAtDragStart)
-        dragEventListeners.forEach { it.onDragResizeEnded(task.taskId, resizeTrigger, inputMethod, destination) }
-        if (destination != taskBoundsAtDragStart) {
-            val base = baseResizeBounds(destination)
-            if (flippedBounds != null) desktopTasksController.rememberFloatingOrientation(task, floatingLandscape, base)
-            windowDecoration.updateResizeVeil(destination)
-            val logical = FloatingWindowGeometry.logicalBounds(base, stableBounds, floatingStartScale)
-            val wct = WindowContainerTransaction().setBounds(task.token, logical)
-                .setFloatingWindowPresentation(task.token,
-                    android.graphics.Point(base.left, base.top), floatingStartScale)
-                .setDragResizing(task.token, false)
-            if (!Flags.refactorCaptionSandboxingToCore() && task.freeformCaptionInsets != 0) {
-                wct.setAppBounds(task.token, null)
-            }
-            pendingFloatingTransition =
-                transitions.startTransition(WindowManager.TRANSIT_CHANGE, wct, this)
-        } else if (isResizingOrAnimatingResize) {
-            springFloatingVeil(Rect(repositionTaskBounds), destination)
-        } else {
-            restoreFloatingPresentation()
-            interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_RESIZE_WINDOW)
-        }
-        repositionTaskBounds.set(destination)
-        ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
-        taskBoundsAtDragStart.setEmpty()
-        return Rect(destination)
-    }
-
-    private fun springFloatingVeil(from: Rect, to: Rect) {
-        floatingSpring = SpringAnimation(FloatValueHolder(0f)).apply {
-            spring = SpringForce(1f).setDampingRatio(SpringForce.DAMPING_RATIO_MEDIUM_BOUNCY)
-                .setStiffness(SpringForce.STIFFNESS_MEDIUM)
-            setMinimumVisibleChange(.001f)
-            addUpdateListener { _, value, _ ->
-                fun lerp(a: Int, b: Int) = (a + (b - a) * value).roundToInt()
-                floatingSpringBounds.set(lerp(from.left, to.left), lerp(from.top, to.top),
-                    lerp(from.right, to.right), lerp(from.bottom, to.bottom))
-                previewFloatingResize(floatingSpringBounds, 1f, true)
-                flushFloatingResizePreview()
-            }
-            addEndListener { _, _, _, _ ->
-                resetVeilIfVisible()
-                restoreFloatingPresentation()
-                interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_RESIZE_WINDOW)
-            }
-            start()
-        }
+        return Rect(repositionTaskBounds)
     }
 
     private fun restoreFloatingPresentation() {

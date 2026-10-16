@@ -1245,73 +1245,46 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
     }
 
     @Test
-    fun floatingEdge_infeasibleMinimumBouncesWithoutRecordingManualChoice() = runOnUiThread {
-        val initial = Rect(100, 100, 700, 1700)
-        val task = mockWindowDecoration.taskInfo
-        task.isFloatingWindow = true
-        task.minWidth = 600
-        task.minHeight = 1400
-        task.configuration.windowConfiguration.displayRotation = ROTATION_0
-        task.configuration.windowConfiguration.setBounds(initial)
-        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT,
-            DISPLAY_ID_0, 700f, 900f, INPUT_METHOD_TYPE_UNKNOWN)
-        val outline = taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 2100f, 900f)
-        Assert.assertTrue(outline.width() > outline.height())
-        val destination = taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 2100f, 900f)
-        Assert.assertEquals(initial, destination)
-        verify(mockTransitions, never()).startTransition(any(), any(), any())
-        verify(mockDesktopTasksController, never()).rememberFloatingOrientation(any(), any(), any())
-        taskPositioner.close()
+    fun floatingTopEdge_changesOnlyScale() = runOnUiThread {
+        verifyFloatingEdgeScale(CTRL_TYPE_TOP, 400f, 100f, 400f, 40f)
     }
 
     @Test
-    fun floatingScaledTopEdge_crossingThresholdCommitsFlippedBoundsAndKeepsScale() = runOnUiThread {
-        verifyFloatingEdgeFlip(CTRL_TYPE_TOP, 400f, 100f, 400f, 700f)
+    fun floatingRightEdge_changesOnlyScale() = runOnUiThread {
+        verifyFloatingEdgeScale(CTRL_TYPE_RIGHT, 700f, 550f, 740f, 550f)
     }
 
     @Test
-    fun floatingScaledRightEdge_crossingThresholdCommitsFlippedBoundsAndKeepsScale() = runOnUiThread {
-        verifyFloatingEdgeFlip(CTRL_TYPE_RIGHT, 700f, 550f, 1300f, 550f)
+    fun floatingLeftEdge_changesOnlyScale() = runOnUiThread {
+        verifyFloatingEdgeScale(CTRL_TYPE_LEFT, 100f, 550f, 60f, 550f)
     }
 
     @Test
-    fun floatingScaledLeftEdge_crossingThresholdCommitsFlippedBoundsAndKeepsScale() = runOnUiThread {
-        verifyFloatingEdgeFlip(CTRL_TYPE_LEFT, 100f, 550f, -500f, 550f)
+    fun floatingBottomEdge_changesOnlyScale() = runOnUiThread {
+        verifyFloatingEdgeScale(CTRL_TYPE_BOTTOM, 400f, 1000f, 400f, 1060f)
     }
 
-    @Test
-    fun floatingScaledBottomEdge_crossingThresholdCommitsFlippedBoundsAndKeepsScale() = runOnUiThread {
-        verifyFloatingEdgeFlip(CTRL_TYPE_BOTTOM, 400f, 1000f, 400f, 400f)
-    }
-
-    private fun verifyFloatingEdgeFlip(ctrl: Int, x: Float, y: Float, endX: Float, endY: Float) {
+    private fun verifyFloatingEdgeScale(ctrl: Int, x: Float, y: Float, endX: Float, endY: Float) {
         val task = mockWindowDecoration.taskInfo
         task.isFloatingWindow = true
         task.floatingWindowScale = .75f
         task.positionInParent = Point(100, 100)
         task.floatingWindowPosition.set(100, 100)
-        task.topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         val initial = Rect(100, 100, 900, 1300)
         task.configuration.windowConfiguration.setBounds(initial)
-        val geometry = DragResizeWindowGeometry(16, android.util.Size(600, 900),
-            16, 8, 24, 48, DragResizeWindowGeometry.DisabledEdge.NONE, true)
-        Assert.assertEquals(ctrl, geometry.calculateCtrlType(true, false, x - 100, y - 100))
         taskPositioner.onDragPositioningStart(ctrl, DISPLAY_ID_0, x, y, INPUT_METHOD_TYPE_UNKNOWN)
-        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, endX, endY)
-        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        val preview = taskPositioner.onDragPositioningMove(DISPLAY_ID_0, endX, endY)
+        Assert.assertEquals(.6667f, preview.width().toFloat() / preview.height(), .002f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, endX, endY)
         Assert.assertEquals(initial, task.configuration.windowConfiguration.bounds)
-        val visible = taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, endX, endY)
-        Assert.assertTrue(visible.width() > visible.height())
-        verify(mockTransitions, times(1)).startTransition(eq(TRANSIT_CHANGE), argThat {
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        verify(mockShellTaskOrganizer).applyTransaction(argThat {
             changes[taskBinder]?.let { change ->
-                val logical = change.configuration.windowConfiguration.bounds
-                logical.width() > logical.height() &&
-                    kotlin.math.abs(change.floatingWindowScale - .75f) < .001f &&
-                    kotlin.math.abs(logical.width() * .75f - visible.width()) <= 1f &&
-                    kotlin.math.abs(logical.height() * .75f - visible.height()) <= 1f
+                kotlin.math.abs(change.floatingWindowScale - .8f) < .001f &&
+                    change.configuration.windowConfiguration.bounds.isEmpty
             } == true
-        }, eq(taskPositioner))
-        verify(mockDesktopTasksController).rememberFloatingOrientation(eq(task), eq(true), any())
+        })
+        verify(mockDesktopTasksController, never()).rememberFloatingOrientation(any(), any(), any())
     }
 
     private fun performDrag(startX: Float, startY: Float, endX: Float, endY: Float, ctrlType: Int) {
