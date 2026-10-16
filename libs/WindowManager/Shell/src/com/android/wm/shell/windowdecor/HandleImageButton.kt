@@ -25,8 +25,8 @@ import com.android.wm.shell.R
 import com.android.wm.shell.windowdecor.extension.getDimensionPixelSize
 
 /**
- * [ImageButton] for the handle at the top of fullscreen apps. Has custom hover and press handling
- * to grow the handle on hover enter and shrink the handle on hover exit and press.
+ * [ImageButton] for the handle at the top of fullscreen apps. Has custom hover handling
+ * to grow the handle on hover enter and shrink it on hover exit.
  */
 class HandleImageButton(context: Context?, attrs: AttributeSet?) : ImageButton(context, attrs) {
     private val handleAnimator = ValueAnimator()
@@ -35,11 +35,6 @@ class HandleImageButton(context: Context?, attrs: AttributeSet?) : ImageButton(c
     private val HANDLE_HOVER_ENTER_PADDING =
         loadDimensionPixelSize(
             R.dimen.desktop_mode_fullscreen_decor_caption_horizontal_padding_hovered
-        )
-    /** Final horizontal padding for press down. */
-    private val HANDLE_PRESS_DOWN_PADDING =
-        loadDimensionPixelSize(
-            R.dimen.desktop_mode_fullscreen_decor_caption_horizontal_padding_touched
         )
     /** Default horizontal padding. */
     private val HANDLE_DEFAULT_PADDING =
@@ -54,17 +49,6 @@ class HandleImageButton(context: Context?, attrs: AttributeSet?) : ImageButton(c
         } else {
             if (!isPressed) {
                 animateHandle(HANDLE_HOVER_ANIM_DURATION, HANDLE_DEFAULT_PADDING)
-            }
-        }
-    }
-
-    override fun setPressed(pressed: Boolean) {
-        if (isPressed != pressed) {
-            super.setPressed(pressed)
-            if (pressed) {
-                animateHandle(HANDLE_PRESS_ANIM_DURATION, HANDLE_PRESS_DOWN_PADDING)
-            } else {
-                animateHandle(HANDLE_PRESS_ANIM_DURATION, HANDLE_DEFAULT_PADDING)
             }
         }
     }
@@ -90,7 +74,5 @@ class HandleImageButton(context: Context?, attrs: AttributeSet?) : ImageButton(c
     companion object {
         /** The duration of animations related to hover state. */
         private const val HANDLE_HOVER_ANIM_DURATION = 300L
-        /** The duration of animations related to pressed state. */
-        private const val HANDLE_PRESS_ANIM_DURATION = 200L
     }
 }
