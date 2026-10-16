@@ -97,6 +97,22 @@ class FloatingMiniInputTest : ShellTestCase() {
         verify(controller, never()).restoreMini(task)
     }
 
+    @Test fun miniTouch_pilfersBeforeMotionAndExcludesItsWholeInputArea() {
+        var pilfered = 0
+        val input = FloatingMiniInput({ mContext }, controller, { pilfered++ })
+        val view = input.createInputView(mContext, task)
+        view.layout(0, 0, 360, 540)
+        org.junit.Assert.assertEquals(listOf(Rect(0, 0, 360, 540)), view.systemGestureExclusionRects)
+        whenever(controller.beginMiniDrag(task)).thenReturn(Rect(0, 100, 360, 640))
+        val time = SystemClock.uptimeMillis()
+        MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 1f, 20f, 0).also {
+            view.dispatchTouchEvent(it)
+            it.recycle()
+        }
+        org.junit.Assert.assertEquals(1, pilfered)
+        input.close()
+    }
+
     @Test fun dragMovesMiniWithoutRestoring() {
         val view = view()
         val time = SystemClock.uptimeMillis()

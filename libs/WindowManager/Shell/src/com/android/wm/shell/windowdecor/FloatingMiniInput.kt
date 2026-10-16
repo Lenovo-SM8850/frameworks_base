@@ -8,6 +8,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
+import android.hardware.input.InputManager
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.SurfaceControl
@@ -23,7 +24,12 @@ import kotlin.math.roundToInt
 
 /** Transparent task child that keeps mini content live while owning tap and drag input. */
 class FloatingMiniInput(private val contextProvider: () -> Context?,
-    private val controller: PinnedLayerController) : AutoCloseable {
+    private val controller: PinnedLayerController,
+    private val pilferPointers: (View) -> Unit = { view ->
+        view.viewRootImpl?.inputToken?.let { token ->
+            view.context.getSystemService(InputManager::class.java).pilferPointers(token)
+        }
+    }) : AutoCloseable {
     private var host: SurfaceControlViewHost? = null
     private var surface: SurfaceControl? = null
     private var parent: SurfaceControl? = null
@@ -124,6 +130,9 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                 setBackgroundColor(Color.TRANSPARENT)
                 isClickable = true
                 isFocusable = false
+                addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+                    view.systemGestureExclusionRects = listOf(Rect(0, 0, view.width, view.height))
+                }
                 contentDescription = context.getString(com.android.wm.shell.R.string.floating_window_restore,
                     info.taskDescription?.label ?: info.baseActivity?.packageName.orEmpty())
                 setOnClickListener { task?.let(controller::restoreMini) }
@@ -131,6 +140,8 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                     val current = task ?: return@setOnTouchListener false
                     if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                         v.requestUnbufferedDispatch(event)
+                        // Windowless hosts do not forward gesture exclusions to WM.
+                        pilferPointers(v)
                         blockedGesture = controller.isMiniAnimating(current)
                     }
                     if (blockedGesture) {
