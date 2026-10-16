@@ -666,7 +666,7 @@ class PinnedLayerController(
         dragEndBounds: Rect,
         displayId: Int = taskInfo.displayId,
     ): Boolean {
-        if (isNotPinned(taskInfo.taskId)) return false
+        if (!taskInfo.isFloatingWindow && isNotPinned(taskInfo.taskId)) return false
 
         if (taskInfo.isFloatingWindow) {
             if (miniInteractions?.onDragEnded(taskInfo, dragStartBounds, dragEndBounds) == true) {
@@ -676,6 +676,12 @@ class PinnedLayerController(
             val moved = FloatingWindowGeometry.movedBaseBounds(base, dragStartBounds, dragEndBounds)
                 ?: return true
             val destination = presentationController.clampToDisplay(taskInfo, moved) ?: base
+            // Clamp the visible leash immediately, as well as its committed presentation.
+            val visibleTop = destination.top + taskInfo.presentationBounds.top - base.top
+            val t = transactionPool.acquire()
+            t.setPosition(leash, destination.left.toFloat(), visibleTop.toFloat()).apply()
+            transactionPool.release(t)
+            dragEndBounds.offsetTo(destination.left, visibleTop)
             shellTaskOrganizer.applyTransaction(WindowContainerTransaction()
                 .setFloatingWindowPresentation(taskInfo.token,
                     android.graphics.Point(destination.left, destination.top), taskInfo.floatingWindowScale))

@@ -2,7 +2,6 @@
 package com.android.wm.shell.pinnedlayer.phone
 
 import android.graphics.Rect
-import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -27,10 +26,10 @@ class FloatingMiniState {
 
     companion object {
         fun corner(bounds: Rect, stable: Rect, threshold: Int): Corner? {
-            val left = abs(bounds.left - stable.left) <= threshold
-            val right = abs(bounds.right - stable.right) <= threshold
-            val top = abs(bounds.top - stable.top) <= threshold
-            val bottom = abs(bounds.bottom - stable.bottom) <= threshold
+            val left = bounds.left <= stable.left + threshold
+            val right = bounds.right >= stable.right - threshold
+            val top = bounds.top <= stable.top + threshold
+            val bottom = bounds.bottom >= stable.bottom - threshold
             return when {
                 left && top -> Corner.TOP_LEFT
                 right && top -> Corner.TOP_RIGHT

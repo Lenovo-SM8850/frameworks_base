@@ -676,7 +676,8 @@ public class DesktopModeTouchEventListener
                 // resizing or transforming to fullscreen) before setting new task bounds.
                 final Rect validDragArea = decoration.getValidDragArea();
                 final boolean needDragIndicatorCleanup;
-                if (isPinned(taskInfo)) {
+                if (mPinnedLayerController != null
+                        && (taskInfo.isFloatingWindow || isPinned(taskInfo))) {
                     needDragIndicatorCleanup =
                             mPinnedLayerController.onDragEnded(
                                     decoration.getTaskSurface(),

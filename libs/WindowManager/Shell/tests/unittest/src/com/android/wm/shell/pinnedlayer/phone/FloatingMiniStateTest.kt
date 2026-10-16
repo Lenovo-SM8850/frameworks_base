@@ -116,4 +116,13 @@ class FloatingMiniStateTest {
         assertThat(beyond.visible.height()).isEqualTo(540)
         assertThat(beyond.scale).isGreaterThan(.45f)
     }
+    @Test fun releaseBeyondCorner_stillSelectsCornerAndNormalReleaseClamps() {
+        val area = Rect(0, 54, 2560, 1420)
+        val released = Rect(2190, 27, 2849, 1082)
+        assertThat(FloatingMiniState.corner(released, area, 48))
+            .isEqualTo(FloatingMiniState.Corner.TOP_RIGHT)
+        assertThat(FloatingMiniState.clamp(Rect(2300, 300, 2959, 1355), area))
+            .isEqualTo(Rect(1901, 300, 2560, 1355))
+    }
+
 }
