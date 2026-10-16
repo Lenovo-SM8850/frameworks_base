@@ -125,7 +125,7 @@
     <string name="desktop_text" msgid="9058641752519570266">"데스크톱 윈도잉"</string>
     <string name="split_screen_text" msgid="1396336058129570886">"화면 분할"</string>
     <string name="more_button_text" msgid="3655388105592893530">"더보기"</string>
-    <string name="float_button_text" msgid="9221657008391364581">"플로팅"</string>
+    <string name="float_button_text" msgid="9221657008391364581">플로팅 창</string>
     <string name="select_text" msgid="5139083974039906583">"선택"</string>
     <string name="screenshot_text" msgid="1477704010087786671">"스크린샷"</string>
     <string name="open_in_browser_text" msgid="9181692926376072904">"브라우저에서 열기"</string>
@@ -181,4 +181,6 @@
     <string name="open_by_default_splash_dialog_app_text" msgid="2680408983754147907">"앱에서 계속"</string>
     <string name="open_by_default_splash_dialog_ask_me_later_text" msgid="2706872945449736432">"나중에 알림"</string>
     <string name="package_update_text" msgid="196015273357188152">"업데이트 중..."</string>
+    <string name="floating_window_restore">%1$s 플로팅 창 복원</string>
+    <string name="floating_window_handle">플로팅 창 핸들</string>
 </resources>

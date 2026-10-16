@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Copyright (C) 2019-2024 The Evolution X Project
+     SPDX-License-Identifier: Apache-2.0
+-->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="aerr_copy">비정상 종료 로그 URL 복사</string>
+    <string name="url_copy_success">URL이 복사됨</string>
+    <string name="url_copy_failed">Pasty에 로그를 업로드하는 중 오류가 발생했습니다.</string>
+    <string name="notification_channel_poweroff_alarm">전원 꺼짐 알람</string>
+    <string name="poweroff_alarm_title">전원 꺼짐 알람이 설정됨</string>
+    <string name="poweroff_alarm_body">알람이 감지되었으며 예정 시간 2분 전에 기기의 전원이 켜집니다.</string>
+    <string name="settings_restart_title">설정을 다시 시작해야 함</string>
+    <string name="settings_restart_message">모든 변경사항을 적용하려면 설정 앱을 다시 시작해야 합니다. 지금 설정 앱을 다시 시작하시겠습니까?</string>
+    <string name="system_restart_title">시스템을 다시 시작해야 함</string>
+    <string name="system_restart_message">모든 변경사항을 적용하려면 시스템을 다시 시작해야 합니다. 지금 시스템을 다시 시작하시겠습니까?</string>
+    <string name="systemui_restart_title">SystemUI를 다시 시작해야 함</string>
+    <string name="systemui_restart_message">모든 변경사항을 적용하려면 SystemUI를 다시 시작해야 합니다. 지금 SystemUI를 다시 시작하시겠습니까?</string>
+    <string name="launcher_restart_title">런처를 다시 시작해야 함</string>
+    <string name="launcher_restart_message">모든 변경사항을 적용하려면 런처를 다시 시작해야 합니다. 지금 런처를 다시 시작하시겠습니까?</string>
+    <string name="pocket_mode_title">포켓 모드 사용 중</string>
+    <string name="pocket_mode_illustration_description">주머니에 있는 휴대전화 그림</string>
+    <string name="pocket_mode_instructions_header">휴대전화를 사용하려면:</string>
+    <string name="pocket_mode_instruction_step1">1. 위에 표시된 파란색 영역(근접 센서)이 가려지지 않고 먼지나 이물질이 없는지 확인하세요.</string>
+    <string name="pocket_mode_instruction_step2">2. 전원 버튼을 길게 눌러 포켓 모드를 종료하세요.</string>
+    <string name="volume_dialog_ringer_guidance_normal">전화 및 알림이 오면 벨소리가 울립니다.</string>
+</resources>

@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Copyright (C) 2019-2024 The Evolution X Project
+     SPDX-License-Identifier: Apache-2.0
+-->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="flashlight_strength_title">손전등 밝기</string>
+    <string name="flashlight_strength_turn_off">끄기</string>
+    <string name="flashlight_strength_turn_on">켜기</string>
+    <string name="face_unlock_recognizing">얼굴 인식 중...</string>
+    <string name="status_bar_call_strength">통화 신호 강도</string>
+    <string name="status_bar_data_saver">데이터 절약 모드</string>
+    <string name="status_bar_nfc">NFC</string>
+    <string name="status_bar_roaming">로밍 표시기</string>
+    <string name="status_bar_hd_calling">HD 통화(VoLTE/VoNR)</string>
+    <string name="status_bar_vowifi">Wi-Fi 통화(VoWiFi)</string>
+    <string name="data_disabled_icon_title">데이터 사용 안 함 아이콘</string>
+    <string name="show_fourg_icon_title">4G 아이콘</string>
+    <string name="wifi_standard_icon_title">Wi-Fi 표준</string>
+    <string name="mic_camera_privacy_indicator_title">마이크 및 카메라 개인정보 보호 표시기</string>
+    <string name="location_privacy_indicator_title">위치 개인정보 보호 표시기</string>
+    <string name="projection_privacy_indicator_title">미디어 프로젝션 개인정보 보호 표시기</string>
+    <plurals name="quick_settings_internet_hotspot_summary_num_devices">
+        <item quantity="other">기기 %d대 연결됨</item>
+    </plurals>
+    <string name="enable_fiveg">5G 사용</string>
+    <string name="quick_settings_sound_label">소리</string>
+    <string name="quick_settings_sound_ring">벨소리</string>
+    <string name="quick_settings_sound_vibrate">진동</string>
+    <string name="quick_settings_sound_mute">음소거</string>
+    <string name="qs_data_switch_label">데이터 SIM 전환</string>
+    <string name="quick_settings_volume_panel_label">음량 패널</string>
+    <string name="quick_settings_locale_label">언어</string>
+    <string name="quick_settings_locale_more_locales_toast">먼저 여러 언어를 설정하세요.</string>
+    <string name="quick_settings_preferred_network_label">기본 네트워크</string>
+    <string name="quick_settings_preferred_network_unsupported">지원되지 않음</string>
+    <string name="refresh_rate_tile_label">주사율</string>
+    <string name="auto_mode_label">자동</string>
+    <string name="quick_settings_compass_label">나침반</string>
+    <string name="quick_settings_compass_value"><xliff:g id="degrees">%1$.0f</xliff:g>\u00b0 <xliff:g id="direction">%2$s</xliff:g></string>
+    <string name="quick_settings_compass_init">초기화 중\u2026</string>
+    <string name="quick_settings_compass_N">북</string>
+    <string name="quick_settings_compass_NE">북동</string>
+    <string name="quick_settings_compass_E">동</string>
+    <string name="quick_settings_compass_SE">남동</string>
+    <string name="quick_settings_compass_S">남</string>
+    <string name="quick_settings_compass_SW">남서</string>
+    <string name="quick_settings_compass_W">서</string>
+    <string name="quick_settings_compass_NW">북서</string>
+    <string name="screenshot_long_press">길게 누르기 - 선택한 영역</string>
+    <string name="quick_settings_cpuinfo_label">CPU 정보</string>
+    <string name="quick_settings_fpsinfo_label">FPS 정보</string>
+    <string name="fps_text_placeholder">FPS: <xliff:g id="fps" example="90">%1$d</xliff:g></string>
+    <string name="quick_settings_autobrightness_label">자동 밝기</string>
+    <string name="vpn_tethering_label">VPN 테더링</string>
+    <string name="vpn_tethering_changed_off">VPN 테더링이 꺼졌습니다.</string>
+    <string name="vpn_tethering_changed_on">VPN 테더링이 켜졌습니다.</string>
+    <string name="keyguard_indication_dash_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • Dash 충전(완충까지 <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_dash_charging"><xliff:g id="percentage">%s</xliff:g> • Dash 충전</string>
+    <string name="keyguard_indication_warp_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • Warp 충전(완충까지 <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_warp_charging"><xliff:g id="percentage">%s</xliff:g> • Warp 충전</string>
+    <string name="keyguard_indication_vooc_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • VOOC 충전(완충까지 <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_vooc_charging"><xliff:g id="percentage">%s</xliff:g> • VOOC 충전</string>
+    <string name="keyguard_indication_turbo_power_time"><xliff:g id="percentage">%2$s</xliff:g> • Turbo 충전(완충까지 <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_turbo_charging"><xliff:g id="percentage">%s</xliff:g> • Turbo 충전</string>
+    <string name="global_action_restart_systemui">SystemUI</string>
+    <string name="quick_settings_smart_pixels_label">스마트 픽셀</string>
+    <string name="quick_settings_smart_pixels_on">켜짐</string>
+    <string name="quick_settings_smart_pixels_off">꺼짐</string>
+    <string name="smart_pixels_percent_label">픽셀 비율</string>
+    <string name="usb_mode_picker_title">USB 모드 선택</string>
+    <string name="usb_mode_file_transfer">파일 전송</string>
+    <string name="usb_mode_tethering">USB 테더링</string>
+    <string name="usb_mode_midi">MIDI</string>
+    <string name="usb_mode_photo_transfer">사진 및 동영상 전송</string>
+    <string name="usb_mode_webcam">USB 웹캠</string>
+    <string name="usb_mode_charging_only">충전만</string>
+    <string name="usb_charging_status">USB 충전이 켜져 있음</string>
+    <string name="onthego_notif_ticker">온더고 활성화됨</string>
+    <string name="onthego_notif_title">온더고 활성화됨</string>
+    <string name="onthego_notif_stop">중지</string>
+    <string name="onthego_notif_options">옵션</string>
+    <string name="onthego_notif_error">온더고를 시작할 수 없음</string>
+    <string name="onthego_notif_restart">온더고 다시 시작</string>
+    <string name="onthego_notif_camera_changed">카메라 모드 변경됨</string>
+    <string name="onthego_service_toggle">서비스 자동 다시 시작</string>
+    <string name="onthego_channel_name">기본</string>
+    <string name="global_action_onthego">온더고</string>
+    <string name="onthego_dialog_title">온더고</string>
+    <string name="onthego_opacity_title">카메라 불투명도</string>
+    <string name="onthego_restart_title">카메라 전환 시 다시 시작</string>
+    <string name="onthego_restart_summary">카메라 전환 시 미리보기를 잠깐 다시 시작함</string>
+    <string name="onthego_front_camera_title">전면 카메라</string>
+    <string name="onthego_front_camera_summary">후면 대신 전면 카메라 사용</string>
+    <string name="ax_dynamic_bar_timer">타이머</string>
+    <string name="ax_dynamic_bar_stopwatch">스톱워치</string>
+    <string name="ax_dynamic_bar_alarm">알람</string>
+    <string name="ax_dynamic_bar_flashlight">손전등</string>
+    <string name="ax_dynamic_bar_hotspot">핫스팟</string>
+    <string name="ax_dynamic_bar_hotspot_active">핫스팟 사용 중</string>
+    <string name="ax_dynamic_bar_vpn_active">VPN 사용 중</string>
+    <string name="ax_dynamic_bar_screen_recording">화면 녹화</string>
+    <string name="ax_dynamic_bar_now_playing">나우 플레잉</string>
+    <string name="ax_dynamic_bar_media_output">미디어 출력</string>
+    <string name="ax_dynamic_bar_sound_mode">소리 모드</string>
+    <string name="ax_dynamic_bar_silent">무음</string>
+    <string name="ax_dynamic_bar_vibrate">진동</string>
+    <string name="ax_dynamic_bar_ring">벨소리</string>
+    <string name="ax_dynamic_bar_charging">충전</string>
+    <string name="ax_dynamic_bar_wireless">무선</string>
+    <string name="ax_dynamic_bar_saver">절전</string>
+    <string name="ax_dynamic_bar_music">음악</string>
+    <string name="ax_dynamic_bar_copied">복사됨</string>
+    <string name="ax_dynamic_bar_copied_feedback">복사됨!</string>
+    <string name="ax_dynamic_bar_image_copied">이미지 복사됨</string>
+    <string name="ax_dynamic_bar_copy_image">이미지 복사</string>
+    <string name="ax_dynamic_bar_clipboard_image_desc">클립보드 이미지</string>
+    <string name="ax_dynamic_bar_image">이미지</string>
+    <string name="ax_dynamic_bar_url">URL</string>
+    <string name="ax_dynamic_bar_dismiss">닫기</string>
+    <string name="ax_dynamic_bar_open">열기</string>
+    <string name="ax_dynamic_bar_stop">중지</string>
+    <string name="ax_dynamic_bar_stop_recording">녹화 중지</string>
+    <string name="ax_dynamic_bar_reset">재설정</string>
+    <string name="ax_dynamic_bar_clear_all">모두 지우기</string>
+    <string name="ax_dynamic_bar_show_more">더 보기</string>
+    <string name="ax_dynamic_bar_show_less">간단히 보기</string>
+    <string name="ax_dynamic_bar_play">재생</string>
+    <string name="ax_dynamic_bar_pause">일시중지</string>
+    <string name="ax_dynamic_bar_paused">일시중지됨</string>
+    <string name="ax_dynamic_bar_saved">저장됨</string>
+    <string name="ax_dynamic_bar_recording">녹화 중</string>
+    <string name="ax_dynamic_bar_done">완료</string>
+    <string name="ax_dynamic_bar_ringing">벨 울림</string>
+    <string name="ax_dynamic_bar_running">실행 중</string>
+    <string name="ax_dynamic_bar_on">켜짐</string>
+    <string name="ax_dynamic_bar_recents">최근 항목</string>
+    <string name="ax_dynamic_bar_kill_app">앱 강제 종료</string>
+    <string name="ax_dynamic_bar_unlocked">잠금 해제됨</string>
+    <string name="ax_dynamic_bar_device_unlocked">기기 잠금 해제됨</string>
+    <string name="ax_dynamic_bar_progress">진행 중</string>
+    <string name="ax_dynamic_bar_casting_to">전송 중:</string>
+    <string name="ax_dynamic_bar_camera_mic">카메라 및 마이크</string>
+    <string name="ax_dynamic_bar_camera">카메라</string>
+    <string name="ax_dynamic_bar_microphone">마이크</string>
+    <string name="ax_dynamic_bar_camera_mic_short">카메라/마이크</string>
+    <string name="ax_dynamic_bar_hotspot_devices">기기 <xliff:g id="count" example="3">%d</xliff:g>대</string>
+    <string name="ax_dynamic_bar_wireless_charging">무선 충전</string>
+    <string name="ax_dynamic_bar_until_full">완충까지</string>
+    <string name="ax_dynamic_bar_battery_saver">절전 모드</string>
+    <string name="ax_dynamic_bar_incoming_call">수신 전화</string>
+    <string name="ax_dynamic_bar_connected">연결됨</string>
+    <string name="ax_dynamic_bar_disconnect">연결 해제</string>
+    <string name="ax_dynamic_bar_no_devices">기기 없음</string>
+    <string name="ax_dynamic_bar_one_device_connected">기기 1대 연결됨</string>
+    <string name="ax_dynamic_bar_devices_connected">기기 <xliff:g id="count" example="3">%d</xliff:g>대 연결됨</string>
+    <string name="ax_dynamic_bar_vpn_connected">VPN 연결됨</string>
+    <string name="ax_dynamic_bar_secured">보안 연결</string>
+    <string name="ax_dynamic_bar_connecting">연결 중\u2026</string>
+    <string name="ax_dynamic_bar_one_device">기기 1대</string>
+    <string name="ax_dynamic_bar_bluetooth_device">블루투스 기기</string>
+    <string name="ax_dynamic_bar_apps_count">앱 <xliff:g id="count" example="2">%d</xliff:g>개</string>
+    <string name="ax_dynamic_bar_just_now">방금 전</string>
+    <string name="ax_dynamic_bar_mins_ago"><xliff:g id="count" example="5">%d</xliff:g>분 전</string>
+    <string name="ax_dynamic_bar_hours_ago"><xliff:g id="count" example="2">%d</xliff:g>시간 전</string>
+    <string name="ax_dynamic_bar_days_ago"><xliff:g id="count" example="3">%d</xliff:g>일 전</string>
+    <string name="ax_dynamic_bar_weeks_ago"><xliff:g id="count" example="1">%d</xliff:g>주 전</string>
+    <string name="ax_dynamic_bar_resume">계속</string>
+    <string name="ax_dynamic_bar_clipboard">클립보드</string>
+    <string name="ax_dynamic_bar_previous">이전</string>
+    <string name="ax_dynamic_bar_next">다음</string>
+    <string name="ax_dynamic_bar_shuffle">랜덤 재생</string>
+    <string name="ax_dynamic_bar_output">출력</string>
+    <string name="ax_dynamic_bar_rec_short">녹화</string>
+    <string name="ax_dynamic_bar_cast_short">전송</string>
+    <string name="ax_dynamic_bar_active">활성</string>
+    <string name="ax_dynamic_bar_biometric">생체 인식</string>
+    <string name="ax_dynamic_bar_trust">Trust</string>
+    <string name="ax_dynamic_bar_alignment">정렬</string>
+    <string name="ax_dynamic_bar_cam_short">카메라</string>
+    <string name="ax_dynamic_bar_mic_short">마이크</string>
+    <string name="ax_dynamic_bar_recent_apps">최근 실행한 앱</string>
+    <string name="ax_dynamic_bar_count_running"><xliff:g id="count" example="3">%d</xliff:g>개 실행 중</string>
+    <string name="ax_dynamic_bar_sports_vs">대</string>
+    <string name="ax_dynamic_bar_sports_live">생중계</string>
+    <string name="ax_dynamic_bar_sports_final">경기 종료</string>
+    <string name="ax_dynamic_bar_sports_halftime">하프타임</string>
+    <string name="ax_dynamic_bar_sports_upcoming">예정</string>
+    <string name="quick_settings_screenshot_label">스크린샷</string>
+    <string name="reevaluating_system_theme">시스템 테마를 다시 확인하는 중입니다. 잠시 기다려 주세요.</string>
+    <string name="weather_condition_clouds">흐림</string>
+    <string name="weather_condition_rain">비</string>
+    <string name="weather_condition_clear">맑음</string>
+    <string name="weather_condition_storm">폭풍우</string>
+    <string name="weather_condition_snow">눈</string>
+    <string name="weather_condition_wind">바람</string>
+    <string name="weather_condition_mist">안개</string>
+    <string name="omnijaws_service_error">날씨 데이터를 불러오지 못함</string>
+    <string name="omnijaws_service_unknown">날씨 데이터 없음</string>
+    <string name="omnijaws_label_default">날씨</string>
+    <string name="clock_ide_weather_data_unavailable">null</string>
+    <string name="usage_data">오늘 사용</string>
+    <string name="usage_data_weekly">이번 주 사용</string>
+    <string name="usage_data_default_suffix">데이터</string>
+    <string name="usage_wifi_default_suffix">Wi-Fi</string>
+    <string name="screenshot_save_to_storage_label">저장공간에 저장</string>
+    <string name="ax_dynamic_bar_call">통화</string>
+    <string name="ax_dynamic_bar_left_earbud">왼쪽 이어버드</string>
+    <string name="ax_dynamic_bar_right_earbud">오른쪽 이어버드</string>
+    <string name="ax_dynamic_bar_earbuds_case">케이스</string>
+    <string name="screenshot_lens_label">렌즈</string>
+    <string name="accessibility_assistant_button">AI 어시스턴트</string>
+    <string name="quick_settings_blur_label">블러</string>
+    <string name="force_stop_dlg_title">강제 종료하시겠습니까?</string>
+    <string name="force_stop_dlg_text">앱을 강제 종료하면 앱이 제대로 작동하지 않을 수 있습니다.</string>
+    <string name="app_volume_panel_title">앱 볼륨</string>
+    <string name="app_volume_panel_subtitle_idle">오디오를 재생 중인 앱별로 볼륨을 조절하세요.</string>
+    <plurals name="app_volume_panel_subtitle_active">
+        <item quantity="other">오디오 재생 중인 앱 <xliff:g id="count" example="3">%d</xliff:g>개</item>
+    </plurals>
+    <string name="app_volume_panel_empty">현재 오디오를 재생 중인 앱이 없습니다.</string>
+    <string name="app_volume_panel_percent"><xliff:g id="percent" example="50">%d</xliff:g>퍼센트</string>
+</resources>
