@@ -290,7 +290,8 @@ class PinnedLayerHandler(
 
         // Should accept all the TransitionInfo.Change if there's an unpin transition.
         // Required to properly handle animation for mixed transitions with pip.
-        if (transitions.any { it is ActiveTransition.Unpin }) {
+        if (transitions.any { it is ActiveTransition.Unpin } &&
+            transitions.none { it is ActiveTransition.Unpin && it.taskInfo.isFloatingWindow && !it.minimized }) {
             startTransaction.apply()
             finishCallback.onTransitionFinished(null)
             return true

@@ -681,6 +681,7 @@ public final class TransitionInfo implements Parcelable {
         private @TransitionMode int mMode = TRANSIT_NONE;
         private @ChangeFlags int mFlags = FLAG_NONE;
         private final Rect mStartAbsBounds = new Rect();
+        private final Rect mStartFloatingWindowBounds = new Rect();
         private final Rect mEndAbsBounds = new Rect();
         private final Point mEndRelOffset = new Point();
         private final Point mEndParentSize = new Point();
@@ -723,6 +724,7 @@ public final class TransitionInfo implements Parcelable {
             mMode = in.readInt();
             mFlags = in.readInt();
             mStartAbsBounds.readFromParcel(in);
+            mStartFloatingWindowBounds.readFromParcel(in);
             mEndAbsBounds.readFromParcel(in);
             mEndRelOffset.readFromParcel(in);
             mEndParentSize.readFromParcel(in);
@@ -750,6 +752,7 @@ public final class TransitionInfo implements Parcelable {
             out.mMode = mMode;
             out.mFlags = mFlags;
             out.mStartAbsBounds.set(mStartAbsBounds);
+            out.mStartFloatingWindowBounds.set(mStartFloatingWindowBounds);
             out.mEndAbsBounds.set(mEndAbsBounds);
             out.mEndRelOffset.set(mEndRelOffset);
             out.mEndParentSize.set(mEndParentSize);
@@ -799,6 +802,17 @@ public final class TransitionInfo implements Parcelable {
         /** Sets the flags for this change */
         public void setFlags(@ChangeFlags int flags) {
             mFlags = flags;
+        }
+
+        /** Sets the visible starting bounds of a floating task, or empty for other tasks. */
+        public void setStartFloatingWindowBounds(@NonNull Rect bounds) {
+            mStartFloatingWindowBounds.set(bounds);
+        }
+
+        /** Returns the floating presentation bounds captured before the transition. */
+        @NonNull
+        public Rect getStartFloatingWindowBounds() {
+            return mStartFloatingWindowBounds;
         }
 
         /** Sets the bounds this container occupied before the change in screen space */
@@ -1099,6 +1113,7 @@ public final class TransitionInfo implements Parcelable {
             dest.writeInt(mMode);
             dest.writeInt(mFlags);
             mStartAbsBounds.writeToParcel(dest, flags);
+            mStartFloatingWindowBounds.writeToParcel(dest, flags);
             mEndAbsBounds.writeToParcel(dest, flags);
             mEndRelOffset.writeToParcel(dest, flags);
             mEndParentSize.writeToParcel(dest, flags);
