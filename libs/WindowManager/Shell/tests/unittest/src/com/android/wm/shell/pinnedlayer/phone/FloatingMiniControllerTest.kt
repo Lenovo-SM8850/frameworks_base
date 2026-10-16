@@ -170,4 +170,16 @@ class FloatingMiniControllerTest : ShellTestCase() {
         verify(h.transaction, times(2)).apply()
         verify(h.organizer, never()).initialTasks
     }
+    @Test fun normalReleaseBeyondTopRight_entersMiniOnRealReleaseGeometry() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.floatingWindowScale = .75f
+        h.task.positionInParent = Point(100, 200)
+        h.task.floatingWindowPosition.set(100, 200)
+        assertThat(h.controller.onDragEnded(h.task, h.task.presentationBounds,
+            Rect(1100, 73, 1700, 973))).isTrue()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        assertThat(entry.bounds).isEqualTo(Rect(832, 108, 1192, 648))
+    }
+
 }
