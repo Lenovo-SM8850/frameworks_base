@@ -39,6 +39,7 @@ import com.android.internal.jank.InteractionJankMonitor
 import com.android.window.flags.Flags
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.DisplayController
+import com.android.wm.shell.common.SurfaceFrameRate
 import com.android.wm.shell.common.MultiDisplayDragMoveBoundsCalculator
 import com.android.wm.shell.common.MultiDisplayDragMoveIndicatorController
 import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.InputMethod
@@ -109,6 +110,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var floatingMinHeight = 1
     private val floatingBaseBounds = Rect()
     private var floatingPreviewActive = false
+    private var floatingDragActive = false
     private var floatingDragCancelled = false
     private var floatingObserverRegistered = false
     private var pendingFloatingTransition: IBinder? = null
@@ -175,6 +177,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
         startDisplayId = displayId
         hasMovedTaskSurfaceOffScreen = false
         val task = windowDecoration.taskInfo
+        floatingDragActive = task.isFloatingWindow
+        if (floatingDragActive) SurfaceFrameRate.setInteracting(this, true)
         floatingLogicalBounds.set(task.configuration.windowConfiguration.bounds)
         floatingStartScale = task.floatingWindowScale
         floatingBaseBounds.set(task.floatingWindowRestoreBounds)
@@ -484,6 +488,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
             taskBoundsAtDragStart.setEmpty()
             ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+            stopFloatingObserver()
             interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
             return Rect(repositionTaskBounds)
         }
@@ -695,7 +700,18 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
     }
 
+    override fun isDragPositioningCancelled() = floatingDragCancelled
+
+    override fun onDragPositioningCancel() {
+        if (!floatingDragActive) return
+        cancelFloatingDragForTransition()
+        floatingDragActive = false
+        SurfaceFrameRate.setInteracting(this, false)
+    }
+
     private fun stopFloatingObserver() {
+        floatingDragActive = false
+        SurfaceFrameRate.setInteracting(this, false)
         if (floatingObserverRegistered) {
             transitions.unregisterObserver(this)
             floatingObserverRegistered = false
@@ -711,6 +727,12 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (pendingFloatingTransition == null) {
             floatingDragCancelled = true
             repositionTaskBounds.set(windowDecoration.taskInfo.presentationBounds)
+            if (!isResizing && windowDecoration.taskSurface.isValid) {
+                transactionSupplier().use { t ->
+                    t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
+                        repositionTaskBounds.top.toFloat()).apply()
+                }
+            }
             floatingResize = null
             taskOrganizer.applyTransaction(WindowContainerTransaction()
                 .setDragResizing(windowDecoration.taskInfo.token, false))
@@ -758,10 +780,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 pendingFloatingTransition =
                     transitions.startTransition(WindowManager.TRANSIT_CHANGE, wct, this)
             } else {
-                stopFloatingObserver()
                 windowDecoration.finishFloatingWindowPreview()
                 floatingPreviewActive = false
                 taskOrganizer.applyTransaction(wct)
+                stopFloatingObserver()
                 interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_RESIZE_WINDOW)
             }
             dragEventListeners.forEach { it.onDragResizeEnded(task.taskId, resizeTrigger, inputMethod, result.visible) }
@@ -771,6 +793,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
             floatingResize = null
             return Rect(repositionTaskBounds)
         }
+        taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, false))
+        stopFloatingObserver()
+        taskBoundsAtDragStart.setEmpty()
+        ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
         return Rect(repositionTaskBounds)
     }
 

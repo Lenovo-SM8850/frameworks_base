@@ -28,7 +28,7 @@ import org.mockito.kotlin.whenever
 @SmallTest
 @RunWith(AndroidJUnit4::class)
 class FloatingFrameRateControllerTest : ShellTestCase() {
-    private class Harness(mini: Boolean = false) {
+    private class Harness(mini: Boolean = false, supported: Boolean = true) {
         val context = mock<Context>()
         val organizer = mock<ShellTaskOrganizer>()
         val executor = mock<ShellExecutor>()
@@ -52,7 +52,8 @@ class FloatingFrameRateControllerTest : ShellTestCase() {
                 FloatingMiniState.Restore(android.graphics.Rect(100, 100, 700, 1000),
                     android.graphics.Rect(0, 0, 800, 1200), .75f),
                 android.graphics.Rect(8, 8, 368, 548), .45f)
-            controller = FloatingFrameRateController(context, organizer, executor, state) { transaction }
+            controller = FloatingFrameRateController(context, organizer, executor, state,
+                supportsOverride = { supported }) { transaction }
         }
     }
 
@@ -150,4 +151,21 @@ class FloatingFrameRateControllerTest : ShellTestCase() {
         verify(transaction).setFrameRateSelectionStrategy(leash,
             SurfaceControl.FRAME_RATE_SELECTION_STRATEGY_OVERRIDE_CHILDREN)
     }
+    @Test fun unsupportedOverride_neverVotesEvenForMini() {
+        val h = Harness(mini = true, supported = false)
+        h.controller.update()
+        verify(h.transaction, never()).setFrameRate(any(), any(), any())
+    }
+
+    @Test fun anyMotion_clearsAndResumesFloatingVotes() {
+        val h = Harness(mini = true)
+        val owner = Any()
+        clearInvocations(h.transaction)
+        com.android.wm.shell.common.SurfaceFrameRate.setInteracting(owner, true)
+        verify(h.transaction).setFrameRate(h.leash, 0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+        clearInvocations(h.transaction)
+        com.android.wm.shell.common.SurfaceFrameRate.setInteracting(owner, false)
+        verify(h.transaction).setFrameRate(h.leash, 60f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+    }
+
 }

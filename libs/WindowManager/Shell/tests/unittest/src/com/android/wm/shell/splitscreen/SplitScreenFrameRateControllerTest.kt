@@ -47,7 +47,7 @@ class SplitScreenFrameRateControllerTest : ShellTestCase() {
         fun changed() = listener.run()
     }
 
-    private class Harness {
+    private class Harness(supported: Boolean = true) {
         val organizer = mock<ShellTaskOrganizer>()
         val displays = mock<DisplayController>()
         val transitions = mock<Transitions>()
@@ -73,7 +73,7 @@ class SplitScreenFrameRateControllerTest : ShellTestCase() {
             whenever(right.isValid).thenReturn(true)
             whenever(t.setFrameRate(any(), any(), any())).thenReturn(t)
             controller = SplitScreenFrameRateController(mock<Context>(), mock<ShellExecutor>(),
-                mock<Handler>(), organizer, transitions, displays, refresh, playback, { t })
+                mock<Handler>(), organizer, transitions, displays, refresh, playback, { supported }, { t })
         }
         fun publish(position: Int = SNAP_TO_2_10_90, atRest: Boolean = true) =
             controller.updateStages(listOf(first, second), position, 0, atRest)
@@ -107,6 +107,7 @@ class SplitScreenFrameRateControllerTest : ShellTestCase() {
         clearInvocations(h.t)
         h.controller.setDividerMoving(true)
         verify(h.t).setFrameRate(h.left, 0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+        h.controller.setDividerMoving(false)
     }
 
     @Test fun unsettledLayoutResizeAndSwap_doNotVote() {
@@ -227,4 +228,54 @@ class SplitScreenFrameRateControllerTest : ShellTestCase() {
         h.publish()
         verify(h.t, never()).setFrameRate(any(), any(), any())
     }
+    @Test fun unsupportedOverride_neverVotesAtOffscreenTargets() {
+        val h = Harness(supported = false)
+        h.publish()
+        h.publish(SNAP_TO_2_90_10)
+        verify(h.t, never()).setFrameRate(any(), any(), any())
+    }
+
+    @Test fun floatingMotion_clearsAndResumesSplitVote() {
+        val h = Harness()
+        h.publish()
+        val owner = Any()
+        clearInvocations(h.t)
+        com.android.wm.shell.common.SurfaceFrameRate.setInteracting(owner, true)
+        verify(h.t).setFrameRate(h.left, 0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+        clearInvocations(h.t)
+        com.android.wm.shell.common.SurfaceFrameRate.setInteracting(owner, false)
+        verify(h.t).setFrameRate(h.left, 30f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+    }
+
+
+    @Test fun splitExitDuringDividerMotion_releasesGlobalOwner() {
+        val h = Harness()
+        h.publish()
+        h.controller.setDividerMoving(true)
+        h.controller.setResizing(true)
+        h.controller.setAnimating(true)
+        org.junit.Assert.assertTrue(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        h.controller.updateStages(emptyList(), SNAP_TO_2_50_50, 0, false)
+        org.junit.Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        h.controller.updateStages(emptyList(), SNAP_TO_2_50_50, 0, false)
+        h.publish()
+        verify(h.t, org.mockito.kotlin.atLeastOnce()).setFrameRate(h.left, 30f,
+            Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+    }
+
+    @Test fun displayRemovalDuringDividerMotion_releasesGlobalOwner() {
+        val h = Harness()
+        h.publish()
+        h.controller.setDividerMoving(true)
+        val listener = argumentCaptor<DisplayController.OnDisplaysChangedListener>()
+        verify(h.displays).addDisplayWindowListener(listener.capture())
+        listener.firstValue.onDisplayRemoved(0)
+        org.junit.Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        listener.firstValue.onDisplayRemoved(0)
+        listener.firstValue.onDisplayAdded(0)
+        h.publish()
+        verify(h.t, org.mockito.kotlin.atLeastOnce()).setFrameRate(h.left, 30f,
+            Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+    }
+
 }

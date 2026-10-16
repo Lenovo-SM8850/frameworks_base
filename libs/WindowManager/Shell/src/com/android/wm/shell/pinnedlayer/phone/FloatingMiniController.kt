@@ -14,6 +14,7 @@ import android.window.WindowContainerTransaction
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.DisplayLayout
+import com.android.wm.shell.common.SurfaceFrameRate
 import com.android.wm.shell.shared.animation.Interpolators
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -87,7 +88,10 @@ class FloatingMiniController(
     }
 
     private fun clearDrag(task: TaskInfo) {
-        dragFrames.remove(key(task))?.close()
+        dragFrames.remove(key(task))?.let {
+            it.close()
+            SurfaceFrameRate.setInteracting(it, false)
+        }
         if (frameScheduled && dragFrames.values.none { it.pending }) {
             choreographer.removeFrameCallback(dragCallback)
             frameScheduled = false
@@ -140,8 +144,8 @@ class FloatingMiniController(
                 FloatingMiniState.stash(end, stable, edge, (28 * density(task)).toInt()) else
                 corner?.let { FloatingMiniState.snap(end, stable, it, margin) }
                     ?: FloatingMiniState.clamp(end, stable, margin)
-            changed(task)
             animate(task, end, entry.scale, destination, entry.scale)
+            changed(task)
         }
         return true
     }
@@ -150,8 +154,8 @@ class FloatingMiniController(
         from: Rect, fromScale: Float, to: Rect, scale: Float) {
         state.enter(task.userId, task.taskId,
             FloatingMiniState.Restore(restore, logical, restoreScale), to, scale)
-        changed(task)
         animate(task, from, fromScale, to, scale)
+        changed(task)
     }
 
     fun enterAfterResize(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,
@@ -197,7 +201,7 @@ class FloatingMiniController(
     fun beginDrag(task: TaskInfo): Rect {
         cancel(task)
         clearDrag(task)
-        dragFrames[key(task)] = Frame(task)
+        dragFrames[key(task)] = Frame(task).also { SurfaceFrameRate.setInteracting(it, true) }
         val entry = state.get(task.userId, task.taskId)
         val bounds = Rect(task.presentationBounds)
         entry?.bounds?.set(bounds)
@@ -377,6 +381,7 @@ class FloatingMiniController(
         val frame = Frame(task)
         val operation = Operation(animation, task, Rect(to), toScale, logical?.let(::Rect), frame.radius, finish)
         animations[key(task)] = operation
+        SurfaceFrameRate.setInteracting(operation, true)
         organizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
         var cancelled = false
         animation.duration = 300
@@ -401,6 +406,7 @@ class FloatingMiniController(
                 if (animations[key(task)] === operation) animations.remove(key(task))
                 frame.close()
                 if (!cancelled) complete(operation)
+                SurfaceFrameRate.setInteracting(operation, false)
             }
         })
         animation.start()
