@@ -118,9 +118,6 @@ private constructor(
     private val surfaceControlViewHostFactory: SurfaceControlViewHostFactory,
     private val decorThemeUtilFactory: DecorThemeUtil.Factory,
 ) {
-    private val shouldShowFloatAction: Boolean
-        get() = shouldShowFloatAction(taskInfo)
-
     private val isViewAboveStatusBar: Boolean
         get() = taskInfo.isFloatingWindow ||
             (DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue() && !taskInfo.isFreeform)
@@ -156,8 +153,7 @@ private constructor(
                 shouldShowManageWindowsButton ||
                 shouldShowChangeAspectRatioButton ||
                 shouldShowGameControlsButton ||
-                shouldShowRestartButton ||
-                shouldShowFloatAction
+                shouldShowRestartButton
 
     private var loadAppInfoJob: Job? = null
 
@@ -544,9 +540,6 @@ private constructor(
                 loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_open_in_browser_pill_height)
             menuHeight -= pillTopMargin
         }
-        if (shouldShowFloatAction) {
-            menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_new_window_height)
-        }
         return menuHeight
     }
 
@@ -667,9 +660,6 @@ private constructor(
         private val gameControlsBtn =
             moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.game_controls_button)
 
-        private val floatBtn =
-            moreActionsPill.requireViewById<HandleMenuActionButton>(R.id.float_action_button)
-
         // Restart Pill.
         private val restartPill = rootView.requireViewById<View>(R.id.handle_menu_restart_pill)
         private val restartBtn =
@@ -687,7 +677,6 @@ private constructor(
 
         private val menuButtons =
             listOf(
-                floatBtn,
                 newWindowBtn,
                 changeAspectRatioBtn,
                 gameControlsBtn,
@@ -715,7 +704,7 @@ private constructor(
                 windowDecorationActions,
                 desktopModeUiEventLogger,
                 shouldShowDesktopModeButton,
-                showFloatingButton = false,
+                showFloatingButton = true,
                 onPillItemClicked = { onHandleMenuClicked?.invoke() },
             )
             menuButtons.forEach { it.setOnClickListener(this) }
@@ -731,7 +720,6 @@ private constructor(
 
         override fun onClick(v: View) {
             when (v.id) {
-                R.id.float_action_button -> windowDecorationActions.onToFloat(taskInfo.taskId)
                 R.id.new_window_button -> {
                     windowDecorationActions.onNewWindow(taskInfo.taskId)
                 }
@@ -879,7 +867,6 @@ private constructor(
                     changeAspectRatioBtn to shouldShowChangeAspectRatioButton,
                     gameControlsBtn to shouldShowGameControlsButton,
                     restartBtn to shouldShowRestartButton,
-                    floatBtn to shouldShowFloatAction(taskInfo),
                 )
             val firstVisible = buttons.find { it.second }?.first
             val lastVisible = buttons.findLast { it.second }?.first
@@ -971,12 +958,6 @@ private constructor(
     data class AppToWebData(val isBrowserApp: Boolean, val openInAppOrBrowserIntent: Intent?)
 
     companion object {
-        private fun shouldShowFloatAction(task: RunningTaskInfo): Boolean =
-            !task.isFloatingWindow && task.isResizeable && task.displayId == 0 &&
-                (task.windowingMode == android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN ||
-                    task.windowingMode == android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW) &&
-                task.activityType == android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD
-
         private const val TAG = "HandleMenu"
         private const val SHOULD_SHOW_SCREENSHOT_BUTTON = false
 

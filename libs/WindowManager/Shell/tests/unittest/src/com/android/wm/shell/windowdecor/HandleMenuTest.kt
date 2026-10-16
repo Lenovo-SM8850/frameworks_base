@@ -541,36 +541,51 @@ class HandleMenuTest : ShellTestCase() {
             "com.android.window.flags.enable_non_default_display_split_bugfix"
     }
 
+
     @Test
-    fun windowingPillMinimize_routesToHandleMenuAction() {
-        val actions = mock<WindowDecorationActions>()
-        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+    fun windowingPill_floatBetweenSplitAndClose_usesExistingAction() {
+        val actions = org.mockito.kotlin.mock<WindowDecorationActions>()
         val pill = WindowingPillView(mContext, mock())
-        pill.initialize(actions, mock(), false) {}
+        pill.initialize(actions, mockDesktopModeUiEventLogger, false) {}
+        pill.desktopModeCompatPolicy = mock()
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        task.displayId = 0
+        task.isResizeable = true
         pill.bind(task, false)
-        pill.requireViewById<View>(R.id.minimize_window_button).performClick()
-        org.mockito.kotlin.verify(actions).onMinimizeFromHandleMenu(task)
-        org.mockito.kotlin.verify(actions, org.mockito.kotlin.never()).onMinimize(any())
+        val button = pill.requireViewById<View>(R.id.floating_button)
+        val params = button.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        assertEquals(R.id.split_screen_button, params.startToEnd)
+        assertEquals(R.id.close_window_button, params.endToStart)
+        assertEquals(View.VISIBLE, button.visibility)
+        assertEquals(View.GONE, pill.requireViewById<View>(R.id.fullscreen_button).visibility)
+        button.performClick()
+        org.mockito.kotlin.verify(actions).onToFloat(task.taskId)
+        task.isFloatingWindow = true
+        pill.bind(task, false)
+        assertEquals(View.GONE, button.visibility)
+        assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.fullscreen_button).visibility)
     }
 
     @Test
-    fun fullscreenRotate_hiddenOnSmallDisplay() {
-        val resources = org.mockito.kotlin.spy(mContext.resources)
-        val context = org.mockito.kotlin.spy(mContext)
-        org.mockito.kotlin.doReturn(resources).whenever(context).resources
-        org.mockito.kotlin.doReturn(android.R.string.ok).whenever(resources)
-            .getIdentifier("accessibility_rotate_button", "string", "com.android.systemui")
+    fun windowingPill_descriptionsFormatAppNameInBothModes() {
         val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
-        task.topActivityRequestedOrientation =
-            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        task.configuration.smallestScreenWidthDp = 600
-        val pill = WindowingPillView(context, mock())
+        task.taskDescription = android.app.ActivityManager.TaskDescription.Builder()
+            .setLabel("Test app").build()
+        val pill = WindowingPillView(mContext, mock())
         pill.initialize(mock(), mock(), false) {}
-        pill.bind(task, false)
-        assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
-        task.configuration.smallestScreenWidthDp = 411
-        pill.bind(task, false)
-        assertEquals(View.GONE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
+        listOf(false, true).forEach { floating ->
+            task.isFloatingWindow = floating
+            pill.bind(task, false)
+            listOf(R.id.rotate_window_button, R.id.fullscreen_button, R.id.split_screen_button,
+                R.id.floating_button, R.id.close_window_button)
+                .forEach { id ->
+                    val button = pill.requireViewById<View>(id)
+                    assertThat(button.contentDescription?.toString().orEmpty()).doesNotContain("%")
+                    assertThat(button.tooltipText?.toString().orEmpty()).doesNotContain("%")
+                }
+            assertThat(pill.requireViewById<View>(R.id.close_window_button)
+                .contentDescription.toString()).isEqualTo(mContext.getString(R.string.close_button_text, "Test app"))
+        }
     }
 
 }

@@ -48,15 +48,15 @@
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
         app:layout_constraintStart_toEndOf="@id/fullscreen_button"
-        app:layout_constraintEnd_toStartOf="@id/minimize_window_button"
+        app:layout_constraintEnd_toStartOf="@id/floating_button"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintHorizontal_chainStyle="spread"/>
 
     <ImageButton
-        android:id="@+id/minimize_window_button"
-        android:contentDescription="@string/minimize_button_text"
-        android:tooltipText="@string/minimize_button_text"
-        android:src="@drawable/desktop_mode_header_ic_minimize"
+        android:id="@+id/floating_button"
+        android:contentDescription="@string/float_button_text"
+        android:tooltipText="@string/float_button_text"
+        android:src="@drawable/desktop_mode_ic_handle_menu_floating"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
         app:layout_constraintStart_toEndOf="@id/split_screen_button"
@@ -71,19 +71,7 @@
         android:src="@drawable/desktop_mode_header_ic_close"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
-        app:layout_constraintStart_toEndOf="@id/minimize_window_button"
-        app:layout_constraintEnd_toStartOf="@id/floating_button"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintHorizontal_chainStyle="spread"/>
-
-    <ImageButton
-        android:id="@+id/floating_button"
-        android:contentDescription="@string/float_button_text"
-        android:tooltipText="@string/float_button_text"
-        android:src="@drawable/desktop_mode_ic_handle_menu_floating"
-        android:tint="@color/materialColorOnSurface"
-        style="@style/DesktopModeHandleMenuWindowingButton"
-        app:layout_constraintStart_toEndOf="@id/close_window_button"
+        app:layout_constraintStart_toEndOf="@id/floating_button"
         app:layout_constraintEnd_toStartOf="@id/desktop_button"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintHorizontal_chainStyle="spread"/>
@@ -95,7 +83,7 @@
         android:src="@drawable/desktop_mode_ic_handle_menu_desktop"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
-        app:layout_constraintStart_toEndOf="@id/floating_button"
+        app:layout_constraintStart_toEndOf="@id/close_window_button"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintHorizontal_chainStyle="spread"/>

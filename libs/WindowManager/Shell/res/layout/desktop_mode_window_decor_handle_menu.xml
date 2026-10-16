@@ -147,13 +147,6 @@
                 android:scaleType="centerCrop"/>
         </LinearLayout>
 
-        <com.android.wm.shell.windowdecor.HandleMenuActionButton
-            android:id="@+id/float_action_button"
-            android:contentDescription="@string/float_button_text"
-            android:text="@string/float_button_text"
-            android:src="@drawable/desktop_mode_ic_handle_menu_floating"
-            android:visibility="gone"
-            style="@style/DesktopModeHandleMenuActionButton"/>
     </LinearLayout>
 
     <LinearLayout
