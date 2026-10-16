@@ -109,6 +109,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var floatingLandscape = false
     private val floatingLogicalBounds = Rect()
     private var floatingStartScale = 1f
+    private var floatingMinimumScale = .5f
+    private var floatingMinimumVisibleSize = 0
     private var floatingMinWidth = 1
     private var floatingMinHeight = 1
     private val floatingSpringBounds = Rect()
@@ -274,6 +276,17 @@ class MultiDisplayVeiledResizeTaskPositioner(
         displayController
             .getDisplayLayout(windowDecoration.taskInfo.displayId)
             ?.getStableBounds(stableBounds)
+        if (task.isFloatingWindow && !stableBounds.isEmpty) {
+            val layout = displayController.getDisplayLayout(task.displayId)
+            if (layout != null) {
+                floatingMinimumScale = minOf(floatingStartScale,
+                    com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.scale(
+                        floatingLogicalBounds, stableBounds, minOf(layout.width(), layout.height()),
+                        (8 * windowDecoration.decorWindowContext.resources.displayMetrics.density).toInt()))
+                floatingMinimumVisibleSize = (minOf(floatingLogicalBounds.width(),
+                    floatingLogicalBounds.height()) * floatingMinimumScale).roundToInt()
+            }
+        }
         return Rect(repositionTaskBounds)
     }
 
@@ -640,7 +653,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (FloatingWindowGeometry.isCorner(ctrlType)) {
             val result = FloatingWindowGeometry.scaledCorner(taskBoundsAtDragStart,
                 floatingLogicalBounds, stableBounds, ctrlType, dx, dy,
-                floatingMinWidth, floatingMinHeight, floatingResizeScratch)
+                floatingMinWidth, floatingMinHeight, floatingResizeScratch, floatingMinimumScale,
+                floatingMinimumVisibleSize)
             floatingResize = result
             if (result.commitsBounds) {
                 previewFloatingResize(result.visible, 1f, true)
@@ -771,6 +785,12 @@ class MultiDisplayVeiledResizeTaskPositioner(
         val task = windowDecoration.taskInfo
         floatingResize?.let { result ->
             val base = baseResizeBounds(result.visible)
+            if (result.atMinimum && (result.visible != taskBoundsAtDragStart ||
+                result.scale < floatingStartScale - .001f || result.commitsBounds)) {
+                windowDecoration.pinnedLayerController?.enterMiniAfterResize(task,
+                    Rect(floatingBaseBounds), Rect(floatingLogicalBounds), floatingStartScale,
+                    base, result.scale)
+            }
             val wct = WindowContainerTransaction().setDragResizing(task.token, false)
                 .setFloatingWindowPresentation(task.token,
                     android.graphics.Point(base.left, base.top), result.scale)

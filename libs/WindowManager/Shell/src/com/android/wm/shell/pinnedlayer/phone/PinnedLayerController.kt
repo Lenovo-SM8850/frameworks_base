@@ -90,6 +90,26 @@ class PinnedLayerController(
     private val minimizedTasks = mutableSetOf<Int>()
     private val minimizeState = FloatingMinimizeState()
     private var minimizeHandles: FloatingMinimizeHandles? = null
+    private var miniInteractions: FloatingMiniController? = null
+    private val miniListeners = mutableSetOf<(TaskInfo) -> Unit>()
+
+    fun isMini(task: TaskInfo): Boolean =
+        presentationController.miniState.get(task.userId, task.taskId) != null
+
+    fun addMiniListener(listener: (TaskInfo) -> Unit) { miniListeners += listener }
+    fun removeMiniListener(listener: (TaskInfo) -> Unit) { miniListeners -= listener }
+    fun isMiniAnimating(task: TaskInfo): Boolean = miniInteractions?.isAnimating(task) == true
+    fun restoreMini(task: TaskInfo) { miniInteractions?.restore(task) }
+    fun beginMiniDrag(task: TaskInfo): Rect = miniInteractions?.beginDrag(task) ?: task.presentationBounds
+    fun moveMini(task: TaskInfo, bounds: Rect) { miniInteractions?.move(task, bounds) }
+    fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect) {
+        miniInteractions?.onDragEnded(task, start, end)
+    }
+    fun enterMiniAfterResize(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,
+        bounds: Rect, scale: Float) {
+        miniInteractions?.enterAfterResize(task, restore, logical, restoreScale, bounds, scale)
+    }
+
 
     fun rememberManualOrientation(task: TaskInfo, landscape: Boolean, bounds: Rect) {
         if (task.isFloatingWindow) presentationController.setManualOrientation(task, landscape, bounds)
@@ -97,6 +117,25 @@ class PinnedLayerController(
 
     fun configureInteractions(context: Context, displayController: DisplayController,
         mainExecutor: com.android.wm.shell.common.ShellExecutor) {
+        miniInteractions = FloatingMiniController(shellTaskOrganizer, displayController,
+            presentationController.miniState) { task ->
+            mainExecutor.execute { miniListeners.toList().forEach { it(task) } }
+        }
+        fun recover(task: RunningTaskInfo) {
+            if (!task.isFloatingWindow || task.displayId != DEFAULT_DISPLAY) return
+            if (task.taskId !in pinnedTasks) pin(task)
+            val entry = presentationController.recoverMini(task)
+                ?: presentationController.miniState.get(task.userId, task.taskId) ?: return
+            miniInteractions?.recover(task, entry)
+        }
+        shellTaskOrganizer.addTaskAppearedListener(object : ShellTaskOrganizer.TaskAppearedListener {
+            override fun onTaskAppeared(taskInfo: RunningTaskInfo, leash: SurfaceControl) {
+                mainExecutor.execute {
+                    shellTaskOrganizer.getRunningTaskInfo(taskInfo.taskId)?.let(::recover)
+                }
+            }
+        })
+        shellTaskOrganizer.initialTasks.forEach { recover(it.first) }
         context.registerReceiverForAllUsers(object : android.content.BroadcastReceiver() {
             override fun onReceive(context: Context, intent: android.content.Intent) {
                 val userId = intent.getIntExtra(android.content.Intent.EXTRA_USER_HANDLE,
@@ -112,6 +151,7 @@ class PinnedLayerController(
         displayController.addDisplayChangingController { displayId, from, to, _, wct ->
             if (displayId == DEFAULT_DISPLAY && from != to) {
                 getPinnedTasks().forEach { task ->
+                    if (miniInteractions?.rotate(task, from, to, wct) == true) return@forEach
                     presentationController.getRotationBounds(task, from, to)?.let { bounds ->
                         presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
                         minimizeState.entries[task.taskId]?.bounds?.set(bounds)
@@ -145,7 +185,9 @@ class PinnedLayerController(
         }
         val entry = minimizeState.entries[taskId] ?: return
         if (!task.isFloatingWindow) { removeMinimizeHandle(taskId); return }
-        val bounds = presentationController.clampToDisplay(task, entry.bounds) ?: return
+        val mini = presentationController.miniState.get(task.userId, task.taskId)
+        val bounds = mini?.let { Rect(it.bounds) }
+            ?: presentationController.clampToDisplay(task, entry.bounds) ?: return
         val wct = WindowContainerTransaction()
         minimizeOldestIfNeeded(task, wct)
         minimizedTasks -= taskId
@@ -153,7 +195,10 @@ class PinnedLayerController(
         currentPinnedTaskId = taskId
         removeMinimizeHandle(taskId)
         wct.merge(getLayerPinnedWct(task.token), true)
-        presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
+        if (mini != null) {
+            wct.setFloatingWindowPresentation(task.token,
+                android.graphics.Point(bounds.left, bounds.top), mini.scale)
+        } else presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
         wct.setHidden(task.token, false).reorder(task.token, true)
         transitions.startTransition(TRANSIT_CHANGE, wct, null)
     }
@@ -183,6 +228,10 @@ class PinnedLayerController(
         shellTaskOrganizer.addTaskInfoChangedListener(object : ShellTaskOrganizer.TaskInfoChangedListener {
             override fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
                 if (taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
+                    presentationController.recoverMini(taskInfo)?.let {
+                        miniInteractions?.recover(taskInfo, it)
+                    }
+                    miniInteractions?.onTaskInfoChanged(taskInfo)
                     presentationController.rememberBounds(taskInfo)
                 } else if (!taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
                     unpin(taskInfo)
@@ -611,6 +660,9 @@ class PinnedLayerController(
         if (isNotPinned(taskInfo.taskId)) return false
 
         if (taskInfo.isFloatingWindow) {
+            if (miniInteractions?.onDragEnded(taskInfo, dragStartBounds, dragEndBounds) == true) {
+                return true
+            }
             val base = taskInfo.floatingWindowRestoreBounds
             val moved = FloatingWindowGeometry.movedBaseBounds(base, dragStartBounds, dragEndBounds)
                 ?: return true
@@ -720,6 +772,7 @@ class PinnedLayerController(
         startTransaction: SurfaceControl.Transaction,
         finishTransaction: SurfaceControl.Transaction,
     ) {
+        miniInteractions?.onTransitionReady(info, startTransaction, finishTransaction)
         // TODO(b/449681882): Clean transitions here. Handler should track animation data
         // separately. Use PinnedLayerUiState instead.
         val transitions = activeTransitions.getOrDefault(transition, emptySet())
@@ -788,6 +841,7 @@ class PinnedLayerController(
     }
 
     override fun onTransitionFinished(transition: IBinder, aborted: Boolean) {
+        miniInteractions?.onTransitionFinished(aborted)
         val pending = activeTransitions.remove(transition).orEmpty()
         if (aborted) {
             val liveFloatingIds = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
@@ -828,6 +882,7 @@ class PinnedLayerController(
     }
 
     private fun unpin(taskInfo: TaskInfo, rememberAsPinned: Boolean = false) {
+        if (!rememberAsPinned) miniInteractions?.remove(taskInfo)
         visiblePinnedTasks -= taskInfo.taskId
         if (rememberAsPinned) {
             minimizedTasks += taskInfo.taskId

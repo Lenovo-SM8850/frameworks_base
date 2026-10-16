@@ -53,9 +53,21 @@ private constructor(
 ) {
     private var floatingBottomHandle: FloatingBottomHandle? = null
     private var floatingTopHandle: FloatingBottomHandle? = null
+    private var floatingMiniInput: FloatingMiniInput? = null
+    private var floatingController: PinnedLayerController? = null
+    private val miniListener: (android.app.TaskInfo) -> Unit = { info ->
+        if (info.taskId == decorTaskInfo.taskId && info is RunningTaskInfo) {
+            relayout(info, hasGlobalFocus, exclusionRegion)
+        }
+    }
 
     fun setFloatingHandleListener(listener: DesktopModeTouchEventListener) {
         if (captionWindowDecoration == null) {
+            floatingController = listener.pinnedLayerController
+            floatingController?.let {
+                it.addMiniListener(miniListener)
+                floatingMiniInput = FloatingMiniInput({ currentDecorWindowContext }, it)
+            }
             floatingBottomHandle = FloatingBottomHandle({ currentDecorWindowContext }, listener)
             floatingTopHandle = FloatingBottomHandle({ currentDecorWindowContext }, listener, false)
         }
@@ -64,6 +76,7 @@ private constructor(
     private fun updateFloatingBottomHandle(t: SurfaceControl.Transaction? = null) {
         floatingBottomHandle?.update(decorTaskInfo, taskSurface, t)
         floatingTopHandle?.update(decorTaskInfo, taskSurface, t)
+        floatingMiniInput?.update(decorTaskInfo, taskSurface, t)
     }
 
     private fun requireDefaultWindowDecor(): DefaultWindowDecoration =
@@ -268,7 +281,7 @@ private constructor(
         get() =
             when {
                 defaultWindowDecor != null -> requireDefaultWindowDecor().pinnedLayerController
-                desktopWindowDecor != null -> null // Unsupported in this context
+                desktopWindowDecor != null -> floatingController
                 captionWindowDecoration != null -> null // Unsupported in this context
                 else -> error("Expected Non-null default or desktop window decoration")
             }
@@ -397,6 +410,9 @@ private constructor(
 
     /** Closes the window decoration. */
     fun close() {
+        floatingController?.removeMiniListener(miniListener)
+        floatingMiniInput?.close()
+        floatingMiniInput = null
         floatingBottomHandle?.close()
         floatingBottomHandle = null
         floatingTopHandle?.close()

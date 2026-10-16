@@ -88,6 +88,78 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
+    fun miniAndStash_doNotOverwriteRememberedNormalGeometry() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.mini", "Main")
+            positionInParent = android.graphics.Point(100, 200)
+            floatingWindowPosition.set(100, 200)
+            userId = 10
+        }
+        val normal = Rect(task.floatingWindowRestoreBounds)
+        controller.rememberBounds(task)
+        val entry = controller.miniState.enter(task.userId, task.taskId,
+            FloatingMiniState.Restore(normal, task.configuration.windowConfiguration.bounds,
+                task.floatingWindowScale), Rect(8, 108, 332, 540), .4f)
+        task.floatingWindowScale = .4f
+        task.positionInParent = android.graphics.Point(8, 108)
+        task.floatingWindowPosition.set(8, 108)
+        controller.rememberBounds(task)
+        entry.edge = FloatingMiniState.Edge.LEFT
+        task.floatingWindowPosition.set(-292, 108)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(normal)
+    }
+
+    @Test
+    fun restart_rebuildsStashAndPreservesRememberedNormalGeometry() {
+        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() })
+        val first = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        val task = createTaskInfo(Rect(0, 0, 800, 1200)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.restart", "Main")
+            floatingWindowScale = .75f
+            floatingWindowPosition.set(100, 200)
+        }
+        val normal = Rect(task.floatingWindowRestoreBounds)
+        first.rememberBounds(task)
+        val restarted = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        task.floatingWindowScale = .405f
+        task.floatingWindowPosition.set(-268, 200)
+        val recovered = requireNotNull(restarted.recoverMini(task))
+        assertThat(recovered.edge).isEqualTo(FloatingMiniState.Edge.LEFT)
+        assertThat(recovered.bounds.right).isEqualTo(56)
+        assertThat(recovered.restore.bounds).isEqualTo(normal)
+        restarted.rememberBounds(task)
+        assertThat(restarted.getPinEntryDestinationBounds(task)).isEqualTo(normal)
+    }
+
+    @Test
+    fun restart_miniWithoutSavedGeometryGetsOnscreenNormalRestore() {
+        val task = createTaskInfo(Rect(0, 0, 800, 1200)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .405f
+            floatingWindowPosition.set(16, 116)
+        }
+        val recovered = requireNotNull(controller.recoverMini(task))
+        assertThat(recovered.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(Rect(0, 100, 1080, 1870).contains(recovered.restore.bounds)).isTrue()
+        assertThat(recovered.restore.bounds.width()).isGreaterThan(recovered.bounds.width())
+        assertThat(recovered.restore.scale).isEqualTo(FloatingWindowGeometry.DEFAULT_SCALE)
+    }
+
+    @Test
+    fun remember_afterRestartRebuildsMiniBeforeStore() {
+        val task = createTaskInfo(Rect(0, 0, 800, 1200)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .405f
+            floatingWindowPosition.set(16, 116)
+        }
+        controller.rememberBounds(task)
+        assertThat(controller.miniState.get(task.userId, task.taskId)).isNotNull()
+    }
+
+    @Test
     fun getPinEntryDestinationBounds_portrait_centeredAndSizedToDisplay() {
         val bounds = requireNotNull(
             controller.getPinEntryDestinationBounds(createTaskInfo(Rect(0, 0, 500, 600)))
