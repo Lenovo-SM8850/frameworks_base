@@ -30,14 +30,11 @@ interface WindowDecorationActions {
     /** Maximizes a window or restores previous sized if already maximized. */
     fun onMaximizeOrRestore(taskId: Int, ambiguousSource: AmbiguousSource, inputMethod: InputMethod)
 
-    /** Rotates the task presentation or accepts a fullscreen per-app rotation choice. */
+    /** Rotates the floating task presentation. */
     fun onRotate(taskInfo: RunningTaskInfo)
 
     /** Minimizes the task. */
     fun onMinimize(taskInfo: RunningTaskInfo)
-
-    /** Minimizes from the app-handle menu, entering floating mode for a fullscreen task. */
-    fun onMinimizeFromHandleMenu(taskInfo: RunningTaskInfo) = onMinimize(taskInfo)
 
     /** Close the task */
     fun onClose(taskInfo: RunningTaskInfo)

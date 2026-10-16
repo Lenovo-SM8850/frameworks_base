@@ -1861,13 +1861,4 @@ class DesktopModeWindowDecorViewModelTests : DesktopModeWindowDecorViewModelTest
         verify(mockPinnedLayerController, never()).minimizeTask(any())
     }
 
-    @Test
-    fun fullscreenHandleMenuMinimize_entersFloatingMinimize() {
-        val task = createTask(windowingMode = WINDOWING_MODE_FULLSCREEN)
-        whenever(mockPinnedLayerController.minimizeTask(task)).thenReturn(true)
-        createDefaultWindowActions().onMinimizeFromHandleMenu(task)
-        verify(mockPinnedLayerController).minimizeTask(task)
-        verify(mockDesktopTasksController, never()).minimizeTask(any(), any())
-    }
-
 }
