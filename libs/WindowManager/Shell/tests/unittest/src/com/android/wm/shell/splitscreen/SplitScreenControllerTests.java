@@ -394,4 +394,58 @@ public class SplitScreenControllerTests extends ShellTestCase {
         info.topActivityInfo = activityInfo;
         return info;
     }
+
+    @Test
+    public void notificationIntent_fullscreenAppOpensOnRight() {
+        ActivityManager.RunningTaskInfo other = createTaskInfo(WINDOWING_MODE_FULLSCREEN,
+                ACTIVITY_TYPE_STANDARD, new Intent().setComponent(
+                        new ComponentName("other.app", "OtherActivity")));
+        when(mRecentTasks.getTopRunningTask(any())).thenReturn(other);
+        PendingIntent intent = PendingIntent.getActivity(mContext, 0,
+                createStartIntent("notificationActivity"), FLAG_IMMUTABLE);
+        mSplitScreenController.startPendingIntent(intent, mContext.getUserId(), null, null);
+        verify(mStageCoordinator).startIntent(eq(intent), any(),
+                eq(SPLIT_POSITION_BOTTOM_OR_RIGHT), any(), any(), any(),
+                eq(com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_INDEX_1),
+                eq(DEFAULT_DISPLAY));
+    }
+
+    @Test
+    public void notificationIntent_splitReplacesUnfocusedSide() {
+        for (boolean rightFocused : new boolean[]{false, true}) {
+            org.mockito.Mockito.clearInvocations(mStageCoordinator);
+            doReturn(true).when(mSplitScreenController).isSplitScreenVisible();
+            ActivityManager.RunningTaskInfo left = createTaskInfo(WINDOWING_MODE_MULTI_WINDOW,
+                    ACTIVITY_TYPE_STANDARD, new Intent().setComponent(
+                            new ComponentName("left.app", "LeftActivity")));
+            ActivityManager.RunningTaskInfo right = createTaskInfo(WINDOWING_MODE_MULTI_WINDOW,
+                    ACTIVITY_TYPE_STANDARD, new Intent().setComponent(
+                            new ComponentName("right.app", "RightActivity")));
+            right.isFocused = rightFocused;
+            left.isFocused = !rightFocused;
+            doReturn(left).when(mSplitScreenController).getTaskInfo(SPLIT_POSITION_TOP_OR_LEFT);
+            doReturn(right).when(mSplitScreenController).getTaskInfo(SPLIT_POSITION_BOTTOM_OR_RIGHT);
+            PendingIntent intent = PendingIntent.getActivity(mContext, 0,
+                    createStartIntent("notificationActivity"), FLAG_IMMUTABLE);
+            mSplitScreenController.startPendingIntent(intent, mContext.getUserId(), null, null);
+            verify(mStageCoordinator).startIntent(eq(intent), any(),
+                    eq(rightFocused ? SPLIT_POSITION_TOP_OR_LEFT : SPLIT_POSITION_BOTTOM_OR_RIGHT),
+                    any(), any(), any(), anyInt(), eq(DEFAULT_DISPLAY));
+        }
+    }
+
+    @Test
+    public void notificationIntent_homeFallsBackToFullscreenSend() throws Exception {
+        ActivityManager.RunningTaskInfo home = createTaskInfo(WINDOWING_MODE_FULLSCREEN,
+                android.app.WindowConfiguration.ACTIVITY_TYPE_HOME, createStartIntent("home"));
+        when(mRecentTasks.getTopRunningTask(any())).thenReturn(home);
+        PendingIntent intent = mock(PendingIntent.class);
+        when(intent.getIntent()).thenReturn(createStartIntent("notificationActivity"));
+        Bundle options = new Bundle();
+        mSplitScreenController.startPendingIntent(intent, mContext.getUserId(), null, options);
+        verify(intent).send(eq(mContext), eq(0), isNull(), isNull(), isNull(), isNull(), eq(options));
+        verify(mStageCoordinator, never()).startIntent(any(), any(), anyInt(), any(), any(), any(),
+                anyInt(), anyInt());
+    }
+
 }

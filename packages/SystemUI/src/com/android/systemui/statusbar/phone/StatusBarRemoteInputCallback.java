@@ -74,6 +74,9 @@ public class StatusBarRemoteInputCallback implements Callback, Callbacks,
     public static final String EXTRA_NOTIFICATION_ACTIVITY_OPTIONS =
             "com.android.systemui.extra.NOTIFICATION_ACTIVITY_OPTIONS";
 
+    public static final String EXTRA_NOTIFICATION_SPLIT_INTENT =
+            "com.android.systemui.extra.NOTIFICATION_SPLIT_INTENT";
+
     private final KeyguardStateController mKeyguardStateController;
     private final SysuiStatusBarStateController mStatusBarStateController;
     private final NotificationLockscreenUserManager mLockscreenUserManager;
@@ -270,6 +273,18 @@ public class StatusBarRemoteInputCallback implements Callback, Callbacks,
 
     boolean startWorkChallengeIfNecessary(int userId, IntentSender intendSender,
             String notificationKey, Bundle activityOptions) {
+        return startWorkChallengeIfNecessary(userId, intendSender, notificationKey,
+                activityOptions, null);
+    }
+
+    boolean startWorkChallengeForSplitIfNecessary(int userId, PendingIntent intent,
+            String notificationKey, Bundle activityOptions) {
+        return startWorkChallengeIfNecessary(userId, intent.getIntentSender(), notificationKey,
+                activityOptions, intent);
+    }
+
+    private boolean startWorkChallengeIfNecessary(int userId, IntentSender intendSender,
+            String notificationKey, Bundle activityOptions, PendingIntent splitIntent) {
         // Clear pending remote view, as we do not want to trigger pending remote input view when
         // it's called by other code
         mPendingWorkRemoteInputView = null;
@@ -283,6 +298,7 @@ public class StatusBarRemoteInputCallback implements Callback, Callbacks,
         callBackIntent.putExtra(Intent.EXTRA_INTENT, intendSender);
         callBackIntent.putExtra(Intent.EXTRA_INDEX, notificationKey);
         callBackIntent.putExtra(EXTRA_NOTIFICATION_ACTIVITY_OPTIONS, activityOptions);
+        callBackIntent.putExtra(EXTRA_NOTIFICATION_SPLIT_INTENT, splitIntent);
         callBackIntent.setPackage(mContext.getPackageName());
 
         PendingIntent callBackPendingIntent = PendingIntent.getBroadcast(

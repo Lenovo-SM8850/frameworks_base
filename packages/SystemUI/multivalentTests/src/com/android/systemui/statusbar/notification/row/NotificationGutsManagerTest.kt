@@ -832,4 +832,63 @@ class NotificationGutsManagerTest(flags: FlagsParameterization) : SysuiTestCase(
         assertNotNull(menuItem)
         return menuItem
     }
+
+    @Test
+    fun testSplitButtonVisibleAboveFloatingAndDispatches() {
+        val row = createTestNotificationRow()
+        row.ensureGutsInflated()
+        row.entryAdapter.sbn!!.notification.contentIntent = android.app.PendingIntent.getActivity(
+            mContext, 0, Intent("test_split_activity"), android.app.PendingIntent.FLAG_IMMUTABLE)
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        whenever(manager.supportsFloatingWindows()).thenReturn(true)
+        whenever(manager.supportsSplitScreen()).thenReturn(true)
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+        val content = (item.gutsContent as GutsContent).contentView
+        val split = content.findViewById<View>(com.android.systemui.res.R.id.notification_open_split_screen)
+        val floating = content.findViewById<View>(com.android.systemui.res.R.id.notification_open_floating)
+        assertEquals(View.VISIBLE, split.visibility)
+        assertEquals(floating.parent, split.parent)
+        val parent = split.parent as android.view.ViewGroup
+        assertEquals(parent.indexOfChild(floating) - 1, parent.indexOfChild(split))
+        assertTrue(split.performClick())
+        verify(kosmos.mockNotificationActivityStarter).onNotificationSplitScreenClicked(any(), eq(row))
+    }
+
+    @Test
+    fun testSplitButtonHiddenWithoutSplitOrFloatingSupport() {
+        val row = createTestNotificationRow()
+        row.entryAdapter.sbn!!.notification.contentIntent = android.app.PendingIntent.getActivity(
+            mContext, 0, Intent("test_split_activity"), android.app.PendingIntent.FLAG_IMMUTABLE)
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        val split = (item.gutsContent as GutsContent).contentView.findViewById<View>(
+            com.android.systemui.res.R.id.notification_open_split_screen)
+        for ((floatingSupported, splitSupported) in listOf(true to false, false to true)) {
+            whenever(manager.supportsFloatingWindows()).thenReturn(floatingSupported)
+            whenever(manager.supportsSplitScreen()).thenReturn(splitSupported)
+            manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+            assertEquals(View.GONE, split.visibility)
+            assertFalse(split.hasOnClickListeners())
+        }
+    }
+
+    @Test
+    fun testSplitButtonHiddenWithoutActivityIntent() {
+        val row = createTestNotificationRow()
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        whenever(manager.supportsFloatingWindows()).thenReturn(true)
+        whenever(manager.supportsSplitScreen()).thenReturn(true)
+        val split = (item.gutsContent as GutsContent).contentView.findViewById<View>(
+            com.android.systemui.res.R.id.notification_open_split_screen)
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+        assertEquals(View.GONE, split.visibility)
+        row.entryAdapter.sbn!!.notification.contentIntent = android.app.PendingIntent.getBroadcast(
+            mContext, 0, Intent("test_split_activity"), android.app.PendingIntent.FLAG_IMMUTABLE)
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+        assertEquals(View.GONE, split.visibility)
+        assertFalse(split.hasOnClickListeners())
+    }
+
 }

@@ -368,6 +368,7 @@
                 style="@style/TextAppearance.NotificationInfo.Button"/>
         </RelativeLayout>
 
+        <include layout="@layout/notification_split_screen_button" />
         <include layout="@layout/notification_floating_button" />
 
         <RelativeLayout

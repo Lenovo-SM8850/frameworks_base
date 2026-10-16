@@ -1205,7 +1205,43 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
      * The interface for calls from outside the Shell, within the host process.
      */
     @ExternalThread
+    @VisibleForTesting
+    void startPendingIntent(PendingIntent intent, int userId, @Nullable Intent fillInIntent,
+            @Nullable Bundle options) {
+        int position = SPLIT_POSITION_BOTTOM_OR_RIGHT;
+        if (isSplitScreenVisible()) {
+            ActivityManager.RunningTaskInfo right = getTaskInfo(SPLIT_POSITION_BOTTOM_OR_RIGHT);
+            if (right != null && right.isFocused) position = SPLIT_POSITION_TOP_OR_LEFT;
+        }
+        TaskInfo other = getTaskInfo(reverseSplitPosition(position), null /* ignoreTaskToken */);
+        String packageName = ComponentUtils.getPackageName(intent);
+        if (other == null || other.displayId != DEFAULT_DISPLAY
+                || (other.userId == userId && other.baseActivity != null
+                        && other.baseActivity.getPackageName().equals(packageName)
+                        && !mMultiInstanceHelpher.supportsMultiInstanceSplit(getComponent(intent),
+                                userId))) {
+            // Home has no companion task for this single-intent entry path.
+            try {
+                intent.send(mContext, 0, fillInIntent, null, null, null, options);
+            } catch (PendingIntent.CanceledException e) {
+                Slog.w(TAG, "Could not launch notification", e);
+            }
+            return;
+        }
+        startIntent(intent, userId, fillInIntent, position, options, null /* hideTaskToken */,
+                null /* wct */, true /* forceLaunchNewTask */,
+                position == SPLIT_POSITION_TOP_OR_LEFT ? SPLIT_INDEX_0 : SPLIT_INDEX_1,
+                DEFAULT_DISPLAY);
+    }
+
     private class SplitScreenImpl implements SplitScreen {
+        @Override
+        public void startPendingIntent(PendingIntent intent, int userId, Intent fillInIntent,
+                Bundle options) {
+            mMainExecutor.execute(() -> SplitScreenController.this.startPendingIntent(
+                    intent, userId, fillInIntent, options));
+        }
+
         private final ArrayMap<SplitScreenListener, Executor> mExecutors = new ArrayMap<>();
         private final SplitScreen.SplitScreenListener mListener = new SplitScreenListener() {
             @Override

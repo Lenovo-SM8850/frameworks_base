@@ -92,5 +92,7 @@ val Kosmos.statusBarNotificationActivityStarter by
             powerInteractor,
             userTracker,
             frameworkStatsLogWrapper,
+            org.mockito.Mockito.mock(com.axion.applocker.AxAppLockerHelper::class.java),
+            Optional.empty(),
         )
     }

@@ -1149,6 +1149,9 @@ public class NotificationLockscreenUserManagerTest extends SysuiTestCase {
         broadcastReceiver.onReceive(mContext, intent);
     }
 
+    private final com.android.wm.shell.splitscreen.SplitScreen mSplitScreen =
+            mock(com.android.wm.shell.splitscreen.SplitScreen.class);
+
     private class TestNotificationLockscreenUserManager
             extends NotificationLockscreenUserManagerImpl {
         public TestNotificationLockscreenUserManager(Context context) {
@@ -1175,7 +1178,9 @@ public class NotificationLockscreenUserManagerTest extends SysuiTestCase {
                     mDeviceUnlockedInteractorLazy,
                     mKeyguardInteractorLazy,
                     mWifiRepositoryLazy,
-                    null //CoroutineScope
+                    null, // CoroutineScope
+                    mock(com.axion.applocker.AxAppLockerHelper.class),
+                    java.util.Optional.of(mSplitScreen)
             );
         }
 
@@ -1195,4 +1200,26 @@ public class NotificationLockscreenUserManagerTest extends SysuiTestCase {
             return mSettingsObserver;
         }
     }
+
+    @Test
+    public void testWorkChallengeResumesSplitThroughShell() {
+        Context context = Mockito.spy(mContext);
+        TestNotificationLockscreenUserManager manager = new TestNotificationLockscreenUserManager(context);
+        android.app.PendingIntent pendingIntent = mock(android.app.PendingIntent.class);
+        android.content.IntentSender sender = mock(android.content.IntentSender.class);
+        when(pendingIntent.getCreatorUserHandle()).thenReturn(android.os.UserHandle.of(1));
+        Intent callback = new Intent(
+                NotificationLockscreenUserManager.NOTIFICATION_UNLOCKED_BY_WORK_CHALLENGE_ACTION);
+        callback.putExtra(Intent.EXTRA_INTENT, sender);
+        callback.putExtra(com.android.systemui.statusbar.phone.StatusBarRemoteInputCallback
+                .EXTRA_NOTIFICATION_SPLIT_INTENT, pendingIntent);
+        manager.getBaseBroadcastReceiverForTest().onReceive(context, callback);
+        org.mockito.ArgumentCaptor<Bundle> options = org.mockito.ArgumentCaptor.forClass(Bundle.class);
+        verify(mSplitScreen).startPendingIntent(eq(pendingIntent), eq(1), any(), options.capture());
+        assertEquals(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                android.app.ActivityOptions.fromBundle(options.getValue())
+                        .getPendingIntentBackgroundActivityStartMode());
+        mBackgroundExecutor.runAllReady();
+    }
+
 }

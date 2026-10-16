@@ -32,6 +32,7 @@ import android.app.PendingIntent;
 import android.app.TaskStackBuilder;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ResolveInfo;
 import android.os.AsyncTask;
 import android.os.Bundle;
@@ -91,6 +92,7 @@ import com.android.systemui.statusbar.notification.row.OnUserInteractionCallback
 import com.android.systemui.statusbar.policy.KeyguardStateController;
 import com.android.systemui.wmshell.BubblesManager;
 import com.android.wm.shell.shared.bubbles.logging.BubbleLog;
+import com.android.wm.shell.splitscreen.SplitScreen;
 
 import com.axion.applocker.AxAppLockerHelper;
 
@@ -168,6 +170,7 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
     private final FrameworkStatsLogWrapper mFrameworkStatsLogWrapper;
     private final OnUserInteractionCallback mOnUserInteractionCallback;
     private final AxAppLockerHelper mAxAppLockerHelper;
+    private final Optional<SplitScreen> mSplitScreen;
 
     private boolean mIsCollapsingToShowActivityOverLockscreen;
 
@@ -210,7 +213,8 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
             PowerInteractor powerInteractor,
             UserTracker userTracker,
             FrameworkStatsLogWrapper frameworkStatsLogWrapper,
-            AxAppLockerHelper axAppLockerHelper) {
+            AxAppLockerHelper axAppLockerHelper,
+            Optional<SplitScreen> splitScreen) {
         mContext = context;
         mContextInteractor = contextInteractor;
         mMainThreadHandler = mainThreadHandler;
@@ -248,6 +252,7 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
         mUserTracker = userTracker;
         mFrameworkStatsLogWrapper = frameworkStatsLogWrapper;
         mAxAppLockerHelper = axAppLockerHelper;
+        mSplitScreen = splitScreen;
 
         launchFullScreenIntentProvider.registerListener(entry -> launchFullScreenIntent(entry));
     }
@@ -287,7 +292,7 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
     @Override
     public void onNotificationClicked(@NonNull NotificationEntry entry,
             @NonNull ExpandableNotificationRow row) {
-        onNotificationClicked(entry, row, false /* floating */);
+        onNotificationClicked(entry, row, false /* floating */, false /* split */);
     }
 
     @Override
@@ -297,11 +302,33 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
         if (intent == null || !intent.isActivity()) {
             return;
         }
-        onNotificationClicked(entry, row, true /* floating */);
+        onNotificationClicked(entry, row, true /* floating */, false /* split */);
+    }
+
+    @Override
+    public boolean isSplitScreenSupported() {
+        return mSplitScreen.isPresent()
+                && android.app.ActivityTaskManager.supportsSplitScreenMultiWindow(mContext)
+                && mContextInteractor.getContext().getDisplayId() == android.view.Display.DEFAULT_DISPLAY;
+    }
+
+    @Override
+    public void onNotificationSplitScreenClicked(@NonNull NotificationEntry entry,
+            @NonNull ExpandableNotificationRow row) {
+        PendingIntent intent = entry.getSbn().getNotification().contentIntent;
+        if (intent == null || !intent.isActivity()) return;
+        ActivityInfo activity = mActivityIntentHelper.getTargetActivityInfo(intent.getIntent(),
+                intent.getCreatorUserHandle().getIdentifier(), false /* onlyDirectBootAware */);
+        if (!isSplitScreenSupported() || activity == null
+                || !ActivityInfo.isResizeableMode(activity.resizeMode)) {
+            onNotificationClicked(entry, row);
+            return;
+        }
+        onNotificationClicked(entry, row, false /* floating */, true /* split */);
     }
 
     private void onNotificationClicked(NotificationEntry entry, ExpandableNotificationRow row,
-            boolean floating) {
+            boolean floating, boolean split) {
         mLogger.logStartingActivityFromClick(entry, row.isHeadsUpState(),
                 mKeyguardStateController.isVisible(),
                 mNotificationShadeWindowController.getPanelExpanded());
@@ -312,8 +339,8 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
         OnKeyguardDismissedAction action =
                 (intent, isActivityIntent, animate, showOverTheLockScreen) ->
                         performActionOnKeyguardDismissed(entry, row, intent, isActivityIntent,
-                                animate, showOverTheLockScreen, floating);
-        performActionAfterKeyguardDismissed(entry, action, floating);
+                                animate, showOverTheLockScreen, floating, split);
+        performActionAfterKeyguardDismissed(entry, action, floating || split);
     }
 
     private boolean shouldOpenLockedShadeForAppLockedNotification(
@@ -433,11 +460,11 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
             boolean isActivityIntent,
             boolean animate,
             boolean showOverLockscreen,
-            boolean floating) {
+            boolean floating, boolean split) {
         mLogger.logHandleClickAfterKeyguardDismissed(entry);
 
         final Runnable runnable = () -> handleNotificationClickAfterPanelCollapsed(
-                entry, row, intent, isActivityIntent, animate, floating);
+                entry, row, intent, isActivityIntent, animate, floating, split);
         if (showOverLockscreen) {
             if (SceneContainerFlag.isEnabled()) {
                 // Launch activity immediately to update keyguard occlusion state
@@ -451,7 +478,7 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
                 && mKeyguardStateController.isOccluded()) {
             mStatusBarKeyguardViewManager.addAfterKeyguardGoneRunnable(runnable);
             mShadeController.collapseShade();
-        } else if (floating) {
+        } else if (floating || split) {
             mShadeController.addPostCollapseAction(runnable);
             mShadeController.collapseShadeForActivityStart();
         } else {
@@ -468,7 +495,7 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
             PendingIntent intent,
             boolean isActivityIntent,
             boolean animate,
-            boolean floating) {
+            boolean floating, boolean split) {
         String notificationKey = entry.getKey();
         mLogger.logHandleClickAfterPanelCollapsed(entry);
 
@@ -490,14 +517,22 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
 
         // Floating launches use the SystemUI work challenge to retain their launch options.
         // Auto-cancel notifications also defer launch and dismissal until the profile is unlocked.
-        if (isActivityIntent && (floating || shouldAutoCancel(entry.getSbn()))) {
+        if (isActivityIntent && (floating || split || shouldAutoCancel(entry.getSbn()))) {
             final int userId = intent.getCreatorUserHandle().getIdentifier();
             if (mLockPatternUtils.isSeparateProfileChallengeEnabled(userId)
                     && mKeyguardManager.isDeviceLocked(userId)) {
                 // TODO(b/28935539): should allow certain activities to
                 // bypass work challenge
                 final boolean startedWorkChallenge;
-                if (floating) {
+                if (split) {
+                    ActivityOptions options = ActivityOptions.makeBasic();
+                    options.setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY);
+                    options.setPendingIntentBackgroundActivityStartMode(
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+                    startedWorkChallenge = mStatusBarRemoteInputCallback
+                            .startWorkChallengeForSplitIfNecessary(userId, intent, notificationKey,
+                                    options.toBundle());
+                } else if (floating) {
                     ActivityOptions options = ActivityOptions.makeBasic();
                     options.setLaunchFloatingWindow(true);
                     startedWorkChallenge =
@@ -527,14 +562,14 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
             fillInIntent = new Intent().putExtra(Notification.EXTRA_REMOTE_INPUT_DRAFT,
                     remoteInputText.toString());
         }
-        final boolean canBubble = !floating && entry.canBubble();
+        final boolean canBubble = !floating && !split && entry.canBubble();
         if (canBubble) {
             mLogger.logExpandingBubble(entry);
             removeHunAfterClick(row);
             expandBubbleStackOnMainThread(entry);
         } else {
             startNotificationIntent(intent, fillInIntent, entry, row, animate, isActivityIntent,
-                    floating);
+                    floating, split);
         }
 
         if (isActivityIntent || canBubble) {
@@ -655,8 +690,18 @@ public class StatusBarNotificationActivityStarter implements NotificationActivit
             ExpandableNotificationRow row,
             boolean animate,
             boolean isActivityIntent,
-            boolean floating) {
+            boolean floating, boolean split) {
         mLogger.logStartNotificationIntent(entry);
+        if (split) {
+            ActivityOptions options = ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY);
+            options.setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+            mSplitScreen.get().startPendingIntent(intent,
+                    intent.getCreatorUserHandle().getIdentifier(), fillInIntent, options.toBundle());
+            mLogger.logSendPendingIntent(entry, intent, ActivityManager.START_SUCCESS);
+            return;
+        }
         final int displayId = mContextInteractor.getContext().getDisplayId();
         try {
             ActivityTransitionAnimator.Controller animationController =

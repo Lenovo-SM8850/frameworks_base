@@ -29,12 +29,14 @@ import static android.provider.Settings.Secure.REDACT_OTP_NOTIFICATION_WHILE_CON
 
 import static com.android.systemui.DejankUtils.whitelistIpcs;
 import static com.android.systemui.statusbar.phone.StatusBarRemoteInputCallback.EXTRA_NOTIFICATION_ACTIVITY_OPTIONS;
+import static com.android.systemui.statusbar.phone.StatusBarRemoteInputCallback.EXTRA_NOTIFICATION_SPLIT_INTENT;
 
 import android.annotation.SuppressLint;
 import android.annotation.UserIdInt;
 import android.app.ActivityOptions;
 import android.app.AxSandboxManager;
 import android.app.KeyguardManager;
+import android.app.PendingIntent;
 import android.app.admin.DevicePolicyManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -64,6 +66,7 @@ import com.android.internal.statusbar.NotificationVisibility;
 import com.android.internal.widget.LockPatternUtils;
 import com.android.systemui.Dumpable;
 import com.android.systemui.LauncherProxyService;
+import com.android.wm.shell.splitscreen.SplitScreen;
 import com.android.systemui.broadcast.BroadcastDispatcher;
 import com.android.systemui.dagger.SysUISingleton;
 import com.android.systemui.dagger.qualifiers.Background;
@@ -95,6 +98,7 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -253,8 +257,16 @@ public class NotificationLockscreenUserManagerImpl implements
                                 : ActivityOptions.makeBasic();
                         options.setPendingIntentBackgroundActivityStartMode(
                                 ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
-                        mContext.startIntentSender(intentSender, null, 0, 0, 0,
-                                options.toBundle());
+                        PendingIntent splitIntent = intent.getParcelableExtra(
+                                EXTRA_NOTIFICATION_SPLIT_INTENT, PendingIntent.class);
+                        if (splitIntent != null && mSplitScreen.isPresent()) {
+                            mSplitScreen.get().startPendingIntent(splitIntent,
+                                    splitIntent.getCreatorUserHandle().getIdentifier(), null,
+                                    options.toBundle());
+                        } else {
+                            mContext.startIntentSender(intentSender, null, 0, 0, 0,
+                                    options.toBundle());
+                        }
                     } catch (IntentSender.SendIntentException e) {
                         /* ignore */
                     }
@@ -324,6 +336,7 @@ public class NotificationLockscreenUserManagerImpl implements
 
     private final Lazy<DeviceUnlockedInteractor> mDeviceUnlockedInteractorLazy;
     private final AxAppLockerHelper mAxAppLockerHelper;
+    private final Optional<SplitScreen> mSplitScreen;
 
     @Inject
     public NotificationLockscreenUserManagerImpl(Context context,
@@ -349,7 +362,8 @@ public class NotificationLockscreenUserManagerImpl implements
             Lazy<KeyguardInteractor> keyguardInteractor,
             Lazy<WifiRepository> wifiRepository,
             @Background CoroutineScope coroutineScope,
-            AxAppLockerHelper axAppLockerHelper
+            AxAppLockerHelper axAppLockerHelper,
+            Optional<SplitScreen> splitScreen
     ) {
         mContext = context;
         mMainExecutor = mainExecutor;
@@ -372,6 +386,7 @@ public class NotificationLockscreenUserManagerImpl implements
         mFeatureFlags = featureFlags;
         mDeviceUnlockedInteractorLazy = deviceUnlockedInteractorLazy;
         mAxAppLockerHelper = axAppLockerHelper;
+        mSplitScreen = splitScreen;
         mAxAppLockerHelper.addRefreshListener(this::notifyNotificationStateChanged);
 
         mLockScreenUris.add(SHOW_LOCKSCREEN);

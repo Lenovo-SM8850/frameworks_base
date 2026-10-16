@@ -227,6 +227,10 @@ class NotificationEntryAdapter(
         notificationActivityStarter.onNotificationClicked(entry, row)
     }
 
+    override fun onEntrySplitScreenClicked(row: ExpandableNotificationRow) {
+        notificationActivityStarter.onNotificationSplitScreenClicked(entry, row)
+    }
+
     override fun onEntryFloatingWindowClicked(row: ExpandableNotificationRow) {
         notificationActivityStarter.onNotificationFloatingWindowClicked(entry, row)
     }
