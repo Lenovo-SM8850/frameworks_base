@@ -148,18 +148,10 @@
         </LinearLayout>
 
         <com.android.wm.shell.windowdecor.HandleMenuActionButton
-            android:id="@+id/floating_minimize_button"
-            android:contentDescription="@string/floating_window_minimize"
-            android:text="@string/floating_window_minimize"
-            android:src="@drawable/desktop_mode_header_ic_minimize"
-            android:visibility="gone"
-            style="@style/DesktopModeHandleMenuActionButton"/>
-
-        <com.android.wm.shell.windowdecor.HandleMenuActionButton
-            android:id="@+id/floating_close_button"
-            android:contentDescription="@string/floating_window_close"
-            android:text="@string/floating_window_close"
-            android:src="@drawable/desktop_mode_ic_handle_menu_close"
+            android:id="@+id/float_action_button"
+            android:contentDescription="@string/float_button_text"
+            android:text="@string/float_button_text"
+            android:src="@drawable/desktop_mode_ic_handle_menu_floating"
             android:visibility="gone"
             style="@style/DesktopModeHandleMenuActionButton"/>
     </LinearLayout>

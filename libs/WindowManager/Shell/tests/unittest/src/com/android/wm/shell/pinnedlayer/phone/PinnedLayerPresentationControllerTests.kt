@@ -641,4 +641,21 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(entry.height()).isGreaterThan(entry.width())
     }
 
+    @Test
+    fun rotateMenu_keepsScaleAndRecordsManualChoice() {
+        val task = createTaskInfo(Rect(0, 0, 600, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        val bounds = requireNotNull(controller.getManualRotationBounds(task))
+        assertThat(bounds.width()).isGreaterThan(bounds.height())
+        controller.setManualOrientation(task, true, bounds)
+        val wct = android.window.WindowContainerTransaction()
+        controller.applyPresentation(task, bounds, wct, task.floatingWindowScale)
+        assertThat(wct.changes[task.token.asBinder()]!!.floatingWindowScale).isEqualTo(.75f)
+        task.topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        assertThat(controller.getManualRotationBounds(task)).isNull()
+    }
+
 }

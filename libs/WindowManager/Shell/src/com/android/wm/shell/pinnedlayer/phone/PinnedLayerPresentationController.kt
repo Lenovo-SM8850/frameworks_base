@@ -83,6 +83,18 @@ class PinnedLayerPresentationController(
         overriddenBounds.remove(taskId)
     }
 
+    fun getManualRotationBounds(task: TaskInfo): Rect? {
+        val logical = task.configuration.windowConfiguration.bounds
+        if (!task.isFloatingWindow || FloatingWindowGeometry.fixedLandscape(
+            task.topActivityRequestedOrientation, logical) != null) return null
+        val details = getDisplayDetails(task.displayId) ?: return null
+        val landscape = logical.width() <= logical.height()
+        return FloatingWindowGeometry.scaledAspectBounds(task.floatingWindowRestoreBounds,
+            logical, details.stableBounds(),
+            displayAspect(details.layout.width(), details.layout.height(), landscape),
+            task.floatingWindowScale, minWidth(task, details), minHeight(task, details))
+    }
+
     /** Rotates geometry in the display WCT without changing a manually selected orientation. */
     fun getRotationBounds(task: TaskInfo, fromRotation: Int, toRotation: Int): Rect? {
         if (!task.isFloatingWindow) return null

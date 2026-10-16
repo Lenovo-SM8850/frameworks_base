@@ -540,4 +540,37 @@ class HandleMenuTest : ShellTestCase() {
         private const val FLAG_ENABLE_NON_DEFAULT_DISPLAY_SPLIT_BUGFIX =
             "com.android.window.flags.enable_non_default_display_split_bugfix"
     }
+
+    @Test
+    fun windowingPillMinimize_routesToHandleMenuAction() {
+        val actions = mock<WindowDecorationActions>()
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        val pill = WindowingPillView(mContext, mock())
+        pill.initialize(actions, mock(), false) {}
+        pill.bind(task, false)
+        pill.requireViewById<View>(R.id.minimize_window_button).performClick()
+        org.mockito.kotlin.verify(actions).onMinimizeFromHandleMenu(task)
+        org.mockito.kotlin.verify(actions, org.mockito.kotlin.never()).onMinimize(any())
+    }
+
+    @Test
+    fun fullscreenRotate_hiddenOnSmallDisplay() {
+        val resources = org.mockito.kotlin.spy(mContext.resources)
+        val context = org.mockito.kotlin.spy(mContext)
+        org.mockito.kotlin.doReturn(resources).whenever(context).resources
+        org.mockito.kotlin.doReturn(android.R.string.ok).whenever(resources)
+            .getIdentifier("accessibility_rotate_button", "string", "com.android.systemui")
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        task.topActivityRequestedOrientation =
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        task.configuration.smallestScreenWidthDp = 600
+        val pill = WindowingPillView(context, mock())
+        pill.initialize(mock(), mock(), false) {}
+        pill.bind(task, false)
+        assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
+        task.configuration.smallestScreenWidthDp = 411
+        pill.bind(task, false)
+        assertEquals(View.GONE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
+    }
+
 }

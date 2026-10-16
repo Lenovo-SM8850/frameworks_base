@@ -415,6 +415,4 @@
     <string name="package_update_text">Updating...</string>
     <string name="floating_window_restore">Restore %1$s floating window</string>
     <string name="floating_window_handle">Floating window handle</string>
-    <string name="floating_window_minimize">Minimize</string>
-    <string name="floating_window_close">Close</string>
 </resources>
