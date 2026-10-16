@@ -609,4 +609,36 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
 
     private fun requestLocation(bounds: Rect, displayId: Int = Display.DEFAULT_DISPLAY) =
         TransitionRequestInfo.RequestedLocation(displayId, bounds)
+    @Test
+    fun newFloatingEntry_usesCurrentDisplayOrientationEvenWithProvisionalBounds() {
+        whenever(displayLayout.width()).thenReturn(1920)
+        whenever(displayLayout.height()).thenReturn(1080)
+        whenever(displayLayout.getStableBounds(any())).thenAnswer {
+            it.getArgument<Rect>(0).set(0, 50, 1920, 1030)
+        }
+        val task = createTaskInfo(Rect(0, 0, 600, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        val entry = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(entry.width()).isGreaterThan(entry.height())
+        assertThat(controller.entryScale(task)).isWithin(.001f).of(.75f)
+    }
+
+    @Test
+    fun newFloatingEntry_respectsFixedPortraitOnLandscapeDisplay() {
+        whenever(displayLayout.width()).thenReturn(1920)
+        whenever(displayLayout.height()).thenReturn(1080)
+        whenever(displayLayout.getStableBounds(any())).thenAnswer {
+            it.getArgument<Rect>(0).set(0, 50, 1920, 1030)
+        }
+        val task = createTaskInfo(Rect(0, 0, 600, 900)).apply {
+            isFloatingWindow = true
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        val entry = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(entry.height()).isGreaterThan(entry.width())
+    }
+
 }
