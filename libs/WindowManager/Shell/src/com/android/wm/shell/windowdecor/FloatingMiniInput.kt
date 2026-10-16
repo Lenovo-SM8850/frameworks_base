@@ -29,6 +29,8 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var downY = 0f
     private var dragging = false
     private var blockedGesture = false
+    private var hostWidth = 0
+    private var hostHeight = 0
 
     fun update(info: RunningTaskInfo, taskSurface: SurfaceControl,
         transaction: SurfaceControl.Transaction? = null) {
@@ -56,6 +58,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                 setOnTouchListener { v, event ->
                     val current = task ?: return@setOnTouchListener false
                     if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                        v.requestUnbufferedDispatch(event)
                         blockedGesture = controller.isMiniAnimating(current)
                     }
                     if (blockedGesture) {
@@ -100,7 +103,11 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                         setTitle("Floating mini input ${info.taskId}")
                     })
             }
-        } else host?.relayout(bounds.width(), bounds.height())
+        } else if (hostWidth != bounds.width() || hostHeight != bounds.height()) {
+            host?.relayout(bounds.width(), bounds.height())
+        }
+        hostWidth = bounds.width()
+        hostHeight = bounds.height()
         val t = transaction ?: SurfaceControl.Transaction()
         try {
             val inverse = 1f / info.floatingWindowScale
@@ -115,6 +122,8 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     override fun close() {
         host?.release()
         host = null
+        hostWidth = 0
+        hostHeight = 0
         surface?.let {
             if (it.isValid) SurfaceControl.Transaction().use { t -> t.remove(it).apply() }
             it.release()

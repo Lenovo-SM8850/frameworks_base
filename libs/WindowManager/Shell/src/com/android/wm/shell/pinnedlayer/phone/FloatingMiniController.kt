@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.android.wm.shell.pinnedlayer.phone
 
+import android.animation.AnimationHandler
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
@@ -11,6 +12,7 @@ import android.view.Choreographer
 import android.view.SurfaceControl
 import android.window.TransitionInfo
 import android.window.WindowContainerTransaction
+import com.android.internal.graphics.SfVsyncFrameCallbackProvider
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.DisplayLayout
@@ -24,9 +26,13 @@ class FloatingMiniController(
     private val organizer: ShellTaskOrganizer,
     private val displays: DisplayController,
     private val state: FloatingMiniState,
-    private val choreographer: Choreographer = Choreographer.getInstance(),
+    private val choreographer: Choreographer = Choreographer.getSfInstance(),
     private val transactions: () -> SurfaceControl.Transaction = { SurfaceControl.Transaction() },
-    private val animators: () -> ValueAnimator = { ValueAnimator.ofFloat(0f, 1f) },
+    private val animators: () -> ValueAnimator = {
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            setAnimationHandler(AnimationHandler().apply { setProvider(SfVsyncFrameCallbackProvider()) })
+        }
+    },
     private val changed: (TaskInfo) -> Unit,
 ) {
     private val pendingResize = mutableMapOf<FloatingMiniState.Key, Pair<Int, Int>>()
@@ -79,7 +85,8 @@ class FloatingMiniController(
             transaction.setMatrix(surface, sx, 0f, 0f, sy)
                 .setPosition(surface, bounds.left.toFloat(), bounds.top.toFloat())
                 .setWindowCrop(surface, width, height)
-                .setCornerRadius(surface, radius / min(sx, sy)).apply()
+                .setCornerRadius(surface, radius / min(sx, sy))
+                .setFrameTimeline(choreographer.vsyncId).apply()
         }
 
         override fun close() {
