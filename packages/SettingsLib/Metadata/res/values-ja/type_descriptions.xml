@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="any_boolean_type_description">ブール値。</string>
+    <string name="any_int_type_description">整数値。</string>
+    <string name="any_string_type_description">文字列値。</string>
+    <string name="display_id_type_description">システム ディスプレイ ID（構成により内部または外部）。</string>
+    <string name="installed_package_name_type_description">デバイスにインストールされている任意のパッケージ。</string>
+    <string name="int_in_range_type_description_from">%1$d 以上の整数（ステップ: %2$d）。</string>
+    <string name="int_in_range_type_description_to">%1$d 以下の整数（ステップ: %2$d）。</string>
+    <string name="int_in_range_type_description_between">指定範囲 [%1$d, %2$d] の整数（ステップ: %3$d）。</string>
+    <string name="time_of_day_type_description">24 時間形式 HH:mm で指定する時刻。</string>
+    <string name="time_duration_type_description">秒単位の整数で表される時間の長さ。</string>
+    <string name="sim_slot_id_type_description">有効な SIM スロット ID。</string>
+    <string name="subscription_id_type_description">有効なサブスクリプション ID。</string>
+    <string name="wifi_ssid_type_description">Wi-Fi ネットワークの SSID。</string>
+</resources>

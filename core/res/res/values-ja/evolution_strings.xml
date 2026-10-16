@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Copyright (C) 2019-2024 The Evolution X Project
+     SPDX-License-Identifier: Apache-2.0
+-->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="aerr_copy">クラッシュログの URL をコピー</string>
+    <string name="url_copy_success">URL をコピーしました</string>
+    <string name="url_copy_failed">ログを Pasty にアップロード中にエラーが発生しました</string>
+    <string name="notification_channel_poweroff_alarm">電源オフ時のアラーム</string>
+    <string name="poweroff_alarm_title">電源オフ時のアラームを設定しました</string>
+    <string name="poweroff_alarm_body">アラームが設定されています。予定時刻の 2 分前にデバイスの電源が入ります</string>
+    <string name="settings_restart_title">設定アプリの再起動が必要です</string>
+    <string name="settings_restart_message">すべての変更を反映するには、設定アプリを再起動する必要があります。今すぐ再起動しますか？</string>
+    <string name="system_restart_title">システムの再起動が必要です</string>
+    <string name="system_restart_message">すべての変更を反映するには、システムを再起動する必要があります。今すぐ再起動しますか？</string>
+    <string name="systemui_restart_title">SystemUI の再起動が必要です</string>
+    <string name="systemui_restart_message">すべての変更を反映するには、SystemUI を再起動する必要があります。今すぐ再起動しますか？</string>
+    <string name="launcher_restart_title">ランチャーの再起動が必要です</string>
+    <string name="launcher_restart_message">すべての変更を反映するには、ランチャーを再起動する必要があります。今すぐ再起動しますか？</string>
+    <string name="pocket_mode_title">ポケットモードが有効です</string>
+    <string name="pocket_mode_illustration_description">ポケットに入ったスマートフォンのイラスト</string>
+    <string name="pocket_mode_instructions_header">スマートフォンを使用するには:</string>
+    <string name="pocket_mode_instruction_step1">1. 上に表示されている青い領域（近接センサー）がふさがれておらず、汚れやほこりが付着していないことを確認してください。</string>
+    <string name="pocket_mode_instruction_step2">2. 電源ボタンを長押しして、ポケットモードを終了してください。</string>
+    <string name="volume_dialog_ringer_guidance_normal">着信音と通知音が鳴ります</string>
+</resources>
