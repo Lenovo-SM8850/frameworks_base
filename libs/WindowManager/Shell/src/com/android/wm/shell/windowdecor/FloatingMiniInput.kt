@@ -87,7 +87,10 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                         }
                         MotionEvent.ACTION_UP -> {
                             if (dragging) controller.endMiniDrag(current, start, moved)
-                            else v.performClick()
+                            else {
+                                controller.endMiniTap(current)
+                                v.performClick()
+                            }
                         }
                         MotionEvent.ACTION_CANCEL -> controller.endMiniDrag(current, start, start)
                     }

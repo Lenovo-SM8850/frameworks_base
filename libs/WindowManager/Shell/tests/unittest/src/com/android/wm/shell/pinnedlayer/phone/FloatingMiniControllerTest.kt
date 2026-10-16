@@ -221,4 +221,27 @@ class FloatingMiniControllerTest : ShellTestCase() {
         }
     }
 
+    @Test fun tapStashedStrip_unstashesAtMiniSizeAndKeepsNormalRestoreGeometry() {
+        val h = Harness()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        entry.edge = FloatingMiniState.Edge.LEFT
+        entry.bounds.set(-332, 300, 28, 840)
+        assertThat(h.controller.isStashed(h.task)).isTrue()
+        h.controller.unstash(h.task)
+        h.interrupt()
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(entry.bounds).isEqualTo(Rect(8, 300, 368, 840))
+        assertThat(entry.scale).isEqualTo(.45f)
+        assertThat(entry.restore.bounds).isEqualTo(h.normal)
+        assertThat(h.state.get(h.task.userId, h.task.taskId)).isSameInstanceAs(entry)
+    }
+
+    @Test fun tapWithoutDrag_releasesInteractionOwner() {
+        val h = Harness()
+        h.controller.beginDrag(h.task)
+        h.controller.endTap(h.task)
+        assertThat(com.android.wm.shell.common.SurfaceFrameRate.isInteracting).isFalse()
+        verify(h.transaction).close()
+    }
+
 }

@@ -100,7 +100,11 @@ class PinnedLayerController(
     fun addMiniListener(listener: (TaskInfo) -> Unit) { miniListeners += listener }
     fun removeMiniListener(listener: (TaskInfo) -> Unit) { miniListeners -= listener }
     fun isMiniAnimating(task: TaskInfo): Boolean = miniInteractions?.isAnimating(task) == true
-    fun restoreMini(task: TaskInfo) { miniInteractions?.restore(task) }
+    fun isMiniStashed(task: TaskInfo): Boolean = miniInteractions?.isStashed(task) == true
+    fun endMiniTap(task: TaskInfo) { miniInteractions?.endTap(task) }
+    fun restoreMini(task: TaskInfo) {
+        if (isMiniStashed(task)) miniInteractions?.unstash(task) else miniInteractions?.restore(task)
+    }
     fun beginMiniDrag(task: TaskInfo): Rect = miniInteractions?.beginDrag(task) ?: task.presentationBounds
     fun moveMini(task: TaskInfo, bounds: Rect) { miniInteractions?.move(task, bounds) }
     fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect) {
