@@ -65,6 +65,40 @@ class FloatingMiniState {
                 stable.top + margin else stable.bottom - margin - height())
         }
 
+        fun tidyBounds(window: Rect, mini: Rect, stable: Rect, margin: Int,
+            occupied: List<Rect>): Rect? {
+            val area = Rect(stable).apply { inset(margin, margin) }
+            if (area.isEmpty || mini.width() > area.width() || mini.height() > area.height()) return null
+            val corners = Corner.entries.sortedBy { corner ->
+                val x = if (corner == Corner.TOP_LEFT || corner == Corner.BOTTOM_LEFT)
+                    stable.left else stable.right
+                val y = if (corner == Corner.TOP_LEFT || corner == Corner.TOP_RIGHT)
+                    stable.top else stable.bottom
+                val dx = window.exactCenterX().toDouble() - x
+                val dy = window.exactCenterY().toDouble() - y
+                dx * dx + dy * dy
+            }
+            for (corner in corners) {
+                val anchor = snap(mini, stable, corner, margin)
+                val top = corner == Corner.TOP_LEFT || corner == Corner.TOP_RIGHT
+                val left = corner == Corner.TOP_LEFT || corner == Corner.BOTTOM_LEFT
+                val vertical = (listOf(anchor.top) + occupied.map {
+                    if (top) it.bottom + margin else it.top - margin - mini.height()
+                }).sortedBy { if (top) it else -it }
+                val horizontal = (listOf(anchor.left) + occupied.map {
+                    if (left) it.right + margin else it.left - margin - mini.width()
+                }).sortedBy { if (left) it else -it }
+                val candidates = vertical.map { Rect(anchor).apply { offsetTo(anchor.left, it) } } +
+                    horizontal.map { Rect(anchor).apply { offsetTo(it, anchor.top) } }
+                for (candidate in candidates) {
+                    if (!area.contains(candidate)) continue
+                    val spaced = Rect(candidate).apply { inset(-margin, -margin) }
+                    if (occupied.none { Rect.intersects(spaced, it) }) return candidate
+                }
+            }
+            return null
+        }
+
         fun stashEdge(bounds: Rect, stable: Rect): Edge = when {
             stable.left - bounds.left > bounds.width() * .6f -> Edge.LEFT
             bounds.right - stable.right > bounds.width() * .6f -> Edge.RIGHT

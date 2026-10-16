@@ -432,6 +432,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
         private final HashSet<WindowContainerToken> mStartingFloatingTasks =
                 new HashSet<>();
         private boolean mFinishingToHome;
+        private boolean mFinishingHomeGesture;
 
 
         /**
@@ -676,6 +677,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             mFloatingTasks.clear();
             mStartingFloatingTasks.clear();
             mFinishingToHome = false;
+            mFinishingHomeGesture = false;
             mPausingTasks = null;
             mPausingDeskId = -1;
             mClosingTasks = null;
@@ -1709,7 +1711,14 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          */
         private void finishInner(boolean toHome, boolean sendUserLeaveHint,
                 IResultReceiver runnerFinishCb, String reason) {
+            final boolean syntheticHomeGesture =
+                    isSyntheticTransition() && toHome && sendUserLeaveHint;
             if (finishSyntheticTransition(runnerFinishCb, reason)) {
+                if (syntheticHomeGesture) {
+                    for (int i = 0; i < mStateListeners.size(); ++i) {
+                        mStateListeners.get(i).onHomeGestureFinished(mDisplayId);
+                    }
+                }
                 return;
             }
 
@@ -1768,6 +1777,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 }
             }
             mFinishingToHome = toHome || mWillFinishToHome;
+            mFinishingHomeGesture = mFinishingToHome && sendUserLeaveHint;
             boolean returningToApp = !toHome
                     && !mWillFinishToHome
                     && mPausingTasks != null
@@ -1999,6 +2009,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             final IResultReceiver runnerFinishCb = mPendingRunnerFinishCb;
 
             final boolean finishedToHome = mFinishingToHome;
+            final boolean finishedHomeGesture = mFinishingHomeGesture;
             if (!mKeyguardLocked) {
                 // Hiding for Overview can exclude a floating task from the transition entirely.
                 for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
@@ -2031,6 +2042,11 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             if (finishedToHome) {
                 for (int i = 0; i < mStateListeners.size(); ++i) {
                     mStateListeners.get(i).onTransitionFinishedToHome(mDisplayId);
+                }
+            }
+            if (finishedHomeGesture) {
+                for (int i = 0; i < mStateListeners.size(); ++i) {
+                    mStateListeners.get(i).onHomeGestureFinished(mDisplayId);
                 }
             }
             finishCb.onTransitionFinished(wct);

@@ -546,6 +546,30 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun expandedFloatingEligibility_excludesMiniStashMinimizedAndOtherDisplays() {
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        val task = setupTask(taskId = 201).apply { isVisible = true }
+        pinTask(task)
+        task.isFloatingWindow = true
+        assertTrue(pinnedLayerController.hasExpandedFloatingWindows())
+        val entry = presentationController.miniState.enter(task.userId, task.taskId,
+            FloatingMiniState.Restore(Rect(DEFAULT_TASK_BOUNDS), Rect(DEFAULT_TASK_BOUNDS), 1f),
+            Rect(0, 0, 100, 100), .3f)
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        entry.edge = FloatingMiniState.Edge.LEFT
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        presentationController.miniState.remove(task.userId, task.taskId)
+        task.isVisible = false
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        task.isVisible = true
+        task.displayId = 1
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        task.displayId = DEFAULT_DISPLAY
+        pinnedLayerController.minimizeTask(task)
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+    }
+
+    @Test
     fun pinTask_unownedFreeform_isNotFloating() {
         val task = setupTask()
         shellTaskOrganizer.stub { on { getRunningTaskInfo(task.taskId) } doReturn task }
