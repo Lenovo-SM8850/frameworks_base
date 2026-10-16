@@ -194,6 +194,17 @@ class PinnedLayerPresentationController(
         return entryBounds(task, bounds, details)
     }
 
+    fun getPreservedEntryBounds(task: TaskInfo, bounds: Rect): Rect? {
+        if (bounds.isEmpty) return null
+        val details = getDisplayDetails(task.displayId) ?: return null
+        val minimum = .3f * min(details.layout.width(), details.layout.height()) + 3
+        val factor = max(1f, minimum / min(bounds.width(), bounds.height()).coerceAtLeast(1))
+        val normal = Rect(bounds.left, bounds.top,
+            bounds.left + (bounds.width() * factor).toInt(),
+            bounds.top + (bounds.height() * factor).toInt())
+        return entryBounds(task, normal, details)
+    }
+
     private fun entryBounds(task: TaskInfo, bounds: Rect, details: DisplayDetails): Rect {
         val visible = clampFloatingBounds(task, bounds, details)
         val stable = details.stableBounds()

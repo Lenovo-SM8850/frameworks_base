@@ -75,6 +75,9 @@ interface WindowDecorationActions {
     fun onToDesktop(taskId: Int, transitionSource: DesktopModeTransitionSource)
 
     /** Requests for task to open float. */
+    /** Whether the task belongs to an active desk that can leave desktop mode. */
+    fun canMoveDeskToFloating(taskInfo: RunningTaskInfo): Boolean = false
+
     fun onToFloat(taskId: Int)
 
     /**

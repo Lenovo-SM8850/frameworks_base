@@ -589,6 +589,23 @@ class HandleMenuTest : ShellTestCase() {
     }
 
 
+    @Test fun desktopFloat_requiresActiveDeskAndNeverShowsForFloatingTask() {
+        val actions = mock<WindowDecorationActions>()
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(
+            android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM).build()
+        task.isResizeable = true
+        val pill = WindowingPillView(mContext, mock())
+        pill.initialize(actions, mock(), false) {}
+        pill.bind(task, false)
+        assertEquals(View.GONE, pill.requireViewById<View>(R.id.floating_button).visibility)
+        whenever(actions.canMoveDeskToFloating(task)).thenReturn(true)
+        pill.bind(task, false)
+        assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.floating_button).visibility)
+        task.isFloatingWindow = true
+        pill.bind(task, false)
+        assertEquals(View.GONE, pill.requireViewById<View>(R.id.floating_button).visibility)
+    }
+
     @Test fun rotate_onlyFloatingAndIncludesFixedOrientationApps() {
         val resources = org.mockito.kotlin.spy(mContext.resources)
         val context = org.mockito.kotlin.spy(mContext)
