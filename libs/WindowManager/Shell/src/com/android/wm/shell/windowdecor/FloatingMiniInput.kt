@@ -5,6 +5,7 @@ import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.SurfaceControl
 import android.view.SurfaceControlViewHost
@@ -12,6 +13,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.WindowlessWindowManager
+import com.android.internal.annotations.VisibleForTesting
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -49,54 +51,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
             surface = leash
             parent = taskSurface
             val manager = WindowlessWindowManager(info.configuration, leash, null)
-            val root = View(context).apply {
-                isClickable = true
-                isFocusable = true
-                contentDescription = context.getString(com.android.wm.shell.R.string.floating_window_restore,
-                    info.taskDescription?.label ?: info.baseActivity?.packageName.orEmpty())
-                setOnClickListener { task?.let(controller::restoreMini) }
-                setOnTouchListener { v, event ->
-                    val current = task ?: return@setOnTouchListener false
-                    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                        v.requestUnbufferedDispatch(event)
-                        blockedGesture = controller.isMiniAnimating(current)
-                    }
-                    if (blockedGesture) {
-                        if (event.actionMasked == MotionEvent.ACTION_UP ||
-                            event.actionMasked == MotionEvent.ACTION_CANCEL) blockedGesture = false
-                        return@setOnTouchListener true
-                    }
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            start = controller.beginMiniDrag(current)
-                            moved.set(start)
-                            downX = event.rawX
-                            downY = event.rawY
-                            dragging = false
-                        }
-                        MotionEvent.ACTION_MOVE -> {
-                            val dx = event.rawX - downX
-                            val dy = event.rawY - downY
-                            val slop = ViewConfiguration.get(context).scaledTouchSlop
-                            if (dragging || abs(dx) > slop || abs(dy) > slop) {
-                                dragging = true
-                                moved.set(start)
-                                moved.offset(dx.roundToInt(), dy.roundToInt())
-                                controller.moveMini(current, moved)
-                            }
-                        }
-                        MotionEvent.ACTION_UP -> {
-                            if (dragging) controller.endMiniDrag(current, start, moved)
-                            else {
-                                controller.endMiniTap(current)
-                                v.performClick()
-                            }
-                        }
-                        MotionEvent.ACTION_CANCEL -> controller.endMiniDrag(current, start, start)
-                    }
-                    true
-                }
-            }
+            val root = createInputView(context, info)
             host = SurfaceControlViewHost(context, display, manager, "FloatingMiniInput").apply {
                 setView(root, WindowManager.LayoutParams(bounds.width(), bounds.height(),
                     WindowManager.LayoutParams.TYPE_APPLICATION,
@@ -120,6 +75,81 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
         } finally {
             if (transaction == null) t.close()
         }
+    }
+
+    @VisibleForTesting
+    fun createInputView(context: Context, info: RunningTaskInfo): View {
+        task = info
+        val taps = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(event: MotionEvent) = true
+            override fun onSingleTapUp(event: MotionEvent): Boolean {
+                task?.takeIf(controller::isMiniStashed)?.let(controller::restoreMini)
+                return true
+            }
+            override fun onDoubleTap(event: MotionEvent) = true
+            override fun onDoubleTapEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_UP) task?.let(controller::restoreMini)
+                return true
+            }
+        }).apply { setIsLongpressEnabled(false) }
+        return View(context).apply {
+                isClickable = true
+                isFocusable = true
+                contentDescription = context.getString(com.android.wm.shell.R.string.floating_window_restore,
+                    info.taskDescription?.label ?: info.baseActivity?.packageName.orEmpty())
+                setOnClickListener { task?.let(controller::restoreMini) }
+                setOnTouchListener { v, event ->
+                    val current = task ?: return@setOnTouchListener false
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                        v.requestUnbufferedDispatch(event)
+                        blockedGesture = controller.isMiniAnimating(current)
+                    }
+                    if (blockedGesture) {
+                        if (event.actionMasked == MotionEvent.ACTION_UP ||
+                            event.actionMasked == MotionEvent.ACTION_CANCEL) blockedGesture = false
+                        return@setOnTouchListener true
+                    }
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) taps.onTouchEvent(event)
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            start = controller.beginMiniDrag(current)
+                            moved.set(start)
+                            downX = event.rawX
+                            downY = event.rawY
+                            dragging = false
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dx = event.rawX - downX
+                            val dy = event.rawY - downY
+                            val slop = ViewConfiguration.get(context).scaledTouchSlop
+                            if (dragging || abs(dx) > slop || abs(dy) > slop) {
+                                if (!dragging) {
+                                    val cancel = MotionEvent.obtain(event)
+                                    cancel.action = MotionEvent.ACTION_CANCEL
+                                    taps.onTouchEvent(cancel)
+                                    cancel.recycle()
+                                }
+                                dragging = true
+                                moved.set(start)
+                                moved.offset(dx.roundToInt(), dy.roundToInt())
+                                controller.moveMini(current, moved)
+                            }
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            if (dragging) controller.endMiniDrag(current, start, moved)
+                            else {
+                                controller.endMiniTap(current)
+                                taps.onTouchEvent(event)
+                            }
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            taps.onTouchEvent(event)
+                            controller.endMiniDrag(current, start, start)
+                        }
+                    }
+                    true
+                }
+            }
     }
 
     override fun close() {
