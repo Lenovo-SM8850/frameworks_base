@@ -620,6 +620,8 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             boolean isFocusedGlobally) {
         final WindowDecorationWrapper decor = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (decor != null) {
+            if (decor.getTaskInfo().isFloatingWindow
+                    && decor.getHasGlobalFocus() == isFocusedGlobally) return;
             decor.relayout(decor.getTaskInfo(), isFocusedGlobally, decor.getExclusionRegion());
         }
     }
@@ -652,6 +654,10 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (decoration == null) return;
         final RunningTaskInfo oldTaskInfo = decoration.getTaskInfo();
+        if (FloatingDecorInfo.canSkipRelayout(oldTaskInfo, taskInfo)) {
+            decoration.updateFloatingTaskInfo(taskInfo);
+            return;
+        }
         if (oldTaskInfo.isFloatingWindow != taskInfo.isFloatingWindow) {
             try (SurfaceControl.Transaction t = mTransactionFactory.get()) {
                 recreateWindowDecoration(taskInfo, decoration.getTaskSurface(), t, t);

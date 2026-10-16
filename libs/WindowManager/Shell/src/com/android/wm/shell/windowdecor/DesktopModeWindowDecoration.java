@@ -606,6 +606,13 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
             });
         }
 
+        if (mTaskInfo.isFloatingWindow) {
+            mLastValidDragArea = calculateValidDragArea();
+            if (!hasGlobalFocus) closeHandleMenu();
+            updateDragResizeListenerIfNeeded(oldDecorationSurface, inFullImmersive);
+            Trace.endSection();
+            return;
+        }
         notifyCaptionStateChanged();
         Trace.beginSection("DesktopModeWindowDecoration#relayout-bindData");
         if (isAppHandle(mWindowDecorViewHolder)) {
@@ -764,6 +771,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                     mSurfaceControlTransactionSupplier,
                     mDisplayController,
                     event -> {
+                        if (mTaskInfo.isFloatingWindow) return;
                         final boolean isDown = event.getAction() == ACTION_DOWN;
                         final boolean isUpOrCancel =
                                 event.getAction() == ACTION_UP

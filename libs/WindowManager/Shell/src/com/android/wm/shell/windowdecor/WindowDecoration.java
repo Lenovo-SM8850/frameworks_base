@@ -341,6 +341,23 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
                 ? INVALID_SHADOW_RADIUS : loadDimensionPixelSize(resources,
                 params.mShadowRadiusId);
 
+        if (mTaskInfo.isFloatingWindow) {
+            mIsCaptionVisible = false;
+            if (mViewHost != null) {
+                mViewHost.release(startT);
+                mViewHost = null;
+            }
+            outResult.mCaptionHeight = 0;
+            outResult.mCaptionTopPadding = 0;
+            outResult.mCustomizableCaptionRegion.setEmpty();
+            updateDecorationContainerSurface(startT, outResult);
+            updateCaptionInsets(params, wct, outResult, taskBounds, localCaptionBounds,
+                    mDecorWindowContext);
+            updateTaskSurface(params, startT, finishT, outResult);
+            Trace.endSection();
+            return;
+        }
+
         Trace.beginSection("relayout-createViewHostIfNeeded");
         createViewHostIfNeeded(mDecorWindowContext, mDisplay);
         Trace.endSection();
@@ -455,6 +472,10 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
     @VisibleForTesting
     T inflateLayout(Context context, int layoutResId) {
         return (T) LayoutInflater.from(context).inflate(layoutResId, null);
+    }
+
+    public void updateFloatingTaskInfo(RunningTaskInfo taskInfo) {
+        mTaskInfo = taskInfo;
     }
 
     private boolean mFloatingWindowDecorScaled;
@@ -642,6 +663,10 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
     }
 
     void onExclusionRegionChanged(@NonNull Region exclusionRegion) {
+        if (mTaskInfo.isFloatingWindow) {
+            mExclusionRegion.set(exclusionRegion);
+            return;
+        }
         relayout(mTaskInfo, mHasGlobalFocus, exclusionRegion);
     }
 

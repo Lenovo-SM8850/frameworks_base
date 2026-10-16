@@ -137,6 +137,21 @@ abstract class CaptionController<T>(
             hasGlobalFocus = params.hasGlobalFocus
             this.decorWindowContext = decorWindowContext
 
+            if (taskInfo.isFloatingWindow) {
+                // Retain menu ownership without creating an invisible input window.
+                getOrCreateViewHolder()
+                isCaptionVisible = false
+                captionInsets?.remove(wct)
+                captionInsets = null
+                windowDecorationInsets?.remove(wct)
+                windowDecorationInsets = null
+                captionViewHost?.release(startT)
+                captionViewHost = null
+                captionLayoutResult = CaptionRelayoutResult(0, taskInfo.presentationBounds.width(),
+                    0, 0, 0, Region())
+                return captionLayoutResult
+            }
+
             val viewHolder = getOrCreateViewHolder()
             isCaptionVisible = taskInfo.isVisible && params.isCaptionVisible
             val viewHost = getOrCreateViewHost(decorWindowContext, display)
@@ -468,6 +483,7 @@ abstract class CaptionController<T>(
      * Inject the given [MotionEvent] into the root view if it exists and the gesture started in it.
      */
     fun injectMotionEvent(e: MotionEvent) {
+        if (taskInfo.isFloatingWindow) return
         val rootView = windowDecorationViewHolder?.rootView ?: return
 
         val isDown = e.action == MotionEvent.ACTION_DOWN

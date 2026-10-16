@@ -126,7 +126,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var floatingPreviewTransaction: SurfaceControl.Transaction? = null
     private var lastFloatingX = Float.NaN
     private var lastFloatingY = Float.NaN
-    private val floatingFrameCallback = Choreographer.FrameCallback { flushFloatingResizePreview() }
+    private var floatingMovePending = false
+    private val floatingFrameCallback = Choreographer.FrameCallback {
+        if (floatingMovePending) flushFloatingMove() else flushFloatingResizePreview()
+    }
     private var closing = false
     private var floatingResize: FloatingWindowGeometry.ScaledResize? = null
     private val displayIds = mutableSetOf<Int>()
@@ -297,10 +300,12 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (floatingDragCancelled) return Rect(repositionTaskBounds)
         if (windowDecoration.taskInfo.isFloatingWindow) {
             if (isResizing) return moveFloatingResize(x, y)
-            val t = transactionSupplier()
-            DragPositioningCallbackUtility.setPositionOnDrag(windowDecoration,
-                repositionTaskBounds, taskBoundsAtDragStart, repositionStartPoint, t, x, y)
-            t.setFrameTimeline(Choreographer.getInstance().vsyncId).apply()
+            DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
+                taskBoundsAtDragStart, repositionStartPoint, x, y)
+            if (!floatingMovePending) {
+                floatingMovePending = true
+                Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
+            }
             return Rect(repositionTaskBounds)
         }
         // If the window needs to be resized to its bounds before snap or maximize, then wait until
@@ -484,6 +489,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
         if (windowDecoration.taskInfo.isFloatingWindow) {
             if (isResizing) return endFloatingResize(x, y)
+            cancelFloatingFrame()
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
             taskBoundsAtDragStart.setEmpty()
@@ -693,8 +699,18 @@ class MultiDisplayVeiledResizeTaskPositioner(
         } else resetVeilIfVisible()
     }
 
+    private fun flushFloatingMove() {
+        if (!floatingMovePending) return
+        floatingMovePending = false
+        val t = floatingPreviewTransaction ?: transactionSupplier().also { floatingPreviewTransaction = it }
+        t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
+            repositionTaskBounds.top.toFloat())
+            .setFrameTimeline(Choreographer.getInstance().vsyncId).apply()
+    }
+
     private fun cancelFloatingFrame() {
-        if (floatingFramePending) {
+        if (floatingFramePending || floatingMovePending) {
+            floatingMovePending = false
             Choreographer.getInstance().removeFrameCallback(floatingFrameCallback)
             floatingFramePending = false
         }
