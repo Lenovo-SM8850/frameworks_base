@@ -308,4 +308,31 @@ class AppHandleViewHolderTest : ShellTestCase() {
             }
         }
     }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_WINDOW_DECORATION_REFACTOR)
+    fun menuHiddenHandle_rebindDoesNotRestartSampling() {
+        val appHandle = createAppHandleViewHolder()
+        appHandle.regionSampler.close()
+        val sampler = mock<com.android.wm.shell.windowdecor.common.HandleRegionSampler>()
+        appHandle.regionSampler = sampler
+        val task = RunningTaskInfo()
+        val data = AppHandleViewHolder.HandleData(task, DEFAULT_CAPTION_POSITION,
+            DEFAULT_CAPTION_WIDTH, DEFAULT_CAPTION_HEIGHT, false, true)
+        appHandle.bindData(data)
+        appHandle.onHandleMenuOpened()
+        org.mockito.kotlin.clearInvocations(sampler)
+        appHandle.bindData(data)
+        org.mockito.kotlin.verify(sampler).update(org.mockito.kotlin.any(),
+            org.mockito.kotlin.eq(false), org.mockito.kotlin.any())
+        appHandle.onHandleMenuClosed()
+        org.mockito.kotlin.verify(sampler).setVisible(true)
+        appHandle.onHandleMenuOpened()
+        appHandle.bindData(data.copy(isCaptionVisible = false))
+        org.mockito.kotlin.clearInvocations(sampler)
+        appHandle.onHandleMenuClosed()
+        org.mockito.kotlin.verify(sampler).setVisible(false)
+        appHandle.close()
+    }
+
 }
