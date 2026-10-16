@@ -470,6 +470,7 @@
     <string name="quick_settings_rotation_unlocked_label" msgid="2359922767950346112">"자동 회전"</string>
     <string name="accessibility_quick_settings_rotation" msgid="4800050198392260738">"화면 자동 회전"</string>
     <string name="quick_settings_location_label" msgid="2621868789013389163">"위치"</string>
+    <string name="quick_settings_screensaver_label">화면 보호기</string>
     <string name="quick_settings_camera_label" msgid="5612076679385269339">"카메라 액세스"</string>
     <string name="quick_settings_mic_label" msgid="8392773746295266375">"마이크 액세스"</string>
     <string name="quick_settings_camera_mic_available" msgid="1453719768420394314">"사용 가능"</string>
@@ -1893,4 +1894,30 @@
     <string name="ace_attribution_settings_button_accessibility_description" msgid="8426163772933746374">"설정 버튼"</string>
     <string name="ace_attribution_thumbs_up_button_accessibility_description" msgid="3561722934830934360">"좋아요 의견 버튼"</string>
     <string name="ace_attribution_thumbs_down_button_accessibility_description" msgid="5471283747650437662">"싫어요 의견 버튼"</string>
+    <string name="now_playing_track_and_artist_description">현재 재생 중: %2$s의 %1$s</string>
+    <string name="camera">카메라</string>
+    <string name="clock_timer">시계/타이머</string>
+    <string name="calculator">계산기</string>
+    <string name="gallery">갤러리</string>
+    <string name="no_default_app_found">기본 %1$s 앱을 찾을 수 없음</string>
+    <string name="weather_data_unavailable">데이터를 사용할 수 없음</string>
+    <string name="omnijaws_weather">OmniJaws</string>
+    <string name="quick_settings_data_label">모바일 데이터</string>
+    <string name="quick_settings_ringer_label">벨소리 모드</string>
+    <string name="torch_active">손전등 켜짐</string>
+    <string name="google_wallet">Google 지갑</string>
+    <!-- Values for strings that the Material library defines without this language. -->
+    <string name="mtrl_button_collapsed_content_description">접힘</string>
+    <string name="mtrl_button_expanded_content_description">펼쳐짐</string>
+    <string name="mtrl_button_overflow_icon_content_description">더보기 메뉴</string>
+    <string name="nav_rail_collapsed_a11y_label">접힘</string>
+    <string name="nav_rail_expanded_a11y_label">펼쳐짐</string>
+    <!-- Values for strings that the Google SystemUI library defines. -->
+    <string name="accessibility_smartspace_next_page">다음 페이지</string>
+    <string name="accessibility_smartspace_previous_page">이전 페이지</string>
+    <string name="calendar_quick_affordance_label">캘린더</string>
+    <string name="calculator_quick_affordance_label">계산기</string>
+    <string name="quick_settings_desktop_mode_label">데스크톱 창 모드</string>
+    <string name="notification_open_split_screen">화면 분할로 열기</string>
+    <string name="notification_open_floating">플로팅 창으로 열기</string>
 </resources>

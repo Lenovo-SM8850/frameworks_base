@@ -125,7 +125,7 @@
     <string name="desktop_text" msgid="9058641752519570266">"デスクトップ ウィンドウ"</string>
     <string name="split_screen_text" msgid="1396336058129570886">"分割画面"</string>
     <string name="more_button_text" msgid="3655388105592893530">"その他"</string>
-    <string name="float_button_text" msgid="9221657008391364581">"フローティング"</string>
+    <string name="float_button_text" msgid="9221657008391364581">フローティング ウィンドウ</string>
     <string name="select_text" msgid="5139083974039906583">"選択"</string>
     <string name="screenshot_text" msgid="1477704010087786671">"スクリーンショット"</string>
     <string name="open_in_browser_text" msgid="9181692926376072904">"ブラウザで開く"</string>
@@ -181,4 +181,25 @@
     <string name="open_by_default_splash_dialog_app_text" msgid="2680408983754147907">"このままアプリを使う"</string>
     <string name="open_by_default_splash_dialog_ask_me_later_text" msgid="2706872945449736432">"後で確認"</string>
     <string name="package_update_text" msgid="196015273357188152">"更新しています..."</string>
+    <string name="floating_window_restore">「%1$s」のフローティング ウィンドウを元に戻す</string>
+    <string name="floating_window_handle">フローティング ウィンドウのハンドル</string>
+    <string name="floating_window_close">フローティング ウィンドウを閉じる</string>
+    <string name="handle_menu_swap_horizontal">左右のアプリを入れ替える</string>
+    <string name="handle_menu_swap_vertical">上下のアプリを入れ替える</string>
+    <string name="handle_menu_close_app">このアプリを閉じる</string>
+    <string name="handle_menu_close_named_app">「%1$s」を閉じる</string>
+    <string name="split_picker_add_below">下に分割を追加</string>
+    <string name="split_picker_add_to_side">横に分割を追加</string>
+    <string name="split_picker_title">アプリを選択</string>
+    <string name="split_picker_search">アプリを検索</string>
+    <string name="split_picker_recent">最近</string>
+    <string name="split_picker_all_apps">すべてのアプリ</string>
+    <string name="split_picker_close">閉じる</string>
+    <string name="split_picker_already_open">この分割ですでに開いています</string>
+    <string name="split_picker_unavailable">この分割では使用できません</string>
+    <string name="split_picker_disabled_app">%1$s、%2$s</string>
+    <string name="split_picker_empty">一致するアプリがありません</string>
+    <string name="split_picker_loading">アプリを読み込んでいます…</string>
+    <string name="split_picker_launching">分割画面でアプリを開いています</string>
+    <string name="handle_menu_replace_app">別のアプリに置き換える</string>
 </resources>

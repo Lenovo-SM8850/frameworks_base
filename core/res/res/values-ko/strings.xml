@@ -235,6 +235,7 @@
     <string name="gnss_time_update_service" msgid="9039489496037616095">"GNSS 시간 업데이트 서비스"</string>
     <string name="device_policy_manager_service" msgid="5085762851388850332">"기기 정책 관리자 서비스"</string>
     <string name="music_recognition_manager_service" msgid="7481956037950276359">"음악 인식 관리자 서비스"</string>
+    <string name="vcn_management_service">VCN 관리 서비스</string>
     <string name="factory_reset_warning" msgid="6858705527798047809">"기기가 삭제됩니다."</string>
     <string name="factory_reset_message" msgid="2657049595153992213">"관리자 앱을 사용할 수 없습니다. 곧 기기가 삭제됩니다.\n\n궁금한 점이 있으면 조직의 관리자에게 문의하세요."</string>
     <string name="printing_disabled_by" msgid="3517499806528864633">"<xliff:g id="OWNER_APP">%s</xliff:g>에 의해 사용 중지되었습니다."</string>
@@ -701,11 +702,11 @@
     <string name="permdesc_xr_tracking_in_background" msgid="3151744132692357005">"앱이 백그라운드에서 XR 데이터에 액세스하도록 허용합니다."</string>
     <string name="permlab_capture_keyboard" msgid="4076894823382693032">"키 캡처"</string>
     <string name="permdesc_capture_keyboard" msgid="4192269470684407219">"시스템이 시스템 단축키 및 작업을 처리하기 전에 앱이 키를 캡처할 수 있도록 허용합니다."</string>
-    <string name="biometric_app_setting_name" msgid="3339209978734534457">"생체 인식 사용"</string>
-    <string name="biometric_or_screen_lock_app_setting_name" msgid="5348462421758257752">"생체 인식 또는 화면 잠금을 사용"</string>
+    <string name="biometric_app_setting_name" msgid="3339209978734534457">얼굴 또는 지문 사용</string>
+    <string name="biometric_or_screen_lock_app_setting_name" msgid="5348462421758257752">얼굴, 지문 또는 화면 잠금 사용</string>
     <string name="biometric_dialog_default_title" msgid="55026799173208210">"본인 확인"</string>
-    <string name="biometric_dialog_default_subtitle" msgid="8457232339298571992">"생체 인식을 사용하여 계속하세요"</string>
-    <string name="biometric_or_screen_lock_dialog_default_subtitle" msgid="159539678371552009">"계속하려면 생체 인식이나 화면 잠금을 사용하세요"</string>
+    <string name="biometric_dialog_default_subtitle" msgid="8457232339298571992">계속하려면 얼굴 또는 지문을 사용하세요.</string>
+    <string name="biometric_or_screen_lock_dialog_default_subtitle" msgid="159539678371552009">계속하려면 얼굴, 지문 또는 화면 잠금을 사용하세요.</string>
     <string name="biometric_dialog_secondary_display_toast" product="default" msgid="256544327174107086">"계속하려면 휴대전화에서 본인 인증을 진행하세요."</string>
     <string name="biometric_dialog_secondary_display_toast" product="tablet" msgid="2855203015454795660">"계속하려면 태블릿에서 본인 인증을 진행하세요."</string>
     <string name="biometric_error_hw_unavailable" msgid="2494077380540615216">"생체 인식 하드웨어를 사용할 수 없음"</string>
@@ -763,11 +764,11 @@
     <string name="alternative_face_setup_notification_content" product="default" msgid="3384959224091897331">"손가락에 물기가 있는 등 지문이 인식되지 않을 때는 얼굴 인식 잠금 해제를 사용하세요."</string>
     <string name="alternative_face_setup_notification_content" product="desktop" msgid="8589631194028810041">"손가락에 물기가 있을 때와 같이 지문이 인식되지 않을 경우에는 얼굴로 잠금 해제하세요."</string>
     <string name="alternative_fp_setup_notification_content" msgid="7454096947415721639">"주변이 어두운 경우 등 얼굴이 인식되지 않을 때는 지문 잠금 해제를 사용해 보세요."</string>
-    <string name="face_recalibrate_notification_name" product="default" msgid="7311163114750748686">"얼굴 인식 잠금 해제"</string>
+    <string name="face_recalibrate_notification_name" product="default" msgid="7311163114750748686">얼굴 인식</string>
     <string name="face_recalibrate_notification_name" product="desktop" msgid="6343244778393495390">"얼굴로 잠금 해제"</string>
-    <string name="face_recalibrate_notification_title" product="default" msgid="2524791952735579082">"얼굴 인식 잠금 해제 문제"</string>
+    <string name="face_recalibrate_notification_title" product="default" msgid="2524791952735579082">얼굴 인식 문제</string>
     <string name="face_recalibrate_notification_title" product="desktop" msgid="7502893130398903561">"얼굴로 잠금 해제하는 데 문제가 있습니다"</string>
-    <string name="face_recalibrate_notification_content" msgid="3064513770251355594">"탭하여 얼굴 모델을 삭제한 후 다시 얼굴을 추가하세요"</string>
+    <string name="face_recalibrate_notification_content" msgid="3064513770251355594">탭하여 얼굴 모델을 삭제한 후 얼굴을 다시 등록하세요.</string>
     <string name="face_sensor_privacy_enabled" product="default" msgid="7407126963510598508">"얼굴 인식 잠금 해제를 사용하려면 설정 &gt; 개인 정보 보호에서 "<b>"카메라 액세스"</b>"를 사용 설정하세요."</string>
     <string name="face_sensor_privacy_enabled" product="desktop" msgid="7690221855638766930">"얼굴로 잠금 해제하려면 설정 &gt; 개인 정보 보호에서 "<b>"카메라 액세스"</b>"를 사용 설정하세요"</string>
     <string name="fingerprint_recalibrate_notification_name" msgid="1414578431898579354">"지문 잠금 해제"</string>
@@ -837,6 +838,12 @@
     <string name="face_dialog_default_subtitle" msgid="6620492813371195429">"계속하려면 얼굴로 인증하세요"</string>
     <string name="face_or_screen_lock_dialog_default_subtitle" msgid="5006381531158341844">"계속하려면 얼굴 또는 화면 잠금을 사용하세요"</string>
   <string-array name="face_error_vendor">
+      <item>인증서가 만료됨</item>
+      <item>센서가 일시적으로 사용 중지됨</item>
+      <item>보정 오류</item>
+      <item>얼굴 인식을 사용할 수 없습니다. 휴대전화가 너무 뜨겁습니다.</item>
+      <item>얼굴 인식을 다시 설정해야 함</item>
+      <item>조명을 조절하고 휴대전화를 고정하세요.</item>
   </string-array>
     <string name="face_error_vendor_unknown" msgid="7387005932083302070">"문제가 발생했습니다. 다시 시도해 보세요."</string>
     <string name="face_icon_content_description" msgid="465030547475916280">"얼굴 아이콘"</string>

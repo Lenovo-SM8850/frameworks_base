@@ -181,4 +181,25 @@
     <string name="open_by_default_splash_dialog_app_text" msgid="2680408983754147907">"В приложении"</string>
     <string name="open_by_default_splash_dialog_ask_me_later_text" msgid="2706872945449736432">"Напомнить позже"</string>
     <string name="package_update_text" msgid="196015273357188152">"Обновление…"</string>
+    <string name="floating_window_restore">Восстановить плавающее окно приложения «%1$s»</string>
+    <string name="floating_window_handle">Обозначение плавающего окна</string>
+    <string name="floating_window_close">Закрыть плавающее окно</string>
+    <string name="handle_menu_swap_horizontal">Поменять местами приложения слева и справа</string>
+    <string name="handle_menu_swap_vertical">Поменять местами приложения сверху и снизу</string>
+    <string name="handle_menu_close_app">Закрыть это приложение</string>
+    <string name="handle_menu_close_named_app">Закрыть приложение «%1$s»</string>
+    <string name="split_picker_add_below">Добавить разделение снизу</string>
+    <string name="split_picker_add_to_side">Добавить разделение сбоку</string>
+    <string name="split_picker_title">Выберите приложение</string>
+    <string name="split_picker_search">Поиск приложений</string>
+    <string name="split_picker_recent">Недавние</string>
+    <string name="split_picker_all_apps">Все приложения</string>
+    <string name="split_picker_close">Закрыть</string>
+    <string name="split_picker_already_open">Уже открыто в этой части экрана</string>
+    <string name="split_picker_unavailable">Недоступно для этой части экрана</string>
+    <string name="split_picker_disabled_app">%1$s, %2$s</string>
+    <string name="split_picker_empty">Нет подходящих приложений</string>
+    <string name="split_picker_loading">Загрузка приложений…</string>
+    <string name="split_picker_launching">Открытие приложения в режиме разделения экрана</string>
+    <string name="handle_menu_replace_app">Заменить другим приложением</string>
 </resources>

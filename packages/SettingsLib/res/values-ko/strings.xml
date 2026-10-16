@@ -416,6 +416,7 @@
     <string name="show_hw_layers_updates" msgid="5268370750002509767">"하드웨어 레이어 업데이트 표시"</string>
     <string name="show_hw_layers_updates_summary" msgid="5850955890493054618">"하드웨어 레이어 업데이트 시 녹색으로 깜박이기"</string>
     <string name="debug_hw_overdraw" msgid="8944851091008756796">"GPU 오버드로 디버그"</string>
+    <string name="debug_hw_renderer">GPU 렌더러 설정</string>
     <string name="disable_overlays" msgid="4206590799671557143">"HW 오버레이 사용 안함"</string>
     <string name="disable_overlays_summary" msgid="1954852414363338166">"화면 합성 목적으로 항상 GPU 사용"</string>
     <string name="simulate_color_space" msgid="1206503300335835151">"색상 공간 시뮬레이션"</string>

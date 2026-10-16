@@ -470,6 +470,7 @@
     <string name="quick_settings_rotation_unlocked_label" msgid="2359922767950346112">"Автоповорот"</string>
     <string name="accessibility_quick_settings_rotation" msgid="4800050198392260738">"Автоповорот экрана"</string>
     <string name="quick_settings_location_label" msgid="2621868789013389163">"Геолокация"</string>
+    <string name="quick_settings_screensaver_label">Заставка</string>
     <string name="quick_settings_camera_label" msgid="5612076679385269339">"Доступ к камере"</string>
     <string name="quick_settings_mic_label" msgid="8392773746295266375">"Доступ к микрофону"</string>
     <string name="quick_settings_camera_mic_available" msgid="1453719768420394314">"Разрешен"</string>
@@ -1893,4 +1894,24 @@
     <string name="ace_attribution_settings_button_accessibility_description" msgid="8426163772933746374">"Кнопка \"Настройки\""</string>
     <string name="ace_attribution_thumbs_up_button_accessibility_description" msgid="3561722934830934360">"Кнопка \"Нравится\""</string>
     <string name="ace_attribution_thumbs_down_button_accessibility_description" msgid="5471283747650437662">"Кнопка \"Не нравится\""</string>
+    <string name="now_playing_track_and_artist_description">Сейчас играет: %1$s — %2$s</string>
+    <string name="camera">Камера</string>
+    <string name="calculator">Калькулятор</string>
+    <string name="gallery">Галерея</string>
+    <string name="no_default_app_found">Приложение по умолчанию (%1$s) не найдено</string>
+    <string name="weather_data_unavailable">Данные недоступны</string>
+    <string name="omnijaws_weather">OmniJaws</string>
+    <string name="quick_settings_data_label">Мобильный интернет</string>
+    <string name="quick_settings_ringer_label">Режим звонка</string>
+    <string name="torch_active">Фонарик включён</string>
+    <string name="google_wallet">Google Кошелёк</string>
+    <!-- Values for strings that the Material library defines without this language. -->
+    <string name="mtrl_button_collapsed_content_description">Свёрнуто</string>
+    <string name="mtrl_button_expanded_content_description">Развёрнуто</string>
+    <string name="mtrl_button_overflow_icon_content_description">Дополнительное меню</string>
+    <string name="nav_rail_collapsed_a11y_label">Свёрнуто</string>
+    <string name="nav_rail_expanded_a11y_label">Развёрнуто</string>
+    <string name="quick_settings_desktop_mode_label">Многооконный режим</string>
+    <string name="notification_open_split_screen">Открыть в режиме разделения экрана</string>
+    <string name="notification_open_floating">Открыть в плавающем окне</string>
 </resources>
