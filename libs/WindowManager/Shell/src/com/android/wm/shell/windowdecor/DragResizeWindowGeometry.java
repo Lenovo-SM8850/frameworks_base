@@ -77,8 +77,11 @@ public final class DragResizeWindowGeometry {
 
         mDisabledEdge = disabledEdge;
 
-        mLargeTaskCorners = new TaskCorners(mTaskSize, largeCornerSize);
-        mFineTaskCorners = new TaskCorners(mTaskSize, fineCornerSize);
+        final int cornerLimit = Math.min(taskSize.getWidth(), taskSize.getHeight()) / 4;
+        mLargeTaskCorners = new TaskCorners(mTaskSize, allowTouchEdgeResize
+                ? Math.min(largeCornerSize, cornerLimit) : largeCornerSize);
+        mFineTaskCorners = new TaskCorners(mTaskSize, allowTouchEdgeResize
+                ? Math.min(fineCornerSize, cornerLimit) : fineCornerSize);
 
         // Save touch areas for each edge.
         mTaskEdges = new TaskEdges(
@@ -204,6 +207,11 @@ public final class DragResizeWindowGeometry {
             ctrlType = calculateEdgeResizeCtrlType(x, y);
         }
         return ctrlType;
+    }
+
+    /** Floating edge input moves the task; only corners resize it. */
+    boolean isEdgeMove(int ctrlType) {
+        return mAllowTouchEdgeResize && Integer.bitCount(ctrlType) == 1;
     }
 
     @DragPositioningCallback.CtrlType
