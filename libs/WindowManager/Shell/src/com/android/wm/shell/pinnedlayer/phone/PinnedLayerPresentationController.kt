@@ -85,8 +85,7 @@ class PinnedLayerPresentationController(
 
     fun getManualRotationBounds(task: TaskInfo): Rect? {
         val logical = task.configuration.windowConfiguration.bounds
-        if (!task.isFloatingWindow || FloatingWindowGeometry.fixedLandscape(
-            task.topActivityRequestedOrientation, logical) != null) return null
+        if (!task.isFloatingWindow) return null
         val details = getDisplayDetails(task.displayId) ?: return null
         val landscape = logical.width() <= logical.height()
         return FloatingWindowGeometry.scaledAspectBounds(task.floatingWindowRestoreBounds,
@@ -108,8 +107,8 @@ class PinnedLayerPresentationController(
         if (start.isEmpty) return null
         val choice = choices[task.taskId] ?: restoreChoice(task, DisplayDetails(oldLayout, details.context))
         rememberBounds(task, start, DisplayDetails(oldLayout, details.context))
-        val landscape = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation, start)
-            ?: choice?.takeIf { it.manual }?.landscape
+        val landscape = choice?.takeIf { it.manual }?.landscape
+            ?: FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation, start)
             ?: (newLayout.width() > newLayout.height())
         val x = stable.left + (start.exactCenterX() - oldStable.left) / oldStable.width() * stable.width()
         val y = stable.top + (start.exactCenterY() - oldStable.top) / oldStable.height() * stable.height()
@@ -159,7 +158,7 @@ class PinnedLayerPresentationController(
             choices[task.taskId] = Choice(remembered.manual, remembered.landscape)
             val fixed = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
                 remembered.bounds)
-            val bounds = if (fixed != null && fixed != remembered.landscape) {
+            val bounds = if (!remembered.manual && fixed != null && fixed != remembered.landscape) {
                 FloatingWindowGeometry.aspectBounds(remembered.bounds, stable,
                     displayAspect(details.layout.width(), details.layout.height(), fixed),
                     (minWidth(task, details) * entryScale(task)).toInt(),
@@ -170,8 +169,8 @@ class PinnedLayerPresentationController(
         if (task.isFloatingWindow) {
             val current = task.floatingWindowRestoreBounds
             val choice = choices[task.taskId]
-            val landscape = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
-                current) ?: choice?.takeIf { it.manual }?.landscape
+            val landscape = choice?.takeIf { it.manual }?.landscape
+                ?: FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation, current)
                 ?: (details.layout.width() > details.layout.height())
             choices[task.taskId] = Choice(choice?.manual == true, landscape)
             val bounds = if ((current.width() > current.height()) != landscape) {
