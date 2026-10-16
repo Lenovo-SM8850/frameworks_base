@@ -11,7 +11,7 @@ class FloatingMiniState {
     data class Restore(val bounds: Rect, val logical: Rect, val scale: Float)
     data class Entry(val restore: Restore, val bounds: Rect, var scale: Float,
         var edge: Edge = Edge.NONE)
-    enum class Edge { NONE, LEFT, TOP, RIGHT, BOTTOM }
+    enum class Edge { NONE, LEFT, RIGHT }
     enum class Corner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
     private val entries = mutableMapOf<Key, Entry>()
 
@@ -68,16 +68,12 @@ class FloatingMiniState {
         fun stashEdge(bounds: Rect, stable: Rect): Edge = when {
             stable.left - bounds.left > bounds.width() * .6f -> Edge.LEFT
             bounds.right - stable.right > bounds.width() * .6f -> Edge.RIGHT
-            stable.top - bounds.top > bounds.height() * .6f -> Edge.TOP
-            bounds.bottom - stable.bottom > bounds.height() * .6f -> Edge.BOTTOM
             else -> Edge.NONE
         }
 
         fun canUnstash(bounds: Rect, stable: Rect, edge: Edge): Boolean = when (edge) {
             Edge.LEFT -> bounds.right - stable.left > bounds.width() * .5f
             Edge.RIGHT -> stable.right - bounds.left > bounds.width() * .5f
-            Edge.TOP -> bounds.bottom - stable.top > bounds.height() * .5f
-            Edge.BOTTOM -> stable.bottom - bounds.top > bounds.height() * .5f
             Edge.NONE -> true
         }
 
@@ -85,8 +81,6 @@ class FloatingMiniState {
             when (edge) {
                 Edge.LEFT -> offsetTo(stable.left - width() + min(strip, width()), top)
                 Edge.RIGHT -> offsetTo(stable.right - min(strip, width()), top)
-                Edge.TOP -> offsetTo(left, stable.top - height() + min(strip, height()))
-                Edge.BOTTOM -> offsetTo(left, stable.bottom - min(strip, height()))
                 Edge.NONE -> Unit
             }
         }

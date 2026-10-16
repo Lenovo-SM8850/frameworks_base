@@ -64,7 +64,7 @@ class FloatingMiniStateTest {
         assertThat(state.canRemember(10, 1)).isTrue()
     }
 
-    @Test fun stashThreshold_hasHysteresisAndKeepsVisibleStripOnEveryEdge() {
+    @Test fun stashThreshold_hasHysteresisAndKeepsVisibleStripOnHorizontalEdges() {
         assertThat(FloatingMiniState.stashEdge(Rect(-216, 300, 144, 840), stable))
             .isEqualTo(FloatingMiniState.Edge.NONE)
         assertThat(FloatingMiniState.stashEdge(Rect(-217, 300, 143, 840), stable))
@@ -123,6 +123,13 @@ class FloatingMiniStateTest {
             .isEqualTo(FloatingMiniState.Corner.TOP_RIGHT)
         assertThat(FloatingMiniState.clamp(Rect(2300, 300, 2959, 1355), area))
             .isEqualTo(Rect(1901, 300, 2560, 1355))
+    }
+
+    @Test fun topAndBottomPushOut_neverStashAndRefitFullyInside() {
+        for (bounds in listOf(Rect(300, -400, 660, 140), Rect(300, 1800, 660, 2340))) {
+            assertThat(FloatingMiniState.stashEdge(bounds, stable)).isEqualTo(FloatingMiniState.Edge.NONE)
+            assertThat(stable.contains(FloatingMiniState.clamp(bounds, stable, 8))).isTrue()
+        }
     }
 
 }
