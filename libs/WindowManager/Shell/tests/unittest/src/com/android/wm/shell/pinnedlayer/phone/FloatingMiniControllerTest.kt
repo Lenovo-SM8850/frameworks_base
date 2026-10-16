@@ -187,4 +187,25 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(entry.bounds).isEqualTo(Rect(832, 108, 1192, 648))
     }
 
+    @Test fun previewAndRelease_shareExactCornerTargets() {
+        val corners = listOf(Rect(-20, 70, 340, 610), Rect(880, 70, 1240, 610),
+            Rect(-20, 1400, 340, 1940), Rect(880, 1400, 1240, 1940))
+        val outside = listOf(Rect(49, 149, 409, 689), Rect(791, 149, 1151, 689),
+            Rect(49, 1311, 409, 1851), Rect(791, 1311, 1151, 1851))
+        val boundary = listOf(Rect(48, 148, 408, 688), Rect(792, 148, 1152, 688),
+            Rect(48, 1312, 408, 1852), Rect(792, 1312, 1152, 1852))
+        corners.forEachIndexed { index, end ->
+            val h = Harness()
+            val start = Rect(300, 500, 660, 1040)
+            assertThat(h.controller.getDragTarget(h.task, start, boundary[index])).isNotNull()
+            assertThat(h.controller.getDragTarget(h.task, start, start)).isNull()
+            assertThat(h.controller.getDragTarget(h.task, start, outside[index])).isNull()
+            val target = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+            assertThat(h.controller.onDragEnded(h.task, start, end)).isTrue()
+            val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+            assertThat(entry.bounds).isEqualTo(target.bounds)
+            assertThat(entry.scale).isEqualTo(target.scale)
+        }
+    }
+
 }

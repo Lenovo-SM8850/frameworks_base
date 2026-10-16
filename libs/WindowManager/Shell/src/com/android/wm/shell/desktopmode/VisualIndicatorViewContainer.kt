@@ -25,6 +25,10 @@ import android.app.ActivityManager
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.Canvas
+import android.graphics.ColorFilter
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.view.Display
 import android.view.SurfaceControl
@@ -68,6 +72,7 @@ constructor(
         object : SurfaceControlViewHostFactory {},
     private val bubbleBoundsProvider: BubbleDropTargetBoundsProvider?,
     private val snapEventHandler: SnapEventHandler,
+    private val inputFlags: Int = 0,
 ) {
     @VisibleForTesting var indicatorView: View? = null
     // Optional extra indicator showing the outline of the bubble bar
@@ -78,6 +83,9 @@ constructor(
     // from the desktop thread.
     private var indicatorLeash: SurfaceControl? = null
     private var isReleased = false
+    private var miniPreview = false
+    private val miniBounds = Rect()
+    private var miniOutline: LayerDrawable? = null
 
     /** Create a fullscreen indicator with no animation */
     @ShellMainThread
@@ -90,6 +98,7 @@ constructor(
     ) {
         if (isReleased) return
         desktopExecutor.execute {
+            if (isReleased) return@execute
             val resources = context.resources
             val metrics = resources.displayMetrics
             val screenWidth: Int
@@ -118,7 +127,7 @@ constructor(
                     screenWidth,
                     screenHeight,
                     WindowManager.LayoutParams.TYPE_APPLICATION,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or inputFlags,
                     PixelFormat.TRANSPARENT,
                 )
             lp.title = "Desktop Mode Visual Indicator"
@@ -151,13 +160,18 @@ constructor(
 
     private fun showIndicator(taskSurface: SurfaceControl, leash: SurfaceControl) {
         mainExecutor.execute {
+            if (isReleased) {
+                SurfaceControl.Transaction().use { it.remove(leash).apply() }
+                leash.release()
+                return@execute
+            }
             indicatorLeash = leash
             val t = SurfaceControl.Transaction()
             t.show(indicatorLeash)
             // We want this indicator to be behind the dragged task, but in front of all others.
             // TODO(411292927): If the indicator is on a different display, this relative layer
             // might not work as expected, but we'll address that in the functional CL.
-            t.setRelativeLayer(indicatorLeash, taskSurface, -1)
+            t.setRelativeLayer(indicatorLeash, taskSurface, if (miniPreview) 1 else -1)
             syncQueue.runInSync { transaction: SurfaceControl.Transaction ->
                 transaction.merge(t)
                 t.close()
@@ -338,11 +352,50 @@ constructor(
         }
     }
 
+    /** Shows an exact mini destination using the existing indicator's stroke without its fill. */
+    fun updateMiniPreview(bounds: Rect?, radius: Float) {
+        if (isReleased) return
+        miniPreview = true
+        val target = bounds?.let(::Rect)
+        desktopExecutor.execute {
+            if (isReleased) return@execute
+            val view = indicatorView ?: return@execute
+            view.animate().cancel()
+            if (target != null) {
+                miniBounds.set(target)
+                val outline = miniOutline ?: (view.context.getDrawable(
+                    R.drawable.desktop_windowing_transition_background)?.mutate() as LayerDrawable)
+                    .also {
+                        it.findDrawableByLayerId(R.id.indicator_solid).alpha = 0
+                        miniOutline = it
+                        view.alpha = 0f
+                        view.background = object : Drawable() {
+                            override fun draw(canvas: Canvas) {
+                                it.bounds = miniBounds
+                                it.draw(canvas)
+                            }
+                            override fun setAlpha(alpha: Int) {
+                                it.alpha = alpha
+                                it.findDrawableByLayerId(R.id.indicator_solid).alpha = 0
+                            }
+                            override fun setColorFilter(filter: ColorFilter?) { it.colorFilter = filter }
+                            override fun getOpacity() = PixelFormat.TRANSLUCENT
+                        }
+                    }
+                (outline.findDrawableByLayerId(R.id.indicator_stroke) as GradientDrawable)
+                    .cornerRadius = radius
+                view.invalidate()
+            }
+            view.animate().alpha(if (target != null) 1f else 0f).setDuration(120).start()
+        }
+    }
+
     /** Release the indicator and its components when it is no longer needed. */
     @ShellMainThread
     fun releaseVisualIndicator() {
         if (isReleased) return
         desktopExecutor.execute {
+            indicatorView?.animate()?.cancel()
             indicatorViewHost?.release()
             indicatorViewHost = null
         }

@@ -127,6 +127,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var lastFloatingX = Float.NaN
     private var lastFloatingY = Float.NaN
     private var floatingMovePending = false
+    private val miniPreview = FloatingMiniPreview(desktopTasksController::createFloatingMiniPreview)
+    private var miniPreviewCancelled = false
     private val floatingFrameCallback = Choreographer.FrameCallback {
         if (floatingMovePending) flushFloatingMove() else flushFloatingResizePreview()
     }
@@ -176,6 +178,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
         y: Float,
         inputMethodType: Int,
     ): Rect {
+        miniPreview.close()
+        miniPreviewCancelled = false
+        windowDecoration.floatingMiniPreviewCancellation = ::onDragPositioningCancel
         this.ctrlType = ctrlType
         startDisplayId = displayId
         hasMovedTaskSurfaceOffScreen = false
@@ -192,16 +197,18 @@ class MultiDisplayVeiledResizeTaskPositioner(
         lastFloatingY = Float.NaN
         floatingAppliedScale = Float.NaN
         taskBoundsAtDragStart.set(task.presentationBounds)
-        if (task.isFloatingWindow && isResizing) {
-            val (minWidth, minHeight) = floatingMinimums()
-            floatingMinWidth = minWidth
-            floatingMinHeight = minHeight
+        if (task.isFloatingWindow) {
             if (!floatingObserverRegistered) {
                 transitions.registerObserver(this)
                 floatingObserverRegistered = true
             }
             windowDecoration.floatingWindowTransitionListener = ::cancelFloatingDragForTransition
-            taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
+            if (isResizing) {
+                val (minWidth, minHeight) = floatingMinimums()
+                floatingMinWidth = minWidth
+                floatingMinHeight = minHeight
+                taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
+            }
         }
         logD(
             TAG,
@@ -473,6 +480,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun onDragPositioningEnd(displayId: Int, x: Float, y: Float): Rect {
+        windowDecoration.floatingMiniPreviewCancellation = null
+        miniPreview.close()
         logD(
             TAG,
             windowDecoration.taskInfo.taskId,
@@ -623,6 +632,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun close() {
+        windowDecoration.floatingMiniPreviewCancellation = null
+        miniPreview.close()
         closing = true
         pendingFloatingTransition = null
         pendingFloatingChange = null
@@ -702,6 +713,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private fun flushFloatingMove() {
         if (!floatingMovePending) return
         floatingMovePending = false
+        if (!miniPreviewCancelled) {
+            miniPreview.update(windowDecoration.taskInfo, windowDecoration.taskSurface,
+                windowDecoration.pinnedLayerController?.getMiniDragTarget(windowDecoration.taskInfo,
+                    taskBoundsAtDragStart, repositionTaskBounds))
+        }
         val t = floatingPreviewTransaction ?: transactionSupplier().also { floatingPreviewTransaction = it }
         t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
             repositionTaskBounds.top.toFloat())
@@ -736,6 +752,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun cancelFloatingDragForTransition() {
+        miniPreview.close()
+        miniPreviewCancelled = true
         cancelFloatingFrame()
         floatingPreviewActive = false
         windowDecoration.finishFloatingWindowPreview()
@@ -754,6 +772,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 .setDragResizing(windowDecoration.taskInfo.token, false))
             stopFloatingObserver()
             interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_RESIZE_WINDOW)
+            interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
         }
     }
 
@@ -932,7 +951,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
                         startTransaction, finishTransaction)
                 }
             } else if (floatingChange != null &&
-                (floatingPreviewActive || floatingFramePending)) {
+                (floatingDragActive || floatingPreviewActive || floatingFramePending)) {
                 cancelFloatingDragForTransition()
                 restoreFloatingDecorations(floatingChange.taskInfo!!,
                     startTransaction, finishTransaction)
@@ -1004,6 +1023,17 @@ class MultiDisplayVeiledResizeTaskPositioner(
         dragEventListener: DragPositioningCallbackUtility.DragEventListener
     ) {
         dragEventListeners.remove(dragEventListener)
+    }
+
+    override fun onDisplayConfigurationChanged(displayId: Int,
+        configuration: android.content.res.Configuration) {
+        if (displayId != startDisplayId) return
+        onDragPositioningCancel()
+    }
+
+    override fun onDisplayRemoved(displayId: Int) {
+        if (displayId != startDisplayId) return
+        onDragPositioningCancel()
     }
 
     override fun onTopologyChanged(topology: DisplayTopology?) {

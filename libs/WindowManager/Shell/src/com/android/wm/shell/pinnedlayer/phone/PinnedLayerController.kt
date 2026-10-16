@@ -112,6 +112,9 @@ class PinnedLayerController(
     }
 
 
+    fun getMiniDragTarget(task: TaskInfo, start: Rect, end: Rect) =
+        miniInteractions?.getDragTarget(task, start, end)
+
     fun rememberManualOrientation(task: TaskInfo, landscape: Boolean, bounds: Rect) {
         if (task.isFloatingWindow) presentationController.setManualOrientation(task, landscape, bounds)
     }

@@ -4009,6 +4009,20 @@ class DesktopTasksController(
         }
     }
 
+    fun createFloatingMiniPreview(task: RunningTaskInfo,
+        taskSurface: SurfaceControl): VisualIndicatorViewContainer? {
+        val display = displayController.getDisplay(task.displayId) ?: return null
+        val layout = displayController.getDisplayLayout(task.displayId) ?: return null
+        val displayContext = displayController.getDisplayContext(task.displayId) ?: return null
+        val builder = SurfaceControl.Builder()
+        rootTaskDisplayAreaOrganizer.attachToDisplayArea(task.displayId, builder)
+        return VisualIndicatorViewContainer(desktopExecutor, mainExecutor, builder, syncQueue,
+            bubbleBoundsProvider = null, snapEventHandler = snapController,
+            inputFlags = android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE).also {
+            it.createView(displayContext, display, layout, task, taskSurface)
+        }
+    }
+
     fun releaseVisualIndicator() {
         visualIndicator?.releaseVisualIndicator()
         visualIndicator = null

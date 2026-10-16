@@ -116,6 +116,22 @@ class FloatingMiniController(
             min(layout.width(), layout.height()), (8 * density(task)).toInt()))
     }
 
+    data class DragTarget(val bounds: Rect, val scale: Float, val radius: Float)
+
+    fun getDragTarget(task: TaskInfo, start: Rect, end: Rect): DragTarget? {
+        if (!task.isFloatingWindow || state.get(task.userId, task.taskId) != null || start == end) return null
+        val stable = stable(task)
+        if (stable.isEmpty) return null
+        val corner = FloatingMiniState.corner(end, stable, (48 * density(task)).toInt()) ?: return null
+        val scale = minimum(task, stable)
+        val bounds = FloatingMiniState.snap(FloatingMiniState.sized(
+            task.configuration.windowConfiguration.bounds, scale, end.left, end.top),
+            stable, corner, (8 * density(task)).toInt())
+        val radius = displays.getDisplayContext(task.displayId)?.resources?.getDimension(
+            com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius) ?: 0f
+        return DragTarget(bounds, scale, radius)
+    }
+
     fun onDragEnded(task: TaskInfo, start: Rect, end: Rect): Boolean {
         clearDrag(task)
         val stable = stable(task)
@@ -124,16 +140,12 @@ class FloatingMiniController(
         val margin = (8 * density(task)).toInt()
         val corner = FloatingMiniState.corner(end, stable, (48 * density(task)).toInt())
         if (entry == null) {
-            if (corner == null || start == end) return false
-            val scale = minimum(task, stable)
-            val bounds = FloatingMiniState.snap(FloatingMiniState.sized(
-                task.configuration.windowConfiguration.bounds, scale, end.left, end.top),
-                stable, corner, margin)
+            val target = getDragTarget(task, start, end) ?: return false
             val restore = FloatingWindowGeometry.movedBaseBounds(
                 task.floatingWindowRestoreBounds, start, end) ?: task.floatingWindowRestoreBounds
             enter(task, FloatingMiniState.clamp(restore, stable),
                 task.configuration.windowConfiguration.bounds, task.floatingWindowScale,
-                end, task.floatingWindowScale, bounds, scale)
+                end, task.floatingWindowScale, target.bounds, target.scale)
         } else {
             val crossed = FloatingMiniState.stashEdge(end, stable)
             val edge = if (crossed != FloatingMiniState.Edge.NONE) crossed else
