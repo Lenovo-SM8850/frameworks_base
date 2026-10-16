@@ -34,7 +34,10 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
 
     fun update(task: RunningTaskInfo, taskSurface: SurfaceControl,
         transaction: SurfaceControl.Transaction? = null) {
-        if (!task.isFloatingWindow) { close(); return }
+        if (!task.isFloatingWindow || listener.pinnedLayerController?.isMini(task) == true) {
+            close()
+            return
+        }
         val context = contextProvider() ?: return
         val display = context.display ?: return
         val bounds = task.presentationBounds

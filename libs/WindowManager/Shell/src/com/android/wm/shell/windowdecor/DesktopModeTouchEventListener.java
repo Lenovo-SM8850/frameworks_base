@@ -166,6 +166,11 @@ public class DesktopModeTouchEventListener
         mGestureDetector = new GestureDetector(mContext, this);
     }
 
+    @Nullable
+    public PinnedLayerController getPinnedLayerController() {
+        return mPinnedLayerController;
+    }
+
     @NonNull
     private String getResourceName(@Nullable View view) {
         if (view == null) return "null";

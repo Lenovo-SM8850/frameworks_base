@@ -43,6 +43,8 @@ class PinnedLayerPresentationController(
         FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() }),
 ) {
 
+    val miniState = FloatingMiniState()
+
     private data class Choice(val manual: Boolean, val landscape: Boolean)
     private val choices = mutableMapOf<Int, Choice>()
     private val rotationBounds = mutableMapOf<Int, Rect>()
@@ -69,6 +71,7 @@ class PinnedLayerPresentationController(
     }
 
     fun removeUser(userId: Int) {
+        miniState.removeUser(userId)
         geometryStore.removeUser(userId)
     }
 
@@ -181,7 +184,42 @@ class PinnedLayerPresentationController(
         val pending = rotationBounds.remove(task.taskId)
         if (pending != null && !boundsMatch(pending, bounds)) return
         val details = getDisplayDetails(task.displayId) ?: return
+        recoverMini(task)
         rememberBounds(task, bounds, details)
+    }
+
+    /** Rebuilds mini ownership before surviving presentation geometry can be remembered. */
+    fun recoverMini(task: TaskInfo): FloatingMiniState.Entry? {
+        if (!task.isFloatingWindow || task.displayId != DEFAULT_DISPLAY ||
+            miniState.get(task.userId, task.taskId) != null) return null
+        val details = getDisplayDetails(task.displayId) ?: return null
+        val stable = details.stableBounds()
+        val logical = task.configuration.windowConfiguration.bounds
+        val visible = task.floatingWindowRestoreBounds
+        if (stable.isEmpty || logical.isEmpty || visible.isEmpty) return null
+        val margin = (8 * details.context.resources.displayMetrics.density).toInt()
+        val scale = FloatingMiniState.scale(logical, stable,
+            min(details.layout.width(), details.layout.height()), margin)
+        val mini = FloatingMiniState.sized(logical, scale, visible.left, visible.top)
+        val edge = FloatingMiniState.stashEdge(visible, stable)
+        val inside = Rect(visible)
+        val mostlyOutside = !inside.intersect(stable) ||
+            inside.width().toLong() * inside.height() * 2 < visible.width().toLong() * visible.height()
+        if (!mostlyOutside && min(visible.width(), visible.height()) >
+            min(mini.width(), mini.height()) + 2) return null
+        val normalTask = android.app.ActivityManager.RunningTaskInfo(
+            task as android.app.ActivityManager.RunningTaskInfo).apply { isFloatingWindow = false }
+        val normal = getPinEntryDestinationBounds(normalTask) ?: return null
+        val normalScale = entryScale(normalTask)
+        entryScales.remove(task.taskId)
+        val bounds = if (edge != FloatingMiniState.Edge.NONE)
+            FloatingMiniState.stash(mini, stable, edge,
+                (28 * details.context.resources.displayMetrics.density).toInt())
+            else FloatingMiniState.clamp(mini, stable, margin)
+        return miniState.enter(task.userId, task.taskId,
+            FloatingMiniState.Restore(normal,
+                FloatingWindowGeometry.logicalBounds(normal, stable, normalScale), normalScale),
+            bounds, scale).also { it.edge = edge }
     }
 
     private fun boundsMatch(expected: Rect, actual: Rect): Boolean =
@@ -193,14 +231,20 @@ class PinnedLayerPresentationController(
     private fun rememberBounds(task: TaskInfo, bounds: Rect,
         details: DisplayDetails? = getDisplayDetails(task.displayId)) {
         details ?: return
+        val mini = miniState.get(task.userId, task.taskId)
+        val state = when {
+            mini == null -> FloatingWindowGeometryStore.PresentationState.NORMAL
+            mini.edge == FloatingMiniState.Edge.NONE -> FloatingWindowGeometryStore.PresentationState.MINI
+            else -> FloatingWindowGeometryStore.PresentationState.STASHED
+        }
         val key = boundsKey(task, details) ?: return
         val previous = choices[task.taskId] ?: restoreChoice(task, details)
         val choice = Choice(previous?.manual == true, bounds.width() > bounds.height())
-        choices[task.taskId] = choice
+        if (mini == null) choices[task.taskId] = choice
         geometryStore.store(key.first, key.second, key.third, bounds, details.stableBounds(),
             details.layout.width(), details.layout.height(), details.context.resources.displayMetrics.densityDpi,
             choice.manual, choice.landscape,
-            if (task.isFloatingWindow) task.floatingWindowScale else entryScale(task))
+            if (task.isFloatingWindow) task.floatingWindowScale else entryScale(task), state)
     }
 
     private fun boundsKey(task: TaskInfo, details: DisplayDetails): Triple<String, Int, Int>? {

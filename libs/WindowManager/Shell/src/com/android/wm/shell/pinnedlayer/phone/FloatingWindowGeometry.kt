@@ -37,20 +37,36 @@ object FloatingWindowGeometry {
     }
 
     data class ScaledResize(val visible: Rect, val logical: Rect, var scale: Float,
-        var commitsBounds: Boolean)
+        var commitsBounds: Boolean, var atMinimum: Boolean = false)
 
     fun scaledCorner(start: Rect, logical: Rect, stable: Rect, ctrl: Int,
         dx: Float, dy: Float, minWidth: Int, minHeight: Int,
-        out: ScaledResize = ScaledResize(Rect(), Rect(), 1f, false)): ScaledResize {
+        out: ScaledResize = ScaledResize(Rect(), Rect(), 1f, false),
+        minimumScale: Float = MIN_SCALE, minimumVisibleShortSide: Int = 0): ScaledResize {
         val visible = corner(start, stable, ctrl, dx, dy,
-            (minWidth * MIN_SCALE).roundToInt(), (minHeight * MIN_SCALE).roundToInt(), out.visible)
+            (minWidth * minimumScale).roundToInt(), (minHeight * minimumScale).roundToInt(), out.visible)
         val requested = visible.width().toFloat() / logical.width()
-        val scale = requested.coerceIn(MIN_SCALE, 1f)
-        val commit = requested < MIN_SCALE - .001f || requested > 1.001f
+        val scale = requested.coerceIn(minimumScale, 1f)
+        val commit = requested < minimumScale - .001f || requested > 1.001f
         val bounds = if (commit) logicalBounds(visible, stable, scale, out.logical)
             else out.logical.apply { set(logical) }
-        val actualScale = if (commit) max(visible.width().toFloat() / bounds.width(),
-            visible.height().toFloat() / bounds.height()).coerceIn(MIN_SCALE, 1f) else scale
+        if (commit && requested < minimumScale && minimumVisibleShortSide > 0) {
+            val shortest = min(bounds.width(), bounds.height())
+            if (shortest < minimumVisibleShortSide) {
+                val factor = minimumVisibleShortSide.toFloat() / shortest.coerceAtLeast(1)
+                val grown = Rect(bounds.left, bounds.top,
+                    bounds.left + (bounds.width() * factor).roundToInt(),
+                    bounds.top + (bounds.height() * factor).roundToInt())
+                logicalBounds(grown, stable, 1f, bounds)
+            }
+        }
+        var actualScale = if (commit) max(visible.width().toFloat() / bounds.width(),
+            visible.height().toFloat() / bounds.height()).coerceIn(minimumScale, 1f) else scale
+        if (commit && requested < minimumScale && minimumVisibleShortSide > 0) {
+            actualScale = max(actualScale, minimumVisibleShortSide.toFloat() /
+                min(bounds.width(), bounds.height())).coerceAtMost(1f)
+        }
+        out.atMinimum = requested <= minimumScale + .001f
         // Keep the opposite corner fixed when display or app constraints clamp the result.
         val width = (bounds.width() * actualScale).roundToInt()
         val height = (bounds.height() * actualScale).roundToInt()

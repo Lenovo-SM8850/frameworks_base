@@ -19,6 +19,8 @@ class FloatingWindowGeometryStore(
     constructor(directory: File, executor: Executor) : this(
         { userId -> File(directory, "floating_window_geometry_$userId.json") }, executor)
 
+    enum class PresentationState { NORMAL, MINI, STASHED }
+
     data class Entry(val bounds: Rect, val manual: Boolean, val landscape: Boolean,
         val scale: Float = FloatingWindowGeometry.DEFAULT_SCALE)
     private val users = mutableMapOf<Int, JSONObject>()
@@ -39,10 +41,13 @@ class FloatingWindowGeometryStore(
 
     fun store(packageName: String, userId: Int, orientation: Int, bounds: Rect, stable: Rect,
         displayWidth: Int, displayHeight: Int, density: Int, manual: Boolean, landscape: Boolean,
-        scale: Float = FloatingWindowGeometry.DEFAULT_SCALE) {
-        if (bounds.isEmpty || stable.isEmpty || !scale.isFinite() ||
-            scale !in FloatingWindowGeometry.MIN_SCALE..1f) return
-        val value = JSONObject().put("left", (bounds.left - stable.left).toDouble() / stable.width())
+        scale: Float = FloatingWindowGeometry.DEFAULT_SCALE,
+        presentationState: PresentationState = PresentationState.NORMAL) {
+        if (presentationState != PresentationState.NORMAL ||
+            bounds.isEmpty || stable.isEmpty || !stable.contains(bounds) || !scale.isFinite() ||
+            scale <= 0f || scale > 1f ||
+            min(bounds.width(), bounds.height()) <= .3f * min(displayWidth, displayHeight) + 2) return
+        val value = JSONObject().put("presentation", presentationState.name).put("left", (bounds.left - stable.left).toDouble() / stable.width())
             .put("top", (bounds.top - stable.top).toDouble() / stable.height())
             .put("width", bounds.width().toDouble() / stable.width())
             .put("height", bounds.height().toDouble() / stable.height())
@@ -61,6 +66,8 @@ class FloatingWindowGeometryStore(
         if (stable.isEmpty) return null
         val key = "$packageName:$orientation"
         val value = user(userId).optJSONObject(key) ?: return null
+        if (value.optString("presentation", PresentationState.NORMAL.name) !=
+            PresentationState.NORMAL.name) return null
         if (value.optInt("short") != min(displayWidth, displayHeight) ||
             value.optInt("long") != max(displayWidth, displayHeight) ||
             value.optInt("density") != density) {
@@ -79,7 +86,8 @@ class FloatingWindowGeometryStore(
         val bounds = Rect(left, top, left + (w * stable.width()).roundToInt(),
             top + (h * stable.height()).roundToInt())
         val scale = value.optDouble("scale", FloatingWindowGeometry.DEFAULT_SCALE.toDouble()).toFloat()
-        if (!scale.isFinite() || scale !in FloatingWindowGeometry.MIN_SCALE..1f) return null
+        if (!scale.isFinite() || scale <= 0f || scale > 1f || !stable.contains(bounds) ||
+            min(bounds.width(), bounds.height()) <= .3f * min(displayWidth, displayHeight) + 2) return null
         return Entry(bounds, value.optBoolean("manual"), value.optBoolean("landscape"), scale)
     }
 

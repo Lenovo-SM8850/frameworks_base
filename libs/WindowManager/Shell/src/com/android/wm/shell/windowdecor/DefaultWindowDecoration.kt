@@ -785,7 +785,8 @@ constructor(
 
     private fun updateDragResizeListenerIfNeeded(prevContainerSurface: SurfaceControl?) {
         val taskPositionChanged = !taskInfo.positionInParent.equals(taskPositionInParent)
-        if (!taskInfo.isDragResizable(inFullImmersive)) {
+        if (!taskInfo.isDragResizable(inFullImmersive) ||
+            pinnedLayerController?.isMini(taskInfo) == true) {
             closeDragResizeListener()
             if (taskPositionChanged) {
                 // We still want to track caption bar's exclusion region on a non-resizeable task.
