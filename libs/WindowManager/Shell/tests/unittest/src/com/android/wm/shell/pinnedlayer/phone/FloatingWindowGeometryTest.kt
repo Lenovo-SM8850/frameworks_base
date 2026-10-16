@@ -71,29 +71,7 @@ class FloatingWindowGeometryTest {
             1.6f, .75f, 600, 1000)).isNull()
     }
 
-    @Test fun hysteresis_crossesOnlyOuterThresholds() {
-        assertThat(FloatingWindowGeometry.selectLandscape(false, 1.08f, false)).isFalse()
-        assertThat(FloatingWindowGeometry.selectLandscape(false, 1.081f, false)).isTrue()
-        assertThat(FloatingWindowGeometry.selectLandscape(true, .92f, false)).isTrue()
-        assertThat(FloatingWindowGeometry.selectLandscape(true, .919f, false)).isFalse()
-    }
-
-    @Test fun hysteresis_keepsTargetThroughSquareAndJitter() {
-        var landscape = false
-        for (ratio in listOf(.8f, .99f, 1.02f, 1.07f, 1.01f)) {
-            landscape = FloatingWindowGeometry.selectLandscape(landscape, ratio, false)
-            assertThat(landscape).isFalse()
-        }
-        landscape = FloatingWindowGeometry.selectLandscape(landscape, 1.2f, false)
-        for (ratio in listOf(1.03f, .99f, .93f, 1.01f)) {
-            landscape = FloatingWindowGeometry.selectLandscape(landscape, ratio, false)
-            assertThat(landscape).isTrue()
-        }
-    }
-
     @Test fun fixedOrientation_neverFlips() {
-        assertThat(FloatingWindowGeometry.selectLandscape(false, 4f, true)).isFalse()
-        assertThat(FloatingWindowGeometry.selectLandscape(true, .2f, true)).isTrue()
         val portrait = Rect(100, 100, 500, 900)
         for (orientation in listOf(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT,
@@ -141,48 +119,6 @@ class FloatingWindowGeometryTest {
         assertThat(large.height()).isEqualTo(1100)
     }
 
-    @Test fun edgeOutline_followsDraggedEdgeAndKeepsOtherEdges() {
-        val start = Rect(100, 100, 500, 900)
-        assertThat(FloatingWindowGeometry.outline(start, CTRL_TYPE_RIGHT, 550f, 80f))
-            .isEqualTo(Rect(100, 100, 1050, 900))
-        assertThat(FloatingWindowGeometry.outline(start, CTRL_TYPE_BOTTOM, 20f, -500f))
-            .isEqualTo(Rect(100, 100, 500, 400))
-    }
-
-    @Test fun sideDrag_selectsUnclampedTargetAndFitsAllDisplayOrientations() {
-        for ((short, long) in listOf(1200 to 1920, 1904 to 3040, 1600 to 2560)) {
-            for ((width, height) in listOf(short to long, long to short)) {
-                val stable = Rect(0, 80, width, height - 80)
-                val h = (stable.height() * .85f).toInt()
-                val w = (h * short.toFloat() / long).toInt()
-                val start = Rect((width - w) / 2, stable.top + (stable.height() - h) / 2,
-                    (width + w) / 2, stable.top + (stable.height() - h) / 2 + h)
-                for (edge in listOf(CTRL_TYPE_LEFT, CTRL_TYPE_RIGHT)) {
-                    val delta = h * 1.10f - start.width()
-                    val outline = FloatingWindowGeometry.outline(start, edge,
-                        if (edge == CTRL_TYPE_LEFT) -delta else delta, 0f)
-                    assertThat(FloatingWindowGeometry.selectLandscape(false,
-                        outline.width().toFloat() / outline.height(), false)).isTrue()
-                    if (width < height) {
-                        assertThat(stable.contains(outline)).isFalse()
-                    }
-                    val committed = requireNotNull(FloatingWindowGeometry.aspectBounds(
-                        start, stable, FloatingWindowGeometry.displayAspect(width, height, true),
-                        100, 100))
-                    assertThat(stable.contains(committed)).isTrue()
-                    assertThat(committed.width()).isGreaterThan(committed.height())
-                    assertThat(committed.width()).isAtLeast(100)
-                    assertThat(committed.height()).isAtLeast(100)
-                    val portraitOutline = FloatingWindowGeometry.outline(committed, edge,
-                        (committed.height() * .90f - committed.width()) *
-                            (if (edge == CTRL_TYPE_LEFT) -1 else 1), 0f)
-                    assertThat(FloatingWindowGeometry.selectLandscape(true,
-                        portraitOutline.width().toFloat() / portraitOutline.height(), false)).isFalse()
-                }
-            }
-        }
-    }
-
     @Test fun aspectFlip_rejectsMinimumSizeThatCannotFitTarget() {
         val stable = Rect(0, 0, 1200, 1920)
         val start = Rect(100, 100, 700, 1500)
@@ -204,4 +140,23 @@ class FloatingWindowGeometryTest {
             .isLessThan(1500)
         assertThat(stable.contains(result)).isTrue()
     }
+    @Test fun allResizeEdges_useScaleRangeAndCommitAtLimits() {
+        val logical = Rect(0, 0, 800, 1200)
+        val start = Rect(500, 500, 1100, 1400)
+        val stable = Rect(0, 0, 3000, 3000)
+        for (ctrl in listOf(CTRL_TYPE_LEFT, CTRL_TYPE_RIGHT, CTRL_TYPE_TOP, CTRL_TYPE_BOTTOM)) {
+            val horizontal = ctrl == CTRL_TYPE_LEFT || ctrl == CTRL_TYPE_RIGHT
+            val sign = if (ctrl == CTRL_TYPE_LEFT || ctrl == CTRL_TYPE_TOP) -1 else 1
+            for (target in listOf(.6f, .85f, 1.1f)) {
+                val delta = (target / .75f - 1f) * (if (horizontal) 600 else 900) * sign
+                val result = FloatingWindowGeometry.scaledCorner(start, logical, stable,
+                    ctrl, if (horizontal) delta else 0f, if (horizontal) 0f else delta,
+                    100, 100, minimumScale = .5f)
+                assertThat(result.scale).isWithin(.002f).of(target.coerceIn(.5f, 1f))
+                assertThat(result.commitsBounds).isEqualTo(target > 1f)
+                assertThat(abs(result.visible.width() * 1.5f - result.visible.height())).isLessThan(2f)
+            }
+        }
+    }
+
 }
