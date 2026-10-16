@@ -28,6 +28,7 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
     displays: DisplayController,
     private val refresh: Runnable,
     playback: MediaPlayback? = null,
+    private val supportsOverride: () -> Boolean = SurfaceFrameRate::isOverrideSupported,
     private val transactions: () -> SurfaceControl.Transaction = { SurfaceControl.Transaction() },
 ) : Transitions.TransitionObserver {
     interface MediaPlayback {
@@ -54,15 +55,19 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
         context.getSystemService(MediaSessionManager::class.java), executor, handler)
 
     init {
+        SurfaceFrameRate.addInteractionListener { update() }
         transitions.registerObserver(this)
         organizer.addTaskVanishedListener(object : ShellTaskOrganizer.TaskVanishedListener {
             override fun onTaskVanished(info: RunningTaskInfo) {
                 if (stages.none { it.root.taskId == info.taskId ||
                     it.tasks.any { task -> task.taskId == info.taskId } }) return
+                settled = false
+                resetMotion()
                 clear()
                 stages = stages.filter { it.root.taskId != info.taskId }.map {
                     it.copy(tasks = it.tasks.filter { task -> task.taskId != info.taskId })
                 }
+                update()
                 handler.post(refresh)
             }
         })
@@ -73,7 +78,10 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
                 if (stage.root.displayId != info.displayId ||
                     (stage.root.taskId != info.taskId && info.parentTaskId != stage.root.taskId)) {
                     settled = false
+                    resetMotion()
                     clear()
+                    stages = emptyList()
+                    update()
                 }
                 // Read stage membership after its task listener handles this update.
                 handler.post(refresh)
@@ -83,15 +91,20 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
             override fun onDisplayConfigurationChanged(displayId: Int, configuration: Configuration) {
                 if (stages.any { it.root.displayId == displayId }) {
                     settled = false
+                    resetMotion()
                     clear()
+                    update()
                     handler.post(refresh)
                 }
             }
             override fun onDisplayRemoved(displayId: Int) {
                 removedDisplays += displayId
                 if (stages.any { it.root.displayId == displayId }) {
+                    settled = false
+                    resetMotion()
                     clear()
                     stages = stages.filter { it.root.displayId != displayId }
+                    update()
                 }
             }
             override fun onDisplayAdded(displayId: Int) { removedDisplays -= displayId }
@@ -109,6 +122,7 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
             }) }
         val changed = owned.filter { keys[it] != nextKeys[it] }.toSet()
         stages = next
+        if (next.isEmpty()) resetMotion()
         keys = nextKeys
         snapPosition = position
         settled = atRest
@@ -116,33 +130,43 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
     }
 
     fun setDividerMoving(moving: Boolean) {
-        dividerMoving = moving
+        dividerMoving = moving && stages.isNotEmpty()
         update()
         if (!moving) handler.post(refresh)
     }
 
     fun setResizing(active: Boolean) {
-        resizing = active
+        resizing = active && stages.isNotEmpty()
         update()
         if (!active) handler.post(refresh)
     }
 
     fun setAnimating(active: Boolean) {
-        animating = active
+        animating = active && stages.isNotEmpty()
         update()
         if (!active) handler.post(refresh)
     }
 
     fun clear() = updateVotes(emptySet())
 
+    private fun resetMotion() {
+        dividerMoving = false
+        resizing = false
+        animating = false
+        SurfaceFrameRate.setInteracting(this, false)
+    }
+
     private fun update(forceClear: Set<SurfaceControl> = emptySet()) {
+        SurfaceFrameRate.setInteracting(this,
+            stages.isNotEmpty() &&
+                (dividerMoving || animating || resizing || inFlight.isNotEmpty()))
         val index = when (snapPosition) {
             SNAP_TO_2_10_90 -> 0
             SNAP_TO_2_90_10 -> 1
             else -> -1
         }
         val desired = if (settled && !dividerMoving && !animating && !resizing && inFlight.isEmpty() &&
-            media.available) stages.filter { it.index == index && it.tasks.isNotEmpty() &&
+            media.available && supportsOverride() && !SurfaceFrameRate.isInteracting) stages.filter { it.index == index && it.tasks.isNotEmpty() &&
                 it.leash.isValid && it.tasks.none(media::isPlaying) }.map { it.leash }.toSet()
             else emptySet()
         updateVotes(desired, forceClear)
@@ -168,7 +192,8 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
     override fun onTransitionReady(transition: IBinder, info: TransitionInfo,
         startTransaction: SurfaceControl.Transaction, finishTransaction: SurfaceControl.Transaction) {
         inFlight += transition
-        clear()
+        settled = false
+        update()
     }
 
     override fun onTransitionMerged(merged: IBinder, playing: IBinder) {
@@ -177,6 +202,7 @@ class SplitScreenFrameRateController @JvmOverloads constructor(
 
     override fun onTransitionFinished(transition: IBinder, aborted: Boolean) {
         inFlight -= transition
+        update()
         handler.post(refresh)
     }
 

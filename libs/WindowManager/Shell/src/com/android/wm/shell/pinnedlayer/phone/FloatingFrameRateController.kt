@@ -16,6 +16,8 @@ class FloatingFrameRateController(
     private val organizer: ShellTaskOrganizer,
     private val executor: ShellExecutor,
     private val miniState: FloatingMiniState,
+    transitions: com.android.wm.shell.transition.Transitions? = null,
+    private val supportsOverride: () -> Boolean = SurfaceFrameRate::isOverrideSupported,
     private val transactions: () -> SurfaceControl.Transaction = { SurfaceControl.Transaction() },
 ) {
     private data class Task(val info: RunningTaskInfo, val leash: SurfaceControl)
@@ -26,6 +28,23 @@ class FloatingFrameRateController(
     private var thermalStatus = PowerManager.THERMAL_STATUS_NONE
 
     init {
+        SurfaceFrameRate.addInteractionListener { update() }
+        transitions?.registerObserver(object : com.android.wm.shell.transition.Transitions.TransitionObserver {
+            private val active = mutableSetOf<android.os.IBinder>()
+            override fun onTransitionReady(transition: android.os.IBinder,
+                info: android.window.TransitionInfo, startT: SurfaceControl.Transaction,
+                finishT: SurfaceControl.Transaction) {
+                active += transition
+                SurfaceFrameRate.setInteracting(this, true)
+            }
+            override fun onTransitionMerged(merged: android.os.IBinder, playing: android.os.IBinder) {
+                if (active.remove(merged)) active += playing
+            }
+            override fun onTransitionFinished(transition: android.os.IBinder, aborted: Boolean) {
+                active -= transition
+                SurfaceFrameRate.setInteracting(this, active.isNotEmpty())
+            }
+        })
         context.getSystemService(PowerManager::class.java)?.let { power ->
             thermalStatus = power.currentThermalStatus
             power.addThermalStatusListener(executor) { status ->
@@ -91,25 +110,31 @@ class FloatingFrameRateController(
     }
 
     fun update() {
-        transactions().use { t ->
-            tasks.values.forEach { task ->
-                if (!task.leash.isValid) return@forEach
-                val info = task.info
-                val floating = info.isFloatingWindow && info.displayId == DEFAULT_DISPLAY
-                if (!floating && !owned.contains(task.leash)) return@forEach
-                if (floating) owned += task.leash else owned -= task.leash
-                val count = tasks.values.count { it.info.isFloatingWindow &&
-                    it.info.displayId == info.displayId }
-                val entry = miniState.get(info.userId, info.taskId)
-                val fps = vote(floating, focusedTaskId?.let { it == info.taskId } ?: info.isFocused,
-                    count, entry != null, entry?.edge != null &&
-                        entry.edge != FloatingMiniState.Edge.NONE, thermalStatus)
-                if (votes[task.leash] != fps) {
-                    applyVote(t, task.leash, fps)
-                    if (floating) votes[task.leash] = fps
-                }
-                if (!floating) votes.remove(task.leash)
+        val enabled = supportsOverride() && !SurfaceFrameRate.isInteracting
+        if (!enabled && owned.isEmpty()) return
+        val count = tasks.values.count { it.info.isFloatingWindow && it.info.displayId == DEFAULT_DISPLAY }
+        val changes = mutableMapOf<SurfaceControl, Float>()
+        tasks.values.forEach { task ->
+            val info = task.info
+            val floating = info.isFloatingWindow && info.displayId == DEFAULT_DISPLAY
+            if (!floating && task.leash !in owned) return@forEach
+            val entry = miniState.get(info.userId, info.taskId)
+            val fps = if (enabled) vote(floating,
+                focusedTaskId?.let { it == info.taskId } ?: info.isFocused, count,
+                entry != null, entry?.edge != null && entry.edge != FloatingMiniState.Edge.NONE,
+                thermalStatus) else 0f
+            if ((votes[task.leash] ?: 0f) != fps && task.leash.isValid) changes[task.leash] = fps
+            if (fps > 0f) {
+                owned += task.leash
+                votes[task.leash] = fps
+            } else {
+                owned -= task.leash
+                votes.remove(task.leash)
             }
+        }
+        if (changes.isEmpty()) return
+        transactions().use { t ->
+            changes.forEach { (leash, fps) -> applyVote(t, leash, fps) }
             t.apply()
         }
     }

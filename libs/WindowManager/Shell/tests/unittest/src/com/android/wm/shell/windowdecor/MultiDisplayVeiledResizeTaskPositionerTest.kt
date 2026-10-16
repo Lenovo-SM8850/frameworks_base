@@ -119,6 +119,9 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
 
     private lateinit var taskPositioner: MultiDisplayVeiledResizeTaskPositioner
 
+    @org.junit.After
+    fun tearDown() = runOnUiThread { taskPositioner.close() }
+
     @Before
     fun setUp() {
         whenever(taskToken.asBinder()).thenReturn(taskBinder)
@@ -1335,4 +1338,28 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
                 DISPLAY_BOUNDS.bottom - 100,
             )
     }
+
+    @Test
+    fun floatingCancel_releasesOwnerWithoutReleaseCommit() = runOnUiThread {
+        beginFloatingCorner()
+        Assert.assertTrue(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+        taskPositioner.onDragPositioningCancel()
+        taskPositioner.onDragPositioningCancel()
+        Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+        verify(mockShellTaskOrganizer, times(1)).applyTransaction(any())
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1100f, 1600f)
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+    }
+
+    @Test
+    fun floatingResizeWithoutMovement_releasesOwner() = runOnUiThread {
+        beginFloatingCorner()
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 700f, 1000f)
+        Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+    }
+
 }

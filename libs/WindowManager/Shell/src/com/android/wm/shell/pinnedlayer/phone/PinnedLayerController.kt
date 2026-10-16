@@ -119,7 +119,7 @@ class PinnedLayerController(
     fun configureInteractions(context: Context, displayController: DisplayController,
         mainExecutor: com.android.wm.shell.common.ShellExecutor) {
         frameRates = FloatingFrameRateController(context, shellTaskOrganizer, mainExecutor,
-            presentationController.miniState)
+            presentationController.miniState, transitions = transitions)
         miniInteractions = FloatingMiniController(shellTaskOrganizer, displayController,
             presentationController.miniState) { task ->
             frameRates?.update()

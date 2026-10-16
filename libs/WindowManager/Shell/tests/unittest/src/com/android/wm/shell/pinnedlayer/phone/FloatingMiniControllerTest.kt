@@ -35,6 +35,10 @@ import org.mockito.kotlin.whenever
 @TestableLooper.RunWithLooper
 @RunWith(AndroidJUnit4::class)
 class FloatingMiniControllerTest : ShellTestCase() {
+    private val active = mutableListOf<Harness>()
+
+    @org.junit.After
+    fun clearInteractions() { active.forEach { it.controller.remove(it.task) } }
     private inner class Harness {
         val organizer = mock<ShellTaskOrganizer>()
         val displays = mock<DisplayController>()
@@ -58,6 +62,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
         val controller: FloatingMiniController
 
         init {
+            active += this
             whenever(organizer.initialTasks).thenReturn(listOf(Pair(task, leash)))
             whenever(displays.getDisplayLayout(0)).thenReturn(layout)
             val displayContext = mock<android.content.Context>()

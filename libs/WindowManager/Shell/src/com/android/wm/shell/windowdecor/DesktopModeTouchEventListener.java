@@ -644,6 +644,12 @@ public class DesktopModeTouchEventListener
             }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
+                if (taskInfo.isFloatingWindow
+                        && (!dragAllowed || e.getActionMasked() == ACTION_CANCEL)) {
+                    mDragPositioningCallback.onDragPositioningCancel();
+                    setIsDragging(decoration, false);
+                    return false;
+                }
                 final boolean wasDragging = mIsDragging;
                 if (wasDragging) {
                     mDesktopModeUiEventLogger.log(taskInfo,
@@ -663,6 +669,11 @@ public class DesktopModeTouchEventListener
                 final Rect newTaskBounds = mDragPositioningCallback.onDragPositioningEnd(
                         e.getDisplayId(),
                         e.getRawX(dragPointerIdx), e.getRawY(dragPointerIdx));
+                if (taskInfo.isFloatingWindow
+                        && mDragPositioningCallback.isDragPositioningCancelled()) {
+                    setIsDragging(decoration, false);
+                    return wasDragging;
+                }
                 WdLog.motionEventLogD(TAG, mTaskId, "handleFreeformMotionEvent(%s) action=%s "
                                 + "dispatched |onDragPositioningEnd| newTaskBounds=%s",
                         viewName, MotionEvent.actionToString(e.getAction()), newTaskBounds);
