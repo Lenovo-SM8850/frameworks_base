@@ -5,10 +5,10 @@ import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
 import android.os.PowerManager
 import android.view.Display.DEFAULT_DISPLAY
-import android.view.Surface
 import android.view.SurfaceControl
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.ShellExecutor
+import com.android.wm.shell.common.SurfaceFrameRate
 
 /** Frame-rate preferences on task containers, using the standard child override strategy. */
 class FloatingFrameRateController(
@@ -124,10 +124,7 @@ class FloatingFrameRateController(
         }
 
         fun applyVote(t: SurfaceControl.Transaction, leash: SurfaceControl, fps: Float) {
-            t.setFrameRate(leash, fps, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-                .setFrameRateSelectionStrategy(leash, if (fps == 0f)
-                    SurfaceControl.FRAME_RATE_SELECTION_STRATEGY_PROPAGATE else
-                    SurfaceControl.FRAME_RATE_SELECTION_STRATEGY_OVERRIDE_CHILDREN)
+            SurfaceFrameRate.applyVote(t, leash, fps)
         }
     }
 }
