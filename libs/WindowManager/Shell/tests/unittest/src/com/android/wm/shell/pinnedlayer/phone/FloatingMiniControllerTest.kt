@@ -56,6 +56,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
                 floatingWindowPosition.set(8, 108)
                 positionInParent = Point(8, 108)
             }
+        val changes = mutableListOf<android.app.TaskInfo>()
         var allocations = 0
         lateinit var animatorListener: Animator.AnimatorListener
         lateinit var updateListener: ValueAnimator.AnimatorUpdateListener
@@ -91,7 +92,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
                 FloatingMiniState.Restore(normal, Rect(0, 0, 800, 1200), .75f),
                 task.presentationBounds, .45f)
             controller = FloatingMiniController(organizer, displays, state, choreographer,
-                { allocations++; transaction }, { animator }) {}
+                { allocations++; transaction }, { animator }) { changes += it }
         }
 
         fun interrupt(mode: Int = TRANSIT_CHANGE): TransitionInfo.Change {
@@ -113,7 +114,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
         h.updateListener.onAnimationUpdate(h.animator)
         h.interrupt()
         assertThat(h.state.get(h.task.userId, h.task.taskId)).isNull()
-        assertThat(h.task.presentationBounds).isEqualTo(h.normal)
+        assertThat(h.task.presentationBounds).isEqualTo(Rect(0, 100, 600, 1000))
         assertThat(h.task.floatingWindowScale).isEqualTo(.75f)
         assertThat(h.controller.isAnimating(h.task)).isFalse()
         verify(h.transaction).close()
@@ -254,6 +255,72 @@ class FloatingMiniControllerTest : ShellTestCase() {
         callback.firstValue.doFrame(6_060_606)
         verify(h.transaction).close()
         verify(h.transaction, never()).apply()
+    }
+
+    @Test fun restoreAtEachCorner_centersOnCurrentMiniThenClamps() {
+        val minis = listOf(Rect(8, 108, 368, 648), Rect(832, 108, 1192, 648),
+            Rect(8, 1352, 368, 1892), Rect(832, 1352, 1192, 1892))
+        val restored = listOf(Rect(0, 100, 600, 1000), Rect(600, 100, 1200, 1000),
+            Rect(0, 1000, 600, 1900), Rect(600, 1000, 1200, 1900))
+        minis.zip(restored).forEach { (mini, expected) -> assertCenteredRestore(mini, expected) }
+    }
+
+    @Test fun restoreAtSideMidpoint_shiftsOnlyEnoughToFit() {
+        assertCenteredRestore(Rect(8, 730, 368, 1270), Rect(0, 550, 600, 1450))
+        assertCenteredRestore(Rect(832, 730, 1192, 1270), Rect(600, 550, 1200, 1450))
+    }
+
+    @Test fun restoreInMiddle_keepsCurrentCenterAndRemembersNewPosition() {
+        val h = assertCenteredRestore(Rect(420, 730, 780, 1270), Rect(300, 550, 900, 1450))
+        val restored = h.changes.last()
+        restored.baseActivity = android.content.ComponentName("test.restore", "Main")
+        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() })
+        val presentation = PinnedLayerPresentationController(context, h.displays, mock(), store)
+        presentation.rememberBounds(restored)
+        val remembered = requireNotNull(store.restore("test.restore", restored.userId,
+            android.content.res.Configuration.ORIENTATION_PORTRAIT, Rect(0, 100, 1200, 1900),
+            1200, 1920, 0))
+        assertThat(remembered.bounds).isEqualTo(Rect(300, 550, 900, 1450))
+        assertThat(remembered.scale).isEqualTo(.75f)
+    }
+
+    @Test fun restoreAfterUnstash_usesUnstashedMiniCenter() {
+        val h = Harness()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        entry.edge = FloatingMiniState.Edge.LEFT
+        entry.bounds.set(-332, 730, 28, 1270)
+        h.controller.unstash(h.task)
+        h.interrupt()
+        assertThat(entry.bounds).isEqualTo(Rect(8, 730, 368, 1270))
+        h.controller.restore(h.task)
+        h.animatorListener.onAnimationEnd(h.animator)
+        assertThat(h.changes.last().presentationBounds).isEqualTo(Rect(0, 550, 600, 1450))
+        assertThat(h.changes.last().floatingWindowScale).isEqualTo(.75f)
+    }
+
+    private fun assertCenteredRestore(mini: Rect, expected: Rect): Harness {
+        val h = Harness()
+        h.controller.onDragEnded(h.task, h.task.presentationBounds, mini)
+        h.interrupt()
+        assertThat(h.task.presentationBounds).isEqualTo(mini)
+        clearInvocations(h.transaction)
+        h.controller.restore(h.task)
+        whenever(h.animator.animatedValue).thenReturn(0f)
+        h.updateListener.onAnimationUpdate(h.animator)
+        verify(h.transaction).setPosition(h.leash, mini.left.toFloat(), mini.top.toFloat())
+        whenever(h.animator.animatedValue).thenReturn(.5f)
+        h.updateListener.onAnimationUpdate(h.animator)
+        verify(h.transaction).setPosition(h.leash,
+            (mini.left + expected.left) / 2f, (mini.top + expected.top) / 2f)
+        h.animatorListener.onAnimationEnd(h.animator)
+        val restored = h.changes.last()
+        assertThat(restored.presentationBounds).isEqualTo(expected)
+        assertThat(restored.floatingWindowScale).isEqualTo(.75f)
+        assertThat(restored.configuration.windowConfiguration.bounds)
+            .isEqualTo(Rect(0, 0, 800, 1200))
+        assertThat(h.state.canRemember(h.task.userId, h.task.taskId)).isTrue()
+        assertThat(Rect(0, 100, 1200, 1900).contains(expected)).isTrue()
+        return h
     }
 
 }
