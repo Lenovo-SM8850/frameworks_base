@@ -365,12 +365,29 @@ public class NotificationGutsManager implements NotifGutsViewManager, CoreStarta
                 && mContext.getDisplayId() == Display.DEFAULT_DISPLAY
                 && supportsFloatingWindows();
         button.setVisibility(available ? View.VISIBLE : View.GONE);
+        View splitButton = content.getContentView().findViewById(R.id.notification_open_split_screen);
+        if (splitButton != null) {
+            boolean splitAvailable = available && supportsSplitScreen();
+            splitButton.setVisibility(splitAvailable ? View.VISIBLE : View.GONE);
+            splitButton.setOnClickListener(splitAvailable ? v -> {
+                row.getGuts().resetFalsingCheck();
+                closeAndSaveGuts(false /* removeLeavebehind */, false /* force */,
+                        true /* removeControls */, -1 /* x */, -1 /* y */, true /* resetMenu */);
+                row.getEntryAdapter().onEntrySplitScreenClicked(row);
+            } : null);
+        }
         button.setOnClickListener(available ? v -> {
             row.getGuts().resetFalsingCheck();
             closeAndSaveGuts(false /* removeLeavebehind */, false /* force */,
                     true /* removeControls */, -1 /* x */, -1 /* y */, true /* resetMenu */);
             row.getEntryAdapter().onEntryFloatingWindowClicked(row);
         } : null);
+    }
+
+    @VisibleForTesting
+    boolean supportsSplitScreen() {
+        return mNotificationActivityStarter != null
+                && mNotificationActivityStarter.isSplitScreenSupported();
     }
 
     @VisibleForTesting

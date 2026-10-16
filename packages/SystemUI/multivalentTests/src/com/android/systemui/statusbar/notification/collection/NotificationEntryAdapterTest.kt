@@ -641,4 +641,14 @@ class NotificationEntryAdapterTest : SysuiTestCase() {
         verify(kosmos.mockVisualStabilityCoordinator)
             .temporarilyAllowFreeMovement(eq(childEntry), anyLong())
     }
+
+    @Test
+    fun onEntrySplitScreenClicked() {
+        val entry = NotificationEntryBuilder().build()
+        val row: ExpandableNotificationRow = mock()
+        underTest = factory.create(entry) as NotificationEntryAdapter
+        underTest.onEntrySplitScreenClicked(row)
+        verify(kosmos.mockNotificationActivityStarter).onNotificationSplitScreenClicked(entry, row)
+    }
+
 }

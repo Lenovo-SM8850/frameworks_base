@@ -206,6 +206,7 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
     private ExpandableNotificationRow mBubbleNotificationRow;
     private FakeShadeDialogContextInteractor mContextInteractor;
     private StatusBarNotificationActivityStarter mUnderTest;
+    @Mock private com.android.wm.shell.splitscreen.SplitScreen mSplitScreen;
 
     private final Answer<Void> mCallOnDismiss = answerVoid(
             (OnDismissAction dismissAction, Runnable cancel,
@@ -302,7 +303,8 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
                         mPowerInteractor,
                         mUserTracker,
                         mFrameworkStatsLogWrapper,
-                        mock(com.axion.applocker.AxAppLockerHelper.class)
+                        mock(com.axion.applocker.AxAppLockerHelper.class),
+                        Optional.of(mSplitScreen)
                 );
 
         // set up dismissKeyguardThenExecute to synchronously invoke the OnDismissAction arg
@@ -880,4 +882,91 @@ public class StatusBarNotificationActivityStarterTest extends SysuiTestCase {
         verify(mActivityTransitionAnimator)
                 .startPendingIntentWithAnimation(any(), anyBoolean(), any(), any());
     }
+
+    private void prepareSplitNotification() {
+        mUnderTest = org.mockito.Mockito.spy(mUnderTest);
+        org.mockito.Mockito.doReturn(true).when(mUnderTest).isSplitScreenSupported();
+        ActivityInfo info = new ActivityInfo();
+        info.resizeMode = ActivityInfo.RESIZE_MODE_RESIZEABLE;
+        when(mActivityIntentHelper.getTargetActivityInfo(any(), anyInt(), eq(false)))
+                .thenReturn(info);
+    }
+
+    @Test
+    public void testSplitNotification_dispatchAndClickSideEffects() {
+        prepareSplitNotification();
+        mUnderTest.onNotificationSplitScreenClicked(mNotificationEntry, mNotificationRow);
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+        ArgumentCaptor<Bundle> options = ArgumentCaptor.forClass(Bundle.class);
+        verify(mSplitScreen).startPendingIntent(eq(mContentIntent), eq(1), any(), options.capture());
+        ActivityOptions activityOptions = ActivityOptions.fromBundle(options.getValue());
+        assertThat(activityOptions.getLaunchFloatingWindow()).isFalse();
+        assertThat(activityOptions.getLaunchDisplayId()).isEqualTo(Display.DEFAULT_DISPLAY);
+        assertThat(activityOptions.getPendingIntentBackgroundActivityStartMode())
+                .isEqualTo(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+        verify(mOnUserInteractionCallback).registerFutureDismissal(mNotificationEntry, REASON_CLICK);
+        verify(mClickNotifier).onNotificationClick(eq(mNotificationEntry.getKey()), any());
+        verify(mShadeController).collapseShadeForActivityStart();
+    }
+
+    @Test
+    public void testSplitNotification_nonResizableFallsBackToTap() {
+        prepareSplitNotification();
+        ActivityInfo info = new ActivityInfo();
+        info.resizeMode = ActivityInfo.RESIZE_MODE_UNRESIZEABLE;
+        when(mActivityIntentHelper.getTargetActivityInfo(any(), anyInt(), eq(false)))
+                .thenReturn(info);
+        mUnderTest.onNotificationSplitScreenClicked(mNotificationEntry, mNotificationRow);
+        verify(mUnderTest).onNotificationClicked(mNotificationEntry, mNotificationRow);
+        verify(mSplitScreen, never()).startPendingIntent(any(), anyInt(), any(), any());
+    }
+
+    @Test
+    public void testSplitNotification_unavailableFallsBackToTap() {
+        prepareSplitNotification();
+        org.mockito.Mockito.doReturn(false).when(mUnderTest).isSplitScreenSupported();
+        mUnderTest.onNotificationSplitScreenClicked(mNotificationEntry, mNotificationRow);
+        verify(mUnderTest).onNotificationClicked(mNotificationEntry, mNotificationRow);
+        verify(mSplitScreen, never()).startPendingIntent(any(), anyInt(), any(), any());
+    }
+
+    @Test
+    public void testSplitNotification_waitsForUnlockAndShadeCollapse() {
+        prepareSplitNotification();
+        doNothing().when(mActivityStarter).dismissKeyguardThenExecute(any(), any(), anyBoolean());
+        doNothing().when(mShadeController).addPostCollapseAction(any());
+        mUnderTest.onNotificationSplitScreenClicked(mNotificationEntry, mNotificationRow);
+        verify(mSplitScreen, never()).startPendingIntent(any(), anyInt(), any(), any());
+        ArgumentCaptor<OnDismissAction> dismiss = ArgumentCaptor.forClass(OnDismissAction.class);
+        verify(mActivityStarter).dismissKeyguardThenExecute(dismiss.capture(), any(), anyBoolean());
+        dismiss.getValue().onDismiss();
+        verify(mShadeController).collapseShadeForActivityStart();
+        verify(mSplitScreen, never()).startPendingIntent(any(), anyInt(), any(), any());
+        ArgumentCaptor<Runnable> collapse = ArgumentCaptor.forClass(Runnable.class);
+        verify(mShadeController).addPostCollapseAction(collapse.capture());
+        collapse.getValue().run();
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+        verify(mSplitScreen).startPendingIntent(eq(mContentIntent), eq(1), any(), any());
+    }
+
+    @Test
+    public void testSplitNotification_lockedWorkProfileDefersWithoutAutoCancel() {
+        prepareSplitNotification();
+        mNotificationEntry.getSbn().getNotification().flags &= ~Notification.FLAG_AUTO_CANCEL;
+        when(mLockPatternUtils.isSeparateProfileChallengeEnabled(1)).thenReturn(true);
+        when(mKeyguardManager.isDeviceLocked(1)).thenReturn(true);
+        when(mRemoteInputCallback.startWorkChallengeForSplitIfNecessary(
+                eq(1), eq(mContentIntent), eq(mNotificationEntry.getKey()), any()))
+                .thenReturn(true);
+        mUnderTest.onNotificationSplitScreenClicked(mNotificationEntry, mNotificationRow);
+        mMainExecutor.runAllReady();
+        mUiBgExecutor.runAllReady();
+        verify(mRemoteInputCallback).startWorkChallengeForSplitIfNecessary(
+                eq(1), eq(mContentIntent), eq(mNotificationEntry.getKey()), any());
+        verify(mSplitScreen, never()).startPendingIntent(any(), anyInt(), any(), any());
+        verify(mOnUserInteractionCallback, never()).registerFutureDismissal(any(), anyInt());
+    }
+
 }
