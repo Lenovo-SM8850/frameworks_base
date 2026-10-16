@@ -655,7 +655,29 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         controller.applyPresentation(task, bounds, wct, task.floatingWindowScale)
         assertThat(wct.changes[task.token.asBinder()]!!.floatingWindowScale).isEqualTo(.75f)
         task.topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        assertThat(controller.getManualRotationBounds(task)).isNull()
+        assertThat(controller.getManualRotationBounds(task)).isNotNull()
+    }
+
+    @Test
+    fun fixedApp_manualShapeOverridesRequestAndSurvivesDeviceRotation() {
+        setRealPortraitDisplay()
+        val task = createTaskInfo(Rect(100, 200, 700, 1100)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        val visible = requireNotNull(controller.getManualRotationBounds(task))
+        assertThat(visible.width()).isGreaterThan(visible.height())
+        controller.setManualOrientation(task, true, visible)
+        val wct = android.window.WindowContainerTransaction()
+        controller.applyPresentation(task, visible, wct, task.floatingWindowScale)
+        val change = requireNotNull(wct.changes[task.token.asBinder()])
+        assertThat(change.floatingWindowScale).isEqualTo(.75f)
+        task.configuration.windowConfiguration.setBounds(change.configuration.windowConfiguration.bounds)
+        task.floatingWindowPosition.set(visible.left, visible.top)
+        val rotated = requireNotNull(controller.getRotationBounds(task,
+            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_90))
+        assertThat(rotated.width()).isGreaterThan(rotated.height())
     }
 
 }

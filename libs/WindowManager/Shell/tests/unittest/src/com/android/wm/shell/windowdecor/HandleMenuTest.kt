@@ -588,4 +588,29 @@ class HandleMenuTest : ShellTestCase() {
         }
     }
 
+
+    @Test fun rotate_onlyFloatingAndIncludesFixedOrientationApps() {
+        val resources = org.mockito.kotlin.spy(mContext.resources)
+        val context = org.mockito.kotlin.spy(mContext)
+        org.mockito.kotlin.doReturn(resources).whenever(context).resources
+        org.mockito.kotlin.doReturn(android.R.string.ok).whenever(resources)
+            .getIdentifier("accessibility_rotate_button", "string", "com.android.systemui")
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        val pill = WindowingPillView(context, mock())
+        pill.initialize(mock(), mock(), false) {}
+        listOf(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LOCKED,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE).forEach {
+            task.topActivityRequestedOrientation = it
+            task.isFloatingWindow = false
+            pill.bind(task, false)
+            assertEquals(View.GONE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
+            task.isFloatingWindow = true
+            pill.bind(task, false)
+            assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
+        }
+    }
+
 }
