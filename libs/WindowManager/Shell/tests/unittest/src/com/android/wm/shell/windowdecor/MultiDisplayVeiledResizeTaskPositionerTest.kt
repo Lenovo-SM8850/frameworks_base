@@ -1362,4 +1362,56 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
     }
 
+
+    private fun beginFloatingMove() {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.floatingWindowPosition.set(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_UNDEFINED,
+            DISPLAY_ID_0, 400f, 110f, INPUT_METHOD_TYPE_UNKNOWN)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 1000f, 30f)
+    }
+
+    @Test
+    fun floatingMove_displayChangeCancelsPreviewAndReleaseTogether() = runOnUiThread {
+        beginFloatingMove()
+        taskPositioner.onDisplayConfigurationChanged(DISPLAY_ID_0, Configuration())
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+        Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer, mockTransaction)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 1200f, 30f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1200f, 30f)
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        verify(mockTransaction, never()).setPosition(any(), any(), any())
+    }
+
+    @Test
+    fun floatingMove_sameTaskTransitionCancelsEvenBeforePreviewFrame() = runOnUiThread {
+        beginFloatingMove()
+        val change = mock<TransitionInfo.Change>()
+        whenever(change.taskInfo).thenReturn(mockWindowDecoration.taskInfo)
+        whenever(mockTransitionInfo.changes).thenReturn(listOf(change))
+        taskPositioner.onTransitionReady(mockTransitionBinder, mockTransitionInfo,
+            mock<Transaction>(), mock<Transaction>())
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+        Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1200f, 30f)
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+    }
+
+
+    @Test
+    fun floatingMove_displayRemovalCancelsPreviewAndReleaseTogether() = runOnUiThread {
+        beginFloatingMove()
+        taskPositioner.onDisplayRemoved(DISPLAY_ID_0)
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+        Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1200f, 30f)
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+    }
+
 }

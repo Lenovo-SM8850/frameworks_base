@@ -51,6 +51,10 @@ private constructor(
     private val defaultWindowDecor: DefaultWindowDecoration? = null,
     private val captionWindowDecoration: CaptionWindowDecoration? = null,
 ) {
+    var floatingMiniPreviewCancellation: (() -> Unit)? = null
+
+    fun cancelFloatingMiniPreview() { floatingMiniPreviewCancellation?.invoke() }
+
     private var floatingBottomHandle: FloatingBottomHandle? = null
     private var floatingTopHandle: FloatingBottomHandle? = null
     private var floatingMiniInput: FloatingMiniInput? = null
