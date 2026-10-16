@@ -91,6 +91,7 @@ class PinnedLayerController(
     private val minimizeState = FloatingMinimizeState()
     private var minimizeHandles: FloatingMinimizeHandles? = null
     private var miniInteractions: FloatingMiniController? = null
+    private var frameRates: FloatingFrameRateController? = null
     private val miniListeners = mutableSetOf<(TaskInfo) -> Unit>()
 
     fun isMini(task: TaskInfo): Boolean =
@@ -117,8 +118,11 @@ class PinnedLayerController(
 
     fun configureInteractions(context: Context, displayController: DisplayController,
         mainExecutor: com.android.wm.shell.common.ShellExecutor) {
+        frameRates = FloatingFrameRateController(context, shellTaskOrganizer, mainExecutor,
+            presentationController.miniState)
         miniInteractions = FloatingMiniController(shellTaskOrganizer, displayController,
             presentationController.miniState) { task ->
+            frameRates?.update()
             mainExecutor.execute { miniListeners.toList().forEach { it(task) } }
         }
         fun recover(task: RunningTaskInfo) {
@@ -161,7 +165,12 @@ class PinnedLayerController(
         }
         displayController.addDisplayWindowListener(object : DisplayController.OnDisplaysChangedListener {
             override fun onDisplayConfigurationChanged(displayId: Int, configuration: Configuration) {
+                frameRates?.clearDisplay(displayId)
+                mainExecutor.execute { frameRates?.update() }
                 if (displayId == DEFAULT_DISPLAY) minimizeHandles?.update()
+            }
+            override fun onDisplayRemoved(displayId: Int) {
+                frameRates?.removeDisplay(displayId)
             }
         })
     }
@@ -883,6 +892,7 @@ class PinnedLayerController(
 
     private fun unpin(taskInfo: TaskInfo, rememberAsPinned: Boolean = false) {
         if (!rememberAsPinned) miniInteractions?.remove(taskInfo)
+        frameRates?.update()
         visiblePinnedTasks -= taskInfo.taskId
         if (rememberAsPinned) {
             minimizedTasks += taskInfo.taskId
