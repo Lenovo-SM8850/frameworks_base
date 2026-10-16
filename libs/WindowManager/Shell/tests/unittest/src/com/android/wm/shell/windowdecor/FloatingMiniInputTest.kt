@@ -64,6 +64,22 @@ class FloatingMiniInputTest : ShellTestCase() {
         tap(view, SystemClock.uptimeMillis())
         verify(controller).restoreMini(task)
     }
+    @Test fun inputHost_neverBecomesFocusableOnResize() {
+        val view = view()
+        org.junit.Assert.assertFalse(view.isFocusable)
+        val host = mock<android.view.SurfaceControlViewHost>()
+        input.relayoutInputHost(host, 360, 540)
+        input.relayoutInputHost(host, 540, 360)
+        val params = org.mockito.kotlin.argumentCaptor<android.view.WindowManager.LayoutParams>()
+        verify(host, times(2)).relayout(params.capture())
+        params.allValues.forEach {
+            org.junit.Assert.assertTrue(it.flags and
+                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+            org.junit.Assert.assertTrue(it.flags and
+                android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED != 0)
+        }
+    }
+
     @Test fun dragMovesMiniWithoutRestoring() {
         val view = view()
         val time = SystemClock.uptimeMillis()
