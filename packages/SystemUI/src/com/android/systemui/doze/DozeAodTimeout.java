@@ -3,11 +3,16 @@
 package com.android.systemui.doze;
 
 import android.app.AlarmManager;
+import android.content.ContentResolver;
 import android.content.Context;
+import android.database.ContentObserver;
+import android.hardware.display.AmbientDisplayConfiguration;
 import android.os.Handler;
 import android.os.SystemClock;
+import android.os.UserHandle;
 import android.view.Display;
 
+import com.android.internal.annotations.VisibleForTesting;
 import com.android.systemui.dagger.qualifiers.Application;
 import com.android.systemui.dagger.qualifiers.Main;
 import com.android.systemui.doze.dagger.DozeScope;
@@ -24,6 +29,8 @@ import com.android.systemui.util.kotlin.JavaAdapterKt;
 import java.io.PrintWriter;
 import java.util.concurrent.CancellationException;
 
+import lineageos.providers.LineageSettings;
+
 import kotlinx.coroutines.CoroutineScope;
 import kotlinx.coroutines.Job;
 
@@ -34,6 +41,12 @@ import javax.inject.Inject;
 public class DozeAodTimeout implements DozeMachine.Part {
     private final int mTimeoutMillis;
     private final AlarmTimeout mAlarm;
+    private final AlarmTimeout mChargingAlarm;
+    private final AmbientDisplayConfiguration mConfig;
+    private final ContentResolver mContentResolver;
+    private final int mWakeOnPlugDefault;
+    @VisibleForTesting
+    final ContentObserver mWakeOnPlugObserver;
     private final DozeHost mHost;
     private final Handler mHandler;
     private final ScreenLifecycle mScreenLifecycle;
@@ -50,6 +63,8 @@ public class DozeAodTimeout implements DozeMachine.Part {
     private boolean mExpired;
     private boolean mSessionActive;
     private boolean mRegistered;
+    private boolean mChargingPulse;
+    private boolean mWakeOnPlug;
 
     private final DozeHost.Callback mHostCallback = new DozeHost.Callback() {
         @Override
@@ -86,9 +101,21 @@ public class DozeAodTimeout implements DozeMachine.Part {
             @Main Handler handler, ScreenLifecycle screenLifecycle,
             WakefulnessLifecycle wakefulnessLifecycle, UserTracker userTracker,
             KeyguardTransitionInteractor keyguardTransitionInteractor,
-            @Application CoroutineScope scope) {
+            @Application CoroutineScope scope, AmbientDisplayConfiguration config) {
         mTimeoutMillis = context.getResources().getInteger(R.integer.config_dozeAodTimeoutMillis);
         mAlarm = new AlarmTimeout(alarmManager, this::expire, "doze_aod_timeout", handler);
+        mChargingAlarm = new AlarmTimeout(alarmManager, host::stopPulsing,
+                "doze_aod_charging_timeout", handler);
+        mConfig = config;
+        mContentResolver = context.getContentResolver();
+        mWakeOnPlugDefault = context.getResources().getBoolean(
+                com.android.internal.R.bool.config_unplugTurnsOnScreen) ? 1 : 0;
+        mWakeOnPlugObserver = new ContentObserver(handler) {
+            @Override
+            public void onChange(boolean selfChange) {
+                updateWakeOnPlug();
+            }
+        };
         mHost = host;
         mHandler = handler;
         mScreenLifecycle = screenLifecycle;
@@ -123,6 +150,10 @@ public class DozeAodTimeout implements DozeMachine.Part {
                         });
             }
             if (!mRegistered) {
+                mContentResolver.registerContentObserver(LineageSettings.Global.getUriFor(
+                        LineageSettings.Global.WAKE_WHEN_PLUGGED_OR_UNPLUGGED),
+                        false, mWakeOnPlugObserver, UserHandle.USER_ALL);
+                updateWakeOnPlug();
                 mHost.addCallback(mHostCallback);
                 mScreenLifecycle.addObserver(mScreenObserver);
                 mWakefulnessLifecycle.addObserver(mWakefulnessObserver);
@@ -132,6 +163,9 @@ public class DozeAodTimeout implements DozeMachine.Part {
         } else if (newState == DozeMachine.State.FINISH) {
             endSession();
         } else {
+            if (newState == DozeMachine.State.DOZE_PULSE_DONE) {
+                cancelChargingPulse();
+            }
             maybeStartTimeout();
         }
     }
@@ -142,7 +176,40 @@ public class DozeAodTimeout implements DozeMachine.Part {
         maybeStartTimeout();
     }
 
+    @VisibleForTesting
+    int getWakeOnPlugSetting(int defaultValue) {
+        return LineageSettings.Global.getInt(mContentResolver,
+                LineageSettings.Global.WAKE_WHEN_PLUGGED_OR_UNPLUGGED, defaultValue);
+    }
+
+    private void updateWakeOnPlug() {
+        mWakeOnPlug = getWakeOnPlugSetting(mWakeOnPlugDefault) == 1;
+    }
+
+    /** Claims a charging pulse only after the visible AOD session has expired. */
+    boolean startChargingPulse() {
+        if (mTimeoutMillis <= 0 || !mSessionActive || !mExpired || mChargingPulse || !mWakeOnPlug
+                || mState != DozeMachine.State.DOZE || mDisplayState != Display.STATE_OFF
+                || mWakefulnessLifecycle.getWakefulness()
+                        != WakefulnessLifecycle.WAKEFULNESS_ASLEEP
+                || !mConfig.alwaysOnEnabled(mUserTracker.getUserId())
+                || mHost.isAlwaysOnSuppressed() || mHost.isPowerSaveActive()) {
+            return false;
+        }
+        mChargingPulse = true;
+        return true;
+    }
+
+    void cancelChargingPulse() {
+        mChargingAlarm.cancel();
+        mChargingPulse = false;
+    }
+
     private void maybeStartTimeout() {
+        if (mChargingPulse && mState == DozeMachine.State.DOZE_PULSING
+                && mDisplayState == Display.STATE_ON) {
+            mChargingAlarm.schedule(mTimeoutMillis, AlarmTimeout.MODE_IGNORE_IF_SCHEDULED);
+        }
         if (mTimeoutMillis <= 0 || !mSessionActive || mExpired || mDeadlineElapsed != 0
                 || !mState.isAlwaysOn() || mDisplayState == Display.STATE_UNKNOWN
                 || mDisplayState == Display.STATE_OFF
@@ -174,6 +241,7 @@ public class DozeAodTimeout implements DozeMachine.Part {
 
     private void endSession() {
         mAlarm.cancel();
+        cancelChargingPulse();
         if (mAodTransitionJob != null) {
             mAodTransitionJob.cancel(new CancellationException("AOD session ended"));
             mAodTransitionJob = null;
@@ -188,6 +256,7 @@ public class DozeAodTimeout implements DozeMachine.Part {
     public void destroy() {
         endSession();
         if (mRegistered) {
+            mContentResolver.unregisterContentObserver(mWakeOnPlugObserver);
             mHost.removeCallback(mHostCallback);
             mScreenLifecycle.removeObserver(mScreenObserver);
             mWakefulnessLifecycle.removeObserver(mWakefulnessObserver);
@@ -200,6 +269,7 @@ public class DozeAodTimeout implements DozeMachine.Part {
     public void dump(PrintWriter pw) {
         pw.println("DozeAodTimeout: timeoutMillis=" + mTimeoutMillis
                 + " deadlineElapsed=" + mDeadlineElapsed + " expired=" + mExpired
-                + " sessionActive=" + mSessionActive + " displayState=" + mDisplayState);
+                + " sessionActive=" + mSessionActive + " displayState=" + mDisplayState
+                + " chargingPulse=" + mChargingPulse + " wakeOnPlug=" + mWakeOnPlug);
     }
 }

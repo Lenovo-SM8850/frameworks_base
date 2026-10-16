@@ -10,6 +10,7 @@ import static com.android.systemui.doze.DozeMachine.State.DOZE_AOD_PAUSED;
 import static com.android.systemui.doze.DozeMachine.State.DOZE_AOD_PAUSING;
 import static com.android.systemui.doze.DozeMachine.State.DOZE_PULSE_DONE;
 import static com.android.systemui.doze.DozeMachine.State.DOZE_PULSING;
+import static com.android.systemui.doze.DozeMachine.State.DOZE_REQUEST_PULSE;
 import static com.android.systemui.doze.DozeMachine.State.DOZE_PULSING_AUTH_UI;
 import static com.android.systemui.doze.DozeMachine.State.FINISH;
 import static com.android.systemui.doze.DozeMachine.State.INITIALIZED;
@@ -20,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -80,6 +82,8 @@ public class DozeAodTimeoutTest extends SysuiTestCase {
     private final CoroutineScope mScope =
             CoroutineScopeKt.CoroutineScope(Dispatchers.getUnconfined());
     private DozeAodTimeout mTimeout;
+    private Integer mWakeOnPlugSetting = 1;
+    private Integer mLastWakeOnPlugDefault;
     private DozeMachine mMachine;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
 
@@ -103,7 +107,13 @@ public class DozeAodTimeoutTest extends SysuiTestCase {
         mContext.getOrCreateTestableResources().addOverride(
                 R.integer.config_dozeAodTimeoutMillis, timeoutMillis);
         mTimeout = new DozeAodTimeout(mContext, mAlarmManager, mHost, mHandler,
-                mScreenLifecycle, mWakefulness, mUserTracker, mTransitions, mScope);
+                mScreenLifecycle, mWakefulness, mUserTracker, mTransitions, mScope, mConfig) {
+            @Override
+            int getWakeOnPlugSetting(int defaultValue) {
+                mLastWakeOnPlugDefault = defaultValue;
+                return mWakeOnPlugSetting != null ? mWakeOnPlugSetting : defaultValue;
+            }
+        };
         mMachine = new DozeMachine(new DozeServiceFake(), mConfig, new WakeLockFake(),
                 mWakefulness, mock(DozeLog.class), mock(DockManager.class), Optional.empty(),
                 mHost, new DozeMachine.Part[]{mTimeout}, mUserTracker);
@@ -119,6 +129,20 @@ public class DozeAodTimeoutTest extends SysuiTestCase {
         listener.getValue().onAlarm();
     }
 
+    private void expireToDarkDoze() {
+        initialize(6000);
+        fireTimeout();
+        mMachine.onScreenState(Display.STATE_OFF);
+    }
+
+    private void startChargingPulse() {
+        assertTrue(mTimeout.startChargingPulse());
+        mMachine.requestPulse(DozeLog.PULSE_REASON_NOTIFICATION);
+        assertEquals(DOZE_REQUEST_PULSE, mMachine.getState());
+        mMachine.requestState(DOZE_PULSING);
+        mMachine.onScreenState(Display.STATE_ON);
+    }
+
     @Test
     public void defaultZero_keepsAodAndDoesNotRegisterOrSchedule() {
         initialize(0);
@@ -126,6 +150,7 @@ public class DozeAodTimeoutTest extends SysuiTestCase {
         verify(mHost, never()).addCallback(any());
         assertEquals(DOZE_AOD, mMachine.getState());
         assertFalse(mTimeout.isAodTimedOut());
+        assertFalse(mTimeout.startChargingPulse());
     }
 
     @Test
@@ -266,5 +291,202 @@ public class DozeAodTimeoutTest extends SysuiTestCase {
         assertEquals(DOZE, mMachine.getState());
         assertTrue(mTimeout.isAodTimedOut());
         verify(mAlarmManager).cancel(any(AlarmManager.OnAlarmListener.class));
+    }
+
+    @Test
+    public void wakeOnPlugDisabled_doesNotStartChargingPulse() {
+        mWakeOnPlugSetting = 0;
+        mContext.getOrCreateTestableResources().addOverride(
+                com.android.internal.R.bool.config_unplugTurnsOnScreen, true);
+        expireToDarkDoze();
+        assertFalse(mTimeout.startChargingPulse());
+        assertEquals(DOZE, mMachine.getState());
+    }
+
+    @Test
+    public void wakeOnPlugEnabled_startsChargingPulseEvenWhenConfigDefaultIsDisabled() {
+        mWakeOnPlugSetting = 1;
+        mContext.getOrCreateTestableResources().addOverride(
+                com.android.internal.R.bool.config_unplugTurnsOnScreen, false);
+        expireToDarkDoze();
+        assertTrue(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void wakeOnPlugAbsent_usesDisabledConfigDefault() {
+        mWakeOnPlugSetting = null;
+        mContext.getOrCreateTestableResources().addOverride(
+                com.android.internal.R.bool.config_unplugTurnsOnScreen, false);
+        expireToDarkDoze();
+        assertEquals(Integer.valueOf(0), mLastWakeOnPlugDefault);
+        assertFalse(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void wakeOnPlugAbsent_usesEnabledConfigDefault() {
+        mWakeOnPlugSetting = null;
+        mContext.getOrCreateTestableResources().addOverride(
+                com.android.internal.R.bool.config_unplugTurnsOnScreen, true);
+        expireToDarkDoze();
+        assertEquals(Integer.valueOf(1), mLastWakeOnPlugDefault);
+        assertTrue(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void wakeOnPlugObserver_appliesSettingChangesDuringSleep() {
+        mWakeOnPlugSetting = 0;
+        expireToDarkDoze();
+        assertFalse(mTimeout.startChargingPulse());
+        mWakeOnPlugSetting = 1;
+        mTimeout.mWakeOnPlugObserver.onChange(false);
+        assertTrue(mTimeout.startChargingPulse());
+        mTimeout.cancelChargingPulse();
+        mWakeOnPlugSetting = 0;
+        mTimeout.mWakeOnPlugObserver.onChange(false);
+        assertFalse(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void plugAfterTimeout_pulsesForConfiguredDurationAndReturnsToDoze() {
+        expireToDarkDoze();
+        doAnswer(invocation -> {
+            mMachine.requestState(DOZE_PULSE_DONE);
+            return null;
+        }).when(mHost).stopPulsing();
+        long before = SystemClock.elapsedRealtime();
+        startChargingPulse();
+        assertTrue(mTimeout.isAodTimedOut());
+        ArgumentCaptor<Long> deadline = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<AlarmManager.OnAlarmListener> listener =
+                ArgumentCaptor.forClass(AlarmManager.OnAlarmListener.class);
+        verify(mAlarmManager).setExact(eq(AlarmManager.ELAPSED_REALTIME_WAKEUP), deadline.capture(),
+                eq("doze_aod_charging_timeout"), listener.capture(), eq(mHandler));
+        assertTrue(deadline.getValue() >= before + 6000);
+        assertTrue(deadline.getValue() <= SystemClock.elapsedRealtime() + 6000);
+        listener.getValue().onAlarm();
+        verify(mHost).stopPulsing();
+        assertEquals(DOZE, mMachine.getState());
+        assertTrue(mTimeout.isAodTimedOut());
+    }
+
+    @Test
+    public void chargingTimeout_usesSessionConfigurationAndWaitsForVisibleDisplay() {
+        initialize(9000);
+        fireTimeout();
+        mMachine.onScreenState(Display.STATE_OFF);
+        assertTrue(mTimeout.startChargingPulse());
+        mMachine.requestPulse(DozeLog.PULSE_REASON_NOTIFICATION);
+        mMachine.requestState(DOZE_PULSING);
+        verify(mAlarmManager, never()).setExact(anyInt(), anyLong(),
+                eq("doze_aod_charging_timeout"), any(), any());
+        long before = SystemClock.elapsedRealtime();
+        mMachine.onScreenState(Display.STATE_ON);
+        ArgumentCaptor<Long> deadline = ArgumentCaptor.forClass(Long.class);
+        verify(mAlarmManager).setExact(eq(AlarmManager.ELAPSED_REALTIME_WAKEUP), deadline.capture(),
+                eq("doze_aod_charging_timeout"), any(), eq(mHandler));
+        assertTrue(deadline.getValue() >= before + 9000);
+        assertTrue(deadline.getValue() <= SystemClock.elapsedRealtime() + 9000);
+    }
+
+    @Test
+    public void plugBeforeTimeout_doesNotPulseOrRenewBudget() {
+        initialize(6000);
+        assertFalse(mTimeout.startChargingPulse());
+        verify(mAlarmManager, times(1)).setExact(anyInt(), anyLong(), any(), any(), any());
+    }
+
+    @Test
+    public void plugWhileScreenOn_doesNotPulse() {
+        expireToDarkDoze();
+        mMachine.onScreenState(Display.STATE_ON);
+        assertFalse(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void plugWhileAwake_doesNotPulse() {
+        expireToDarkDoze();
+        when(mWakefulness.getWakefulness()).thenReturn(WakefulnessLifecycle.WAKEFULNESS_AWAKE);
+        assertFalse(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void plugWithAodDisabled_doesNotPulse() {
+        when(mConfig.alwaysOnEnabled(anyInt())).thenReturn(false);
+        initialize(6000);
+        mMachine.onScreenState(Display.STATE_OFF);
+        assertFalse(mTimeout.startChargingPulse());
+        assertEquals(DOZE, mMachine.getState());
+    }
+
+    @Test
+    public void plugAfterAodDisabledDuringSleep_doesNotPulse() {
+        expireToDarkDoze();
+        when(mConfig.alwaysOnEnabled(anyInt())).thenReturn(false);
+        assertFalse(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void plugWhileSuppressed_doesNotPulse() {
+        expireToDarkDoze();
+        when(mHost.isAlwaysOnSuppressed()).thenReturn(true);
+        assertFalse(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void repeatedPlugAndQuickReplug_doNotStackOrExtendPulse() {
+        expireToDarkDoze();
+        assertTrue(mTimeout.startChargingPulse());
+        assertFalse(mTimeout.startChargingPulse());
+        mMachine.requestPulse(DozeLog.PULSE_REASON_NOTIFICATION);
+        mMachine.requestState(DOZE_PULSING);
+        mMachine.onScreenState(Display.STATE_ON);
+        // Disconnect does not renew the session; a subsequent connect is still rejected.
+        assertFalse(mTimeout.startChargingPulse());
+        mMachine.onScreenState(Display.STATE_ON);
+        verify(mAlarmManager, times(1)).setExact(anyInt(), anyLong(),
+                eq("doze_aod_charging_timeout"), any(), any());
+    }
+
+    @Test
+    public void cancelledChargingPulse_allowsNextPlug() {
+        expireToDarkDoze();
+        assertTrue(mTimeout.startChargingPulse());
+        mTimeout.cancelChargingPulse();
+        assertTrue(mTimeout.startChargingPulse());
+        verify(mAlarmManager, never()).setExact(anyInt(), anyLong(),
+                eq("doze_aod_charging_timeout"), any(), any());
+    }
+
+    @Test
+    public void notificationDuringChargingPulse_keepsItsOwnLifetime() {
+        expireToDarkDoze();
+        startChargingPulse();
+        ArgumentCaptor<AlarmManager.OnAlarmListener> listener =
+                ArgumentCaptor.forClass(AlarmManager.OnAlarmListener.class);
+        verify(mAlarmManager).setExact(anyInt(), anyLong(),
+                eq("doze_aod_charging_timeout"), listener.capture(), any());
+        mTimeout.cancelChargingPulse();
+        verify(mAlarmManager).cancel(any(AlarmManager.OnAlarmListener.class));
+        listener.getValue().onAlarm();
+        verify(mHost, never()).stopPulsing();
+        assertEquals(DOZE_PULSING, mMachine.getState());
+    }
+
+    @Test
+    public void plugAfterPreviousChargingPulseFinished_startsNewSession() {
+        expireToDarkDoze();
+        startChargingPulse();
+        mMachine.requestState(DOZE_PULSE_DONE);
+        mMachine.onScreenState(Display.STATE_OFF);
+        assertTrue(mTimeout.startChargingPulse());
+    }
+
+    @Test
+    public void finishDuringChargingPulse_cancelsTimeout() {
+        expireToDarkDoze();
+        startChargingPulse();
+        mMachine.requestState(FINISH);
+        verify(mAlarmManager).cancel(any(AlarmManager.OnAlarmListener.class));
+        assertFalse(mTimeout.startChargingPulse());
     }
 }
