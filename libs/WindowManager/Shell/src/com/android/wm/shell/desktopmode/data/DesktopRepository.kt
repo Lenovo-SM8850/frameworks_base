@@ -1177,7 +1177,9 @@ class DesktopRepository(
      * appropriate classes.
      */
     fun updateTaskExclusionRegions(taskId: Int, taskExclusionRegions: Region) {
+        if (desktopExclusionRegions[taskId] == taskExclusionRegions) return
         val exclusionRegion = Region.obtain(taskExclusionRegions)
+        desktopExclusionRegions[taskId]?.recycle()
         desktopExclusionRegions.put(taskId, exclusionRegion)
         notifyDesktopGestureExclusionListener()
     }
@@ -1189,7 +1191,9 @@ class DesktopRepository(
      * appropriate classes.
      */
     fun removeExclusionRegion(taskId: Int) {
+        val removed = desktopExclusionRegions[taskId] ?: return
         desktopExclusionRegions.delete(taskId)
+        removed.recycle()
         notifyDesktopGestureExclusionListener()
     }
 

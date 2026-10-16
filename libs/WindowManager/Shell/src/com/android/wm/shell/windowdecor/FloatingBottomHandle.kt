@@ -34,13 +34,17 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
     private var parent: SurfaceControl? = null
     private var hostWidth = 0
     private var hostHeight = 0
+    private var lastScale = Float.NaN
+    private var visibleWidth = 0
+    private var visibleHeight = 0
     private var pill: View? = null
     private var sampler: HandleRegionSampler? = null
     private val sampleBounds = Rect()
 
     fun update(task: RunningTaskInfo, taskSurface: SurfaceControl,
         transaction: SurfaceControl.Transaction? = null) {
-        if (!task.isFloatingWindow || listener.pinnedLayerController?.isMini(task) == true) {
+        if (!task.isFloatingWindow || !task.isVisible ||
+            listener.pinnedLayerController?.isMini(task) == true) {
             close()
             return
         }
@@ -106,8 +110,15 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         val y = (if (atBottom) bounds.bottom - height else bounds.top) + (height - pillHeight) / 2
         sampleBounds.set(x, y, x + pillWidth, y + pillHeight)
         sampler?.update(sampleBounds, true, light)
+        val unchanged = width == hostWidth && height == hostHeight &&
+            lastScale == task.floatingWindowScale && visibleWidth == bounds.width() &&
+            visibleHeight == bounds.height()
+        visibleWidth = bounds.width()
+        visibleHeight = bounds.height()
         hostWidth = width
         hostHeight = height
+        lastScale = task.floatingWindowScale
+        if (unchanged && transaction == null) return
         val t = transaction ?: SurfaceControl.Transaction()
         try {
             val inverse = 1f / task.floatingWindowScale
@@ -132,5 +143,6 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         }
         surface = null
         parent = null
+        lastScale = Float.NaN
     }
 }

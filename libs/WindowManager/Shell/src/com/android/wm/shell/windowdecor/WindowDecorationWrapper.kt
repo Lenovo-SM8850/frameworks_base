@@ -298,6 +298,13 @@ private constructor(
             else -> error("Expected Non-null window decoration")
         }
 
+    fun updateFloatingTaskInfo(taskInfo: RunningTaskInfo) {
+        when {
+            defaultWindowDecor != null -> requireDefaultWindowDecor().taskInfo = taskInfo
+            desktopWindowDecor != null -> requireDesktopWindowDecor().updateFloatingTaskInfo(taskInfo)
+        }
+    }
+
     /** Updates all window decorations, including any existing caption. */
     fun relayout(taskInfo: RunningTaskInfo, isFocused: Boolean, exclusionRegion: Region) =
         when {

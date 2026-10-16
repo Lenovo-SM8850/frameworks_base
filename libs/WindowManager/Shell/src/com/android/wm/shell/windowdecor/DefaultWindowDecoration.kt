@@ -293,6 +293,10 @@ constructor(
      * To be called when exclusion region is changed to allow [relayout] to be called if necessary.
      */
     override fun onExclusionRegionChanged(exclusionRegion: Region) {
+        if (taskInfo.isFloatingWindow) {
+            this.exclusionRegion.set(exclusionRegion)
+            return
+        }
         if (captionType == CaptionController.CaptionType.APP_HANDLE) {
             // Avoid unnecessary relayouts for app handle. See b/383672263
             return
@@ -785,6 +789,7 @@ constructor(
 
     private fun updateDragResizeListenerIfNeeded(prevContainerSurface: SurfaceControl?) {
         val taskPositionChanged = !taskInfo.positionInParent.equals(taskPositionInParent)
+        taskPositionInParent.set(taskInfo.positionInParent.x, taskInfo.positionInParent.y)
         if (!taskInfo.isDragResizable(inFullImmersive) ||
             pinnedLayerController?.isMini(taskInfo) == true) {
             closeDragResizeListener()
@@ -880,7 +885,9 @@ constructor(
             // Task can't be moved in full immersive, so skip excluding the caption region.
             return exclusionRegion
         }
-        exclusionRegion.union(Rect(0, 0, taskWidth, captionController?.getCaptionHeight() ?: 0))
+        if (!taskInfo.isFloatingWindow) {
+            exclusionRegion.union(Rect(0, 0, taskWidth, captionController?.getCaptionHeight() ?: 0))
+        }
         exclusionRegion.translate(positionInParent.x, positionInParent.y)
         return exclusionRegion
     }

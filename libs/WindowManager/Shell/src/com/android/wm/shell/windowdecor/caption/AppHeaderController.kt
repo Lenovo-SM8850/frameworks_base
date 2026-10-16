@@ -237,11 +237,11 @@ class AppHeaderController(
                 captionLayout.captionY + captionLayout.captionTopPadding,
             )
 
-            updateLayoutMenu(startT)
-
-            updateViewHolder(params.hasGlobalFocus)
-
-            notifyCaptionStateChanged()
+            if (!taskInfo.isFloatingWindow) {
+                updateLayoutMenu(startT)
+                updateViewHolder(params.hasGlobalFocus)
+                notifyCaptionStateChanged()
+            }
             return captionLayout
         }
 
@@ -711,7 +711,8 @@ class AppHeaderController(
     private fun determineMaxY(requiredEmptySpace: Int, stableBounds: Rect): Int =
         stableBounds.bottom - requiredEmptySpace
 
-    override fun getCaptionHeight(): Int = dimensions.height + getCaptionTopPadding()
+    override fun getCaptionHeight(): Int =
+        if (taskInfo.isFloatingWindow) 0 else dimensions.height + getCaptionTopPadding()
 
     override fun getCaptionWidth(): Int =
         taskInfo.presentationBounds.width()
