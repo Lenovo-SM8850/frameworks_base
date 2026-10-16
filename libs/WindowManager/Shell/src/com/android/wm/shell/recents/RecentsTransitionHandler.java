@@ -427,6 +427,12 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          *
          */
         private HashMap<WindowContainerToken, TaskState> mTaskStates = new HashMap<>();
+        private final ArrayMap<WindowContainerToken, TransitionInfo.Change> mFloatingTasks =
+                new ArrayMap<>();
+        private final HashSet<WindowContainerToken> mStartingFloatingTasks =
+                new HashSet<>();
+        private boolean mFinishingToHome;
+
 
         /**
          * List of tasks that we are switching away from via this transition, ordered from top most
@@ -667,6 +673,9 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             mFinishTransaction = null;
             mAwaitingCancelCompletion = false;
             mTaskStates.clear();
+            mFloatingTasks.clear();
+            mStartingFloatingTasks.clear();
+            mFinishingToHome = false;
             mPausingTasks = null;
             mPausingDeskId = -1;
             mClosingTasks = null;
@@ -799,6 +808,10 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                         + ") or no transition (" + (mTransition == null) + ")");
                 return false;
             }
+            for (ActivityManager.RunningTaskInfo task
+                    : mShellTaskOrganizer.getRunningTasks(mDisplayId)) {
+                if (isFloatingAboveHome(task)) mStartingFloatingTasks.add(task.token);
+            }
             // First see if this is a valid recents transition.
             boolean hasPausingTasks = false;
             for (int i = 0; i < info.getChanges().size(); ++i) {
@@ -887,6 +900,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 final ActivityManager.RunningTaskInfo taskInfo = change.getTaskInfo();
                 if (taskInfo != null && taskInfo.isFloatingWindow) {
                     // Floating windows are hidden during Overview and are not remote targets.
+                    rememberFloatingTask(change);
                     t.hide(change.getLeash());
                     continue;
                 }
@@ -1210,10 +1224,13 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 final TransitionInfo.Change change = info.getChanges().get(i);
                 final ActivityManager.RunningTaskInfo taskInfo = change.getTaskInfo();
                 if (taskInfo != null && taskInfo.isFloatingWindow) {
-                    startT.hide(change.getLeash());
-                    if (TransitionUtil.isOpeningType(change.getMode())) {
+                    rememberFloatingTask(change);
+                    if (TransitionUtil.isOpeningType(change.getMode())
+                            && (change.getMode() == TRANSIT_OPEN
+                                    || !mStartingFloatingTasks.contains(change.getContainer()))) {
                         mState = STATE_NEW_TASK;
                     }
+                    startT.hide(change.getLeash());
                     continue;
                 }
                 if (taskInfo != null && mBubbleHelper.isBubbleTask(taskInfo)) {
@@ -1736,6 +1753,21 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
 
             // Note: returning to a desk tile, whether it be by clicking the tile or one of the
             // existing exploded tasks is considered to be returning to app.
+            final TransitionInfo.Change recentsChange = mRecentsTask != null
+                    ? mInfo.getChange(mRecentsTask) : null;
+            if (!toHome && mState == STATE_NORMAL && !mKeyguardLocked && recentsChange != null
+                    && recentsChange.getTaskInfo().topActivityType == ACTIVITY_TYPE_HOME
+                    && mPausingTasks != null && mPausingTasks.isEmpty() && mOpeningTasks.isEmpty()) {
+                // Floating tasks are not app targets, so there is no app order to restore.
+                for (ActivityManager.RunningTaskInfo task
+                        : mShellTaskOrganizer.getRunningTasks(mDisplayId)) {
+                    if (isFloatingAboveHome(task)) {
+                        toHome = true;
+                        break;
+                    }
+                }
+            }
+            mFinishingToHome = toHome || mWillFinishToHome;
             boolean returningToApp = !toHome
                     && !mWillFinishToHome
                     && mPausingTasks != null
@@ -1942,6 +1974,21 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             }
         }
 
+        private void rememberFloatingTask(TransitionInfo.Change change) {
+            final TransitionInfo.Change previous = mFloatingTasks.get(change.getContainer());
+            if (previous != null && previous.getMode() == android.view.WindowManager.TRANSIT_CLOSE
+                    && !TransitionUtil.isOpeningType(change.getMode())) return;
+            mFloatingTasks.put(change.getContainer(), change);
+        }
+
+        private boolean isFloatingAboveHome(ActivityManager.RunningTaskInfo task) {
+            final TransitionInfo.Change change = mFloatingTasks.get(task.token);
+            return task.isFloatingWindow && task.displayId == mDisplayId
+                    && task.configuration.windowConfiguration.isAlwaysOnTop()
+                    && (change == null
+                            || change.getMode() != android.view.WindowManager.TRANSIT_CLOSE);
+        }
+
         /**
          * Runs the actual logic to finish the recents transition.
          */
@@ -1951,12 +1998,41 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             final Transitions.TransitionFinishCallback finishCb = mFinishCB;
             final IResultReceiver runnerFinishCb = mPendingRunnerFinishCb;
 
+            final boolean finishedToHome = mFinishingToHome;
+            if (!mKeyguardLocked) {
+                // Hiding for Overview can exclude a floating task from the transition entirely.
+                for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
+                        : mShellTaskOrganizer.getInitialTasks()) {
+                    if (!isFloatingAboveHome(task.first)) continue;
+                    if (wct == null) wct = new WindowContainerTransaction();
+                    wct.setHidden(task.first.token, false);
+                    if (task.second.isValid()) mPendingFinishTransaction.show(task.second);
+                }
+                for (int i = 0; i < mFloatingTasks.size(); ++i) {
+                    final TransitionInfo.Change change = mFloatingTasks.valueAt(i);
+                    final ActivityManager.RunningTaskInfo current = mShellTaskOrganizer
+                            .getRunningTaskInfo(change.getTaskInfo().taskId);
+                    if (current == null || !isFloatingAboveHome(current)) continue;
+                    if (wct == null) wct = new WindowContainerTransaction();
+                    wct.setHidden(current.token, false);
+                    final TaskState taskState = mTaskStates.get(change.getContainer());
+                    final SurfaceControl surface = taskState != null
+                            ? taskState.mTaskSurface : change.getLeash();
+                    if (surface.isValid()) mPendingFinishTransaction.show(surface);
+                }
+            }
+
             // We merge the cleanup transaction (prepared in finishInner()) with the last accepted
             // finish transaction to ensure that it's applied after the default finish transaction
             // created for the bookend transition (if it's used)
             mFinishTransaction.merge(mPendingFinishTransaction);
 
             cleanUp();
+            if (finishedToHome) {
+                for (int i = 0; i < mStateListeners.size(); ++i) {
+                    mStateListeners.get(i).onTransitionFinishedToHome(mDisplayId);
+                }
+            }
             finishCb.onTransitionFinished(wct);
             if (runnerFinishCb != null) {
                 try {

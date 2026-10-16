@@ -328,6 +328,13 @@ class PinnedLayerController(
         )
         recentsTransitionHandler.addTransitionStateListener(
             object : RecentsTransitionStateListener {
+                override fun onTransitionFinishedToHome(displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    recentsRunning = false
+                    overviewShowing = false
+                    transitions.runOnIdle { updateVisibility() }
+                }
+
                 override fun onTransitionStateChanged(state: Int, displayId: Int) {
                     if (displayId != DEFAULT_DISPLAY) return
                     recentsRunning = RecentsTransitionStateListener.isRunning(state)
@@ -347,13 +354,10 @@ class PinnedLayerController(
         val hidden = keyguardShowing || recentsRunning || overviewShowing
         minimizeHandles?.setVisible(!hidden)
         val wct = WindowContainerTransaction()
-        val focusedTask = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
-            .firstOrNull { it.isFocused && (!hidden || !isPinned(it.taskId)) }
         getPinnedTasks().filter { it.taskId !in minimizedTasks }.forEach {
             wct.setHidden(it.token, hidden)
         }
         if (!wct.isEmpty) {
-            focusedTask?.let { wct.reorder(it.token, true) }
             shellTaskOrganizer.applyTransaction(wct)
         }
     }

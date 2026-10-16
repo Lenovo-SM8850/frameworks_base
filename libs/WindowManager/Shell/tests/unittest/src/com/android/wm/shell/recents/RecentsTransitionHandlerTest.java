@@ -39,6 +39,7 @@ import static com.android.wm.shell.transition.Transitions.TRANSIT_START_RECENTS_
 
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -1011,4 +1012,182 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
             return mState;
         }
     }
+    @Test
+    public void testHomeFinishWithOneFloatingTask() throws Exception {
+        assertFloatingHomeFinish(1, false);
+    }
+
+    @Test
+    public void testHomeFinishWithTwoFloatingTasks() throws Exception {
+        assertFloatingHomeFinish(2, false);
+    }
+
+    @Test
+    public void testRecentsToHomeWithOneFloatingTask() throws Exception {
+        assertFloatingHomeFinish(1, true);
+    }
+
+    @Test
+    public void testRecentsToHomeWithTwoFloatingTasks() throws Exception {
+        assertFloatingHomeFinish(2, true);
+    }
+
+    @Test
+    public void testHomeFinishFalseWithOneFloatingTaskAndNoAppTarget() throws Exception {
+        assertFloatingHomeFinish(1, false, true);
+    }
+
+    @Test
+    public void testHomeFinishFalseWithTwoFloatingTasksAndNoAppTarget() throws Exception {
+        assertFloatingHomeFinish(2, false, true);
+    }
+
+    @Test
+    public void testRecentsToHomeFinishFalseWithOneFloatingTaskAndNoAppTarget() throws Exception {
+        assertFloatingHomeFinish(1, true, true);
+    }
+
+    @Test
+    public void testRecentsToHomeFinishFalseWithTwoFloatingTasksAndNoAppTarget() throws Exception {
+        assertFloatingHomeFinish(2, true, true);
+    }
+
+    private void assertFloatingHomeFinish(int count, boolean merge) throws Exception {
+        assertFloatingHomeFinish(count, merge, false);
+    }
+
+    @Test
+    public void testHomeFinishDoesNotReshowClosingFloatingTask() throws Exception {
+        assertFloatingHomeFinish(2, true, false, true);
+    }
+
+    private void assertFloatingHomeFinish(int count, boolean merge, boolean onlyFloating)
+            throws Exception {
+        assertFloatingHomeFinish(count, merge, onlyFloating, false);
+    }
+
+    private void assertFloatingHomeFinish(int count, boolean merge, boolean onlyFloating,
+            boolean closeFirst) throws Exception {
+        final IBinder transition = startRecentsTransition(false);
+        final TransitionInfo info = createTransitionInfo();
+        final ArrayList<ActivityManager.RunningTaskInfo> floating = new ArrayList<>();
+        if (onlyFloating) {
+            info.getChanges().removeIf(change -> change.getTaskInfo().topActivityType
+                    != ACTIVITY_TYPE_HOME);
+            info.getChanges().get(0).setMode(TRANSIT_CHANGE);
+        }
+        for (int i = 0; i < count; ++i) {
+            final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                    .setUserId(0)
+                    .setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM)
+                    .setActivityType(ACTIVITY_TYPE_STANDARD)
+                    .setTopActivityType(ACTIVITY_TYPE_STANDARD).build();
+            task.isFloatingWindow = true;
+            task.configuration.windowConfiguration.setAlwaysOnTop(true);
+            final TransitionInfo.Change change = new TransitionInfo.Change(task.token,
+                    new SurfaceControl());
+            change.setTaskInfo(task);
+            change.setMode(TRANSIT_CHANGE);
+            if (!onlyFloating) info.getChanges().add(change);
+            mShellTaskOrganizer.onTaskAppeared(task, change.getLeash());
+            floating.add(task);
+        }
+        final Transitions.TransitionFinishCallback finish =
+                mock(Transitions.TransitionFinishCallback.class);
+        final RecentsTransitionStateListener state = mock(RecentsTransitionStateListener.class);
+        mRecentsTransitionHandler.addTransitionStateListener(state);
+        mRecentsTransitionHandler.startAnimation(transition, info, new StubTransaction(),
+                new StubTransaction(), finish);
+        if (merge) {
+            final TransitionInfo incoming = new TransitionInfoBuilder(TRANSIT_CHANGE).build();
+            final TransitionInfo.Change change = new TransitionInfo.Change(floating.get(0).token,
+                    new SurfaceControl());
+            change.setTaskInfo(floating.get(0));
+            change.setMode(closeFirst ? android.view.WindowManager.TRANSIT_CLOSE : TRANSIT_TO_FRONT);
+            incoming.getChanges().add(change);
+            final Transitions.TransitionFinishCallback merged =
+                    mock(Transitions.TransitionFinishCallback.class);
+            mRecentsTransitionHandler.mergeAnimation(new Binder(), incoming,
+                    new StubTransaction(), new StubTransaction(), transition, merged);
+            verify(merged).onTransitionFinished(any());
+        }
+        final IResultReceiver runnerFinish = mock(IResultReceiver.class);
+        mRecentsTransitionHandler.findController(transition).finish(!onlyFloating, false, runnerFinish);
+        mMainExecutor.flushAll();
+        final ArgumentCaptor<WindowContainerTransaction> wct =
+                ArgumentCaptor.forClass(WindowContainerTransaction.class);
+        verify(finish).onTransitionFinished(wct.capture());
+        for (int i = 0; i < floating.size(); ++i) {
+            final ActivityManager.RunningTaskInfo task = floating.get(i);
+            if (closeFirst && i == 0) {
+                assertNull(wct.getValue().getChanges().get(task.token.asBinder()));
+            } else {
+                assertFalse(wct.getValue().getChanges().get(task.token.asBinder()).getHidden());
+            }
+        }
+        verify(runnerFinish).send(anyInt(), any());
+        if (onlyFloating) {
+            verify(mTransitions, never()).startTransition(eq(TRANSIT_END_RECENTS_TRANSITION),
+                    any(), any());
+        }
+        verify(state).onTransitionFinishedToHome(anyInt());
+        assertNull(mRecentsTransitionHandler.findController(transition));
+    }
+
+
+    @Test
+    public void testNewFloatingLaunchDuringRecentsFinishToApp() throws Exception {
+        assertNewFloatingLaunchFinish(false, TRANSIT_OPEN);
+    }
+
+    @Test
+    public void testNewFloatingLaunchDuringRecentsFinishToHome() throws Exception {
+        assertNewFloatingLaunchFinish(true, TRANSIT_OPEN);
+    }
+
+    @Test
+    public void testNewFloatingTaskToFrontDuringRecentsIsLaunch() throws Exception {
+        assertNewFloatingLaunchFinish(false, TRANSIT_TO_FRONT);
+    }
+
+    private void assertNewFloatingLaunchFinish(boolean toHome, int mode) throws Exception {
+        final IBinder transition = startRecentsTransition(false);
+        final Transitions.TransitionFinishCallback finish =
+                mock(Transitions.TransitionFinishCallback.class);
+        final SurfaceControl.Transaction finishT = mock(SurfaceControl.Transaction.class);
+        mRecentsTransitionHandler.setFinishTransactionSupplier(() -> finishT);
+        mRecentsTransitionHandler.startAnimation(transition, createTransitionInfo(),
+                new StubTransaction(), new StubTransaction(), finish);
+        final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                .setUserId(0).setWindowingMode(WINDOWING_MODE_FREEFORM)
+                .setActivityType(ACTIVITY_TYPE_STANDARD)
+                .setTopActivityType(ACTIVITY_TYPE_STANDARD).build();
+        task.isFloatingWindow = true;
+        task.configuration.windowConfiguration.setAlwaysOnTop(true);
+        final SurfaceControl leash = mock(SurfaceControl.class);
+        when(leash.isValid()).thenReturn(true);
+        mShellTaskOrganizer.onTaskAppeared(task, leash);
+        final TransitionInfo incoming = new TransitionInfoBuilder(TRANSIT_OPEN).build();
+        final TransitionInfo.Change change = new TransitionInfo.Change(task.token, leash);
+        change.setTaskInfo(task);
+        change.setMode(mode);
+        incoming.getChanges().add(change);
+        final Transitions.TransitionFinishCallback merged =
+                mock(Transitions.TransitionFinishCallback.class);
+        mRecentsTransitionHandler.mergeAnimation(new Binder(), incoming,
+                new StubTransaction(), new StubTransaction(), transition, merged);
+        verify(merged).onTransitionFinished(any());
+        mRecentsTransitionHandler.findController(transition).finish(toHome, false,
+                mock(IResultReceiver.class));
+        mMainExecutor.flushAll();
+        final ArgumentCaptor<WindowContainerTransaction> wct =
+                ArgumentCaptor.forClass(WindowContainerTransaction.class);
+        verify(finish).onTransitionFinished(wct.capture());
+        assertFalse(wct.getValue().getChanges().get(task.token.asBinder()).getHidden());
+        verify(finishT, org.mockito.Mockito.atLeastOnce()).show(leash);
+        verify(mTransitions, never()).startTransition(eq(TRANSIT_END_RECENTS_TRANSITION),
+                any(), any());
+        assertNull(mRecentsTransitionHandler.findController(transition));
+    }
+
 }
