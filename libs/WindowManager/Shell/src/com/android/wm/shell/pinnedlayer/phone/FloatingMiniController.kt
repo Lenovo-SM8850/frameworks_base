@@ -188,6 +188,27 @@ class FloatingMiniController(
         changed(task)
     }
 
+    fun isStashed(task: TaskInfo): Boolean = state.get(task.userId, task.taskId)?.edge
+        ?.let { it != FloatingMiniState.Edge.NONE } == true
+
+    fun unstash(task: TaskInfo) {
+        val entry = state.get(task.userId, task.taskId) ?: return
+        if (!isStashed(task)) return
+        val stable = stable(task)
+        if (stable.isEmpty) return
+        val destination = FloatingMiniState.clamp(entry.bounds, stable, (8 * density(task)).toInt())
+        entry.edge = FloatingMiniState.Edge.NONE
+        animate(task, Rect(entry.bounds), entry.scale, destination, entry.scale)
+        changed(task)
+    }
+
+    fun endTap(task: TaskInfo) {
+        clearDrag(task)
+        if (organizer.getRunningTaskInfo(task.taskId)?.isFloatingWindow == true) {
+            organizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, false))
+        }
+    }
+
     fun restore(task: TaskInfo) {
         val entry = state.get(task.userId, task.taskId) ?: return
         val stable = stable(task)
