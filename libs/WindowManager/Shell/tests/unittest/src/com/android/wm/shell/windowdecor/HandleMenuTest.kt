@@ -543,7 +543,7 @@ class HandleMenuTest : ShellTestCase() {
 
 
     @Test
-    fun windowingPill_floatBetweenSplitAndClose_usesExistingAction() {
+    fun windowingPill_fullscreenHasFullscreenSplitAndFloat_usesExistingAction() {
         val actions = org.mockito.kotlin.mock<WindowDecorationActions>()
         val pill = WindowingPillView(mContext, mock())
         pill.initialize(actions, mockDesktopModeUiEventLogger, false) {}
@@ -555,9 +555,9 @@ class HandleMenuTest : ShellTestCase() {
         val button = pill.requireViewById<View>(R.id.floating_button)
         val params = button.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         assertEquals(R.id.split_screen_button, params.startToEnd)
-        assertEquals(R.id.close_window_button, params.endToStart)
+        assertEquals(R.id.desktop_button, params.endToStart)
         assertEquals(View.VISIBLE, button.visibility)
-        assertEquals(View.GONE, pill.requireViewById<View>(R.id.fullscreen_button).visibility)
+        assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.fullscreen_button).visibility)
         button.performClick()
         org.mockito.kotlin.verify(actions).onToFloat(task.taskId)
         task.isFloatingWindow = true
@@ -567,7 +567,7 @@ class HandleMenuTest : ShellTestCase() {
     }
 
     @Test
-    fun windowingPill_descriptionsFormatAppNameInBothModes() {
+    fun windowingPill_remainingDescriptionsHaveNoFormatPlaceholder() {
         val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
         task.taskDescription = android.app.ActivityManager.TaskDescription.Builder()
             .setLabel("Test app").build()
@@ -577,17 +577,45 @@ class HandleMenuTest : ShellTestCase() {
             task.isFloatingWindow = floating
             pill.bind(task, false)
             listOf(R.id.rotate_window_button, R.id.fullscreen_button, R.id.split_screen_button,
-                R.id.floating_button, R.id.close_window_button)
+                R.id.floating_button)
                 .forEach { id ->
                     val button = pill.requireViewById<View>(id)
                     assertThat(button.contentDescription?.toString().orEmpty()).doesNotContain("%")
                     assertThat(button.tooltipText?.toString().orEmpty()).doesNotContain("%")
                 }
-            assertThat(pill.requireViewById<View>(R.id.close_window_button)
-                .contentDescription.toString()).isEqualTo(mContext.getString(R.string.close_button_text, "Test app"))
         }
     }
 
+
+    @Test fun floatingCloseUsesDismissRowBelowIcons_withoutAppName() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FREEFORM, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        task.isFloatingWindow = true
+        task.taskDescription = android.app.ActivityManager.TaskDescription.Builder()
+            .setLabel("Test app").build()
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.windowingPillView.parent as View
+        val pill = root.requireViewById<View>(R.id.windowing_pill)
+        val row = root.requireViewById<View>(R.id.floating_close_pill)
+        val parent = row.parent as android.view.ViewGroup
+        assertEquals(parent.indexOfChild(pill) + 1, parent.indexOfChild(row))
+        assertEquals(View.VISIBLE, row.visibility)
+        val button = root.requireViewById<View>(R.id.floating_close_button)
+        val label = mContext.getString(R.string.floating_window_close)
+        assertEquals(label, button.contentDescription.toString())
+        assertEquals(label, button.tooltipText.toString())
+        assertThat(label).doesNotContain("%")
+        assertThat(label).doesNotContain("Test app")
+        button.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
+    }
+
+    @Test fun fullscreenHasNoCloseRow() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        handleMenu = createAndShowHandleMenu()
+        assertEquals(View.GONE, (handleMenu.handleMenuView!!.windowingPillView.parent as View)
+            .requireViewById<View>(R.id.floating_close_pill).visibility)
+    }
 
     @Test fun desktopFloat_requiresActiveDeskAndNeverShowsForFloatingTask() {
         val actions = mock<WindowDecorationActions>()

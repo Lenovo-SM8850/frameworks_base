@@ -43,6 +43,7 @@ import android.view.WindowManager.LayoutParams
 import android.view.WindowlessWindowManager
 import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.TextView
 import android.window.DesktopExperienceFlags
 import android.window.DesktopModeFlags
 import android.window.SurfaceSyncGroup
@@ -540,6 +541,9 @@ private constructor(
                 loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_open_in_browser_pill_height)
             menuHeight -= pillTopMargin
         }
+        if (taskInfo.isFloatingWindow) {
+            menuHeight += loadDimensionPixelSize(R.dimen.bubble_menu_item_height) + pillTopMargin
+        }
         return menuHeight
     }
 
@@ -647,6 +651,9 @@ private constructor(
         val windowingPillView: WindowingPillView =
             rootView.requireViewById<WindowingPillView>(R.id.windowing_pill)
 
+        private val floatingClosePill = rootView.requireViewById<View>(R.id.floating_close_pill)
+        private val floatingCloseButton = rootView.requireViewById<View>(R.id.floating_close_button)
+
         // More Actions Pill.
         private val moreActionsPill = rootView.requireViewById<View>(R.id.more_actions_pill)
         private val screenshotBtn =
@@ -677,6 +684,7 @@ private constructor(
 
         private val menuButtons =
             listOf(
+                floatingCloseButton,
                 newWindowBtn,
                 changeAspectRatioBtn,
                 gameControlsBtn,
@@ -720,6 +728,9 @@ private constructor(
 
         override fun onClick(v: View) {
             when (v.id) {
+                R.id.floating_close_button -> {
+                    if (taskInfo.isFloatingWindow) windowDecorationActions.onClose(taskInfo)
+                }
                 R.id.new_window_button -> {
                     windowDecorationActions.onNewWindow(taskInfo.taskId)
                 }
@@ -754,6 +765,13 @@ private constructor(
             this.style = calculateMenuStyle(taskInfo)
 
             bindAppInfoPill(style)
+            floatingClosePill.isGone = !taskInfo.isFloatingWindow
+            if (taskInfo.isFloatingWindow) {
+                floatingClosePill.background.setTint(style.backgroundColor)
+                rootView.requireViewById<TextView>(R.id.floating_close_label).setTextColor(style.textColor)
+                rootView.requireViewById<ImageView>(R.id.floating_close_icon).imageTintList =
+                    ColorStateList.valueOf(style.textColor)
+            }
             windowingPillView.isGone = !shouldShowWindowingPill
             if (shouldShowWindowingPill) {
                 val isInSplitScreen = splitScreenController.isTaskInSplitScreen(taskInfo.taskId)

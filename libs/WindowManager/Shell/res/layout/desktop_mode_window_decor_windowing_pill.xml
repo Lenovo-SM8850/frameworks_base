@@ -60,18 +60,6 @@
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
         app:layout_constraintStart_toEndOf="@id/split_screen_button"
-        app:layout_constraintEnd_toStartOf="@id/close_window_button"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintHorizontal_chainStyle="spread"/>
-
-    <ImageButton
-        android:id="@+id/close_window_button"
-        android:contentDescription="@string/close_button_text"
-        android:tooltipText="@string/close_button_text"
-        android:src="@drawable/desktop_mode_header_ic_close"
-        android:tint="@color/materialColorOnSurface"
-        style="@style/DesktopModeHandleMenuWindowingButton"
-        app:layout_constraintStart_toEndOf="@id/floating_button"
         app:layout_constraintEnd_toStartOf="@id/desktop_button"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintHorizontal_chainStyle="spread"/>
@@ -83,7 +71,7 @@
         android:src="@drawable/desktop_mode_ic_handle_menu_desktop"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
-        app:layout_constraintStart_toEndOf="@id/close_window_button"
+        app:layout_constraintStart_toEndOf="@id/floating_button"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintHorizontal_chainStyle="spread"/>

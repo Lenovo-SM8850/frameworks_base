@@ -415,4 +415,6 @@
     <string name="package_update_text">Updating...</string>
     <string name="floating_window_restore">Restore %1$s floating window</string>
     <string name="floating_window_handle">Floating window handle</string>
+    <!-- Action to close the floating window from its handle menu. -->
+    <string name="floating_window_close">Close floating window</string>
 </resources>
