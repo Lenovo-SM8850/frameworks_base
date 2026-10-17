@@ -659,6 +659,29 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
+    fun manualRotation_keepsVisibleCenterAndClampsOnlyAtStableEdges() {
+        listOf(android.graphics.Point(300, 500), android.graphics.Point(0, 100),
+            android.graphics.Point(900, 1700)).forEach { position ->
+            val task = createTaskInfo(Rect(0, 0, 600, 900)).apply {
+                isFloatingWindow = true
+                floatingWindowScale = .75f
+                positionInParent = position
+                floatingWindowPosition.set(position.x, position.y + 400)
+            }
+            val start = task.presentationBounds
+            val end = requireNotNull(controller.getManualRotationBounds(task))
+            val stable = Rect(0, 100, 1080, 1870)
+            assertThat(stable.contains(end)).isTrue()
+            val x = start.exactCenterX().coerceIn(
+                stable.left + end.width() / 2f, stable.right - end.width() / 2f)
+            val y = start.exactCenterY().coerceIn(
+                stable.top + end.height() / 2f, stable.bottom - end.height() / 2f)
+            assertThat(end.exactCenterX()).isWithin(.5f).of(x)
+            assertThat(end.exactCenterY()).isWithin(.5f).of(y)
+        }
+    }
+
+    @Test
     fun fixedApp_manualShapeOverridesRequestAndSurvivesDeviceRotation() {
         setRealPortraitDisplay()
         val task = createTaskInfo(Rect(100, 200, 700, 1100)).apply {

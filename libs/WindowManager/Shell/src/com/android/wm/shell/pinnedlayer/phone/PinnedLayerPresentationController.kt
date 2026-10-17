@@ -88,7 +88,7 @@ class PinnedLayerPresentationController(
         if (!task.isFloatingWindow) return null
         val details = getDisplayDetails(task.displayId) ?: return null
         val landscape = logical.width() <= logical.height()
-        return FloatingWindowGeometry.scaledAspectBounds(task.floatingWindowRestoreBounds,
+        return FloatingWindowGeometry.scaledAspectBounds(task.presentationBounds,
             logical, details.stableBounds(),
             displayAspect(details.layout.width(), details.layout.height(), landscape),
             task.floatingWindowScale, minWidth(task, details), minHeight(task, details))

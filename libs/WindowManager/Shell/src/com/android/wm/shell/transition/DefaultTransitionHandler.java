@@ -415,6 +415,11 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                         finishTransaction, onAnimFinish));
                 continue;
             }
+            if (isFloatingRotation(change) && TransitionInfo.isIndependent(change, info)) {
+                animations.add(startFloatingRotationAnimation(info, change, startTransaction,
+                        finishTransaction, onAnimFinish));
+                continue;
+            }
             if (isTask && change.getTaskInfo().isFloatingWindow
                     && change.getMode() == TRANSIT_CHANGE) {
                 Transitions.applyFloatingWindowTransform(change, startTransaction);
@@ -976,6 +981,17 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 && change.getStartAbsBounds().height() == layout.height();
     }
 
+    static boolean isFloatingRotation(TransitionInfo.Change change) {
+        return change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow
+                && change.getMode() == TRANSIT_CHANGE
+                && !change.getStartFloatingWindowBounds().isEmpty()
+                && !change.getStartAbsBounds().isEmpty() && !change.getEndAbsBounds().isEmpty()
+                && change.getStartDisplayId() == change.getEndDisplayId()
+                && change.getStartRotation() == change.getEndRotation()
+                && ((change.getStartAbsBounds().width() > change.getStartAbsBounds().height())
+                != (change.getEndAbsBounds().width() > change.getEndAbsBounds().height()));
+    }
+
     private static boolean isFloatingExit(TransitionInfo.Change change) {
         if (change.getTaskInfo() == null || change.getStartFloatingWindowBounds().isEmpty()) {
             return false;
@@ -1110,6 +1126,55 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
         animator.addUpdateListener(value -> {
             final SurfaceControl.Transaction t = mTransactionPool.acquire();
             applyFrame.accept(t, value.getCurrentPlayTime());
+            t.setFrameTimeline(android.view.Choreographer.getInstance().getVsyncId()).apply();
+            mTransactionPool.release(t);
+        });
+        final WindowAnimation windowAnimation =
+                new WindowAnimation(change, radius, animation, animator);
+        windowAnimation.addFinishCallback(onFinish, mMainExecutor);
+        return windowAnimation;
+    }
+
+    private WindowAnimation startFloatingRotationAnimation(TransitionInfo info,
+            TransitionInfo.Change change, SurfaceControl.Transaction startT,
+            SurfaceControl.Transaction finishT, Consumer<WindowAnimation> onFinish) {
+        final TransitionInfo.Root root = TransitionUtil.getRootFor(change, info);
+        final SurfaceControl leash = change.getLeash();
+        final SurfaceControl veil = new SurfaceControl.Builder()
+                .setName("Floating resize veil").setColorLayer().setParent(root.getLeash()).build();
+        final Context displayContext = mDisplayController.getDisplayContext(change.getEndDisplayId());
+        final Context context = displayContext != null ? displayContext : mContext;
+        final float radius = context.getResources().getDimension(com.android.wm.shell.shared.R.dimen
+                .desktop_windowing_freeform_rounded_corner_radius);
+        final int color = context.getColor(com.android.internal.R.color.materialColorSurfaceContainer);
+        startT.setColor(veil, new float[] {android.graphics.Color.red(color) / 255f,
+                android.graphics.Color.green(color) / 255f, android.graphics.Color.blue(color) / 255f})
+                .setRelativeLayer(veil, leash, -1).show(veil).show(leash);
+        final SurfaceControl snapshot = change.getSnapshot();
+        if (snapshot != null) {
+            startT.reparent(snapshot, root.getLeash()).setRelativeLayer(snapshot, leash, 1)
+                    .show(snapshot);
+            finishT.hide(snapshot);
+        }
+        final FloatingResizeAnimation animation =
+                new FloatingResizeAnimation(change, root.getOffset(), radius, veil);
+        final long duration = (long) (300 * mTransitionAnimationScaleSetting);
+        animation.setDuration(duration);
+        animation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN);
+        animation.setStartTime(0);
+        animation.apply(startT, 0f);
+        Transitions.applyFloatingWindowTransform(change, finishT);
+        finishT.setAlpha(leash, 1f).setCornerRadius(leash,
+                radius / change.getTaskInfo().floatingWindowScale).remove(veil);
+        finishT.addTransactionCommittedListener(mMainExecutor, veil::release);
+        final ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
+        animator.setDuration(duration);
+        animator.setInterpolator(Interpolators.LINEAR);
+        animator.addUpdateListener(value -> {
+            final float progress = duration == 0 ? 1f : animation.getInterpolator()
+                    .getInterpolation(Math.min(1f, (float) value.getCurrentPlayTime() / duration));
+            final SurfaceControl.Transaction t = mTransactionPool.acquire();
+            animation.apply(t, progress);
             t.setFrameTimeline(android.view.Choreographer.getInstance().getVsyncId()).apply();
             mTransactionPool.release(t);
         });
