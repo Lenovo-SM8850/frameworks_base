@@ -621,7 +621,7 @@
   <java-symbol type="dimen" name="immersive_mode_cling_width" />
   <java-symbol type="dimen" name="accessibility_magnification_indicator_width" />
   <java-symbol type="dimen" name="circular_display_mask_thickness" />
-  <java-symbol type="dimen" name="user_icon_size" />
+  <java-symbol type="dimen" name="user_icon_size" id="0x010503b7" />
   <java-symbol type="dimen" name="round_scrollbar_width" />
 
   <java-symbol type="string" name="add_account_button_label" />
@@ -1404,7 +1404,7 @@
   <java-symbol type="drawable" name="popup_top_dark" />
   <java-symbol type="drawable" name="popup_top_bright" />
   <java-symbol type="drawable" name="search_spinner" />
-  <java-symbol type="drawable" name="sym_app_on_sd_unavailable_icon" />
+  <java-symbol type="drawable" name="sym_app_on_sd_unavailable_icon" id="0x01080a43" />
   <java-symbol type="drawable" name="text_edit_side_paste_window" />
   <java-symbol type="drawable" name="text_edit_paste_window" />
   <java-symbol type="drawable" name="btn_check_off" />
@@ -1494,11 +1494,11 @@
   <java-symbol type="drawable" name="stat_notify_sync_error" />
   <java-symbol type="drawable" name="stat_notify_wifi_in_range" />
   <java-symbol type="drawable" name="ic_thread_network" />
-  <java-symbol type="drawable" name="ic_wifi_signal_0" />
-  <java-symbol type="drawable" name="ic_wifi_signal_1" />
-  <java-symbol type="drawable" name="ic_wifi_signal_2" />
-  <java-symbol type="drawable" name="ic_wifi_signal_3" />
-  <java-symbol type="drawable" name="ic_wifi_signal_4" />
+  <java-symbol type="drawable" name="ic_wifi_signal_0" id="0x01080631" />
+  <java-symbol type="drawable" name="ic_wifi_signal_1" id="0x01080632" />
+  <java-symbol type="drawable" name="ic_wifi_signal_2" id="0x01080633" />
+  <java-symbol type="drawable" name="ic_wifi_signal_3" id="0x01080634" />
+  <java-symbol type="drawable" name="ic_wifi_signal_4" id="0x01080635" />
   <java-symbol type="drawable" name="ic_signal_wifi_transient_animation" />
   <java-symbol type="drawable" name="ic_hotspot_transient_animation" />
   <java-symbol type="drawable" name="ic_bluetooth_transient_animation" />
@@ -1575,7 +1575,7 @@
   <java-symbol type="drawable" name="ic_sim_card_multi_48px_clr" />
   <java-symbol type="drawable" name="ic_signal_cellular_alt_24px" />
 
-  <java-symbol type="drawable" name="btn_borderless_rect" />
+  <java-symbol type="drawable" name="btn_borderless_rect" id="0x0108016d" />
   <java-symbol type="drawable" name="ic_phone" />
   <java-symbol type="drawable" name="ic_phone_disabled" />
   <java-symbol type="drawable" name="ic_bt_headphones_a2dp" />
@@ -1588,9 +1588,9 @@
   <java-symbol type="drawable" name="ic_expand_more" />
   <java-symbol type="drawable" name="ic_lockscreen_ime" />
   <java-symbol type="drawable" name="ic_menu" />
-  <java-symbol type="drawable" name="ic_minus" />
+  <java-symbol type="drawable" name="ic_minus" id="0x010805a2" />
   <java-symbol type="drawable" name="ic_mode_edit" />
-  <java-symbol type="drawable" name="ic_plus" />
+  <java-symbol type="drawable" name="ic_plus" id="0x010805d0" />
   <java-symbol type="drawable" name="ic_qs_night_display_on" />
   <java-symbol type="drawable" name="ic_settings_bluetooth" />
   <java-symbol type="drawable" name="ic_settings_print" />
@@ -1919,8 +1919,8 @@
   <java-symbol type="bool" name="config_supportDreamWirelessChargingRestriction" />
   <java-symbol type="bool" name="config_allowRotationResolver" />
   <java-symbol type="bool" name="config_dockedStackDividerFreeSnapMode" />
-  <java-symbol type="bool" name="config_enableAppLaunchBlur" />
-  <java-symbol type="bool" name="config_enableBlurExpansion" />
+  <java-symbol type="bool" name="config_enableAppLaunchBlur" id="0x0111017c" />
+  <java-symbol type="bool" name="config_enableBlurExpansion" id="0x01110180" />
   <java-symbol type="dimen" name="docked_stack_divider_thickness" />
   <java-symbol type="dimen" name="docked_stack_divider_insets" />
   <java-symbol type="dimen" name="docked_stack_minimize_thickness" />
@@ -1932,15 +1932,15 @@
   <java-symbol type="dimen" name="navigation_bar_height" />
   <java-symbol type="dimen" name="navigation_bar_height_landscape" />
   <java-symbol type="dimen" name="navigation_bar_width" />
-  <java-symbol type="dimen" name="navigation_bar_frame_height" />
+  <java-symbol type="dimen" name="navigation_bar_frame_height" id="0x0105027b" />
   <java-symbol type="dimen" name="navigation_bar_frame_height_landscape" />
   <java-symbol type="dimen" name="navigation_bar_gesture_height" />
   <java-symbol type="dimen" name="navigation_bar_gesture_larger_height" />
   <java-symbol type="dimen" name="navigation_bar_height_car_mode" />
   <java-symbol type="dimen" name="navigation_bar_height_landscape_car_mode" />
   <java-symbol type="dimen" name="navigation_bar_width_car_mode" />
-  <java-symbol type="dimen" name="taskbar_frame_height" />
-  <java-symbol type="dimen" name="status_bar_height" />
+  <java-symbol type="dimen" name="taskbar_frame_height" id="0x01050377" />
+  <java-symbol type="dimen" name="status_bar_height" id="0x01050368" />
   <java-symbol type="dimen" name="display_cutout_touchable_region_size" />
   <java-symbol type="dimen" name="system_gestures_distance_threshold" />
   <java-symbol type="dimen" name="system_gestures_start_threshold" />
@@ -2720,9 +2720,9 @@
 
   <!-- Gestural Nav buttons within InputMethodService -->
   <java-symbol type="dimen" name="input_method_nav_key_button_ripple_max_width" />
-  <java-symbol type="dimen" name="input_method_navigation_bar_height" />
+  <java-symbol type="dimen" name="input_method_navigation_bar_height" id="0x01050213" />
   <java-symbol type="drawable" name="ic_ime_nav_back" />
-  <java-symbol type="drawable" name="ic_ime_switcher" />
+  <java-symbol type="drawable" name="ic_ime_switcher" id="0x01080467" />
   <java-symbol type="id" name="input_method_nav_back" />
   <java-symbol type="id" name="input_method_nav_buttons" />
   <java-symbol type="id" name="input_method_nav_center_group" />
@@ -3305,8 +3305,8 @@
   <java-symbol type="integer" name="config_doubleTapPowerGestureMode" />
   <java-symbol type="integer" name="config_doubleTapPowerGestureMultiTargetDefaultAction" />
   <java-symbol type="bool" name="config_emergencyGestureEnabled" />
-  <java-symbol type="bool" name="config_defaultEmergencyGestureEnabled" />
-  <java-symbol type="bool" name="config_defaultEmergencyGestureSoundEnabled" />
+  <java-symbol type="bool" name="config_defaultEmergencyGestureEnabled" id="0x01110138" />
+  <java-symbol type="bool" name="config_defaultEmergencyGestureSoundEnabled" id="0x01110139" />
   <java-symbol type="bool" name="config_volumeHushGestureEnabled" />
 
   <java-symbol type="drawable" name="platlogo_m" />
@@ -3957,7 +3957,7 @@
 
   <java-symbol type="raw" name="fallback_categories" />
 
-  <java-symbol type="string" name="config_icon_mask" />
+  <java-symbol type="string" name="config_icon_mask" id="0x010402cd" />
   <java-symbol type="string" name="config_banner_mask" />
   <java-symbol type="string" name="config_batterymeterPerimeterPath" />
   <java-symbol type="string" name="config_batterymeterErrorPerimeterPath" />
@@ -4365,7 +4365,7 @@
   <java-symbol type="string" name="config_feedbackIntentExtraKey" />
   <java-symbol type="string" name="config_feedbackIntentNameKey" />
 
-  <java-symbol type="array" name="config_hideWhenDisabled_packageNames" />
+  <java-symbol type="array" name="config_hideWhenDisabled_packageNames" id="0x01070098" />
 
   <java-symbol type="string" name="config_dozeLongPressSensorType" />
   <java-symbol type="string" name="config_dozeUdfpsLongPressSensorType" />
@@ -4396,12 +4396,12 @@
   <java-symbol type="bool" name="config_displayBlanksAfterDoze" />
   <java-symbol type="bool" name="config_displayBrightnessBucketsInDoze" />
   <java-symbol type="bool" name="config_displayColorFadeDisabled" />
-  <java-symbol type="integer" name="config_storageManagerDaystoRetainDefault" />
+  <java-symbol type="integer" name="config_storageManagerDaystoRetainDefault" id="0x010e0165" />
   <java-symbol type="bool" name="config_supportsSmartIdleMaintenance" />
-  <java-symbol type="string" name="config_headlineFontFamily" />
-  <java-symbol type="string" name="config_headlineFontFamilyMedium" />
-  <java-symbol type="string" name="config_bodyFontFamily" />
-  <java-symbol type="string" name="config_bodyFontFamilyMedium" />
+  <java-symbol type="string" name="config_headlineFontFamily" id="0x010402c7" />
+  <java-symbol type="string" name="config_headlineFontFamilyMedium" id="0x010402c8" />
+  <java-symbol type="string" name="config_bodyFontFamily" id="0x01040248" />
+  <java-symbol type="string" name="config_bodyFontFamilyMedium" id="0x01040249" />
 
   <java-symbol type="integer" name="config_pressedStateDurationMillis" />
   <java-symbol type="integer" name="config_tapTimeoutMillis" />
@@ -4545,7 +4545,7 @@
   <java-symbol type="string" name="config_managed_provisioning_package" />
 
   <java-symbol type="string" name="notification_app_name_system" />
-  <java-symbol type="string" name="notification_app_name_settings" />
+  <java-symbol type="string" name="notification_app_name_settings" id="0x01040717" />
 
   <!-- Battery saver config -->
   <java-symbol type="integer" name="config_lowBatteryAutoTriggerDefaultLevel" />
@@ -4920,7 +4920,7 @@
   <java-symbol type="array" name="config_defaultImperceptibleKillingExemptionProcStates" />
 
   <java-symbol type="color" name="conversation_important_highlight" />
-  <java-symbol type="dimen" name="importance_ring_stroke_width" />
+  <java-symbol type="dimen" name="importance_ring_stroke_width" id="0x010501d1" />
   <java-symbol type="dimen" name="importance_ring_anim_max_stroke_width" />
   <java-symbol type="dimen" name="importance_ring_size" />
 
@@ -4955,7 +4955,7 @@
   <java-symbol type="drawable" name="conversation_badge_background" />
   <java-symbol type="drawable" name="conversation_badge_ring" />
   <java-symbol type="color" name="conversation_important_highlight" />
-  <java-symbol type="dimen" name="importance_ring_stroke_width" />
+  <java-symbol type="dimen" name="importance_ring_stroke_width" id="0x010501d1" />
   <java-symbol type="dimen" name="importance_ring_anim_max_stroke_width" />
   <java-symbol type="dimen" name="importance_ring_size" />
   <java-symbol type="dimen" name="notification_2025_conversation_icon_badge_size" />
@@ -5017,7 +5017,7 @@
 
   <java-symbol type="dimen" name="config_wallpaperMinScale"/>
   <!-- The max scale for the wallpaper when it's zoomed in -->
-  <java-symbol type="dimen" name="config_wallpaperMaxScale"/>
+  <java-symbol type="dimen" name="config_wallpaperMaxScale" id="0x0105014c" />
 
   <!-- Set to true to enable the user switcher on the keyguard. -->
   <java-symbol type="bool" name="config_keyguardUserSwitcher" />
@@ -5468,7 +5468,7 @@
   <java-symbol type="bool" name="config_assistLongPressHomeEnabledDefault" />
   <java-symbol type="bool" name="config_assistTouchGestureEnabledDefault" />
 
-  <java-symbol type="bool" name="config_searchAllEntrypointsEnabledDefault" />
+  <java-symbol type="bool" name="config_searchAllEntrypointsEnabledDefault" id="0x01110263" />
 
   <java-symbol type="integer" name="config_hotwordDetectedResultMaxBundleSize" />
 
@@ -6284,13 +6284,13 @@
   <java-symbol type="string" name="config_wearRemoteIntentAction" />
 
   <!-- Whether desktop mode is supported on the current device  -->
-  <java-symbol type="bool" name="config_isDesktopModeSupported" />
+  <java-symbol type="bool" name="config_isDesktopModeSupported" id="0x011101f3" />
 
   <!-- Whether the developer option for desktop mode is supported on the current device  -->
-  <java-symbol type="bool" name="config_isDesktopModeDevOptionSupported" />
+  <java-symbol type="bool" name="config_isDesktopModeDevOptionSupported" id="0x011101f2" />
 
   <!-- Whether the current device's internal display can host desktop sessions.  -->
-  <java-symbol type="bool" name="config_canInternalDisplayHostDesktops" />
+  <java-symbol type="bool" name="config_canInternalDisplayHostDesktops" id="0x0111006e" />
 
   <!-- Maximum number of active tasks on a given Desktop Windowing session. Set to 0 for unlimited. -->
   <java-symbol type="integer" name="config_maxDesktopWindowingActiveTasks"/>
@@ -6300,7 +6300,7 @@
 
   <!-- Whether a display enters desktop mode by default when the windowing mode of the display's
        root TaskDisplayArea is set to WINDOWING_MODE_FREEFORM. -->
-  <java-symbol type="bool" name="config_enterDesktopByDefaultOnFreeformDisplay" />
+  <java-symbol type="bool" name="config_enterDesktopByDefaultOnFreeformDisplay" id="0x011101c5" />
 
   <!-- Whether the home screen should be shown behind freeform tasks in desktop mode. -->
   <java-symbol type="bool" name="config_showHomeBehindDesktop" />
@@ -6550,7 +6550,7 @@
   <java-symbol type="array" name="config_defaultAppFunctionAgentAllowlist" />
 
   <!-- Action for opening trusted location settings page -->
-  <java-symbol type="string" name="trusted_location_settings_action" />
+  <java-symbol type="string" name="trusted_location_settings_action" id="0x01040ae1" />
 
   <!-- For Interactive Doze -->
   <java-symbol type="bool" name="config_enableInteractiveDoze" />
@@ -6636,4 +6636,11 @@
   <!-- Disable the Video Capability over IWLAN when Wi-Fi Calling is turned off  -->
   <java-symbol type="bool" name="config_disable_video_capability_when_wfc_off" />
     <java-symbol type="bool" name="config_allowHbmWithoutTimeLimit" />
+  <java-symbol type="dimen" name="rounded_corner_content_padding" id="0x0105033d" />
+  <java-symbol type="dimen" name="taskbar_stashed_size" id="0x01050378" />
+  <java-symbol type="drawable" name="btn_borderless_material" id="0x0108016c" />
+  <java-symbol type="drawable" name="ic_add_supervised_user" id="0x010803bd" />
+  <java-symbol type="string" name="next_button_label" id="0x0104070b" />
+  <java-symbol type="string" name="skip_button_label" id="0x01040a64" />
+  <java-symbol type="style" name="TextAppearance.DeviceDefault.Body1" id="0x0103039c" />
 </resources>
