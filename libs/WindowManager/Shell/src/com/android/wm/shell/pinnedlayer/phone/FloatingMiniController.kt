@@ -238,14 +238,21 @@ class FloatingMiniController(
         val entry = state.get(task.userId, task.taskId) ?: return
         val stable = stable(task)
         if (stable.isEmpty) return
-        val restore = entry.restore
+        val current = task.configuration.windowConfiguration.bounds
+        if (current.isEmpty) return
+        val saved = entry.restore
+        val logical = if (current.width().toLong() * saved.logical.height() !=
+            saved.logical.width().toLong() * current.height()) {
+            FloatingWindowGeometry.aspectBounds(saved.logical, stable,
+                current.width().toFloat() / current.height(), 1, 1) ?: return
+        } else saved.logical
+        val restore = FloatingMiniState.Restore(saved.bounds, logical, saved.scale)
         val scale = min(restore.scale, min(stable.width().toFloat() / restore.logical.width(),
             stable.height().toFloat() / restore.logical.height()))
         val destination = FloatingMiniState.sized(restore.logical, scale, 0, 0).apply {
             offsetTo((entry.bounds.exactCenterX() - width() / 2f).roundToInt(),
                 (entry.bounds.exactCenterY() - height() / 2f).roundToInt())
         }.let { FloatingMiniState.clamp(it, stable) }
-        val current = task.configuration.windowConfiguration.bounds
         val drawingTask = if (current.width() != restore.logical.width() ||
             current.height() != restore.logical.height()) {
             val initialScale = entry.bounds.width().toFloat() / restore.logical.width()

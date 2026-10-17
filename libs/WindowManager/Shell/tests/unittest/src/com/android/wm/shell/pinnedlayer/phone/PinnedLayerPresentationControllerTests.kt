@@ -249,6 +249,78 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(actual)
     }
 
+    @Test
+    fun entry_ignoresSavedManualRotationAndUsesCurrentFullscreenAspect() {
+        val task = createTaskInfo(Rect(0, 0, 1000, 600)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.entry", "Main")
+            minWidth = 1
+            minHeight = 1
+        }
+        controller.setManualOrientation(task, true, Rect(100, 200, 1000, 800))
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 600, 1000))
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(.6f)
+        assertThat(controller.getManualRotationBounds(task)).isNull()
+    }
+
+    @Test
+    fun entry_afterRestartUsesCurrentDesktopAspectInsteadOfSavedRotation() {
+        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() })
+        val first = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        val task = createTaskInfo(Rect(0, 0, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.entry", "Main")
+            minWidth = 1
+            minHeight = 1
+        }
+        first.setManualOrientation(task, false, Rect(100, 200, 700, 1200))
+        val restarted = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_FREEFORM)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1000, 600))
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val bounds = requireNotNull(restarted.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(1000f / 600)
+    }
+
+    @Test
+    fun entry_usesLetterboxedAppFrameInsteadOfFullscreenTaskAspect() {
+        val task = createTaskInfo(Rect(0, 0, 1920, 1080)).apply {
+            configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            topActivityMainWindowFrame = Rect(600, 0, 1320, 1080)
+            minWidth = 1
+            minHeight = 1
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(2f / 3)
+    }
+
+    @Test
+    fun entry_usesLetterboxBoundsWhenMainWindowMatchesActivityBounds() {
+        val task = createTaskInfo(Rect(0, 0, 1920, 1080)).apply {
+            configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            appCompatTaskInfo.topActivityLetterboxBounds = Rect(600, 0, 1320, 1080)
+            minWidth = 1
+            minHeight = 1
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(2f / 3)
+    }
+
+    @Test
+    fun entry_usesFullscreenBoundsWhenOrientationMetadataIsUnavailable() {
+        val task = createTaskInfo(Rect(0, 0, 1000, 600)).apply {
+            configuration.windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
+            minWidth = 1
+            minHeight = 1
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(1000f / 600)
+    }
+
     private fun setRealPortraitDisplay() {
         val info = android.view.DisplayInfo().apply {
             logicalWidth = 1080

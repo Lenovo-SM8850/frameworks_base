@@ -105,7 +105,7 @@ class PinnedLayerPresentationController(
         if (oldStable.isEmpty || stable.isEmpty) return null
         val start = task.floatingWindowRestoreBounds
         if (start.isEmpty) return null
-        val choice = choices[task.taskId] ?: restoreChoice(task, DisplayDetails(oldLayout, details.context))
+        val choice = choices[task.taskId]
         rememberBounds(task, start, DisplayDetails(oldLayout, details.context))
         val landscape = choice?.takeIf { it.manual }?.landscape
             ?: FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation, start)
@@ -121,11 +121,6 @@ class PinnedLayerPresentationController(
         rotatedStableBounds[task.taskId] = Rect(stable)
         rememberBounds(task, result, DisplayDetails(newLayout, details.context))
         return result
-    }
-
-    private fun restoreChoice(task: TaskInfo, details: DisplayDetails): Choice? {
-        val entry = restored(task, details) ?: return null
-        return Choice(entry.manual, entry.landscape).also { choices[task.taskId] = it }
     }
 
     private fun restored(task: TaskInfo, details: DisplayDetails): FloatingWindowGeometryStore.Entry? {
@@ -147,43 +142,46 @@ class PinnedLayerPresentationController(
     // various ways (e.g., by expanding or contracting against display boundaries).
     private val overriddenBounds: SparseArray<OverridableBounds> = SparseArray()
 
-    /** Returns remembered package bounds, or a centered window matching display orientation. */
+    /** Restores position and size using the app's current aspect, never a saved rotation. */
     fun getPinEntryDestinationBounds(task: TaskInfo, displayId: Int = task.displayId): Rect? {
         val details = getDisplayDetails(displayId) ?: return null
         val stable = details.stableBounds()
+        val appFrame = task.appCompatTaskInfo.topActivityLetterboxBounds?.takeUnless { it.isEmpty }
+            ?: task.topActivityMainWindowFrame?.takeUnless { it.isEmpty }
+        val current = appFrame ?: task.configuration.windowConfiguration.bounds
+        val orientation = task.configuration.orientation
+        val landscape = when {
+            appFrame != null -> current.width() > current.height()
+            orientation == Configuration.ORIENTATION_LANDSCAPE -> true
+            orientation == Configuration.ORIENTATION_PORTRAIT -> false
+            task.isFloatingWindow && choices[task.taskId]?.manual == true && !current.isEmpty ->
+                current.width() > current.height()
+            else -> FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation, current)
+                ?: if (!task.isFloatingWindow && !current.isEmpty) current.width() > current.height()
+                else details.layout.width() > details.layout.height()
+        }
+        val hasCurrentAspect = appFrame != null || orientation != Configuration.ORIENTATION_UNDEFINED ||
+            (!task.isFloatingWindow && task.windowingMode != WindowConfiguration.WINDOWING_MODE_UNDEFINED)
+        val aspect = if (hasCurrentAspect && !current.isEmpty &&
+            (current.width() > current.height()) == landscape) {
+            current.width().toFloat() / current.height()
+        } else displayAspect(details.layout.width(), details.layout.height(), landscape)
+        choices[task.taskId] = Choice(false, landscape)
+        rotationBounds.remove(task.taskId)
         val remembered = restored(task, details)
         entryScales[task.taskId] = remembered?.scale
             ?: if (task.isFloatingWindow) task.floatingWindowScale else FloatingWindowGeometry.DEFAULT_SCALE
-        if (remembered != null) {
-            choices[task.taskId] = Choice(remembered.manual, remembered.landscape)
-            val fixed = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
-                remembered.bounds)
-            val bounds = if (!remembered.manual && fixed != null && fixed != remembered.landscape) {
-                FloatingWindowGeometry.aspectBounds(remembered.bounds, stable,
-                    displayAspect(details.layout.width(), details.layout.height(), fixed),
+        val previous = remembered?.bounds
+            ?: if (task.isFloatingWindow) task.floatingWindowRestoreBounds else null
+        if (previous != null) {
+            val bounds = if ((previous.width() > previous.height()) != landscape ||
+                hasCurrentAspect) {
+                FloatingWindowGeometry.aspectBounds(previous, stable, aspect,
                     (minWidth(task, details) * entryScale(task)).toInt(),
-                    (minHeight(task, details) * entryScale(task)).toInt()) ?: remembered.bounds
-            } else remembered.bounds
-            return entryBounds(task, bounds, details)
+                    (minHeight(task, details) * entryScale(task)).toInt())
+            } else Rect(previous)
+            if (bounds != null) return entryBounds(task, bounds, details)
         }
-        if (task.isFloatingWindow) {
-            val current = task.floatingWindowRestoreBounds
-            val choice = choices[task.taskId]
-            val landscape = choice?.takeIf { it.manual }?.landscape
-                ?: FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation, current)
-                ?: (details.layout.width() > details.layout.height())
-            choices[task.taskId] = Choice(choice?.manual == true, landscape)
-            val bounds = if ((current.width() > current.height()) != landscape) {
-                FloatingWindowGeometry.scaledAspectBounds(current,
-                    task.configuration.windowConfiguration.bounds, stable,
-                    displayAspect(details.layout.width(), details.layout.height(), landscape),
-                    entryScale(task), minWidth(task, details), minHeight(task, details)) ?: current
-            } else current
-            return entryBounds(task, bounds, details)
-        }
-        val landscape = FloatingWindowGeometry.fixedLandscape(task.topActivityRequestedOrientation,
-            task.configuration.windowConfiguration.bounds) ?: (details.layout.width() > details.layout.height())
-        choices[task.taskId] = Choice(false, landscape)
         val shortEdge = (max(details.layout.width(), details.layout.height()) * .30f).toInt()
         val longEdge = max(shortEdge,
             (min(details.layout.width(), details.layout.height()) * .72f).toInt())
@@ -191,7 +189,12 @@ class PinnedLayerPresentationController(
         val height = if (landscape) shortEdge else longEdge
         val bounds = Rect(0, 0, width, height)
         bounds.offset(stable.centerX() - width / 2, stable.centerY() - height / 2)
-        return entryBounds(task, bounds, details)
+        val fitted = if (hasCurrentAspect) {
+            FloatingWindowGeometry.aspectBounds(bounds, stable, aspect,
+                (minWidth(task, details) * entryScale(task)).toInt(),
+                (minHeight(task, details) * entryScale(task)).toInt()) ?: bounds
+        } else bounds
+        return entryBounds(task, fitted, details)
     }
 
     fun getPreservedEntryBounds(task: TaskInfo, bounds: Rect): Rect? {
@@ -274,7 +277,7 @@ class PinnedLayerPresentationController(
             else -> FloatingWindowGeometryStore.PresentationState.STASHED
         }
         val key = boundsKey(task, details) ?: return
-        val previous = choices[task.taskId] ?: restoreChoice(task, details)
+        val previous = choices[task.taskId]
         val choice = Choice(previous?.manual == true, bounds.width() > bounds.height())
         if (mini == null) choices[task.taskId] = choice
         geometryStore.store(key.first, key.second, key.third, bounds, details.stableBounds(),

@@ -107,6 +107,19 @@ class FloatingMiniControllerTest : ShellTestCase() {
         }
     }
 
+    @Test fun restore_usesCurrentMiniAspectWhenItChangedSinceEntry() {
+        val h = Harness()
+        h.task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1200, 800))
+        h.controller.restore(h.task)
+        h.animatorListener.onAnimationEnd(h.animator)
+        val restored = h.changes.last()
+        val logical = restored.configuration.windowConfiguration.bounds
+        assertThat(logical.width().toFloat() / logical.height()).isWithin(.002f).of(1.5f)
+        assertThat(restored.presentationBounds.width())
+            .isGreaterThan(restored.presentationBounds.height())
+        assertThat(h.state.get(h.task.userId, h.task.taskId)).isNull()
+    }
+
     @Test fun interruptedRestore_commitsTargetAndRemovesMiniOwnership() {
         val h = Harness()
         h.controller.restore(h.task)
