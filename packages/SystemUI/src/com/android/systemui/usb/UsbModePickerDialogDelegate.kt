@@ -28,6 +28,7 @@ import android.os.Handler
 import android.os.HandlerExecutor
 import android.os.UserHandle
 import android.os.UserManager
+import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
@@ -143,6 +144,8 @@ class UsbModePickerDialogDelegate @Inject constructor(
     }
 
     private fun showDialog(functions: Long) {
+        if (Settings.Secure.getIntForUser(context.contentResolver, USB_MODE_PICKER_ENABLED,
+                1, UserHandle.USER_CURRENT) == 0) return
         currentDialog?.dismiss()
 
         val modes = buildModeList(functions)
@@ -310,6 +313,7 @@ class UsbModePickerDialogDelegate @Inject constructor(
     }
 
     companion object {
+        private const val USB_MODE_PICKER_ENABLED = "usb_mode_picker_enabled"
         private const val UNLOCK_SHOW_DELAY_MS = 500L
 
         private val USB_MODES = listOf(
