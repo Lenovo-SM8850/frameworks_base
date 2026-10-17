@@ -93,6 +93,8 @@ class PinnedLayerController(
     private var miniInteractions: FloatingMiniController? = null
     private var frameRates: FloatingFrameRateController? = null
     private val miniListeners = mutableSetOf<(TaskInfo) -> Unit>()
+    private val taskLeashes = mutableMapOf<Int, SurfaceControl>()
+    private val hdrLeashes = mutableMapOf<Int, SurfaceControl>()
 
     fun isMini(task: TaskInfo): Boolean =
         presentationController.miniState.get(task.userId, task.taskId) != null
@@ -246,8 +248,20 @@ class PinnedLayerController(
 
     private fun onInit() {
         transitions.registerObserver(this)
+        shellTaskOrganizer.addTaskAppearedListener(object : ShellTaskOrganizer.TaskAppearedListener {
+            override fun onTaskAppeared(taskInfo: RunningTaskInfo, leash: SurfaceControl) {
+                taskLeashes[taskInfo.taskId] = leash
+                updateHdrHeadroom(taskInfo.taskId, taskInfo.isFloatingWindow)
+            }
+        })
+        shellTaskOrganizer.initialTasks.forEach {
+            taskLeashes[it.first.taskId] = it.second
+            updateHdrHeadroom(it.first.taskId, it.first.isFloatingWindow)
+        }
         shellTaskOrganizer.addTaskVanishedListener(object : ShellTaskOrganizer.TaskVanishedListener {
             override fun onTaskVanished(taskInfo: RunningTaskInfo) {
+                updateHdrHeadroom(taskInfo.taskId, false)
+                taskLeashes.remove(taskInfo.taskId)
                 if (taskInfo.isFloatingWindow || taskInfo.taskId in pinnedTasks) {
                     unpin(taskInfo)
                     presentationController.forgetTask(taskInfo.taskId)
@@ -256,6 +270,12 @@ class PinnedLayerController(
         })
         shellTaskOrganizer.addTaskInfoChangedListener(object : ShellTaskOrganizer.TaskInfoChangedListener {
             override fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+                // Let the transition start transaction change HDR ownership atomically first.
+                transitions.runOnIdle {
+                    shellTaskOrganizer.getRunningTaskInfo(taskInfo.taskId)?.let {
+                        updateHdrHeadroom(it.taskId, it.isFloatingWindow)
+                    }
+                }
                 if (taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
                     presentationController.recoverMini(taskInfo)?.let {
                         miniInteractions?.recover(taskInfo, it)
@@ -843,6 +863,26 @@ class PinnedLayerController(
         startTransaction: SurfaceControl.Transaction,
         finishTransaction: SurfaceControl.Transaction,
     ) {
+        val pending = activeTransitions[transition].orEmpty()
+        val releasing = pending.filterIsInstance<ActiveTransition.Unpin>().filter {
+            !it.minimized && info.changes.none { change ->
+                change.taskInfo?.taskId == it.taskInfo.taskId && change.mode == TRANSIT_TO_BACK
+            }
+        }.map { it.taskInfo.taskId }.toSet()
+        info.changes.forEach { change ->
+            val task = change.taskInfo ?: return@forEach
+            // Prefer the organizer's task surface over a transition's temporary animation leash.
+            val leash = taskLeashes.getOrPut(task.taskId) { change.leash }
+            updateHdrHeadroom(task.taskId,
+                task.isFloatingWindow && change.mode != TRANSIT_CLOSE && task.taskId !in releasing,
+                leash, startTransaction)
+        }
+        pending.filter { entry -> info.changes.none {
+            it.taskInfo?.taskId == entry.taskInfo.taskId
+        } }.forEach { entry ->
+            updateHdrHeadroom(entry.taskInfo.taskId, entry.taskInfo.taskId !in releasing,
+                transaction = startTransaction)
+        }
         miniInteractions?.onTransitionReady(info, startTransaction, finishTransaction)
         // TODO(b/449681882): Clean transitions here. Handler should track animation data
         // separately. Use PinnedLayerUiState instead.
@@ -915,6 +955,9 @@ class PinnedLayerController(
         miniInteractions?.onTransitionFinished(aborted)
         val pending = activeTransitions.remove(transition).orEmpty()
         if (aborted) {
+            taskLeashes.keys.toList().forEach { id ->
+                updateHdrHeadroom(id, shellTaskOrganizer.getRunningTaskInfo(id)?.isFloatingWindow == true)
+            }
             val liveFloatingIds = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
                 .filter { it.isFloatingWindow }.map { it.taskId }
             (pinnedTasks + visiblePinnedTasks + liveFloatingIds).toList().forEach { id ->
@@ -942,6 +985,29 @@ class PinnedLayerController(
                 val task = shellTaskOrganizer.getRunningTaskInfo(it.taskInfo.taskId)
                 if (task?.isFloatingWindow != true) unpin(it.taskInfo)
             }
+        }
+    }
+
+    /** Owns the HDR cap for the lifetime of a floating task, including minis and hidden tasks. */
+    private fun updateHdrHeadroom(taskId: Int, floating: Boolean,
+        leash: SurfaceControl? = taskLeashes[taskId],
+        transaction: SurfaceControl.Transaction? = null) {
+        val previous = hdrLeashes[taskId]
+        val next = leash?.takeIf { floating && it.isValid }
+        if (previous == null && next == null) return
+        val t = transaction ?: transactionPool.acquire()
+        if (previous != null && previous != next) {
+            if (previous.isValid) t.setDesiredMaxHdrHeadroom(previous, 0f)
+            hdrLeashes.remove(taskId)
+        }
+        if (next != null) {
+            // A floating window is secondary content; cap its entire subtree at SDR headroom.
+            t.setDesiredMaxHdrHeadroom(next, 1.0f)
+            hdrLeashes[taskId] = next
+        }
+        if (transaction == null) {
+            t.apply()
+            transactionPool.release(t)
         }
     }
 

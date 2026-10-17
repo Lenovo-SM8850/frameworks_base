@@ -146,6 +146,278 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun floatingEnter_capsTaskLeashInStartTransaction() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+
+        hdrTransition(task)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+        verify(finishTransaction, never()).setDesiredMaxHdrHeadroom(any(), any())
+    }
+
+    @Test
+    fun pinFromFullscreen_capsTaskLeashInStartTransaction() {
+        assertPinCapsHdr(WINDOWING_MODE_FULLSCREEN)
+    }
+
+    @Test
+    fun pinFromDesktop_capsTaskLeashInStartTransaction() {
+        assertPinCapsHdr(WINDOWING_MODE_FREEFORM)
+    }
+
+    private fun assertPinCapsHdr(windowingMode: Int) {
+        val task = setupTask().apply {
+            configuration.windowConfiguration.windowingMode = windowingMode
+        }
+        whenever(leash.isValid).thenReturn(true)
+        val transition = mock<IBinder>()
+        assertNotNull(pinnedLayerController.pinTask(transition, task, null))
+        task.isFloatingWindow = true
+        task.configuration.windowConfiguration.windowingMode = WINDOWING_MODE_FREEFORM
+        val info = TransitionInfo(TRANSIT_CHANGE, FLAG_NONE)
+        info.addChange(TransitionInfo.Change(task.token, leash).apply {
+            taskInfo = task
+            mode = TRANSIT_CHANGE
+        })
+
+        pinnedLayerController.onTransitionReady(transition, info, startTransaction, finishTransaction)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+    }
+
+    @Test
+    fun transitionAnimationLeash_capsOrganizerTaskSurface() {
+        val task = setupTask()
+        val taskLeash = mock<SurfaceControl>()
+        whenever(taskLeash.isValid).thenReturn(true)
+        whenever(leash.isValid).thenReturn(true)
+        initController()
+        val appeared = argumentCaptor<ShellTaskOrganizer.TaskAppearedListener>()
+        verify(shellTaskOrganizer).addTaskAppearedListener(appeared.capture())
+        appeared.firstValue.onTaskAppeared(task, taskLeash)
+        task.isFloatingWindow = true
+
+        hdrTransition(task)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(taskLeash, 1.0f)
+        verify(startTransaction, never()).setDesiredMaxHdrHeadroom(leash, any())
+    }
+
+    @Test
+    fun fullscreenTask_doesNotRequestHdrCap() {
+        val task = setupTask().apply {
+            configuration.windowConfiguration.windowingMode = WINDOWING_MODE_FULLSCREEN
+        }
+        whenever(leash.isValid).thenReturn(true)
+
+        hdrTransition(task)
+
+        verify(startTransaction, never()).setDesiredMaxHdrHeadroom(any(), any())
+    }
+
+    @Test
+    fun maximize_clearsHdrCapInFullscreenStartTransaction() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        org.mockito.Mockito.clearInvocations(startTransaction, poolTransaction)
+
+        assertTrue(pinnedLayerController.maximizeTask(task))
+        verify(poolTransaction, never()).setDesiredMaxHdrHeadroom(any(), any())
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.windowingMode = WINDOWING_MODE_FULLSCREEN
+        hdrTransition(task)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+        verify(startTransaction, never()).setDesiredMaxHdrHeadroom(leash, 1.0f)
+    }
+
+    @Test
+    fun desktopHandoff_clearsHdrCapWhileRemainingFreeform() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        org.mockito.Mockito.clearInvocations(startTransaction)
+
+        task.isFloatingWindow = false
+        hdrTransition(task)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+    }
+
+    @Test
+    fun close_clearsHdrCapInStartTransaction() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        org.mockito.Mockito.clearInvocations(startTransaction)
+
+        hdrTransition(task, TRANSIT_CLOSE)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+    }
+
+    @Test
+    fun cleanUnpin_withoutTaskChange_clearsHdrCapInStartTransaction() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        org.mockito.Mockito.clearInvocations(startTransaction)
+        val transition = mock<IBinder>()
+        pinnedLayerController.unpinTask(transition, task, PinnedLayerController.UnpinStrategy.CLEAN)
+
+        pinnedLayerController.onTransitionReady(transition, TransitionInfo(TRANSIT_CHANGE, FLAG_NONE),
+            startTransaction, finishTransaction)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+    }
+
+    @Test
+    fun miniRestoreAndRotation_keepHdrCap() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        val bounds = task.configuration.windowConfiguration.bounds
+        presentationController.miniState.enter(task.userId, task.taskId,
+            FloatingMiniState.Restore(bounds, bounds, 1f), Rect(0, 0, 100, 100), .25f)
+        org.mockito.Mockito.clearInvocations(startTransaction)
+
+        hdrTransition(task)
+        presentationController.miniState.remove(task.userId, task.taskId)
+        hdrTransition(task)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 900, 600))
+        hdrTransition(task)
+
+        verify(startTransaction, org.mockito.kotlin.times(3))
+            .setDesiredMaxHdrHeadroom(leash, 1.0f)
+        verify(startTransaction, never()).setDesiredMaxHdrHeadroom(leash, 0f)
+    }
+
+    @Test
+    fun minimize_keepsHdrCap() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        org.mockito.Mockito.clearInvocations(startTransaction, poolTransaction)
+        val transition = mock<IBinder>()
+        pinnedLayerController.unpinTask(transition, task, PinnedLayerController.UnpinStrategy.HIDE)
+
+        pinnedLayerController.onTransitionReady(transition, TransitionInfo(TRANSIT_CHANGE, FLAG_NONE),
+            startTransaction, finishTransaction)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+        verify(startTransaction, never()).setDesiredMaxHdrHeadroom(leash, 0f)
+        verify(poolTransaction, never()).setDesiredMaxHdrHeadroom(any(), any())
+    }
+
+    @Test
+    fun initialFloatingTask_capsRecoveredLeash() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        whenever(shellTaskOrganizer.initialTasks).thenReturn(listOf(android.util.Pair(task, leash)))
+
+        initController()
+
+        verify(poolTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+        verify(poolTransaction).apply()
+    }
+
+    @Test
+    fun appearedFloatingTask_capsLeashAndVanishedTaskClearsIt() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        initController()
+        val appeared = argumentCaptor<ShellTaskOrganizer.TaskAppearedListener>()
+        val vanished = argumentCaptor<ShellTaskOrganizer.TaskVanishedListener>()
+        verify(shellTaskOrganizer).addTaskAppearedListener(appeared.capture())
+        verify(shellTaskOrganizer).addTaskVanishedListener(vanished.capture())
+
+        appeared.firstValue.onTaskAppeared(task, leash)
+        vanished.firstValue.onTaskVanished(task)
+
+        val order = org.mockito.kotlin.inOrder(poolTransaction)
+        order.verify(poolTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+        order.verify(poolTransaction).apply()
+        order.verify(poolTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+        order.verify(poolTransaction).apply()
+    }
+
+    @Test
+    fun replacedLeash_clearsOldCapBeforeCappingNewLeash() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        val replacement = mock<SurfaceControl>()
+        whenever(replacement.isValid).thenReturn(true)
+        initController()
+        val appeared = argumentCaptor<ShellTaskOrganizer.TaskAppearedListener>()
+        verify(shellTaskOrganizer).addTaskAppearedListener(appeared.capture())
+        appeared.firstValue.onTaskAppeared(task, leash)
+        org.mockito.Mockito.clearInvocations(poolTransaction)
+
+        appeared.firstValue.onTaskAppeared(task, replacement)
+
+        val order = org.mockito.kotlin.inOrder(poolTransaction)
+        order.verify(poolTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+        order.verify(poolTransaction).setDesiredMaxHdrHeadroom(replacement, 1.0f)
+        order.verify(poolTransaction).apply()
+    }
+
+    @Test
+    fun taskInfoExit_defersHdrClearUntilTransitionsIdle() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        whenever(shellTaskOrganizer.getRunningTaskInfo(task.taskId)).thenReturn(task)
+        initController()
+        hdrTransition(task)
+        val changed = argumentCaptor<ShellTaskOrganizer.TaskInfoChangedListener>()
+        verify(shellTaskOrganizer).addTaskInfoChangedListener(changed.capture())
+        task.isFloatingWindow = false
+
+        changed.firstValue.onTaskInfoChanged(task)
+
+        verify(poolTransaction, never()).setDesiredMaxHdrHeadroom(any(), any())
+        val idle = argumentCaptor<Runnable>()
+        verify(transitions).runOnIdle(idle.capture())
+        idle.firstValue.run()
+        verify(poolTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+        verify(poolTransaction).apply()
+    }
+
+    @Test
+    fun abortedExit_restoresHdrCapForLiveFloatingTask() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        whenever(shellTaskOrganizer.getRunningTaskInfo(task.taskId)).thenReturn(task)
+        whenever(shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)).thenReturn(arrayListOf(task))
+        hdrTransition(task)
+        val transition = mock<IBinder>()
+        pinnedLayerController.unpinTask(transition, task, PinnedLayerController.UnpinStrategy.CLEAN)
+        pinnedLayerController.onTransitionReady(transition, TransitionInfo(TRANSIT_CHANGE, FLAG_NONE),
+            startTransaction, finishTransaction)
+
+        pinnedLayerController.onTransitionFinished(transition, true)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 0f)
+        verify(poolTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+    }
+
+    private fun initController() {
+        val init = argumentCaptor<Runnable>()
+        verify(shellInit).addInitCallback(init.capture(), eq(pinnedLayerController))
+        init.firstValue.run()
+    }
+
+    private fun hdrTransition(task: RunningTaskInfo, mode: Int = TRANSIT_CHANGE) {
+        val info = TransitionInfo(mode, FLAG_NONE)
+        info.addChange(TransitionInfo.Change(task.token, leash).apply {
+            taskInfo = task
+            this.mode = mode
+        })
+        pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+    }
+
+    @Test
     fun vanishedDesktopTask_doesNotNotifyFloatingListeners() {
         val init = argumentCaptor<Runnable>()
         verify(shellInit).addInitCallback(init.capture(), eq(pinnedLayerController))
