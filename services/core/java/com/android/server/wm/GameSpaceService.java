@@ -39,7 +39,9 @@ public final class GameSpaceService extends SystemService {
     private final Handler mHandler;
 
     private boolean mStarted;
+    private boolean mKeyguardShowing;
     private String mCurrentGame;
+    private String mFocusedPackage;
     private Runnable mPendingBoost;
 
     public GameSpaceService(Context context) {
@@ -48,7 +50,7 @@ public final class GameSpaceService extends SystemService {
         mThread.start();
         mHandler = new Handler(mThread.getLooper());
         mGameListManager = new GameListManager(context);
-        mGameStateDispatcher = new GameStateDispatcher(context);
+        mGameStateDispatcher = new GameStateDispatcher(context, mHandler);
         mGamePackageHandler = new GamePackageHandler(context, mGameListManager, mHandler);
     }
 
@@ -61,11 +63,26 @@ public final class GameSpaceService extends SystemService {
     public void onBootPhase(int phase) {
         if (phase == PHASE_ACTIVITY_MANAGER_READY) {
             startGameSpace();
+        } else if (phase == PHASE_BOOT_COMPLETED) {
+            mHandler.post(mGameStateDispatcher::initialize);
         }
+    }
+
+    @Override
+    public void onUserSwitching(TargetUser from, TargetUser to) {
+        mHandler.post(() -> {
+            mCurrentGame = null;
+            mFocusedPackage = null;
+            stopOverlay();
+        });
     }
 
     public void onAppFocusChanged(ActivityRecord record, Task task) {
         if (record == null || record.packageName == null) {
+            mHandler.post(() -> {
+                mFocusedPackage = null;
+                mGameStateDispatcher.setGameFocused(false);
+            });
             return;
         }
         final String packageName = record.packageName;
@@ -102,6 +119,7 @@ public final class GameSpaceService extends SystemService {
 
     public void onKeyguardChanged(boolean showing) {
         mHandler.post(() -> {
+            mKeyguardShowing = showing;
             if (mCurrentGame == null) {
                 return;
             }
@@ -129,6 +147,9 @@ public final class GameSpaceService extends SystemService {
     }
 
     private void updateFocusedPackage(String packageName, boolean freeformTask) {
+        mFocusedPackage = packageName;
+        mGameStateDispatcher.setGameFocused(
+                !mKeyguardShowing && mGameListManager.isGame(packageName));
         final boolean gameActive = mCurrentGame != null && isCurrentGameTopApp();
         if (freeformTask && gameActive) {
             return;
@@ -169,7 +190,7 @@ public final class GameSpaceService extends SystemService {
 
     private void startOverlay() {
         final String currentGame = mCurrentGame;
-        if (currentGame == null) {
+        if (currentGame == null || mKeyguardShowing) {
             return;
         }
         cancelPendingBoost();
@@ -178,6 +199,8 @@ public final class GameSpaceService extends SystemService {
             mHandler.postDelayed(mPendingBoost, BOOST_DELAY_MS);
         }
         mGameStateDispatcher.dispatchGameState(true, currentGame);
+        mGameStateDispatcher.setGameFocused(mFocusedPackage != null
+                && mGameListManager.isGame(mFocusedPackage));
     }
 
     private void stopOverlay() {

@@ -20,14 +20,28 @@ import android.app.IActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
+import android.database.ContentObserver;
 import android.os.BatteryManager;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.provider.Settings;
+import android.util.AtomicFile;
 import android.util.Slog;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.function.Supplier;
+
+import org.json.JSONObject;
+
 import lineageos.health.HealthInterface;
+import lineageos.providers.LineageSettings;
 
 class GameStateDispatcher {
     private static final String TAG = "GameStateDispatcher";
@@ -42,25 +56,81 @@ class GameStateDispatcher {
     private static final String KEY_BYPASS_CHARGE_ENABLED = "bypass_charge_enabled";
     private static final String KEY_POWER_MODE_PERF_BY_USER = "power_mode_perf_by_user";
     private static final String KEY_POWER_MODE_PERF = "persist.sys.power_mode_perf";
-    private static final int DEFAULT_CHARGE_LIMIT = 100;
+    private static final String EXTRA_BYPASS_CHARGE_ACTIVE = "bypass_charge_active";
+    private static final String[] CHARGE_SETTINGS = {
+            LineageSettings.System.CHARGING_CONTROL_ENABLED,
+            LineageSettings.System.CHARGING_CONTROL_MODE,
+            LineageSettings.System.CHARGING_CONTROL_LIMIT,
+    };
 
     private final Context mContext;
     private final IActivityManager mActivityManager;
 
-    private int mChargeControlLimit = DEFAULT_CHARGE_LIMIT;
-    private boolean mWasChargingControlEnabled;
+    private final Handler mHandler;
+    private final AtomicFile mSavedChargeControl;
+    private final Supplier<HealthInterface> mHealth;
+    private ServiceConnection mSessionConnection;
+    private String mGamePackage;
+    private int mGameUserId = UserHandle.USER_SYSTEM;
+    private boolean mGameFocused;
+    private boolean mSessionReady;
     private boolean mBypassChargeActive;
+    private boolean mInitialized;
 
-    GameStateDispatcher(Context context) {
+    GameStateDispatcher(Context context, Handler handler) {
+        this(context, handler, ActivityManager.getService(),
+                new AtomicFile(new File(Environment.getDataSystemDirectory(),
+                        "gamespace-bypass.json")),
+                () -> HealthInterface.getInstance(context));
+    }
+
+    GameStateDispatcher(Context context, Handler handler, IActivityManager activityManager,
+            AtomicFile savedChargeControl, Supplier<HealthInterface> health) {
         mContext = context;
-        mActivityManager = ActivityManager.getService();
+        mHandler = handler;
+        mActivityManager = activityManager;
+        mSavedChargeControl = savedChargeControl;
+        mHealth = health;
+    }
+
+    void initialize() {
+        if (mInitialized) {
+            return;
+        }
+        if (!restoreChargingControl()) {
+            mHandler.postDelayed(this::initialize, 1000);
+            return;
+        }
+        mInitialized = true;
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(KEY_BYPASS_CHARGE_ENABLED), false,
+                new ContentObserver(mHandler) {
+                    @Override
+                    public void onChange(boolean selfChange) {
+                        updateBypassCharge();
+                    }
+                }, UserHandle.USER_ALL);
+        updateBypassCharge();
     }
 
     void dispatchGameState(boolean active, String packageName) {
         Settings.Secure.putIntForUser(mContext.getContentResolver(), KEY_GAMING_MODE_ACTIVE,
                 active ? 1 : 0, UserHandle.USER_CURRENT);
-        updateGameSession(active, packageName);
-        updateBypassCharge(active);
+        mGameFocused = active;
+        if (active) {
+            mGamePackage = packageName;
+            mGameUserId = ActivityManager.getCurrentUser();
+            startGameSession();
+        } else {
+            updateBypassCharge();
+            stopGameSession();
+            mGamePackage = null;
+        }
+    }
+
+    void setGameFocused(boolean focused) {
+        mGameFocused = focused;
+        updateBypassCharge();
     }
 
     void boostGame(boolean enable) {
@@ -75,107 +145,197 @@ class GameStateDispatcher {
         SystemProperties.set(KEY_POWER_MODE_PERF, enable ? "1" : "0");
     }
 
-    private void updateGameSession(boolean active, String packageName) {
-        if (active) {
-            startGameSession(packageName);
-            return;
-        }
-        stopGameSession();
+    private Intent gameSessionIntent() {
+        return new Intent(ACTION_GAME_START)
+                .setComponent(GAME_SPACE_SESSION_COMPONENT)
+                .putExtra(EXTRA_PACKAGE_NAME, mGamePackage)
+                .putExtra(EXTRA_BYPASS_CHARGE_ACTIVE, mBypassChargeActive);
     }
 
-    private void startGameSession(String packageName) {
-        if (packageName == null) {
+    private void startGameSession() {
+        if (mGamePackage == null) {
             return;
         }
-        final Intent intent = new Intent(ACTION_GAME_START)
-                .setComponent(GAME_SPACE_SESSION_COMPONENT)
-                .putExtra(EXTRA_PACKAGE_NAME, packageName);
         try {
-            final ComponentName result = mActivityManager.startService(null, intent, null, false,
-                    mContext.getOpPackageName(), mContext.getAttributionTag(),
-                    UserHandle.USER_CURRENT);
+            final ComponentName result = mActivityManager.startService(null,
+                    gameSessionIntent(), null, false, mContext.getOpPackageName(),
+                    mContext.getAttributionTag(), mGameUserId);
             if (result == null) {
                 Slog.w(TAG, "GameSpace session service not found");
+                return;
+            }
+            if (mSessionConnection != null) {
+                updateBypassCharge();
+                return;
+            }
+            final ServiceConnection connection = new ServiceConnection() {
+                @Override
+                public void onServiceConnected(ComponentName name, IBinder service) {
+                    if (mSessionConnection != this) {
+                        return;
+                    }
+                    mSessionReady = true;
+                    updateBypassCharge();
+                }
+
+                @Override
+                public void onServiceDisconnected(ComponentName name) {
+                    if (mSessionConnection != this) {
+                        return;
+                    }
+                    mSessionReady = false;
+                    updateBypassCharge();
+                }
+
+                @Override
+                public void onBindingDied(ComponentName name) {
+                    onServiceDisconnected(name);
+                }
+
+                @Override
+                public void onNullBinding(ComponentName name) {
+                    onServiceDisconnected(name);
+                }
+            };
+            mSessionConnection = connection;
+            if (!mContext.bindServiceAsUser(gameSessionIntent(), connection, 0,
+                    mHandler, UserHandle.of(mGameUserId))) {
+                mSessionConnection = null;
             }
         } catch (RemoteException | RuntimeException e) {
+            mSessionConnection = null;
+            mSessionReady = false;
+            updateBypassCharge();
             Slog.w(TAG, "Failed to start GameSpace session", e);
         }
     }
 
     private void stopGameSession() {
+        mSessionReady = false;
+        if (mSessionConnection != null) {
+            mContext.unbindService(mSessionConnection);
+            mSessionConnection = null;
+        }
         final Intent intent = new Intent().setComponent(GAME_SPACE_SESSION_COMPONENT);
         try {
-            mActivityManager.stopService(null, intent, null, UserHandle.USER_CURRENT);
+            mActivityManager.stopService(null, intent, null, mGameUserId);
         } catch (RemoteException | RuntimeException e) {
             Slog.w(TAG, "Failed to stop GameSpace session", e);
         }
     }
 
-    private void updateBypassCharge(boolean active) {
+    private void updateBypassCharge() {
+        if (!mInitialized) {
+            return;
+        }
+        final boolean active = mGameFocused && mSessionReady
+                && mGameUserId == ActivityManager.getCurrentUser() && bypassChargeEnabled();
+        if (active == mBypassChargeActive && !mSavedChargeControl.exists()) {
+            return;
+        }
+        if (active && mBypassChargeActive) {
+            return;
+        }
         if (active) {
-            if (!bypassChargeEnabled()) {
+            if (!restoreChargingControl()) {
                 return;
             }
-            mChargeControlLimit = getChargingLimit();
-            setBypassActive(true);
-            setSmartChargeLevel(batteryLevel());
-            mBypassChargeActive = true;
-            return;
+            final BatteryManager batteryManager = mContext.getSystemService(BatteryManager.class);
+            final int level = batteryManager == null ? -1
+                    : batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            if (level < 0 || level > 100) {
+                return;
+            }
+            try {
+                final HealthInterface health = mHealth.get();
+                if (!health.isChargingControlSupported() || !saveChargingControl(health)) {
+                    return;
+                }
+                if (!health.setEnabled(true) || !health.setMode(HealthInterface.MODE_LIMIT)
+                        || !health.setLimit(level)) {
+                    restoreChargingControl();
+                    return;
+                }
+                mBypassChargeActive = true;
+            } catch (Exception e) {
+                Slog.w(TAG, "Failed to set charging bypass", e);
+                restoreChargingControl();
+                return;
+            }
+        } else {
+            mBypassChargeActive = false;
+            if (!restoreChargingControl()) {
+                mHandler.postDelayed(this::updateBypassCharge, 1000);
+                return;
+            }
         }
-
-        if (!mBypassChargeActive) {
-            return;
+        if (mSessionReady && mGamePackage != null) {
+            // Reuse the session command to acknowledge a successfully applied request.
+            startGameSession();
         }
-        setBypassActive(false);
-        setSmartChargeLevel(mChargeControlLimit);
-        mBypassChargeActive = false;
     }
 
     private boolean bypassChargeEnabled() {
         return Settings.System.getIntForUser(mContext.getContentResolver(),
-                KEY_BYPASS_CHARGE_ENABLED, 0, UserHandle.USER_CURRENT) == 1;
+                KEY_BYPASS_CHARGE_ENABLED, 0, mGameUserId) == 1;
     }
 
-    private int getChargingLimit() {
+    private boolean saveChargingControl(HealthInterface health) {
+        FileOutputStream stream = null;
         try {
-            final HealthInterface health = HealthInterface.getInstance(mContext);
-            mWasChargingControlEnabled = health.getEnabled();
-            if (mWasChargingControlEnabled) {
-                return health.getLimit();
+            final int userId = mGameUserId;
+            final JSONObject saved = new JSONObject()
+                    .put("user", userId)
+                    .put("enabled", health.getEnabled())
+                    .put("mode", health.getMode())
+                    .put("limit", health.getLimit());
+            for (String setting : CHARGE_SETTINGS) {
+                saved.put(setting, LineageSettings.System.getStringForUser(
+                        mContext.getContentResolver(), setting, userId));
             }
+            // Persist the original settings before the first temporary change.
+            stream = mSavedChargeControl.startWrite();
+            stream.write(saved.toString().getBytes(StandardCharsets.UTF_8));
+            mSavedChargeControl.finishWrite(stream);
+            return true;
         } catch (Exception e) {
-            Slog.w(TAG, "Failed to get charging limit", e);
+            mSavedChargeControl.failWrite(stream);
+            Slog.w(TAG, "Failed to save charging control", e);
+            return false;
         }
-        return DEFAULT_CHARGE_LIMIT;
     }
 
-    private int batteryLevel() {
-        final BatteryManager batteryManager = mContext.getSystemService(BatteryManager.class);
-        if (batteryManager == null) {
-            return -1;
-        }
-        return batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
-    }
-
-    private void setSmartChargeLevel(int value) {
-        if (value < 0) {
-            return;
+    private boolean restoreChargingControl() {
+        if (!mSavedChargeControl.exists()) {
+            return true;
         }
         try {
-            final HealthInterface health = HealthInterface.getInstance(mContext);
-            health.setMode(HealthInterface.MODE_LIMIT);
-            health.setLimit(value);
+            final JSONObject saved = new JSONObject(new String(
+                    mSavedChargeControl.readFully(), StandardCharsets.UTF_8));
+            final HealthInterface health = mHealth.get();
+            if (!health.isChargingControlSupported()) {
+                return false;
+            }
+            final int userId = saved.getInt("user");
+            if (userId == ActivityManager.getCurrentUser()
+                    && (!health.setLimit(saved.getInt("limit"))
+                            || (saved.getInt("mode") != HealthInterface.MODE_NONE
+                                    && !health.setMode(saved.getInt("mode")))
+                            || !health.setEnabled(saved.getBoolean("enabled")))) {
+                return false;
+            }
+            // Preserve absent settings as well as explicitly configured values.
+            for (String setting : CHARGE_SETTINGS) {
+                if (!LineageSettings.System.putStringForUser(mContext.getContentResolver(),
+                        setting, saved.optString(setting, null), userId)) {
+                    return false;
+                }
+            }
+            mSavedChargeControl.delete();
+            return true;
         } catch (Exception e) {
-            Slog.w(TAG, "Failed to set charging limit", e);
-        }
-    }
-
-    private void setBypassActive(boolean value) {
-        try {
-            final HealthInterface health = HealthInterface.getInstance(mContext);
-            health.setEnabled(value || mWasChargingControlEnabled);
-        } catch (Exception e) {
-            Slog.w(TAG, "Failed to set charging bypass", e);
+            Slog.w(TAG, "Failed to restore charging control", e);
+            return false;
         }
     }
 }
