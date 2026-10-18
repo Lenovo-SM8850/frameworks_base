@@ -35,6 +35,8 @@ import static java.util.stream.Collectors.joining;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.app.ActivityManager;
+import android.app.ActivityTaskManager;
+import android.app.IActivityTaskManager;
 import android.companion.virtualdevice.flags.Flags;
 import android.content.ComponentName;
 import android.content.Context;
@@ -1182,7 +1184,10 @@ public class EdgeBackGestureHandler implements TunerService.Tunable {
             return withinRange;
         }
 
-        if (mExcludeRegion.contains(x, y)) {
+        final boolean ignoreHomeExclusion = mExcludeRegion.contains(x, y)
+                && shouldIgnoreHomeExclusion(ActivityTaskManager.getService(),
+                        ev.getDisplayId(), x, y);
+        if (mExcludeRegion.contains(x, y) && !ignoreHomeExclusion) {
             if (withinRange) {
                 // We don't have the end point for logging purposes.
                 mEndPoint.x = -1;
@@ -1193,9 +1198,47 @@ public class EdgeBackGestureHandler implements TunerService.Tunable {
             return false;
         }
 
-        mInRejectedExclusion = mUnrestrictedExcludeRegion.contains(x, y);
+        mInRejectedExclusion = !ignoreHomeExclusion && mUnrestrictedExcludeRegion.contains(x, y);
         mLogGesture = true;
         return withinRange;
+    }
+
+    /** Allows Back outside floating tasks when the focused floating task is above Home. */
+    static boolean shouldIgnoreHomeExclusion(IActivityTaskManager taskManager,
+            int displayId, int x, int y) {
+        try {
+            // Match Shell's focus source at DOWN, rather than selecting the top floating task.
+            final ActivityTaskManager.RootTaskInfo focused = taskManager.getFocusedRootTaskInfo();
+            if (focused == null || !focused.isFloatingWindow || !focused.isVisible
+                    || focused.displayId != displayId) {
+                return false;
+            }
+            boolean focusedTaskVisible = false;
+            boolean homeBehind = false;
+            boolean foundBackground = false;
+            for (ActivityManager.RunningTaskInfo task : taskManager.getTasks(
+                    Integer.MAX_VALUE, false, false, displayId)) {
+                if (!task.isVisible || task.displayId != displayId) continue;
+                if (task.taskId == focused.taskId && task.isFocused) focusedTaskVisible = true;
+                if (task.isFloatingWindow) {
+                    // Preserve each floating app's own exclusion where it can receive the touch.
+                    if (task.getPresentationBounds().contains(x, y)) return false;
+                    continue;
+                }
+                if (task.getWindowingMode()
+                        == android.app.WindowConfiguration.WINDOWING_MODE_PINNED) continue;
+                if (!foundBackground) {
+                    homeBehind = task.getActivityType()
+                            == android.app.WindowConfiguration.ACTIVITY_TYPE_HOME;
+                    foundBackground = true;
+                }
+            }
+            // WM supplies a merged region without window attribution. Only bypass it over Home.
+            return focusedTaskVisible && homeBehind;
+        } catch (RemoteException e) {
+            Log.w(TAG, "Unable to check floating focus for Home exclusion", e);
+            return false;
+        }
     }
 
     private void cancelGesture(MotionEvent ev) {
