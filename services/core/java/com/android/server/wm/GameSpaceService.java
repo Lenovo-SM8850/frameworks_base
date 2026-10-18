@@ -15,8 +15,7 @@
  */
 package com.android.server.wm;
 
-import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
-
+import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -24,9 +23,10 @@ import android.os.Handler;
 import android.os.Process;
 import android.util.Slog;
 
-import com.android.server.LocalServices;
 import com.android.server.ServiceThread;
 import com.android.server.SystemService;
+
+import java.util.function.Predicate;
 
 public final class GameSpaceService extends SystemService {
     private static final String TAG = "GameSpaceService";
@@ -41,7 +41,19 @@ public final class GameSpaceService extends SystemService {
     private boolean mStarted;
     private boolean mKeyguardShowing;
     private String mCurrentGame;
-    private String mFocusedPackage;
+    private Task mCurrentGameTask;
+    private boolean mOverlayStarted;
+    private final WindowContainerListener mGameTaskListener = new WindowContainerListener() {
+        @Override
+        public void onVisibleRequestedChanged(boolean visible) {
+            mHandler.post(() -> updateGameTask(mCurrentGameTask, null));
+        }
+
+        @Override
+        public void onRemoved() {
+            mHandler.post(() -> updateGameTask(mCurrentGameTask, null));
+        }
+    };
     private Runnable mPendingBoost;
 
     public GameSpaceService(Context context) {
@@ -71,62 +83,60 @@ public final class GameSpaceService extends SystemService {
     @Override
     public void onUserSwitching(TargetUser from, TargetUser to) {
         mHandler.post(() -> {
-            mCurrentGame = null;
-            mFocusedPackage = null;
             stopOverlay();
-        });
-    }
-
-    public void onAppFocusChanged(ActivityRecord record, Task task) {
-        if (record == null || record.packageName == null) {
-            mHandler.post(() -> {
-                mFocusedPackage = null;
-                mGameStateDispatcher.setGameFocused(false);
-            });
-            return;
-        }
-        final String packageName = record.packageName;
-        final boolean freeformTask = task != null
-                && task.getWindowingMode() == WINDOWING_MODE_FREEFORM;
-        mHandler.post(() -> updateFocusedPackage(packageName, freeformTask));
-    }
-
-    public void removeTask(Task task) {
-        if (task == null) {
-            return;
-        }
-        final String packageName = getTaskPackageName(task);
-        if (packageName == null) {
-            return;
-        }
-        mHandler.post(() -> {
-            if (packageName.equals(mCurrentGame)) {
-                mCurrentGame = null;
-                stopOverlay();
+            mCurrentGame = null;
+            if (mCurrentGameTask != null) {
+                synchronized (mCurrentGameTask.mAtmService.mGlobalLock) {
+                    setCurrentGameTask(null);
+                }
             }
         });
     }
 
-    private String getTaskPackageName(Task task) {
-        final ActivityRecord top = task.getTopMostActivity();
-        if (top != null && top.packageName != null) {
-            return top.packageName;
+    public void onAppFocusChanged(ActivityRecord record, Task task) {
+        // The activity at the top may belong to an in-game browser in the same task.
+        mHandler.post(() -> updateGameTask(task, null));
+    }
+
+    public void removeTask(Task task) {
+        if (task != null) {
+            mHandler.post(() -> updateGameTask(mCurrentGameTask, task));
         }
+    }
+
+    static String getGamePackageName(Task task, Predicate<String> isGame) {
         final Intent baseIntent = task.getBaseIntent();
         final ComponentName component = baseIntent != null ? baseIntent.getComponent() : null;
-        return component != null ? component.getPackageName() : null;
+        if (component != null && isGame.test(component.getPackageName())) {
+            return component.getPackageName();
+        }
+        final ActivityRecord game = task.getActivity(
+                r -> !r.finishing && isGame.test(r.packageName));
+        return game != null ? game.packageName : null;
+    }
+
+    static boolean isGameTaskVisible(Task task) {
+        // Requested visibility reflects the end state of a transition, unlike focus or resume.
+        return task.isAttached() && !task.isForceHidden() && task.isVisibleRequested();
+    }
+
+    static Task getVisibleGameTask(Task currentTask, Task focusedTask,
+            Predicate<Task> isGameTask) {
+        // A quick-launched floating game must not take over a still-visible game's session.
+        if (currentTask != null && isGameTask.test(currentTask) && isGameTaskVisible(currentTask)) {
+            return currentTask;
+        }
+        return focusedTask != null && isGameTask.test(focusedTask)
+                && isGameTaskVisible(focusedTask) ? focusedTask : null;
     }
 
     public void onKeyguardChanged(boolean showing) {
         mHandler.post(() -> {
             mKeyguardShowing = showing;
-            if (mCurrentGame == null) {
-                return;
-            }
             if (showing) {
                 stopOverlay();
             } else {
-                startOverlay();
+                updateGameTask(mCurrentGameTask, null);
             }
         });
     }
@@ -139,53 +149,76 @@ public final class GameSpaceService extends SystemService {
         mGamePackageHandler.registerPackageReceiver();
         mGameListManager.registerGameListObserver(mHandler);
         mGameListManager.addListener(() -> mHandler.post(() -> {
-            if (mCurrentGame != null && mGameListManager.isGame(mCurrentGame)) {
+            updateGameTask(mCurrentGameTask, null);
+            if (mOverlayStarted) {
                 mGameStateDispatcher.boostGame(mGameListManager.isGameInPerfMode(mCurrentGame));
             }
         }));
         Slog.i(TAG, "GameSpaceService initialized");
     }
 
-    private void updateFocusedPackage(String packageName, boolean freeformTask) {
-        mFocusedPackage = packageName;
-        mGameStateDispatcher.setGameFocused(
-                !mKeyguardShowing && mGameListManager.isGame(packageName));
-        final boolean gameActive = mCurrentGame != null && isCurrentGameTopApp();
-        if (freeformTask && gameActive) {
+    private void updateGameTask(Task focusedTask, Task removedTask) {
+        final Task reference = focusedTask != null ? focusedTask : mCurrentGameTask;
+        if (reference == null) {
             return;
         }
-
-        final boolean isGame = mGameListManager.isGame(packageName);
-        boolean shouldStartOverlay = false;
-        boolean shouldStopOverlay = false;
-
-        if (isGame) {
-            if (!packageName.equals(mCurrentGame)) {
-                if (mCurrentGame != null) {
-                    shouldStopOverlay = true;
-                }
-                mCurrentGame = packageName;
-                shouldStartOverlay = true;
+        final int userId = ActivityManager.getCurrentUser();
+        final Task gameTask;
+        final String gamePackage;
+        final boolean visible;
+        synchronized (reference.mAtmService.mGlobalLock) {
+            final Predicate<Task> isGameTask = t -> t != removedTask && t.isLeafTask()
+                    && t.isAttached() && t.mUserId == userId
+                    && t.getTopNonFinishingActivity() != null
+                    && getGamePackageName(t, mGameListManager::isGame) != null;
+            Task candidate = getVisibleGameTask(mCurrentGameTask, focusedTask, isGameTask);
+            if (candidate == null) {
+                candidate = reference.mAtmService.mRootWindowContainer.getTask(
+                        t -> isGameTask.test(t) && isGameTaskVisible(t));
             }
-        } else if (mCurrentGame != null) {
-            mCurrentGame = null;
-            shouldStopOverlay = true;
+            // Retain a hidden task's listener so a show without a focus change restarts it.
+            if (candidate == null && mCurrentGameTask != null
+                    && isGameTask.test(mCurrentGameTask)) {
+                candidate = mCurrentGameTask;
+            }
+            if (candidate == null && focusedTask != null && isGameTask.test(focusedTask)) {
+                candidate = focusedTask;
+            }
+            gameTask = candidate;
+            gamePackage = gameTask != null
+                    ? getGamePackageName(gameTask, mGameListManager::isGame) : null;
+            visible = gameTask != null && isGameTaskVisible(gameTask);
+            setCurrentGameTask(gameTask);
         }
-
-        if (shouldStopOverlay) {
+        if (mCurrentGame != null && !mCurrentGame.equals(gamePackage)) {
             stopOverlay();
         }
-        if (shouldStartOverlay) {
-            startOverlay();
+        mCurrentGame = gamePackage;
+        if (mKeyguardShowing || gameTask == null) {
+            // A removed/finished game and keyguard are definitive exits, not transitions.
+            stopOverlay();
+        } else if (visible) {
+            if (!mOverlayStarted) {
+                startOverlay();
+            }
+            mGameStateDispatcher.setGameVisible(true, this::stopOverlay);
+        } else if (mOverlayStarted) {
+            mGameStateDispatcher.setGameVisible(false, this::stopOverlay);
         }
     }
 
-    private boolean isCurrentGameTopApp() {
-        final ActivityTaskManagerInternal activityTaskManager =
-                LocalServices.getService(ActivityTaskManagerInternal.class);
-        final WindowProcessController topApp = activityTaskManager != null
-                ? activityTaskManager.getTopApp() : null;
-        return topApp != null && topApp.containsPackage(mCurrentGame);
+    // Caller holds the WM lock; callbacks only enqueue work on the GameSpace handler.
+    private void setCurrentGameTask(Task task) {
+        if (mCurrentGameTask == task) {
+            return;
+        }
+        if (mCurrentGameTask != null) {
+            mCurrentGameTask.unregisterWindowContainerListener(mGameTaskListener);
+        }
+        mCurrentGameTask = task;
+        if (task != null) {
+            task.registerWindowContainerListener(mGameTaskListener, false);
+        }
     }
 
     private void startOverlay() {
@@ -198,12 +231,15 @@ public final class GameSpaceService extends SystemService {
             mPendingBoost = () -> mGameStateDispatcher.boostGame(true);
             mHandler.postDelayed(mPendingBoost, BOOST_DELAY_MS);
         }
+        mOverlayStarted = true;
         mGameStateDispatcher.dispatchGameState(true, currentGame);
-        mGameStateDispatcher.setGameFocused(mFocusedPackage != null
-                && mGameListManager.isGame(mFocusedPackage));
     }
 
     private void stopOverlay() {
+        if (!mOverlayStarted) {
+            return;
+        }
+        mOverlayStarted = false;
         cancelPendingBoost();
         mGameStateDispatcher.dispatchGameState(false, null);
         mGameStateDispatcher.boostGame(false);

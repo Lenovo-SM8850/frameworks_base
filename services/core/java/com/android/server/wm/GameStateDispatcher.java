@@ -45,6 +45,8 @@ import lineageos.providers.LineageSettings;
 
 class GameStateDispatcher {
     private static final String TAG = "GameStateDispatcher";
+    static final long GAME_VISIBILITY_GRACE_MS = 1500;
+    static final long SESSION_RETRY_DELAY_MS = 1000;
     private static final String GAME_SPACE_PACKAGE = "io.chaldeaprjkt.gamespace";
     private static final String GAME_SPACE_SESSION_SERVICE =
             "io.chaldeaprjkt.gamespace.gamebar.SessionService";
@@ -72,10 +74,16 @@ class GameStateDispatcher {
     private ServiceConnection mSessionConnection;
     private String mGamePackage;
     private int mGameUserId = UserHandle.USER_SYSTEM;
-    private boolean mGameFocused;
+    private boolean mGameVisible;
     private boolean mSessionReady;
     private boolean mBypassChargeActive;
     private boolean mInitialized;
+    private Runnable mPendingGameHidden;
+    private boolean mSessionRetryPending;
+    private final Runnable mRetryGameSession = () -> {
+        mSessionRetryPending = false;
+        startGameSession();
+    };
 
     GameStateDispatcher(Context context, Handler handler) {
         this(context, handler, ActivityManager.getService(),
@@ -114,9 +122,10 @@ class GameStateDispatcher {
     }
 
     void dispatchGameState(boolean active, String packageName) {
+        cancelPendingGameHidden();
         Settings.Secure.putIntForUser(mContext.getContentResolver(), KEY_GAMING_MODE_ACTIVE,
                 active ? 1 : 0, UserHandle.USER_CURRENT);
-        mGameFocused = active;
+        mGameVisible = active;
         if (active) {
             mGamePackage = packageName;
             mGameUserId = ActivityManager.getCurrentUser();
@@ -128,9 +137,29 @@ class GameStateDispatcher {
         }
     }
 
-    void setGameFocused(boolean focused) {
-        mGameFocused = focused;
-        updateBypassCharge();
+    void setGameVisible(boolean visible, Runnable onHidden) {
+        if (visible) {
+            cancelPendingGameHidden();
+            mGameVisible = true;
+            updateBypassCharge();
+        } else if (mGameVisible && mPendingGameHidden == null) {
+            // Keep the session and its original charging snapshot through short transitions.
+            // Repeated hidden notifications must not extend the deadline.
+            mPendingGameHidden = () -> {
+                mPendingGameHidden = null;
+                mGameVisible = false;
+                updateBypassCharge();
+                onHidden.run();
+            };
+            mHandler.postDelayed(mPendingGameHidden, GAME_VISIBILITY_GRACE_MS);
+        }
+    }
+
+    private void cancelPendingGameHidden() {
+        if (mPendingGameHidden != null) {
+            mHandler.removeCallbacks(mPendingGameHidden);
+            mPendingGameHidden = null;
+        }
     }
 
     void boostGame(boolean enable) {
@@ -153,7 +182,8 @@ class GameStateDispatcher {
     }
 
     private void startGameSession() {
-        if (mGamePackage == null) {
+        if (mGamePackage == null || !mGameVisible
+                || mGameUserId != ActivityManager.getCurrentUser()) {
             return;
         }
         try {
@@ -162,9 +192,11 @@ class GameStateDispatcher {
                     mContext.getAttributionTag(), mGameUserId);
             if (result == null) {
                 Slog.w(TAG, "GameSpace session service not found");
+                scheduleGameSessionRetry();
                 return;
             }
             if (mSessionConnection != null) {
+                scheduleGameSessionRetry();
                 updateBypassCharge();
                 return;
             }
@@ -174,6 +206,7 @@ class GameStateDispatcher {
                     if (mSessionConnection != this) {
                         return;
                     }
+                    cancelGameSessionRetry();
                     mSessionReady = true;
                     updateBypassCharge();
                 }
@@ -185,16 +218,23 @@ class GameStateDispatcher {
                     }
                     mSessionReady = false;
                     updateBypassCharge();
+                    // Keep a reconnectable binding; START_NOT_STICKY still needs a start request.
+                    scheduleGameSessionRetry();
                 }
 
                 @Override
                 public void onBindingDied(ComponentName name) {
-                    onServiceDisconnected(name);
+                    if (mSessionConnection != this) {
+                        return;
+                    }
+                    clearSessionConnection();
+                    updateBypassCharge();
+                    scheduleGameSessionRetry();
                 }
 
                 @Override
                 public void onNullBinding(ComponentName name) {
-                    onServiceDisconnected(name);
+                    onBindingDied(name);
                 }
             };
             mSessionConnection = connection;
@@ -202,20 +242,44 @@ class GameStateDispatcher {
                     mHandler, UserHandle.of(mGameUserId))) {
                 mSessionConnection = null;
             }
+            scheduleGameSessionRetry();
         } catch (RemoteException | RuntimeException e) {
-            mSessionConnection = null;
-            mSessionReady = false;
+            clearSessionConnection();
             updateBypassCharge();
+            scheduleGameSessionRetry();
             Slog.w(TAG, "Failed to start GameSpace session", e);
         }
     }
 
-    private void stopGameSession() {
-        mSessionReady = false;
-        if (mSessionConnection != null) {
-            mContext.unbindService(mSessionConnection);
-            mSessionConnection = null;
+    private void scheduleGameSessionRetry() {
+        if (!mSessionReady && !mSessionRetryPending && mGameVisible && mGamePackage != null
+                && mGameUserId == ActivityManager.getCurrentUser()) {
+            mSessionRetryPending = true;
+            mHandler.postDelayed(mRetryGameSession, SESSION_RETRY_DELAY_MS);
         }
+    }
+
+    private void cancelGameSessionRetry() {
+        mHandler.removeCallbacks(mRetryGameSession);
+        mSessionRetryPending = false;
+    }
+
+    private void clearSessionConnection() {
+        mSessionReady = false;
+        final ServiceConnection connection = mSessionConnection;
+        mSessionConnection = null;
+        if (connection != null) {
+            try {
+                mContext.unbindService(connection);
+            } catch (IllegalArgumentException e) {
+                Slog.w(TAG, "Failed to unbind GameSpace session", e);
+            }
+        }
+    }
+
+    private void stopGameSession() {
+        cancelGameSessionRetry();
+        clearSessionConnection();
         final Intent intent = new Intent().setComponent(GAME_SPACE_SESSION_COMPONENT);
         try {
             mActivityManager.stopService(null, intent, null, mGameUserId);
@@ -228,7 +292,7 @@ class GameStateDispatcher {
         if (!mInitialized) {
             return;
         }
-        final boolean active = mGameFocused && mSessionReady
+        final boolean active = mGameVisible && mSessionReady
                 && mGameUserId == ActivityManager.getCurrentUser() && bypassChargeEnabled();
         if (active == mBypassChargeActive && !mSavedChargeControl.exists()) {
             return;

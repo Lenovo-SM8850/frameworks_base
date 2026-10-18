@@ -4,17 +4,24 @@
 
 package com.android.server.wm;
 
+import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
+import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
 import static com.android.dx.mockito.inline.extended.ExtendedMockito.doReturn;
 import static com.android.dx.mockito.inline.extended.ExtendedMockito.doAnswer;
 import static com.android.dx.mockito.inline.extended.ExtendedMockito.mockitoSession;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.ActivityManager;
@@ -76,6 +83,7 @@ public class GameStateDispatcherTest {
     private ServiceConnection mConnection;
     private ContentObserver mObserver;
     private boolean mToggle = true;
+    private int mSessionStartCount;
 
     @Before
     public void setUp() throws Exception {
@@ -122,7 +130,10 @@ public class GameStateDispatcherTest {
             return true;
         });
         when(mActivityManager.startService(any(), any(), any(), eq(false),
-                any(), any(), anyInt())).thenReturn(SESSION);
+                any(), any(), anyInt())).thenAnswer(invocation -> {
+                    mSessionStartCount++;
+                    return SESSION;
+                });
         doAnswer(invocation -> {
             mConnection = invocation.getArgument(1);
             return true;
@@ -232,16 +243,286 @@ public class GameStateDispatcherTest {
         assertEquals(original, mSettings);
     }
 
+    private void setGameVisible(boolean visible) {
+        mDispatcher.setGameVisible(visible, () -> mDispatcher.dispatchGameState(false, null));
+    }
+
+    private void advanceTime(long millis) {
+        mLooper.moveTimeForward(millis);
+        mLooper.dispatchAll();
+    }
+
+    private Task visibleGameTask(int windowingMode) {
+        Task task = mock(Task.class);
+        when(task.getBaseIntent()).thenReturn(new Intent().setComponent(
+                new ComponentName("test.game", "test.game.MainActivity")));
+        when(task.isAttached()).thenReturn(true);
+        when(task.isVisibleRequested()).thenReturn(true);
+        when(task.getWindowingMode()).thenReturn(windowingMode);
+        when(task.isFocused()).thenReturn(false);
+        return task;
+    }
+
     @Test
-    public void focusLoss_restoresWhileSessionIsRetained() {
+    public void inGameBrowser_keepsGameTaskIdentityAndBypass() {
+        Task task = visibleGameTask(WINDOWING_MODE_FULLSCREEN);
+        // The top activity is not a listed game; the task's base intent still is.
+        ActivityRecord browser = mock(ActivityRecord.class);
+        when(task.getTopMostActivity()).thenReturn(browser);
+        assertEquals("test.game", GameSpaceService.getGamePackageName(task, "test.game"::equals));
+        enterGame();
+        setGameVisible(GameSpaceService.isGameTaskVisible(task));
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS + 1);
+        assertBypass();
+        verify(mHealth, times(1)).setLimit(50);
+    }
+
+    @Test
+    public void floatingOrMiniWindow_homeHideShow_keepsOriginalSnapshot() {
         Map<String, String> original = new HashMap<>(mSettings);
         enterGame();
-        mDispatcher.setGameFocused(false);
-        assertEquals(original, mSettings);
-        mDispatcher.setGameFocused(true);
+        setGameVisible(false);
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS / 2);
         assertBypass();
-        mDispatcher.setGameFocused(false);
+        setGameVisible(true);
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS + 1);
+        assertBypass();
+        verify(mHealth, times(1)).setLimit(50);
+        mDispatcher.dispatchGameState(false, null);
         assertEquals(original, mSettings);
+    }
+
+    @Test
+    public void visibleFloatingOrMiniWindow_focusElsewhere_keepsBypass() {
+        Task task = visibleGameTask(WINDOWING_MODE_FREEFORM);
+        assertFalse(task.isFocused());
+        enterGame();
+        setGameVisible(GameSpaceService.isGameTaskVisible(task));
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS + 1);
+        assertBypass();
+        verify(mHealth, times(1)).setLimit(50);
+    }
+
+    @Test
+    public void fullscreenGame_underSidebarOrGameSpaceWindow_keepsBypass() {
+        Task task = visibleGameTask(WINDOWING_MODE_FULLSCREEN);
+        Task floatingApp = mock(Task.class);
+        when(floatingApp.getBaseIntent()).thenReturn(new Intent().setComponent(
+                new ComponentName("test.browser", "test.browser.MainActivity")));
+        when(floatingApp.isFocused()).thenReturn(true);
+        when(floatingApp.getWindowingMode()).thenReturn(WINDOWING_MODE_FREEFORM);
+        assertEquals(null, GameSpaceService.getGamePackageName(floatingApp, "test.game"::equals));
+        assertFalse(task.isFocused());
+        assertTrue(floatingApp.isFocused());
+        enterGame();
+        setGameVisible(GameSpaceService.isGameTaskVisible(task));
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS + 1);
+        assertBypass();
+        verify(mHealth, times(1)).setLimit(50);
+    }
+
+    @Test
+    public void secondGameOpenedFloating_keepsVisibleCurrentOwnerAndBypass() {
+        Task current = visibleGameTask(WINDOWING_MODE_FULLSCREEN);
+        Task floating = visibleGameTask(WINDOWING_MODE_FREEFORM);
+        when(floating.getBaseIntent()).thenReturn(new Intent().setComponent(
+                new ComponentName("test.game.second", "test.game.second.MainActivity")));
+        java.util.function.Predicate<Task> isGame = task -> GameSpaceService.getGamePackageName(
+                task, name -> "test.game".equals(name) || "test.game.second".equals(name)) != null;
+        enterGame();
+        final int starts = mSessionStartCount;
+        final ServiceConnection connection = mConnection;
+        assertSame(current, GameSpaceService.getVisibleGameTask(current, floating, isGame));
+        setGameVisible(GameSpaceService.isGameTaskVisible(current));
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS + 1);
+        assertSame(current, GameSpaceService.getVisibleGameTask(current, current, isGame));
+        assertSame(connection, mConnection);
+        assertEquals(starts, mSessionStartCount);
+        verify(mContext, never()).unbindService(any());
+        verify(mHealth, times(1)).setLimit(50);
+        assertBypass();
+        when(current.isVisibleRequested()).thenReturn(false);
+        assertSame(floating, GameSpaceService.getVisibleGameTask(current, floating, isGame));
+        when(current.isVisibleRequested()).thenReturn(true);
+        assertSame(floating, GameSpaceService.getVisibleGameTask(
+                current, floating, task -> task != current && isGame.test(task)));
+    }
+
+    @Test
+    public void sessionDisconnect_restartsAndReappliesBypassWithoutRebinding() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        final ServiceConnection connection = mConnection;
+        final int starts = mSessionStartCount;
+        connection.onServiceDisconnected(SESSION);
+        assertEquals(original, mSettings);
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS / 2);
+        assertEquals(starts, mSessionStartCount);
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS / 2 + 1);
+        assertEquals(starts + 1, mSessionStartCount);
+        assertSame(connection, mConnection);
+        verify(mContext, never()).unbindService(any());
+        connection.onServiceConnected(SESSION, new Binder());
+        assertBypass();
+        final int reconnectedStarts = mSessionStartCount;
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS + 1);
+        assertEquals(reconnectedStarts, mSessionStartCount);
+        mDispatcher.dispatchGameState(false, null);
+        assertEquals(original, mSettings);
+    }
+
+    @Test
+    public void bindingDied_rebindsAndIgnoresOldCallbacks() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        final ServiceConnection old = mConnection;
+        old.onBindingDied(SESSION);
+        assertEquals(original, mSettings);
+        verify(mContext).unbindService(old);
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS + 1);
+        assertNotSame(old, mConnection);
+        old.onServiceConnected(SESSION, new Binder());
+        assertEquals(original, mSettings);
+        mConnection.onServiceConnected(SESSION, new Binder());
+        old.onServiceDisconnected(SESSION);
+        assertBypass();
+    }
+
+    @Test
+    public void nullBinding_retriesWithNewConnection() {
+        enterGame();
+        final ServiceConnection old = mConnection;
+        old.onNullBinding(SESSION);
+        assertFalse(mSaved.exists());
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS + 1);
+        assertNotSame(old, mConnection);
+        mConnection.onServiceConnected(SESSION, new Binder());
+        assertBypass();
+    }
+
+    @Test
+    public void sessionReconnectBeforeRetry_cancelsRestart() {
+        enterGame();
+        mConnection.onServiceDisconnected(SESSION);
+        mConnection.onServiceConnected(SESSION, new Binder());
+        final int starts = mSessionStartCount;
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS + 1);
+        assertEquals(starts, mSessionStartCount);
+        assertBypass();
+    }
+
+    @Test
+    public void sessionDeathThenExit_cancelsRestartAndIgnoresLateConnection() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        final ServiceConnection old = mConnection;
+        old.onServiceDisconnected(SESSION);
+        mDispatcher.dispatchGameState(false, null);
+        final int starts = mSessionStartCount;
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS + 1);
+        old.onServiceConnected(SESSION, new Binder());
+        assertEquals(starts, mSessionStartCount);
+        assertEquals(original, mSettings);
+        assertFalse(mSaved.exists());
+    }
+
+    @Test
+    public void failedSessionStart_retriesUntilConnected() throws Exception {
+        when(mActivityManager.startService(any(), any(), any(), eq(false),
+                any(), any(), anyInt())).thenReturn(null);
+        mDispatcher.dispatchGameState(true, "test.game");
+        assertFalse(mSaved.exists());
+        when(mActivityManager.startService(any(), any(), any(), eq(false),
+                any(), any(), anyInt())).thenReturn(SESSION);
+        advanceTime(GameStateDispatcher.SESSION_RETRY_DELAY_MS + 1);
+        mConnection.onServiceConnected(SESSION, new Binder());
+        assertBypass();
+    }
+
+    @Test
+    public void hiddenGame_restoresAndStopsSessionAfterGraceDeadline() throws Exception {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        setGameVisible(false);
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS / 2);
+        assertBypass();
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS / 2 + 1);
+        assertEquals(original, mSettings);
+        assertFalse(mSaved.exists());
+        verify(mContext).unbindService(mConnection);
+        verify(mActivityManager).stopService(any(), any(), any(), eq(0));
+    }
+
+    @Test
+    public void repeatedHiddenEvents_doNotExtendGraceDeadline() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        setGameVisible(false);
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS / 2);
+        setGameVisible(false);
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS / 2 + 1);
+        assertEquals(original, mSettings);
+        assertFalse(mSaved.exists());
+    }
+
+    @Test
+    public void visibleThenHiddenAgain_usesNewGraceDeadline() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        setGameVisible(false);
+        advanceTime(1000);
+        setGameVisible(true);
+        setGameVisible(false);
+        advanceTime(500);
+        assertBypass();
+        advanceTime(1000);
+        assertEquals(original, mSettings);
+    }
+
+    @Test
+    public void taskRemovalOrKeyguardDuringGrace_restoresImmediatelyAndCancelsDeadline() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        setGameVisible(false);
+        mDispatcher.dispatchGameState(false, null);
+        assertEquals(original, mSettings);
+        enterGame();
+        advanceTime(GameStateDispatcher.GAME_VISIBILITY_GRACE_MS + 1);
+        assertBypass();
+    }
+
+    @Test
+    public void toggleOffDuringGrace_restoresImmediately() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        setGameVisible(false);
+        mToggle = false;
+        mObserver.onChange(false);
+        assertEquals(original, mSettings);
+        assertFalse(mSaved.exists());
+    }
+
+    @Test
+    public void sessionDeathDuringGrace_restoresImmediately() {
+        Map<String, String> original = new HashMap<>(mSettings);
+        enterGame();
+        setGameVisible(false);
+        mConnection.onServiceDisconnected(SESSION);
+        assertEquals(original, mSettings);
+        assertFalse(mSaved.exists());
+    }
+
+    @Test
+    public void detachedOrForceHiddenTask_isNotVisible() {
+        Task task = visibleGameTask(WINDOWING_MODE_FREEFORM);
+        when(task.isAttached()).thenReturn(false);
+        assertFalse(GameSpaceService.isGameTaskVisible(task));
+        when(task.isAttached()).thenReturn(true);
+        when(task.isForceHidden()).thenReturn(true);
+        assertFalse(GameSpaceService.isGameTaskVisible(task));
+        when(task.isForceHidden()).thenReturn(false);
+        when(task.isVisibleRequested()).thenReturn(false);
+        assertFalse(GameSpaceService.isGameTaskVisible(task));
     }
 
     @Test
