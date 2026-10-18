@@ -3,6 +3,7 @@ package android.content.res;
 import android.content.ComponentName;
 import android.content.res.IThemeEngineCallback;
 import android.graphics.Bitmap;
+import android.os.Bundle;
 
 /** @hide */
 interface IThemeEngineManager {
@@ -28,4 +29,8 @@ interface IThemeEngineManager {
     void notifyThemeChanged(String category);
 
     List<String> getAvailableOverlays(String category);
+
+    // Append to preserve transaction IDs used by existing picker clients.
+    Bundle getAppIconAppearance(in ComponentName component, int userId);
+    Bundle getAppIconResources(String packageName, int userId);
 }
