@@ -591,6 +591,17 @@ public class Transitions implements RemoteCallable<Transitions>,
         }
     }
 
+    /** Supplies decoration-owned resize veils for floating rotation transitions. */
+    public interface FloatingRotationVeilProvider {
+        @Nullable com.android.wm.shell.windowdecor.ResizeVeil createVeil(
+                int taskId, SurfaceControl parent);
+        boolean isContentReady(int taskId);
+    }
+
+    public void setFloatingRotationVeilProvider(FloatingRotationVeilProvider provider) {
+        mDefaultTransitionHandler.setFloatingRotationVeilProvider(provider);
+    }
+
     /**
      * Runs the given {@code runnable} when the last active transition has finished, or immediately
      * if there are currently no active transitions.

@@ -383,6 +383,21 @@ constructor(
         relayout(newBounds, t)
     }
 
+    /** Updates a transition-owned veil without applying the shared animation transaction. */
+    fun updateTransitionFrame(
+        t: SurfaceControl.Transaction,
+        bounds: Rect,
+        backgroundAlpha: Float,
+        iconAlpha: Float,
+    ) {
+        val veil = veilSurface ?: return
+        val background = backgroundSurface ?: return
+        val icon = iconSurface ?: return
+        if (!veil.isValid || !background.isValid || !icon.isValid) return
+        relayout(bounds, t, trackJank = false)
+        t.setAlpha(background, backgroundAlpha).setAlpha(icon, iconAlpha)
+    }
+
     fun updateParentScale(t: SurfaceControl.Transaction, scale: Float) {
         val veil = veilSurface ?: return
         val inverse = 1f / scale

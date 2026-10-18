@@ -66,6 +66,7 @@ import com.android.wm.shell.sysui.ShellInit;
 import com.android.wm.shell.transition.Transitions;
 
 import java.util.ArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Implementation to draw the starting window to an application, and remove the starting window
@@ -91,6 +92,15 @@ public class StartingWindowController implements RemoteCallable<StartingWindowCo
 
     private final StartingSurfaceDrawer mStartingSurfaceDrawer;
     private final StartingWindowTypeAlgorithm mStartingWindowTypeAlgorithm;
+    // Pending requests are removed when no surface is created or the first app frame is drawn.
+    private final ConcurrentHashMap<Integer, StartingWindowInfo> mPendingAppDraws =
+            new ConcurrentHashMap<>();
+
+    /** Whether a pending or created starting window still covers content. Safe on animation threads. */
+    public boolean hasStartingWindow(int taskId) {
+        return mPendingAppDraws.containsKey(taskId);
+    }
+
 
     private TriConsumer<Integer, Integer, Integer> mTaskLaunchingCallback;
     private final StartingSurfaceImpl mImpl = new StartingSurfaceImpl();
@@ -387,6 +397,7 @@ public class StartingWindowController implements RemoteCallable<StartingWindowCo
      * Called when a task need a starting window.
      */
     public void addStartingWindow(StartingWindowInfo windowInfo) {
+        mPendingAppDraws.put(windowInfo.taskInfo.taskId, windowInfo);
         mShellMainExecutor.execute(() -> mRemoveStartingObserver.onAddingWindow(
                 windowInfo.taskInfo.taskId, windowInfo.transitionToken, windowInfo.appToken));
         mSplashScreenExecutor.execute(() -> {
@@ -419,6 +430,8 @@ public class StartingWindowController implements RemoteCallable<StartingWindowCo
                 }
             }
             if (!mStartingSurfaceDrawer.hasStartingWindow(taskId, isWindowless)) {
+                // A declined or failed request has no first-draw removal callback to wait for.
+                mPendingAppDraws.remove(taskId, windowInfo);
                 mShellMainExecutor.execute(() ->
                         mRemoveStartingObserver.forceRemoveWindow(taskId, windowInfo.appToken));
             }
@@ -457,6 +470,8 @@ public class StartingWindowController implements RemoteCallable<StartingWindowCo
      * Called when the content of a task is ready to show, starting window can be removed.
      */
     public void removeStartingWindow(StartingWindowRemovalInfo removalInfo) {
+        // WM sends this when app content is drawn, before the visual starting-window removal.
+        mPendingAppDraws.remove(removalInfo.taskId);
         final int taskId = removalInfo.taskId;
         mShellMainExecutor.execute(() ->
                 mRemoveStartingObserver.requestRemoval(taskId, removalInfo));
@@ -478,6 +493,7 @@ public class StartingWindowController implements RemoteCallable<StartingWindowCo
      * Clear all starting window immediately, called this method when releasing the task organizer.
      */
     public void clearAllWindows() {
+        mPendingAppDraws.clear();
         mSplashScreenExecutor.execute(() -> {
             mStartingSurfaceDrawer.clearAllWindows();
             synchronized (mTaskBackgroundColors) {

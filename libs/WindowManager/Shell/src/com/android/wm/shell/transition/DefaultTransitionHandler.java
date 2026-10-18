@@ -149,6 +149,11 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
     private final CounterRotatorHelper mRotator = new CounterRotatorHelper();
     private final Rect mInsets = new Rect(0, 0, 0, 0);
     private float mTransitionAnimationScaleSetting = 1.0f;
+    private Transitions.FloatingRotationVeilProvider mFloatingRotationVeilProvider;
+
+    void setFloatingRotationVeilProvider(Transitions.FloatingRotationVeilProvider provider) {
+        mFloatingRotationVeilProvider = provider;
+    }
 
     private final RootTaskDisplayAreaOrganizer mRootTDAOrganizer;
     private final int mCurrentUserId;
@@ -426,9 +431,12 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                         isFloatingRotation(change) && TransitionInfo.isIndependent(change, info));
             }
             if (isFloatingRotation(change) && TransitionInfo.isIndependent(change, info)) {
-                animations.add(startFloatingRotationAnimation(info, change, startTransaction,
-                        finishTransaction, onAnimFinish));
-                continue;
+                final WindowAnimation rotation = startFloatingRotationAnimation(info, change,
+                        startTransaction, finishTransaction, onAnimFinish);
+                if (rotation != null) {
+                    animations.add(rotation);
+                    continue;
+                }
             }
             if (isTask && change.getTaskInfo().isFloatingWindow
                     && change.getMode() == TRANSIT_CHANGE) {
@@ -867,6 +875,12 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
             @NonNull Transitions.TransitionFinishCallback finishCallback) {
         ArrayList<WindowAnimation> animations = mTransitionAnimators.get(mergeTarget);
         if (animations == null) return;
+        if (shouldDeferEmptyFloatingRotationChange(info, animations)) {
+            // Bookkeeping must not end the visible morph before its first animation frame.
+            ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
+                    "Deferring empty CHANGE during floating rotation");
+            return;
+        }
         boolean hasFloating = false;
         for (int i = 0; i < info.getChanges().size(); ++i) {
             if (isFloatingChange(info.getChanges().get(i))) {
@@ -979,6 +993,15 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 mAnimExecutor.execute(winAnim::end);
             }
         }
+    }
+
+    static boolean shouldDeferEmptyFloatingRotationChange(TransitionInfo info,
+            List<WindowAnimation> animations) {
+        if (info.getType() != TRANSIT_CHANGE || !info.getChanges().isEmpty()) return false;
+        for (int i = 0; i < animations.size(); i++) {
+            if (animations.get(i).getAnimation() instanceof FloatingResizeAnimation) return true;
+        }
+        return false;
     }
 
     private boolean isFloatingEntry(TransitionInfo.Change change) {
@@ -1150,50 +1173,92 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
     private WindowAnimation startFloatingRotationAnimation(TransitionInfo info,
             TransitionInfo.Change change, SurfaceControl.Transaction startT,
             SurfaceControl.Transaction finishT, Consumer<WindowAnimation> onFinish) {
+        final Transitions.FloatingRotationVeilProvider provider = mFloatingRotationVeilProvider;
+        if (provider == null) return null;
         final TransitionInfo.Root root = TransitionUtil.getRootFor(change, info);
         final SurfaceControl leash = change.getLeash();
-        final SurfaceControl veil = new SurfaceControl.Builder()
-                .setName("Floating resize veil").setColorLayer().setParent(root.getLeash()).build();
+        final SurfaceControl frame = new SurfaceControl.Builder()
+                .setName("Floating rotation frame").setContainerLayer()
+                .setParent(root.getLeash()).build();
+        final com.android.wm.shell.windowdecor.ResizeVeil veil =
+                provider.createVeil(change.getTaskInfo().taskId, frame);
+        if (veil == null) {
+            startT.remove(frame);
+            startT.addTransactionCommittedListener(mMainExecutor, frame::release);
+            return null;
+        }
         final Context displayContext = mDisplayController.getDisplayContext(change.getEndDisplayId());
         final Context context = displayContext != null ? displayContext : mContext;
-        final float radius = context.getResources().getDimension(com.android.wm.shell.shared.R.dimen
+        final float radius = context.getResources().getDimensionPixelSize(com.android.wm.shell.shared.R.dimen
                 .desktop_windowing_freeform_rounded_corner_radius);
-        final int color = context.getColor(com.android.internal.R.color.materialColorSurfaceContainer);
-        startT.setColor(veil, new float[] {android.graphics.Color.red(color) / 255f,
-                android.graphics.Color.green(color) / 255f, android.graphics.Color.blue(color) / 255f})
-                .setRelativeLayer(veil, leash, -1).show(veil).show(leash);
+        final float shadow = context.getResources().getDimension(change.getTaskInfo().isFocused
+                ? com.android.wm.shell.R.dimen.floating_decor_shadow_focused_radius
+                : com.android.wm.shell.R.dimen.floating_decor_shadow_unfocused_radius);
+        final Rect initial = new Rect(change.getStartFloatingWindowBounds());
+        initial.offset(-root.getOffset().x, -root.getOffset().y);
+        veil.updateTransactionWithShowVeil(startT, frame, initial, change.getTaskInfo(), false);
+        startT.setRelativeLayer(frame, leash, 2).show(frame).show(leash);
         final SurfaceControl snapshot = change.getSnapshot();
-        if (snapshot != null) {
+        if (snapshot != null && snapshot.isValid()) {
+            // Retain old content only under the initial veil fade, never during the morph.
             startT.reparent(snapshot, root.getLeash()).setRelativeLayer(snapshot, leash, 1)
                     .show(snapshot);
             finishT.hide(snapshot);
         }
-        final FloatingResizeAnimation animation =
-                new FloatingResizeAnimation(change, root.getOffset(), radius, veil);
-        final long duration = (long) (300 * mTransitionAnimationScaleSetting);
+        final FloatingResizeAnimation animation = new FloatingResizeAnimation(change,
+                root.getOffset(), radius, shadow, frame, veil);
+        final long duration = (long) (animation.getDuration() * mTransitionAnimationScaleSetting);
         animation.setDuration(duration);
-        animation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN);
         animation.setStartTime(0);
-        animation.apply(startT, 0f);
+        animation.applyAtTime(startT, 0L, provider.isContentReady(change.getTaskInfo().taskId));
         Transitions.applyFloatingWindowTransform(change, finishT);
-        finishT.setAlpha(leash, 1f).setCornerRadius(leash,
-                radius / change.getTaskInfo().floatingWindowScale).remove(veil);
-        finishT.addTransactionCommittedListener(mMainExecutor, veil::release);
+        // Decoration relayout already restored its scale-compensated outline after Core's reset.
+        finishT.setAlpha(leash, 1f);
+        finishFloatingRotation(finishT, frame, veil, mMainExecutor);
         final ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
         animator.setDuration(duration);
         animator.setInterpolator(Interpolators.LINEAR);
+        final int[] frames = {0};
+        final long[] playTime = {0};
+        final boolean[] ending = {false};
         animator.addUpdateListener(value -> {
-            final float progress = duration == 0 ? 1f : animation.getInterpolator()
-                    .getInterpolation(Math.min(1f, (float) value.getCurrentPlayTime() / duration));
             final SurfaceControl.Transaction t = mTransactionPool.acquire();
-            animation.apply(t, progress);
+            animation.applyAtTime(t, value.getCurrentPlayTime(),
+                    provider.isContentReady(change.getTaskInfo().taskId));
             t.setFrameTimeline(android.view.Choreographer.getInstance().getVsyncId()).apply();
             mTransactionPool.release(t);
+            frames[0]++;
+            if (!ending[0]) playTime[0] = value.getCurrentPlayTime();
+            if (animation.isFinished() && !ending[0]) {
+                ending[0] = true;
+                animator.end();
+            }
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator ignored) {
+                ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
+                        "Floating rotation task=%d frames=%d elapsed=%d limit=%d start=%s end=%s",
+                        change.getTaskInfo().taskId, frames[0], playTime[0], duration,
+                        change.getStartFloatingWindowBounds(),
+                        change.getTaskInfo().getPresentationBounds());
+            }
         });
         final WindowAnimation windowAnimation =
                 new WindowAnimation(change, radius, animation, animator);
         windowAnimation.addFinishCallback(onFinish, mMainExecutor);
         return windowAnimation;
+    }
+
+    /** Detaches at finish without invalidating the animation's live frame handle. */
+    static void finishFloatingRotation(SurfaceControl.Transaction finishT, SurfaceControl frame,
+            com.android.wm.shell.windowdecor.ResizeVeil veil, java.util.concurrent.Executor executor) {
+        // Transaction.remove releases immediately, before this deferred transaction is applied.
+        finishT.reparent(frame, null);
+        finishT.addTransactionCommittedListener(executor, () -> {
+            veil.dispose();
+            frame.release();
+        });
     }
 
     private WindowAnimation startFloatingExitAnimation(TransitionInfo info,
