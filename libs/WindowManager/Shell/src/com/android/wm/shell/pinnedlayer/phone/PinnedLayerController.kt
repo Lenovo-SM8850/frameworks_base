@@ -236,6 +236,7 @@ class PinnedLayerController(
     private var keyguardShowing = false
     private var recentsRunning = false
     private var overviewShowing = false
+    private var recentsVisibilityHandler: RecentsTransitionHandler? = null
 
     private val pinnedTasksListeners = mutableSetOf<PinnedTasksListener>()
 
@@ -335,6 +336,7 @@ class PinnedLayerController(
         shellController: ShellController,
         recentsTransitionHandler: RecentsTransitionHandler,
     ) {
+        recentsVisibilityHandler = recentsTransitionHandler
         shellController.addUserChangeListener(object : UserChangeListener {
             override fun onUserChanged(newUserId: Int, userContext: Context) {
                 minimizeHandles?.setUsers(setOf(newUserId))
@@ -371,7 +373,7 @@ class PinnedLayerController(
                 override fun onTransitionFinishedToHome(displayId: Int) {
                     if (displayId != DEFAULT_DISPLAY) return
                     recentsRunning = false
-                    overviewShowing = false
+                    overviewShowing = shellController.isOverviewVisible(displayId)
                     transitions.runOnIdle { updateVisibility() }
                 }
 
@@ -391,7 +393,9 @@ class PinnedLayerController(
     }
 
     private fun updateVisibility() {
-        val hidden = keyguardShowing || recentsRunning || overviewShowing
+        // A Home gesture runs Recents before Overview is actually shown.
+        val hidden = keyguardShowing || overviewShowing
+        if (hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, true)
         minimizeHandles?.setVisible(!hidden)
         val wct = WindowContainerTransaction()
         getPinnedTasks().filter { it.taskId !in minimizedTasks }.forEach {
@@ -400,6 +404,7 @@ class PinnedLayerController(
         if (!wct.isEmpty) {
             shellTaskOrganizer.applyTransaction(wct)
         }
+        if (!hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, false)
     }
 
     fun getFloatingLaunchBounds(task: TaskInfo): Rect? =
@@ -426,7 +431,7 @@ class PinnedLayerController(
             presentationController.setManualOrientation(task, bounds.width() > bounds.height(), bounds)
         }
         presentationController.applyPresentation(task, bounds, wct, scale)
-        wct.setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
+        wct.setHidden(task.token, keyguardShowing || overviewShowing)
         if (minimized) {
             visiblePinnedTasks -= task.taskId
             minimizedTasks += task.taskId
@@ -532,7 +537,7 @@ class PinnedLayerController(
             removeMinimizeHandle(task.taskId)
             merge(getLayerPinnedWct(task.token), /* transfer= */ true)
             bounds?.let { presentationController.applyPresentation(task, it, this) }
-            setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
+            setHidden(task.token, keyguardShowing || overviewShowing)
 
         }
     }
@@ -929,7 +934,7 @@ class PinnedLayerController(
                     pin(task)
                     if (restoring) {
                         wct.merge(getLayerPinnedWct(task.token), true)
-                        wct.setHidden(task.token, keyguardShowing || recentsRunning || overviewShowing)
+                        wct.setHidden(task.token, keyguardShowing || overviewShowing)
                         wct.reorder(task.token, true)
                     }
                     if (!wct.isEmpty) shellTaskOrganizer.applyTransaction(wct)

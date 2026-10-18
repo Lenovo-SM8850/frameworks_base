@@ -1275,8 +1275,9 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         relayoutParams.mWindowDecorConfig = windowDecorConfig;
 
         if (desktopConfig.useRoundedCorners()) {
-            relayoutParams.mCornerRadiusId = shouldIgnoreCornerRadius ? Resources.ID_NULL :
-                    getCornerRadiusId(relayoutParams.mLayoutResId);
+            // Floating tasks are not Recents targets, so decoration still owns their outline.
+            relayoutParams.mCornerRadiusId = shouldIgnoreCornerRadius && !taskInfo.isFloatingWindow
+                    ? Resources.ID_NULL : getCornerRadiusId(relayoutParams.mLayoutResId);
         }
         // Set opaque background for all freeform tasks to prevent freeform tasks below
         // from being visible if freeform task window above is translucent.
@@ -2063,7 +2064,8 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
      *
      * <p> When a Recents transition is active we allow that transition to take ownership of the
      * corner radius of its task surfaces, so each window decoration should stop updating the corner
-     * radius of its task surface during that time.
+     * radius of its task surface during that time. Floating tasks are excluded from Recents
+     * targets and retain their decoration-owned corner radius.
      */
     void setIsRecentsTransitionRunning(boolean isRecentsTransitionRunning) {
         mIsRecentsTransitionRunning = isRecentsTransitionRunning;

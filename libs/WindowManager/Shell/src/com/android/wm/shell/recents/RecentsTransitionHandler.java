@@ -63,6 +63,7 @@ import android.util.ArrayMap;
 import android.util.IntArray;
 import android.util.Pair;
 import android.util.Slog;
+import android.util.SparseBooleanArray;
 import android.view.RemoteAnimationTarget;
 import android.view.SurfaceControl;
 import android.window.DesktopExperienceFlags;
@@ -122,6 +123,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
     private final ArrayList<RecentsController> mControllers = new ArrayList<>();
     private final ArrayList<RecentsTransitionStateListener> mStateListeners = new ArrayList<>();
     private Supplier<SurfaceControl.Transaction> mFinishTransactionSupplier = null;
+    private final SparseBooleanArray mFloatingTasksHidden = new SparseBooleanArray();
 
     /**
      * List of other handlers which might need to mix recents with other things. These are checked
@@ -178,6 +180,51 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
     }
 
     /**
+     * Applies Shell visibility policy to floating surfaces while a transient Recents transition
+     * owns them. The caller also updates WM's hidden state with its visibility WCT.
+     */
+    public void setFloatingTasksHidden(int displayId, boolean hidden) {
+        if (mFloatingTasksHidden.get(displayId) == hidden) return;
+        mFloatingTasksHidden.put(displayId, hidden);
+        final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
+                new ArrayMap<>();
+        for (RecentsController controller : mControllers) {
+            if (controller.mDisplayId == displayId) {
+                tasks.putAll(controller.getFloatingTaskSurfaces());
+            }
+        }
+        if (tasks.isEmpty()) return;
+        try (SurfaceControl.Transaction t = newSurfaceTransaction()) {
+            for (int i = 0; i < tasks.size(); ++i) {
+                final SurfaceControl surface = tasks.valueAt(i).second;
+                if (!surface.isValid()) continue;
+                if (hidden) t.hide(surface);
+                else t.show(surface);
+            }
+            // A merged transition may also have hidden a temporary handler leash.
+            for (RecentsController controller : mControllers) {
+                if (controller.mDisplayId != displayId) continue;
+                for (int i = 0; i < controller.mFloatingTasks.size(); ++i) {
+                    final TransitionInfo.Change change = controller.mFloatingTasks.valueAt(i);
+                    final Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task =
+                            tasks.get(change.getTaskInfo().taskId);
+                    final SurfaceControl leash = change.getLeash();
+                    if (task == null || !leash.isValid() || leash == task.second
+                            || leash.isSameSurface(task.second)) continue;
+                    if (hidden) t.hide(leash);
+                    else t.show(leash);
+                }
+            }
+            t.apply();
+        }
+    }
+
+    private SurfaceControl.Transaction newSurfaceTransaction() {
+        return mFinishTransactionSupplier != null
+                ? mFinishTransactionSupplier.get() : new SurfaceControl.Transaction();
+    }
+
+    /**
      * Sets a background color on the transition root layered behind the outgoing task. {@code null}
      * may be used to clear any previously set colors to avoid showing a background at all. The
      * color is always shown at full opacity.
@@ -187,8 +234,8 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
     }
 
     /**
-     * Used for testing to provide a supplier for the transaction used in
-     * RecentsController#finishInner() which later gets merged into the final finish transaction.
+     * Used for testing to provide Recents cleanup and floating visibility transactions.
+     * The cleanup transaction later gets merged into the final finish transaction.
      */
     @VisibleForTesting
     public void setFinishTransactionSupplier(
@@ -901,9 +948,10 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 final TransitionInfo.Change change = info.getChanges().get(i);
                 final ActivityManager.RunningTaskInfo taskInfo = change.getTaskInfo();
                 if (taskInfo != null && taskInfo.isFloatingWindow) {
-                    // Floating windows are hidden during Overview and are not remote targets.
+                    // Floating windows stay above the Home gesture and are not remote targets.
+                    // The Overview visibility listener hides them when Overview is actually shown.
                     rememberFloatingTask(change);
-                    t.hide(change.getLeash());
+                    if (mFloatingTasksHidden.get(mDisplayId)) t.hide(change.getLeash());
                     continue;
                 }
                 if (TransitionUtil.isWallpaper(change)) {
@@ -1722,9 +1770,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 return;
             }
 
-            final SurfaceControl.Transaction t = mFinishTransactionSupplier != null
-                    ? mFinishTransactionSupplier.get()
-                    : new SurfaceControl.Transaction();
+            final SurfaceControl.Transaction t = newSurfaceTransaction();
 
             if (mAwaitingCancelCompletion) {
                 ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
@@ -1999,6 +2045,30 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                             || change.getMode() != android.view.WindowManager.TRANSIT_CLOSE);
         }
 
+        private ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>>
+                getFloatingTaskSurfaces() {
+            final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
+                    new ArrayMap<>();
+            // Prefer organizer surfaces over temporary one-off handler leashes.
+            for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
+                    : mShellTaskOrganizer.getInitialTasks()) {
+                if (isFloatingAboveHome(task.first)) tasks.put(task.first.taskId, task);
+            }
+            for (int i = 0; i < mFloatingTasks.size(); ++i) {
+                final TransitionInfo.Change change = mFloatingTasks.valueAt(i);
+                final ActivityManager.RunningTaskInfo current =
+                        mShellTaskOrganizer.getRunningTaskInfo(change.getTaskInfo().taskId);
+                if (current == null || !isFloatingAboveHome(current)) continue;
+                final Pair<ActivityManager.RunningTaskInfo, SurfaceControl> organized =
+                        tasks.get(current.taskId);
+                if (organized != null && organized.second.isValid()) continue;
+                final TaskState taskState = mTaskStates.get(change.getContainer());
+                tasks.put(current.taskId, Pair.create(current, taskState != null
+                        ? taskState.mTaskSurface : change.getLeash()));
+            }
+            return tasks;
+        }
+
         /**
          * Runs the actual logic to finish the recents transition.
          */
@@ -2010,27 +2080,17 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
 
             final boolean finishedToHome = mFinishingToHome;
             final boolean finishedHomeGesture = mFinishingHomeGesture;
-            if (!mKeyguardLocked) {
-                // Hiding for Overview can exclude a floating task from the transition entirely.
-                for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
-                        : mShellTaskOrganizer.getInitialTasks()) {
-                    if (!isFloatingAboveHome(task.first)) continue;
-                    if (wct == null) wct = new WindowContainerTransaction();
-                    wct.setHidden(task.first.token, false);
-                    if (task.second.isValid()) mPendingFinishTransaction.show(task.second);
-                }
-                for (int i = 0; i < mFloatingTasks.size(); ++i) {
-                    final TransitionInfo.Change change = mFloatingTasks.valueAt(i);
-                    final ActivityManager.RunningTaskInfo current = mShellTaskOrganizer
-                            .getRunningTaskInfo(change.getTaskInfo().taskId);
-                    if (current == null || !isFloatingAboveHome(current)) continue;
-                    if (wct == null) wct = new WindowContainerTransaction();
-                    wct.setHidden(current.token, false);
-                    final TaskState taskState = mTaskStates.get(change.getContainer());
-                    final SurfaceControl surface = taskState != null
-                            ? taskState.mTaskSurface : change.getLeash();
-                    if (surface.isValid()) mPendingFinishTransaction.show(surface);
-                }
+            // Overview can remain visible after Recents commits its transient Home task.
+            final boolean hidden = mKeyguardLocked || mFloatingTasksHidden.get(mDisplayId);
+            final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
+                    getFloatingTaskSurfaces();
+            for (int i = 0; i < tasks.size(); ++i) {
+                final Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task = tasks.valueAt(i);
+                if (wct == null) wct = new WindowContainerTransaction();
+                wct.setHidden(task.first.token, hidden);
+                if (!task.second.isValid()) continue;
+                if (hidden) mPendingFinishTransaction.hide(task.second);
+                else mPendingFinishTransaction.show(task.second);
             }
 
             // We merge the cleanup transaction (prepared in finishInner()) with the last accepted

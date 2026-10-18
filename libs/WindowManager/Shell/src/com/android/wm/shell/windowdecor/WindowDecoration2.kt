@@ -75,7 +75,7 @@ import kotlinx.coroutines.launch
  */
 abstract class WindowDecoration2<T>(
     var taskInfo: RunningTaskInfo,
-    context: Context,
+    private val context: Context,
     private val displayController: DisplayController,
     taskSurface: SurfaceControl,
     private val surfaceControlSupplier: () -> SurfaceControl,
@@ -207,6 +207,31 @@ abstract class WindowDecoration2<T>(
             }
 
             if (!taskInfo.isVisible) {
+                if (taskInfo.isFloatingWindow) {
+                    // Core resets the outline even when a transition hides the task. Preserve
+                    // decoration ownership in its finish transaction before skipping the views.
+                    val outlineContext =
+                        context.createConfigurationContext(
+                            params.windowDecorConfig ?: taskInfo.configuration
+                        ).apply { setTheme(context.themeResId) }
+                    updateTaskSurfaceOutline(
+                        params,
+                        startT,
+                        finishT,
+                        if (params.borderSettingsId != Resources.ID_NULL) {
+                            BoxShadowHelper.getBorderSettings(outlineContext, params.borderSettingsId)
+                        } else null,
+                        params.boxShadowSettingsIds?.let {
+                            BoxShadowHelper.getBoxShadowSettings(outlineContext, it)
+                        },
+                        outlineContext.resources.getDimensionPixelSize(
+                            params.shadowRadiusId, INVALID_SHADOW_RADIUS,
+                        ),
+                        outlineContext.resources.getDimensionPixelSize(
+                            params.cornerRadiusId, INVALID_CORNER_RADIUS,
+                        ),
+                    )
+                }
                 releaseViews(wct)
                 if (params.setTaskVisibilityPositionAndCrop) {
                     finishT.hide(taskSurface)

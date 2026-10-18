@@ -618,7 +618,9 @@ constructor(
             insetSourceFlags = insetSourceFlags,
             displayExclusionRegion = Region.obtain(displayExclusionRegion),
             shadowRadiusId = getShadowRadiusId(captionType, hasGlobalFocus),
-            cornerRadiusId = getCornerRadiusId(captionType, shouldIgnoreCornerRadius),
+            // Floating tasks are not Recents targets, so decoration still owns their outline.
+            cornerRadiusId = getCornerRadiusId(
+                captionType, shouldIgnoreCornerRadius && !taskInfo.isFloatingWindow),
             borderSettingsId = getBorderSettingsId(captionType, taskInfo, hasGlobalFocus),
             boxShadowSettingsIds = getShadowSettingsIds(captionType, hasGlobalFocus),
             isCaptionVisible = isCaptionVisible,
@@ -855,7 +857,7 @@ constructor(
     }
 
     private fun getCornerRadius(): Int {
-        val shouldIgnoreCornerRadius = isRecentsTransitionRunning
+        val shouldIgnoreCornerRadius = isRecentsTransitionRunning && !taskInfo.isFloatingWindow
         return decorWindowContext.resources.getDimensionPixelSize(
             getCornerRadiusId(captionType, shouldIgnoreCornerRadius),
             defaultValue = 0,

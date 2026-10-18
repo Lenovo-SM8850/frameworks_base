@@ -521,6 +521,28 @@ public class DesktopModeWindowDecorationTests extends ShellTestCase {
     }
 
     @Test
+    public void updateRelayoutParams_recentsFloatingAndMiniKeepOutlineResources() {
+        for (float scale : new float[]{.75f, .25f}) {
+            final ActivityManager.RunningTaskInfo taskInfo = createTaskInfo(true /* visible */);
+            taskInfo.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
+            taskInfo.isFloatingWindow = true;
+            taskInfo.floatingWindowScale = scale;
+            final RelayoutParams normal = new RelayoutParams();
+            final RelayoutParams recents = new RelayoutParams();
+
+            updateRelayoutParams(normal, taskInfo);
+            updateRelayoutParams(recents, taskInfo, true /* shouldIgnoreCornerRadius */);
+
+            assertThat(recents.mCornerRadiusId).isEqualTo(
+                    com.android.wm.shell.shared.R.dimen
+                            .desktop_windowing_freeform_rounded_corner_radius);
+            assertThat(recents.mCornerRadiusId).isEqualTo(normal.mCornerRadiusId);
+            assertThat(recents.mShadowRadiusId).isEqualTo(normal.mShadowRadiusId);
+            assertThat(recents.mBoxShadowSettingsIds).isEqualTo(normal.mBoxShadowSettingsIds);
+        }
+    }
+
+    @Test
     public void updateRelayoutParams_appHeader_usesTaskDensity() {
         final int systemDensity = mTestableContext.getOrCreateTestableResources().getResources()
                 .getConfiguration().densityDpi;
@@ -1787,6 +1809,12 @@ public class DesktopModeWindowDecorationTests extends ShellTestCase {
 
     private void updateRelayoutParams(
             RelayoutParams relayoutParams, ActivityManager.RunningTaskInfo taskInfo) {
+        updateRelayoutParams(relayoutParams, taskInfo, DEFAULT_SHOULD_IGNORE_CORNER_RADIUS);
+    }
+
+    private void updateRelayoutParams(
+            RelayoutParams relayoutParams, ActivityManager.RunningTaskInfo taskInfo,
+            boolean shouldIgnoreCornerRadius) {
         DesktopModeWindowDecoration.updateRelayoutParams(
                 relayoutParams,
                 mTestableContext,
@@ -1801,7 +1829,7 @@ public class DesktopModeWindowDecorationTests extends ShellTestCase {
                 new InsetsState(),
                 DEFAULT_HAS_GLOBAL_FOCUS,
                 mExclusionRegion,
-                DEFAULT_SHOULD_IGNORE_CORNER_RADIUS,
+                shouldIgnoreCornerRadius,
                 DEFAULT_SHOULD_EXCLUDE_CAPTION_FROM_APP_BOUNDS,
                 mDesktopConfig,
                 DEFAULT_IN_SYNC_WITH_TRANSITION,

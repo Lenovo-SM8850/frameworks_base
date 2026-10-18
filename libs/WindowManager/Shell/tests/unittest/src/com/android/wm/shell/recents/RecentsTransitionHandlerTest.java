@@ -1129,8 +1129,14 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
                 mock(Transitions.TransitionFinishCallback.class);
         final RecentsTransitionStateListener state = mock(RecentsTransitionStateListener.class);
         mRecentsTransitionHandler.addTransitionStateListener(state);
-        mRecentsTransitionHandler.startAnimation(transition, info, new StubTransaction(),
+        final SurfaceControl.Transaction startT = mock(SurfaceControl.Transaction.class);
+        mRecentsTransitionHandler.startAnimation(transition, info, startT,
                 new StubTransaction(), finish);
+        for (TransitionInfo.Change change : info.getChanges()) {
+            if (change.getTaskInfo().isFloatingWindow) {
+                verify(startT, never()).hide(change.getLeash());
+            }
+        }
         if (merge) {
             final TransitionInfo incoming = new TransitionInfoBuilder(TRANSIT_CHANGE).build();
             final TransitionInfo.Change change = new TransitionInfo.Change(floating.get(0).token,
@@ -1172,6 +1178,121 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
         assertNull(mRecentsTransitionHandler.findController(transition));
     }
 
+
+    @Test
+    public void testOverviewVisibilityImmediatelyHidesAndRestoresFloatingSurface() throws Exception {
+        final IBinder transition = startRecentsTransition(false);
+        final TransitionInfo info = createTransitionInfo();
+        final ActivityManager.RunningTaskInfo task = addVisibleFloatingTask(info);
+        final SurfaceControl surface = mShellTaskOrganizer.getInitialTasks().stream()
+                .filter(pair -> pair.first.taskId == task.taskId).findFirst().get().second;
+        final SurfaceControl animationLeash = mock(SurfaceControl.class);
+        when(animationLeash.isValid()).thenReturn(true);
+        final TransitionInfo.Change animated = new TransitionInfo.Change(task.token, animationLeash);
+        animated.setTaskInfo(task);
+        animated.setMode(TRANSIT_CHANGE);
+        info.getChanges().removeIf(change -> change.getTaskInfo().taskId == task.taskId);
+        info.getChanges().add(animated);
+        final SurfaceControl.Transaction visibility = mock(SurfaceControl.Transaction.class);
+        mRecentsTransitionHandler.startAnimation(transition, info, new StubTransaction(),
+                new StubTransaction(), mock(Transitions.TransitionFinishCallback.class));
+        mRecentsTransitionHandler.setFinishTransactionSupplier(() -> visibility);
+
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, true);
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, true);
+
+        verify(visibility).hide(surface);
+        verify(visibility).hide(animationLeash);
+        verify(visibility).apply();
+        verify(visibility, never()).show(surface);
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, false);
+        verify(visibility).show(surface);
+        verify(visibility).show(animationLeash);
+        verify(visibility, org.mockito.Mockito.times(2)).apply();
+    }
+
+    @Test
+    public void testForcedHomeFinishWhileOverviewVisibleKeepsFloatingTaskHidden() throws Exception {
+        final IBinder transition = startRecentsTransition(false);
+        final TransitionInfo info = createTransitionInfo();
+        info.getChanges().removeIf(change -> change.getTaskInfo().topActivityType
+                != ACTIVITY_TYPE_HOME);
+        info.getChanges().get(0).setMode(TRANSIT_CHANGE);
+        final ActivityManager.RunningTaskInfo task = addVisibleFloatingTask(info);
+        final SurfaceControl surface = mShellTaskOrganizer.getInitialTasks().stream()
+                .filter(pair -> pair.first.taskId == task.taskId).findFirst().get().second;
+        final SurfaceControl.Transaction cleanup = mock(SurfaceControl.Transaction.class);
+        final Transitions.TransitionFinishCallback finish =
+                mock(Transitions.TransitionFinishCallback.class);
+        final RecentsTransitionStateListener state = mock(RecentsTransitionStateListener.class);
+        mRecentsTransitionHandler.addTransitionStateListener(state);
+        mRecentsTransitionHandler.startAnimation(transition, info, new StubTransaction(),
+                new StubTransaction(), finish);
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, true);
+        mRecentsTransitionHandler.setFinishTransactionSupplier(() -> cleanup);
+
+        mRecentsTransitionHandler.findController(transition).finish(false, false,
+                mock(IResultReceiver.class));
+        mMainExecutor.flushAll();
+
+        final ArgumentCaptor<WindowContainerTransaction> wct =
+                ArgumentCaptor.forClass(WindowContainerTransaction.class);
+        verify(finish).onTransitionFinished(wct.capture());
+        assertTrue(wct.getValue().getChanges().get(task.token.asBinder()).getHidden());
+        verify(cleanup).hide(surface);
+        verify(cleanup, never()).show(surface);
+        verify(state).onTransitionFinishedToHome(task.displayId);
+    }
+
+    @Test
+    public void testOverviewHiddenBeforeAppFinishRestoresFloatingSurfaceOnce() throws Exception {
+        final IBinder transition = startRecentsTransition(false);
+        final TransitionInfo info = createTransitionInfo();
+        final ActivityManager.RunningTaskInfo task = addVisibleFloatingTask(info);
+        final SurfaceControl surface = mShellTaskOrganizer.getInitialTasks().stream()
+                .filter(pair -> pair.first.taskId == task.taskId).findFirst().get().second;
+        final Transitions.TransitionFinishCallback finish =
+                mock(Transitions.TransitionFinishCallback.class);
+        mRecentsTransitionHandler.startAnimation(transition, info, new StubTransaction(),
+                new StubTransaction(), finish);
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, true);
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, false);
+        final SurfaceControl.Transaction cleanup = mock(SurfaceControl.Transaction.class);
+        mRecentsTransitionHandler.setFinishTransactionSupplier(() -> cleanup);
+
+        mRecentsTransitionHandler.findController(transition).finish(false, false,
+                mock(IResultReceiver.class));
+        mMainExecutor.flushAll();
+        final ArgumentCaptor<Transitions.TransitionHandler> pending =
+                ArgumentCaptor.forClass(Transitions.TransitionHandler.class);
+        verify(mTransitions).startTransition(eq(TRANSIT_END_RECENTS_TRANSITION), any(),
+                pending.capture());
+        pending.getValue().onTransitionConsumed(transition, false, new StubTransaction());
+
+        final ArgumentCaptor<WindowContainerTransaction> wct =
+                ArgumentCaptor.forClass(WindowContainerTransaction.class);
+        verify(finish).onTransitionFinished(wct.capture());
+        assertFalse(wct.getValue().getChanges().get(task.token.asBinder()).getHidden());
+        verify(cleanup).show(surface);
+        verify(cleanup, never()).hide(surface);
+    }
+
+    private ActivityManager.RunningTaskInfo addVisibleFloatingTask(TransitionInfo info) {
+        final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                .setUserId(0).setWindowingMode(WINDOWING_MODE_FREEFORM)
+                .setActivityType(ACTIVITY_TYPE_STANDARD)
+                .setTopActivityType(ACTIVITY_TYPE_STANDARD).build();
+        task.isFloatingWindow = true;
+        task.configuration.windowConfiguration.setAlwaysOnTop(true);
+        final SurfaceControl surface = mock(SurfaceControl.class);
+        when(surface.isValid()).thenReturn(true);
+        mShellTaskOrganizer.onTaskAppeared(task, surface);
+        final TransitionInfo.Change change = new TransitionInfo.Change(task.token, surface);
+        change.setTaskInfo(task);
+        change.setMode(TRANSIT_CHANGE);
+        info.getChanges().add(change);
+        return task;
+    }
 
     @Test
     public void testNewFloatingLaunchDuringRecentsFinishToApp() throws Exception {
