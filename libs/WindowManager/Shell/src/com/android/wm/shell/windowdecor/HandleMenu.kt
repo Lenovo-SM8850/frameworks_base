@@ -82,9 +82,8 @@ import kotlinx.coroutines.launch
 /**
  * Handle menu opened when the appropriate button is clicked on.
  *
- * Displays up to 3 pills that show the following: App Info: App name, app icon, and collapse button
- * to close the menu. Windowing Options(Proto 2 only): Buttons to change windowing modes. Additional
- * Options: Miscellaneous functions including screenshot and closing task.
+ * Displays windowing options and additional actions, with separate close and app-to-web pills
+ * when available. Tapping outside dismisses the menu.
  */
 class HandleMenu
 private constructor(
@@ -506,6 +505,9 @@ private constructor(
     /** Determines handle menu height based the max size and the visibility of pills. */
     private fun getHandleMenuHeight(): Int {
         var menuHeight = loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_height)
+        // The app info row and its following inter-pill gap are no longer displayed.
+        menuHeight -= loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_app_info_pill_height)
+        menuHeight -= pillTopMargin
         if (!shouldShowWindowingPill) {
             menuHeight -=
                 loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
@@ -782,6 +784,18 @@ private constructor(
                 bindMoreActionsPill(style)
             }
             bindOpenInAppOrBrowserPill(style)
+            // The first visible pill takes the menu's top margin; subsequent pills keep the gap.
+            var firstPill = true
+            listOf(windowingPillView, floatingClosePill, moreActionsPill, openInAppOrBrowserPill)
+                .filter { !it.isGone }
+                .forEach { pill ->
+                    (pill.layoutParams as ViewGroup.MarginLayoutParams).topMargin =
+                        context.resources.getDimensionPixelSize(
+                            if (firstPill) R.dimen.desktop_mode_handle_menu_margin_top
+                            else R.dimen.desktop_mode_handle_menu_pill_spacing_margin
+                        )
+                    firstPill = false
+                }
         }
 
         /** Sets the app's name. */
@@ -827,6 +841,7 @@ private constructor(
          * because input is detected through the status bar layer with a global input monitor.
          */
         fun checkMotionEvent(ev: MotionEvent, inputPointLocal: PointF) {
+            if (!appInfoPill.isShown) return
             val inputInCollapseButton =
                 pointInView(collapseMenuButton, inputPointLocal.x, inputPointLocal.y)
             val action = ev.actionMasked

@@ -30,6 +30,8 @@
 
     <LinearLayout
         android:id="@+id/app_info_pill"
+        android:visibility="gone"
+        android:importantForAccessibility="noHideDescendants"
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="@dimen/desktop_mode_handle_menu_app_info_pill_height"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_margin_top"
