@@ -7,6 +7,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import android.app.ActivityManager.RunningTaskInfo;
 import android.graphics.Point;
@@ -26,22 +28,26 @@ import org.junit.runner.RunWith;
 @SmallTest
 @RunWith(AndroidJUnit4.class)
 public class FloatingResizeAnimationTest extends ShellTestCase {
-    private TransitionInfo.Change change(SurfaceControl snapshot) {
-        final RunningTaskInfo task = new RunningTaskInfo();
-        task.isFloatingWindow = true;
-        task.floatingWindowScale = .75f;
-        task.positionInParent = new Point(350, 550);
-        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
-        task.configuration.windowConfiguration.setBounds(new Rect(0, 0, 1200, 800));
-        final TransitionInfo.Change change =
-                new TransitionInfo.Change(mock(WindowContainerToken.class), mock(SurfaceControl.class));
-        change.setTaskInfo(task);
-        change.setMode(TRANSIT_CHANGE);
-        change.setStartAbsBounds(new Rect(0, 0, 800, 1200));
-        change.setEndAbsBounds(new Rect(0, 0, 1200, 800));
-        change.setStartFloatingWindowBounds(new Rect(500, 400, 1100, 1300));
-        change.setSnapshot(snapshot, .5f);
-        return change;
+    private SurfaceControl validSurface() {
+        final SurfaceControl surface = mock(SurfaceControl.class);
+        when(surface.isValid()).thenReturn(true);
+        return surface;
+    }
+
+    @Test
+    public void invalidLeashOrVeil_skipsLateAnimationFrames() {
+        final SurfaceControl veil = validSurface();
+        final TransitionInfo.Change change = change(null);
+        final FloatingResizeAnimation animation =
+                new FloatingResizeAnimation(change, new Point(), 20f, veil);
+        final SurfaceControl.Transaction t = MockTransactionPool.create();
+        when(change.getLeash().isValid()).thenReturn(false);
+        animation.apply(t, .5f);
+        verifyNoInteractions(t);
+        when(change.getLeash().isValid()).thenReturn(true);
+        when(veil.isValid()).thenReturn(false);
+        animation.apply(t, .5f);
+        verifyNoInteractions(t);
     }
 
     @Test
@@ -51,6 +57,33 @@ public class FloatingResizeAnimationTest extends ShellTestCase {
         assertFalse(DefaultTransitionHandler.isFloatingExit(change));
         change.getTaskInfo().isFloatingWindow = false;
         assertTrue(DefaultTransitionHandler.isFloatingExit(change));
+    }
+
+    @Test
+    public void missingCapturedPresentation_doesNotSelectRotation() {
+        final TransitionInfo.Change change = change(null);
+        change.setStartFloatingWindowBounds(new Rect());
+        assertFalse(DefaultTransitionHandler.isFloatingRotation(change));
+        change.setStartFloatingWindowBounds(new Rect(500, 400, 1100, 1300));
+        assertTrue(DefaultTransitionHandler.isFloatingRotation(change));
+    }
+
+    private TransitionInfo.Change change(SurfaceControl snapshot) {
+        final RunningTaskInfo task = new RunningTaskInfo();
+        task.isFloatingWindow = true;
+        task.floatingWindowScale = .75f;
+        task.positionInParent = new Point(350, 550);
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
+        task.configuration.windowConfiguration.setBounds(new Rect(0, 0, 1200, 800));
+        final TransitionInfo.Change change =
+                new TransitionInfo.Change(mock(WindowContainerToken.class), validSurface());
+        change.setTaskInfo(task);
+        change.setMode(TRANSIT_CHANGE);
+        change.setStartAbsBounds(new Rect(0, 0, 800, 1200));
+        change.setEndAbsBounds(new Rect(0, 0, 1200, 800));
+        change.setStartFloatingWindowBounds(new Rect(500, 400, 1100, 1300));
+        change.setSnapshot(snapshot, .5f);
+        return change;
     }
 
     @Test
@@ -72,8 +105,8 @@ public class FloatingResizeAnimationTest extends ShellTestCase {
 
     @Test
     public void startsAtVisibleBoundsAndCrossFadesWithoutStretch() {
-        final SurfaceControl snapshot = mock(SurfaceControl.class);
-        final SurfaceControl veil = mock(SurfaceControl.class);
+        final SurfaceControl snapshot = validSurface();
+        final SurfaceControl veil = validSurface();
         final TransitionInfo.Change change = change(snapshot);
         final FloatingResizeAnimation animation =
                 new FloatingResizeAnimation(change, new Point(), 20f, veil);
@@ -99,14 +132,14 @@ public class FloatingResizeAnimationTest extends ShellTestCase {
 
     @Test
     public void roundedVisibleSizeKeepsExactEndpointMatrices() {
-        final SurfaceControl snapshot = mock(SurfaceControl.class);
+        final SurfaceControl snapshot = validSurface();
         final TransitionInfo.Change change = change(snapshot);
         change.setStartAbsBounds(new Rect(0, 0, 800, 1199));
         change.setStartFloatingWindowBounds(new Rect(500, 400, 1100, 1299));
         change.setEndAbsBounds(new Rect(0, 0, 1200, 799));
         change.getTaskInfo().configuration.windowConfiguration.setBounds(new Rect(0, 0, 1200, 799));
         final FloatingResizeAnimation animation =
-                new FloatingResizeAnimation(change, new Point(), 20f, mock(SurfaceControl.class));
+                new FloatingResizeAnimation(change, new Point(), 20f, validSurface());
         final SurfaceControl.Transaction start = MockTransactionPool.create();
         animation.apply(start, 0f);
         verify(start).setMatrix(snapshot, .75f, 0f, 0f, .75f);
@@ -119,7 +152,7 @@ public class FloatingResizeAnimationTest extends ShellTestCase {
 
     @Test
     public void endsAtPresentationTransformIncludingRootOffsetWithoutSnapshot() {
-        final SurfaceControl veil = mock(SurfaceControl.class);
+        final SurfaceControl veil = validSurface();
         final TransitionInfo.Change change = change(null);
         final FloatingResizeAnimation animation =
                 new FloatingResizeAnimation(change, new Point(100, 200), 20f, veil);

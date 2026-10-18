@@ -415,6 +415,16 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                         finishTransaction, onAnimFinish));
                 continue;
             }
+            if (change.getMode() == TRANSIT_CHANGE && isTask
+                    && change.getStartAbsBounds().width() != change.getEndAbsBounds().width()) {
+                ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
+                        "Floating rotation candidate task=%d floating=%b start=%s rotations=%d->%d"
+                                + " independent=%b animate=%b",
+                        change.getTaskInfo().taskId, change.getTaskInfo().isFloatingWindow,
+                        change.getStartFloatingWindowBounds(), change.getStartRotation(),
+                        change.getEndRotation(), TransitionInfo.isIndependent(change, info),
+                        isFloatingRotation(change) && TransitionInfo.isIndependent(change, info));
+            }
             if (isFloatingRotation(change) && TransitionInfo.isIndependent(change, info)) {
                 animations.add(startFloatingRotationAnimation(info, change, startTransaction,
                         finishTransaction, onAnimFinish));

@@ -97,6 +97,7 @@ class PinnedLayerController(
     private val miniListeners = mutableSetOf<(TaskInfo) -> Unit>()
     private val taskLeashes = mutableMapOf<Int, SurfaceControl>()
     private val hdrLeashes = mutableMapOf<Int, SurfaceControl>()
+    private val pendingRotations = mutableMapOf<IBinder, Pair<Int, Rect>>()
 
     fun isMini(task: TaskInfo): Boolean =
         presentationController.miniState.get(task.userId, task.taskId) != null
@@ -468,7 +469,9 @@ class PinnedLayerController(
         presentationController.setManualOrientation(task, landscape, bounds)
         val wct = WindowContainerTransaction()
         presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
-        transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        val startBounds = Rect(task.presentationBounds)
+        val transition = transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        pendingRotations[transition] = task.taskId to startBounds
         return true
     }
 
@@ -900,6 +903,22 @@ class PinnedLayerController(
         startTransaction: SurfaceControl.Transaction,
         finishTransaction: SurfaceControl.Transaction,
     ) {
+        pendingRotations.remove(transition)?.let { (taskId, startBounds) ->
+            info.changes.firstOrNull {
+                it.taskInfo?.taskId == taskId && it.mode == TRANSIT_CHANGE
+            }?.let { change ->
+                logV("Floating rotate ready taskId=%d floating=%b start=%s captured=%s " +
+                    "rotation=%d->%d independent=%b", taskId,
+                    change.taskInfo!!.isFloatingWindow, change.startFloatingWindowBounds,
+                    startBounds, change.startRotation, change.endRotation,
+                    TransitionInfo.isIndependent(change, info))
+                if (change.taskInfo!!.isFloatingWindow && change.startFloatingWindowBounds.isEmpty &&
+                    !keyguardShowing && !overviewShowing) {
+                    // A bounds-only rotate can lack Core's visible-task presentation snapshot.
+                    change.setStartFloatingWindowBounds(startBounds)
+                }
+            }
+        }
         val pending = activeTransitions[transition].orEmpty()
         val releasing = pending.filterIsInstance<ActiveTransition.Unpin>().filter {
             !it.minimized && (it.exitFloating || info.changes.none { change ->
@@ -1023,6 +1042,7 @@ class PinnedLayerController(
     }
 
     override fun onTransitionFinished(transition: IBinder, aborted: Boolean) {
+        pendingRotations.remove(transition)
         miniInteractions?.onTransitionFinished(aborted)
         val pending = activeTransitions.remove(transition).orEmpty()
         if (aborted) {

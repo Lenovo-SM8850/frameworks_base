@@ -888,6 +888,54 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun rotateTask_suppliesMissingStartPresentationBeforeDefaultHandler() {
+        assertRotatePresentation(preserveCoreBounds = false)
+    }
+
+    @Test
+    fun rotateTask_keepsCoreStartPresentationWhenAvailable() {
+        assertRotatePresentation(preserveCoreBounds = true)
+    }
+
+    @Test
+    fun rotateTask_hiddenByKeyguard_doesNotCreateAnAnimationStartPresentation() {
+        assertRotatePresentation(preserveCoreBounds = false, hidden = true)
+    }
+
+    private fun assertRotatePresentation(preserveCoreBounds: Boolean, hidden: Boolean = false) {
+        if (hidden) {
+            val shell = mock<ShellController>()
+            pinnedLayerController.configureVisibility(shell, mock())
+            val listener = argumentCaptor<KeyguardChangeListener>()
+            verify(shell).addKeyguardChangeListener(listener.capture())
+            listener.firstValue.onKeyguardVisibilityChanged(true, false, false)
+        }
+        val task = setupTask(taskId = 201).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            positionInParent = android.graphics.Point(300, 100)
+            configuration.windowConfiguration.setBounds(Rect(0, 0, 800, 1200))
+        }
+        val start = Rect(task.presentationBounds)
+        val transition = mock<IBinder>()
+        whenever(transitions.startTransition(eq(TRANSIT_CHANGE), any(), anyOrNull()))
+            .thenReturn(transition)
+        assertTrue(pinnedLayerController.rotateTask(task))
+        val change = TransitionInfo.Change(task.token, leash).apply {
+            taskInfo = task
+            mode = TRANSIT_CHANGE
+            setStartAbsBounds(Rect(0, 0, 800, 1200))
+            setEndAbsBounds(Rect(0, 0, 1200, 800))
+            if (preserveCoreBounds) setStartFloatingWindowBounds(Rect(1, 2, 301, 502))
+        }
+        val info = TransitionInfo(TRANSIT_CHANGE, FLAG_NONE).apply { addChange(change) }
+        pinnedLayerController.onTransitionReady(transition, info,
+            startTransaction, finishTransaction)
+        assertEquals(if (preserveCoreBounds) Rect(1, 2, 301, 502)
+            else if (hidden) Rect() else start, change.startFloatingWindowBounds)
+    }
+
+    @Test
     fun rootBackOverHome_startsBackgroundExitAndClearsInterception() {
         val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = 201).apply { isFloatingWindow = true }
         pinTask(task)
