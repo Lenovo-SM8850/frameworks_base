@@ -45,6 +45,15 @@ public class FloatingResizeAnimationTest extends ShellTestCase {
     }
 
     @Test
+    public void backExitUsesClosingAnimationButMiniMinimizeDoesNot() {
+        final TransitionInfo.Change change = change(null);
+        change.setMode(android.view.WindowManager.TRANSIT_TO_BACK);
+        assertFalse(DefaultTransitionHandler.isFloatingExit(change));
+        change.getTaskInfo().isFloatingWindow = false;
+        assertTrue(DefaultTransitionHandler.isFloatingExit(change));
+    }
+
+    @Test
     public void manualShapeChangeAnimatesButPresentationScaleAndDisplayRotationDoNot() {
         final TransitionInfo.Change change = change(null);
         assertTrue(DefaultTransitionHandler.isFloatingRotation(change));

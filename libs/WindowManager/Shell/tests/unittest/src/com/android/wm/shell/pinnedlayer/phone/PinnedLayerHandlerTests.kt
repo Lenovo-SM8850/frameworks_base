@@ -156,6 +156,7 @@ class PinnedLayerHandlerTests : ShellTestCase() {
                 desktopTasksController,
             )
         whenever(presentationController.isTaskSupportedForPinning(any())).thenReturn(true)
+        whenever(presentationController.miniState).thenReturn(FloatingMiniState())
         whenever(desktopUserRepositories.getProfile(USER_ID_0)).thenReturn(desktopRepository)
 
         // Setup default display with a desk containing one desktop window that'll be pinned.
@@ -187,6 +188,26 @@ class PinnedLayerHandlerTests : ShellTestCase() {
         assertTrue(wct.hierarchyOps.any {
             it.isReparent && it.container == task.token.asBinder() && it.toTop
         })
+    }
+
+    @Test
+    fun appRequestedBack_exitsFloatingInsteadOfRetainingMinimizedTask() {
+        val pin = setupWindowingLayerTransition(
+            WINDOWING_LAYER_PINNED, mock(), triggerTaskId = TASK_ID_0)
+        val task = requireNotNull(pin.triggerTask).apply { isFloatingWindow = true }
+        val transition = mock<IBinder>()
+        pinnedLayerHandler.handleRequest(transition, pin)
+        pinnedLayerController.onTransitionReady(transition,
+            TransitionInfo(TRANSIT_CHANGE, FLAG_NONE), startTransaction, finishTransaction)
+
+        val wct = requireNotNull(pinnedLayerHandler.handleRequest(mock(),
+            TransitionRequestInfo(TRANSIT_TO_BACK, task, null)))
+
+        val change = requireNotNull(wct.changes[task.token.asBinder()])
+        assertFalse(change.floatingWindow)
+        assertFalse(change.hidden)
+        assertEquals(android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED, change.windowingMode)
+        assertFalse(wct.hierarchyOps.any { it.toTop })
     }
 
     @Test

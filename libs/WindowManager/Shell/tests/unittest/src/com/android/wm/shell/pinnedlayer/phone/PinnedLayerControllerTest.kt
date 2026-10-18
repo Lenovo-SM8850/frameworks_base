@@ -30,6 +30,8 @@ import android.view.WindowManager.TRANSIT_CHANGE
 import android.view.WindowManager.TRANSIT_CLOSE
 import android.view.WindowManager.TRANSIT_OPEN
 import android.view.WindowManager.TRANSIT_TO_FRONT
+import android.view.WindowManager.TRANSIT_TO_BACK
+import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
 import android.window.DisplayAreaInfo
 import android.window.DisplayAreaOrganizer
 import android.window.TransitionInfo
@@ -883,6 +885,141 @@ class PinnedLayerControllerTest : ShellTestCase() {
             it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
         })
         assertTrue(pinnedLayerController.isPinned(tasks.first().taskId))
+    }
+
+    @Test
+    fun appMoveToBack_leavesFloatingModeWithoutMinimizeHandleOrForegroundReorder() {
+        assertAppDepartureLeavesFloating(TRANSIT_TO_BACK)
+    }
+
+    @Test
+    fun appFinish_clearsSurvivingRecentTaskAfterTransition() {
+        org.mockito.kotlin.doAnswer {
+            it.getArgument<Runnable>(0).run()
+            null
+        }.whenever(transitions).runOnIdle(any())
+        assertAppDepartureLeavesFloating(TRANSIT_CLOSE)
+    }
+
+    private fun assertAppDepartureLeavesFloating(mode: Int) {
+        val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = 201).apply { isFloatingWindow = true }
+        pinTask(task)
+        task.configuration.windowConfiguration.setAlwaysOnTop(false)
+        task.isVisible = false
+        val info = TransitionInfo(mode, FLAG_NONE).apply {
+            addChange(TransitionInfo.Change(task.token, leash).apply {
+                taskInfo = task
+                this.mode = mode
+            })
+        }
+
+        pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+
+        assertTrue(pinnedLayerController.getPinnedTasks().isEmpty())
+        val field = PinnedLayerController::class.java.getDeclaredField("minimizedTasks")
+            .apply { isAccessible = true }
+        assertTrue((field.get(pinnedLayerController) as Set<*>).isEmpty())
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(wct.capture())
+        val change = requireNotNull(wct.firstValue.changes[task.token.asBinder()])
+        assertFalse(change.floatingWindow)
+        assertFalse(change.disablePip)
+        assertFalse(change.hidden)
+        assertEquals(WINDOWING_MODE_UNDEFINED, change.windowingMode)
+        assertTrue(requireNotNull(wct.firstValue.findBoundsChange(task)).isEmpty)
+        assertTrue(wct.firstValue.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ALWAYS_ON_TOP &&
+                !it.isAlwaysOnTop
+        })
+        assertFalse(wct.firstValue.hierarchyOps.any { it.toTop })
+        // A normal relaunch must not enter the retained-minimized restoration branch.
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FULLSCREEN)
+        val launch = TransitionInfo(TRANSIT_TO_FRONT, FLAG_NONE).apply {
+            addChange(TransitionInfo.Change(task.token, leash).apply {
+                taskInfo = task
+                this.mode = TRANSIT_TO_FRONT
+            })
+        }
+        pinnedLayerController.onTransitionReady(mock(), launch, startTransaction, finishTransaction)
+        assertTrue(pinnedLayerController.getPinnedTasks().isEmpty())
+    }
+
+    @Test
+    fun appMoveToBack_existingMiniRetainsFloatingIdentity() {
+        val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = 201).apply { isFloatingWindow = true }
+        pinTask(task)
+        presentationController.miniState.enter(task.userId, task.taskId,
+            FloatingMiniState.Restore(Rect(DEFAULT_TASK_BOUNDS), Rect(DEFAULT_TASK_BOUNDS), 1f),
+            Rect(0, 0, 100, 100), .3f)
+        task.configuration.windowConfiguration.setAlwaysOnTop(false)
+        val info = TransitionInfo(TRANSIT_TO_BACK, FLAG_NONE).apply {
+            addChange(TransitionInfo.Change(task.token, leash).apply {
+                taskInfo = task
+                mode = TRANSIT_TO_BACK
+            })
+        }
+        pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+        assertTrue(pinnedLayerController.isPinned(task.taskId))
+        assertTrue(pinnedLayerController.isMini(task))
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
+    }
+
+    @Test
+    fun sleepWakeToBackParticipants_keepFloatingWithoutKeyguardCallback() {
+        for ((id, type) in listOf(201 to android.view.WindowManager.TRANSIT_SLEEP,
+                202 to android.view.WindowManager.TRANSIT_WAKE)) {
+            val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = id).apply { isFloatingWindow = true }
+            pinTask(task)
+            task.configuration.windowConfiguration.setAlwaysOnTop(false)
+            val info = TransitionInfo(type, FLAG_NONE).apply {
+                addChange(TransitionInfo.Change(task.token, leash).apply {
+                    taskInfo = task
+                    mode = TRANSIT_TO_BACK
+                })
+            }
+            pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+            assertTrue(pinnedLayerController.getPinnedTasks().any { it.taskId == task.taskId })
+        }
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
+    }
+
+    @Test
+    fun keyguardToBackParticipant_doesNotExitBeforeVisibilityCallback() {
+        val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = 201).apply { isFloatingWindow = true }
+        pinTask(task)
+        task.configuration.windowConfiguration.setAlwaysOnTop(false)
+        val info = TransitionInfo(TRANSIT_TO_FRONT,
+            android.view.WindowManager.TRANSIT_FLAG_KEYGUARD_APPEARING).apply {
+            addChange(TransitionInfo.Change(task.token, leash).apply {
+                taskInfo = task
+                mode = TRANSIT_TO_BACK
+            })
+        }
+        pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+        assertTrue(pinnedLayerController.getPinnedTasks().any { it.taskId == task.taskId })
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
+    }
+
+    @Test
+    fun controllerBackExit_doesNotRememberTaskJustBecauseChangeMovesToBack() {
+        val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = 201).apply { isFloatingWindow = true }
+        pinTask(task)
+        val transition = mock<IBinder>()
+        val wct = pinnedLayerController.unpinTask(transition, task,
+            PinnedLayerController.UnpinStrategy.BACK)
+        assertEquals(WINDOWING_MODE_UNDEFINED,
+            requireNotNull(wct.changes[task.token.asBinder()]).windowingMode)
+        // Core has already applied the exit WCT when it constructs TransitionInfo.
+        task.isFloatingWindow = false
+        val info = TransitionInfo(TRANSIT_TO_BACK, FLAG_NONE).apply {
+            addChange(TransitionInfo.Change(task.token, leash).apply {
+                taskInfo = task
+                mode = TRANSIT_TO_BACK
+            })
+        }
+        pinnedLayerController.onTransitionReady(transition, info, startTransaction, finishTransaction)
+        assertTrue(pinnedLayerController.getPinnedTasks().isEmpty())
     }
 
     @Test

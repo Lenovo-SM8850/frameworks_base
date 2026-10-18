@@ -28,6 +28,8 @@ import android.app.TaskWindowingLayerRequestHandler.REMOTE_CALLBACK_RESULT_KEY
 import android.app.TaskWindowingLayerRequestHandler.RESULT_APPROVED
 import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
 import android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
+import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
+import android.app.WindowConfiguration.ACTIVITY_TYPE_HOME
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.IBinder
@@ -496,6 +498,20 @@ class PinnedLayerController(
         return true
     }
 
+    /** Clears floating ownership without bringing a departing task back to the foreground. */
+    private fun getExitToBackWct(task: TaskInfo): WindowContainerTransaction =
+        getRemovedFromLayerWct(task.token)
+            .setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED)
+            .setBounds(task.token, Rect())
+            .setHidden(task.token, false)
+            .reorder(task.token, false)
+
+    /** Handles an app departure while retaining actual minis and Shell visibility policy. */
+    fun shouldLeaveFloatingOnBack(task: TaskInfo): Boolean =
+        task.isFloatingWindow && !isMini(task) && presentationController.recoverMini(task) == null &&
+            task.taskId !in minimizedTasks &&
+            !keyguardShowing && !recentsRunning && !overviewShowing
+
     /**
      * Pins a task and adds it to the active transitions for the given transition token.
      *
@@ -562,12 +578,14 @@ class PinnedLayerController(
             unpinStrategy,
         )
         val transitions = activeTransitions.getOrPut(transition) { mutableSetOf() }
-        transitions += ActiveTransition.Unpin(task, unpinStrategy == UnpinStrategy.HIDE)
+        transitions += ActiveTransition.Unpin(task, unpinStrategy == UnpinStrategy.HIDE,
+            exitFloating = unpinStrategy == UnpinStrategy.BACK)
 
         return when (unpinStrategy) {
             UnpinStrategy.HIDE,
             UnpinStrategy.CLOSE ->
                 getLayerUnpinnedWct(task.token, isMinimizing = unpinStrategy == UnpinStrategy.HIDE)
+            UnpinStrategy.BACK -> getExitToBackWct(task)
             UnpinStrategy.CLEAN -> getRemovedFromLayerWct(task.token)
                 .setBounds(task.token, task.presentationBounds)
         }
@@ -870,9 +888,9 @@ class PinnedLayerController(
     ) {
         val pending = activeTransitions[transition].orEmpty()
         val releasing = pending.filterIsInstance<ActiveTransition.Unpin>().filter {
-            !it.minimized && info.changes.none { change ->
+            !it.minimized && (it.exitFloating || info.changes.none { change ->
                 change.taskInfo?.taskId == it.taskInfo.taskId && change.mode == TRANSIT_TO_BACK
-            }
+            })
         }.map { it.taskInfo.taskId }.toSet()
         info.changes.forEach { change ->
             val task = change.taskInfo ?: return@forEach
@@ -914,13 +932,47 @@ class PinnedLayerController(
                         }
                     unpin(
                         transition.taskInfo,
-                        rememberAsPinned = transition.minimized || isMovingToBack,
+                        rememberAsPinned = transition.minimized ||
+                            (isMovingToBack && !transition.exitFloating),
                     )
                 }
             }
         }
         info.changes.forEach { change ->
             val task = change.taskInfo ?: return@forEach
+            val owned = activeTransitions.values.any { entries ->
+                entries.any { it.taskInfo.taskId == task.taskId }
+            }
+            val policyTransition = info.type == android.view.WindowManager.TRANSIT_SLEEP ||
+                info.type == android.view.WindowManager.TRANSIT_WAKE ||
+                info.type != TRANSIT_TO_BACK && info.type != TRANSIT_CLOSE &&
+                info.changes.any {
+                    it.taskInfo?.activityType == ACTIVITY_TYPE_HOME &&
+                        TransitionUtil.isOpeningType(it.mode)
+                }
+            val keyguardTransition = info.isKeyguardGoingAway ||
+                info.flags and (android.view.WindowManager.TRANSIT_FLAG_KEYGUARD_APPEARING or
+                    android.view.WindowManager.TRANSIT_FLAG_KEYGUARD_LOCKED) != 0
+            if (!owned && !policyTransition && !keyguardTransition &&
+                task.taskId in visiblePinnedTasks && shouldLeaveFloatingOnBack(task) &&
+                (change.mode == TRANSIT_TO_BACK || change.mode == TRANSIT_CLOSE)) {
+                logV("Leaving floating mode after app departure taskId=%d type=%d mode=%d",
+                    task.taskId, info.type, change.mode)
+                unpin(task)
+                if (change.mode == TRANSIT_TO_BACK) {
+                    shellTaskOrganizer.applyTransaction(getExitToBackWct(task))
+                    // Later observers and handlers must not restore the discarded transform.
+                    task.isFloatingWindow = false
+                } else {
+                    // A finished activity may leave an empty recent task, or remove it entirely.
+                    this.transitions.runOnIdle {
+                        shellTaskOrganizer.getRunningTaskInfo(task.taskId)?.takeIf {
+                            it.isFloatingWindow && !it.isVisible
+                        }?.let { shellTaskOrganizer.applyTransaction(getExitToBackWct(it)) }
+                    }
+                }
+                return@forEach
+            }
             if (task.isFloatingWindow && change.mode != TRANSIT_CLOSE) {
                 val restoring = task.taskId in minimizedTasks &&
                     (TransitionUtil.isOpeningType(change.mode) ||
@@ -940,7 +992,7 @@ class PinnedLayerController(
                     if (!wct.isEmpty) shellTaskOrganizer.applyTransaction(wct)
                 }
                 if (!restoring && !task.configuration.windowConfiguration.isAlwaysOnTop &&
-                    task.taskId in visiblePinnedTasks &&
+                    task.taskId in visiblePinnedTasks && !policyTransition && !keyguardTransition &&
                     !keyguardShowing && !recentsRunning && !overviewShowing) {
                     visiblePinnedTasks -= task.taskId
                     minimizedTasks += task.taskId
@@ -1074,6 +1126,9 @@ class PinnedLayerController(
          * handler wants to decide where to put the task.
          */
         CLEAN,
+
+        /** Leaves floating mode for an app-initiated move to the background. */
+        BACK,
     }
 
     interface PinnedTasksListener {

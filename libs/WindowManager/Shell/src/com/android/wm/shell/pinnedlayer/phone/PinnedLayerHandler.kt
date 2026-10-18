@@ -227,6 +227,9 @@ class PinnedLayerHandler(
         val isSwitchingToAnotherLayer =
             request.windowingLayerChange.isSwitchingToAnotherLayerRequest()
         return when {
+            isClosePinnedRequest && request.type == android.view.WindowManager.TRANSIT_TO_BACK &&
+                request.triggerTask?.let(pinnedLayerController::shouldLeaveFloatingOnBack) == true ->
+                UnpinStrategy.BACK
             isClosePinnedRequest && request.type == android.view.WindowManager.TRANSIT_TO_BACK ->
                 UnpinStrategy.HIDE
             isClosePinnedRequest -> UnpinStrategy.CLOSE

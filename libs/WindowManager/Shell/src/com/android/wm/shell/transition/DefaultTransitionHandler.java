@@ -992,11 +992,13 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 != (change.getEndAbsBounds().width() > change.getEndAbsBounds().height()));
     }
 
-    private static boolean isFloatingExit(TransitionInfo.Change change) {
+    static boolean isFloatingExit(TransitionInfo.Change change) {
         if (change.getTaskInfo() == null || change.getStartFloatingWindowBounds().isEmpty()) {
             return false;
         }
         return change.getMode() == android.view.WindowManager.TRANSIT_CLOSE
+                || (change.getMode() == android.view.WindowManager.TRANSIT_TO_BACK
+                        && !change.getTaskInfo().isFloatingWindow)
                 || (change.getMode() == TRANSIT_CHANGE && !change.getTaskInfo().isFloatingWindow);
     }
 
@@ -1187,7 +1189,7 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
     private WindowAnimation startFloatingExitAnimation(TransitionInfo info,
             TransitionInfo.Change change, SurfaceControl.Transaction startT,
             SurfaceControl.Transaction finishT, Consumer<WindowAnimation> onFinish) {
-        final boolean closing = change.getMode() == android.view.WindowManager.TRANSIT_CLOSE;
+        final boolean closing = TransitionUtil.isClosingType(change.getMode());
         final Rect start = new Rect(change.getStartFloatingWindowBounds());
         final Rect end = closing ? new Rect(start) : new Rect(change.getEndAbsBounds());
         if (closing) {
@@ -1250,6 +1252,10 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
         startT.show(leash);
         if (closing) {
             finishT.hide(leash);
+            if (!change.getTaskInfo().isFloatingWindow) {
+                finishT.setMatrix(leash, 1f, 0f, 0f, 1f)
+                        .setCornerRadius(leash, 0f).setShadowRadius(leash, 0f);
+            }
         } else {
             finishT.setMatrix(leash, 1f, 0f, 0f, 1f).setAlpha(leash, 1f)
                     .setCornerRadius(leash, endRounded ? radius : 0f);
