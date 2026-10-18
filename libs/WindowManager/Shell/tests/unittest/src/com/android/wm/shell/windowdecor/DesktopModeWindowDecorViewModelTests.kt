@@ -137,6 +137,22 @@ class DesktopModeWindowDecorViewModelTests : DesktopModeWindowDecorViewModelTest
     }
 
     @Test
+    fun floatingFocus_usesLiveOrganizerFocusInsteadOfTransitionHistory() {
+        val task = createTask(windowingMode = WINDOWING_MODE_FREEFORM).apply {
+            isFloatingWindow = true
+            isFocused = false
+        }
+        val decoration = mock<WindowDecorationWrapper>()
+        whenever(decoration.taskInfo).thenReturn(task)
+        val region = android.graphics.Region()
+        whenever(decoration.exclusionRegion).thenReturn(region)
+        windowDecorByTaskIdSpy.put(task.taskId, decoration)
+        whenever(mockTaskOrganizer.getRunningTaskInfo(task.taskId)).thenReturn(task)
+        desktopModeWindowDecorViewModel.onFocusedTaskChanged(task, true, true)
+        verify(decoration).relayout(task, false, region)
+    }
+
+    @Test
     fun floatingRootBack_usesPinnedLayerExit() {
         val task = RunningTaskInfo().apply { isFloatingWindow = true }
         desktopModeWindowDecorViewModel.onBackOnTaskRoot(task)

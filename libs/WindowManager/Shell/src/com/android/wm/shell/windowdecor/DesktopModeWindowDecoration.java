@@ -538,6 +538,11 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 /* occludingElementsCalculator = */ () -> getOccludingElements(),
                 mDecorThemeUtilFactory);
 
+        if (mFloatingFocusEnabled) {
+            mRelayoutParams.mShadowRadiusId = FloatingFocusIndicator.shadowRadiusId(taskInfo.isFocused);
+            mRelayoutParams.mBoxShadowSettingsIds = null;
+        }
+
         final Configuration newConfig = mRelayoutParams.mWindowDecorConfig;
 
         boolean configChanged = false;

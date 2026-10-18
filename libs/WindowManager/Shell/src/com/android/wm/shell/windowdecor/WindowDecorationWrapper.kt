@@ -59,6 +59,31 @@ private constructor(
     private var floatingTopHandle: FloatingBottomHandle? = null
     private var floatingMiniInput: FloatingMiniInput? = null
     private var floatingController: PinnedLayerController? = null
+    private var floatingFocusActive = false
+    private val floatingFocusIndicator = FloatingFocusIndicator { radius, alpha ->
+        defaultWindowDecor?.updateFloatingFocusShadow(radius)
+        desktopWindowDecor?.updateFloatingFocusShadow(radius)
+        floatingBottomHandle?.setFocusAlpha(alpha)
+        floatingTopHandle?.setFocusAlpha(alpha)
+    }
+
+    private fun updateFloatingFocus(task: RunningTaskInfo,
+        finishT: SurfaceControl.Transaction? = null) {
+        val enabled = task.isFloatingWindow && floatingController?.isMini(task) != true &&
+            floatingPreviewSource == null
+        if (!enabled && !floatingFocusActive) return
+        floatingFocusActive = enabled
+        defaultWindowDecor?.floatingFocusEnabled = enabled
+        desktopWindowDecor?.mFloatingFocusEnabled = enabled
+        if (!enabled || !task.isVisible) {
+            floatingFocusIndicator.close()
+            defaultWindowDecor?.updateFloatingFocusShadow(null)
+            desktopWindowDecor?.updateFloatingFocusShadow(null)
+            return
+        }
+        currentDecorWindowContext?.let { floatingFocusIndicator.update(task, it, finishT) }
+    }
+
     private val miniListener: (android.app.TaskInfo) -> Unit = { info ->
         if (info.taskId == decorTaskInfo.taskId && info is RunningTaskInfo) {
             relayout(info, hasGlobalFocus, exclusionRegion)
@@ -81,6 +106,8 @@ private constructor(
         floatingBottomHandle?.update(decorTaskInfo, taskSurface, t)
         floatingTopHandle?.update(decorTaskInfo, taskSurface, t)
         floatingMiniInput?.update(decorTaskInfo, taskSurface, t)
+        floatingBottomHandle?.setFocusAlpha(floatingFocusIndicator.alpha)
+        floatingTopHandle?.setFocusAlpha(floatingFocusIndicator.alpha)
     }
 
     private fun requireDefaultWindowDecor(): DefaultWindowDecoration =
@@ -310,14 +337,17 @@ private constructor(
     }
 
     /** Updates all window decorations, including any existing caption. */
-    fun relayout(taskInfo: RunningTaskInfo, isFocused: Boolean, exclusionRegion: Region) =
+    fun relayout(taskInfo: RunningTaskInfo, isFocused: Boolean, exclusionRegion: Region) {
+        updateFloatingFocus(taskInfo)
+        val focused = if (taskInfo.isFloatingWindow && floatingController?.isMini(taskInfo) != true)
+            taskInfo.isFocused else isFocused
         when {
             defaultWindowDecor != null -> {
-                requireDefaultWindowDecor().relayout(resolveFloatingPreview(taskInfo), isFocused, exclusionRegion)
+                requireDefaultWindowDecor().relayout(resolveFloatingPreview(taskInfo), focused, exclusionRegion)
             }
 
             desktopWindowDecor != null -> {
-                requireDesktopWindowDecor().relayout(resolveFloatingPreview(taskInfo), isFocused, exclusionRegion)
+                requireDesktopWindowDecor().relayout(resolveFloatingPreview(taskInfo), focused, exclusionRegion)
             }
 
             captionWindowDecoration != null -> {
@@ -325,7 +355,10 @@ private constructor(
             }
 
             else -> error("Expected Non-null window decoration")
-        }.also { updateFloatingBottomHandle() }
+        }
+        if (!floatingFocusIndicator.initialized) updateFloatingFocus(taskInfo)
+        updateFloatingBottomHandle()
+    }
 
     /** Updates all window decorations, including any existing caption. */
     fun relayout(
@@ -343,6 +376,10 @@ private constructor(
             finishFloatingWindowPreview()
             floatingWindowTransitionListener?.invoke()
         }
+        val focused = if (taskInfo.isFloatingWindow && floatingController?.isMini(taskInfo) != true)
+            taskInfo.isFocused else hasGlobalFocus
+        val focusFinishT = if (inSyncWithTransition && startT !== finishT) finishT else null
+        updateFloatingFocus(taskInfo, focusFinishT)
         when {
             defaultWindowDecor != null -> {
                 requireDefaultWindowDecor()
@@ -352,7 +389,7 @@ private constructor(
                         finishT,
                         applyStartTransactionOnDraw,
                         shouldSetTaskVisibilityPositionAndCrop,
-                        hasGlobalFocus,
+                        focused,
                         displayExclusionRegion,
                         inSyncWithTransition,
                         taskSurface,
@@ -367,7 +404,7 @@ private constructor(
                         finishT,
                         applyStartTransactionOnDraw,
                         shouldSetTaskVisibilityPositionAndCrop,
-                        hasGlobalFocus,
+                        focused,
                         displayExclusionRegion,
                         inSyncWithTransition,
                         taskSurface,
@@ -382,7 +419,7 @@ private constructor(
                         finishT,
                         applyStartTransactionOnDraw,
                         shouldSetTaskVisibilityPositionAndCrop,
-                        hasGlobalFocus,
+                        focused,
                         displayExclusionRegion,
                         inSyncWithTransition,
                     )
@@ -390,6 +427,7 @@ private constructor(
 
             else -> error("Expected Non-null window decoration")
         }.also {
+            if (!floatingFocusIndicator.initialized) updateFloatingFocus(taskInfo, focusFinishT)
             updateFloatingBottomHandle(startT)
             if (inSyncWithTransition && taskInfo.isFloatingWindow) {
                 updateFloatingWindowChildScale(startT, taskInfo.floatingWindowScale)
@@ -421,6 +459,7 @@ private constructor(
 
     /** Closes the window decoration. */
     fun close() {
+        floatingFocusIndicator.close()
         floatingController?.removeMiniListener(miniListener)
         floatingMiniInput?.close()
         floatingMiniInput = null

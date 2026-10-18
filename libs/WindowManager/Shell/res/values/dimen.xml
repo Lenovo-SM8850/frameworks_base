@@ -439,6 +439,10 @@
     <!-- The thickness of shadows of a window that has focus in DIP. -->
     <dimen name="freeform_decor_shadow_focused_thickness">20dp</dimen>
 
+    <!-- Floating shadows in visible display pixels before presentation-scale compensation. -->
+    <dimen name="floating_decor_shadow_focused_radius">20dp</dimen>
+    <dimen name="floating_decor_shadow_unfocused_radius">15dp</dimen>
+
     <!-- The thickness of shadows of a window that doesn't have focus in DIP. -->
     <dimen name="freeform_decor_shadow_unfocused_thickness">5dp</dimen>
 

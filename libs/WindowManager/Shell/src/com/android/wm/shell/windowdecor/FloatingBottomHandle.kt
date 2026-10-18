@@ -138,6 +138,8 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         }
     }
 
+    fun setFocusAlpha(alpha: Float) { pill?.alpha = alpha }
+
     override fun close() {
         sampler?.close()
         sampler = null

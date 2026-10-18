@@ -95,6 +95,17 @@ abstract class WindowDecoration2<T>(
 ) : AutoCloseable where T : View, T : TaskFocusStateConsumer {
 
     var floatingWindowPreview = false
+    var floatingFocusEnabled = false
+    private var floatingFocusShadowRadius: Float? = null
+
+    fun updateFloatingFocusShadow(radius: Float?) {
+        floatingFocusShadowRadius = radius
+        if (radius != null && taskInfo.isFloatingWindow && taskSurface.isValid) {
+            SurfaceControl.Transaction().use {
+                it.setShadowRadius(taskSurface, radius / taskInfo.floatingWindowScale).apply()
+            }
+        }
+    }
 
     @VisibleForTesting var captionController: CaptionController<T>? = null
     /** Returns the display associated with the task. */
@@ -495,7 +506,8 @@ abstract class WindowDecoration2<T>(
         }
 
         if (shadowRadius != INVALID_SHADOW_RADIUS) {
-            val radius = shadowRadius / if (taskInfo.isFloatingWindow) taskInfo.floatingWindowScale else 1f
+            val radius = (if (floatingFocusEnabled) floatingFocusShadowRadius ?: shadowRadius.toFloat()
+                else shadowRadius.toFloat()) / if (taskInfo.isFloatingWindow) taskInfo.floatingWindowScale else 1f
             startT.setShadowRadius(taskSurface, radius)
             finishT.setShadowRadius(taskSurface, radius)
         }

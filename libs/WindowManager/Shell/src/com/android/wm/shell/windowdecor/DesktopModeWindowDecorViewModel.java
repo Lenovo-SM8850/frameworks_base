@@ -620,6 +620,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             boolean isFocusedGlobally) {
         final WindowDecorationWrapper decor = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (decor != null) {
+            if (decor.getTaskInfo().isFloatingWindow && (mPinnedLayerController == null
+                    || !mPinnedLayerController.isMini(decor.getTaskInfo()))) {
+                // Organizer focus is authoritative for Back, including focus outside transitions.
+                final RunningTaskInfo live = mTaskOrganizer.getRunningTaskInfo(taskInfo.taskId);
+                if (live != null) decor.relayout(live, live.isFocused, decor.getExclusionRegion());
+                return;
+            }
             if (decor.getTaskInfo().isFloatingWindow
                     && decor.getHasGlobalFocus() == isFocusedGlobally) return;
             decor.relayout(decor.getTaskInfo(), isFocusedGlobally, decor.getExclusionRegion());

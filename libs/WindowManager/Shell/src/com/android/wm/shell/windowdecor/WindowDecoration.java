@@ -109,6 +109,18 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
      */
     static final int CAPTION_LAYER_Z_ORDER = -1;
     boolean mFloatingWindowPreview;
+    public boolean mFloatingFocusEnabled;
+    private Float mFloatingFocusShadowRadius;
+
+    public void updateFloatingFocusShadow(Float radius) {
+        mFloatingFocusShadowRadius = radius;
+        if (radius != null && mTaskInfo.isFloatingWindow && mTaskSurface.isValid()) {
+            try (SurfaceControl.Transaction t = new SurfaceControl.Transaction()) {
+                t.setShadowRadius(mTaskSurface, radius / mTaskInfo.floatingWindowScale).apply();
+            }
+        }
+    }
+
     /**
      * The Z-order of the task input sink in {@link DragPositioningCallback}.
      * <p>
@@ -650,8 +662,10 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
 
         final float scale = mTaskInfo.isFloatingWindow ? mTaskInfo.floatingWindowScale : 1f;
         if (outResult.mShadowRadius != INVALID_SHADOW_RADIUS) {
-            startT.setShadowRadius(mTaskSurface, outResult.mShadowRadius / scale);
-            finishT.setShadowRadius(mTaskSurface, outResult.mShadowRadius / scale);
+            final float radius = mFloatingFocusEnabled && mFloatingFocusShadowRadius != null
+                    ? mFloatingFocusShadowRadius : outResult.mShadowRadius;
+            startT.setShadowRadius(mTaskSurface, radius / scale);
+            finishT.setShadowRadius(mTaskSurface, radius / scale);
         }
         if (outResult.mCornerRadius != INVALID_CORNER_RADIUS) {
             startT.setCornerRadius(mTaskSurface, outResult.mCornerRadius / scale);
