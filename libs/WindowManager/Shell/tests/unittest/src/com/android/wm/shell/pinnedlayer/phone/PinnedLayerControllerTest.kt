@@ -888,6 +888,33 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun rootBackOverHome_startsBackgroundExitAndClearsInterception() {
+        val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = 201).apply { isFloatingWindow = true }
+        pinTask(task)
+
+        pinnedLayerController.onFloatingTaskRootBack(task)
+
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(eq(TRANSIT_TO_BACK), wct.capture(), anyOrNull())
+        val change = requireNotNull(wct.firstValue.changes[task.token.asBinder()])
+        assertFalse(change.floatingWindow)
+        assertFalse(change.interceptBackPressed)
+        assertEquals(WINDOWING_MODE_UNDEFINED, change.windowingMode)
+        assertFalse(wct.firstValue.hierarchyOps.any { it.toTop })
+    }
+
+    @Test
+    fun rootBackAfterHomeFocus_doesNotTargetAnotherFloatingTask() {
+        val home = setupTask().apply {
+            isFloatingWindow = false
+            configuration.windowConfiguration.setActivityType(
+                android.app.WindowConfiguration.ACTIVITY_TYPE_HOME)
+        }
+        pinnedLayerController.onFloatingTaskRootBack(home)
+        verify(transitions, never()).startTransition(any(), anyOrNull(), anyOrNull())
+    }
+
+    @Test
     fun appMoveToBack_leavesFloatingModeWithoutMinimizeHandleOrForegroundReorder() {
         assertAppDepartureLeavesFloating(TRANSIT_TO_BACK)
     }

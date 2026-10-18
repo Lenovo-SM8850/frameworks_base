@@ -681,6 +681,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
     }
 
     @Override
+    public void onBackOnTaskRoot(RunningTaskInfo taskInfo) {
+        if (mPinnedLayerController != null && taskInfo.isFloatingWindow) {
+            mPinnedLayerController.onFloatingTaskRootBack(taskInfo);
+        }
+    }
+
+    @Override
     public void onTaskVanished(RunningTaskInfo taskInfo) {
         // A task vanishing doesn't necessarily mean the task was closed, it could also mean its
         // windowing mode changed. We're only interested in closing tasks so checking whether

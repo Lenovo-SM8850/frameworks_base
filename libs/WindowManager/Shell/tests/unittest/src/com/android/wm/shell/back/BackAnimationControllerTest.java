@@ -397,6 +397,19 @@ public class BackAnimationControllerTest extends ShellTestCase {
     }
 
     @Test
+    public void focusedFloatingOverHome_buttonBackInvokesTheFocusedAppCallback()
+            throws RemoteException {
+        createNavigationInfo(BackNavigationInfo.TYPE_CALLBACK, false, false);
+        mController.onMotionEvent(0, 0, MotionEvent.ACTION_DOWN, BackEvent.EDGE_NONE,
+                DEFAULT_DISPLAY);
+        mController.setTriggerBack(true);
+        mController.onMotionEvent(0, 0, MotionEvent.ACTION_UP, BackEvent.EDGE_NONE,
+                DEFAULT_DISPLAY);
+        verify(mActivityTaskManager).startBackNavigation(any(), any());
+        verify(mAppCallback).onBackInvoked();
+    }
+
+    @Test
     public void focusedFloatingTask_edgeTapDoesNotPreventFullscreenRefocus()
             throws RemoteException {
         ActivityTaskManager.RootTaskInfo task = new ActivityTaskManager.RootTaskInfo();

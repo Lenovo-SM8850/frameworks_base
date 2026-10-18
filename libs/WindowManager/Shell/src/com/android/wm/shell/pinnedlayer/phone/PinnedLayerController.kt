@@ -506,6 +506,20 @@ class PinnedLayerController(
             .setHidden(task.token, false)
             .reorder(task.token, false)
 
+    /** Completes a root Back after the app has exhausted its own navigation. */
+    fun onFloatingTaskRootBack(task: RunningTaskInfo) {
+        if (!task.isFloatingWindow || keyguardShowing || recentsRunning || overviewShowing) return
+        if (isMini(task) || presentationController.recoverMini(task) != null ||
+            task.taskId in minimizedTasks) {
+            minimizeTask(task)
+            return
+        }
+        logV("Leaving floating mode after root Back taskId=%d", task.taskId)
+        val transition = transitions.startTransition(TRANSIT_TO_BACK, getExitToBackWct(task), null)
+        activeTransitions[transition] = mutableSetOf(
+            ActiveTransition.Unpin(task, exitFloating = true))
+    }
+
     /** Handles an app departure while retaining actual minis and Shell visibility policy. */
     fun shouldLeaveFloatingOnBack(task: TaskInfo): Boolean =
         task.isFloatingWindow && !isMini(task) && presentationController.recoverMini(task) == null &&

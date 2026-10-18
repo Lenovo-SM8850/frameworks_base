@@ -162,6 +162,26 @@ public class BackNavigationControllerTests extends WindowTestsBase {
     }
 
     @Test
+    public void backUsesFocusedFloatingWindowAboveHomeAndHomeAfterOutsideTouch() {
+        final IOnBackInvokedCallback homeCallback = withAppCallback(mRootHomeTask);
+        final Task floating = createTopTaskWithActivity();
+        floating.setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM);
+        floating.setFloatingWindow(true);
+        floating.setAlwaysOnTop(true);
+        final IOnBackInvokedCallback floatingCallback = withAppCallback(floating);
+        doReturn(floating.getTopVisibleAppMainWindow()).when(mWm).getFocusedWindowLocked();
+
+        BackNavigationInfo info = startBackNavigation();
+
+        assertThat(info.getFocusedTaskId()).isEqualTo(floating.mTaskId);
+        assertThat(info.getOnBackInvokedCallback()).isEqualTo(floatingCallback);
+        info.onBackNavigationFinished(false);
+        doReturn(mRootHomeTask.getTopVisibleAppMainWindow()).when(mWm).getFocusedWindowLocked();
+        info = startBackNavigation();
+        assertThat(info.getOnBackInvokedCallback()).isEqualTo(homeCallback);
+    }
+
+    @Test
     public void noBackWhenMoveTaskToBack() {
         Task taskA = createTask(mDefaultDisplay);
         ActivityRecord recordA = createActivityRecord(taskA);
