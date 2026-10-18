@@ -599,15 +599,17 @@ public class DesktopModeTouchEventListener
 
                 final boolean inDesktopModeDisplay = mShellDesktopState
                         .isEligibleWindowDropTarget(e.getDisplayId());
+                // Floating windows move on their own display without a desktop session.
+                final boolean canMoveOnDisplay = taskInfo.isFloatingWindow
+                        ? e.getDisplayId() == taskInfo.displayId : inDesktopModeDisplay;
                 // TODO: b/418651425 - Use a more specific pointer icon when available.
                 final IBinder inputToken = v.getViewRootImpl() != null
                         ? v.getViewRootImpl().getInputToken() : null;
                 updatePointerIcon(e, dragPointerIdx, inputToken,
-                        inDesktopModeDisplay ? PointerIcon.TYPE_ARROW
+                        canMoveOnDisplay ? PointerIcon.TYPE_ARROW
                                 : PointerIcon.TYPE_NO_DROP);
-                // Allow bounds update only when cursor is on desktop-mode displays.
-                // Otherwise, ignore the MOVE event and the window holds its current bounds.
-                if (inDesktopModeDisplay) {
+                // Desktop windows still require an eligible desktop drop target.
+                if (canMoveOnDisplay) {
                     mCurrentBounds.set(mDragPositioningCallback.onDragPositioningMove(
                             e.getDisplayId(),
                             e.getRawX(dragPointerIdx), e.getRawY(dragPointerIdx)));

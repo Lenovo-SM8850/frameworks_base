@@ -367,4 +367,91 @@ class DesktopModeTouchEventListenerTest : ShellTestCase() {
         }
     }
 
+    @Test
+    fun floatingTopHandle_dragOutsideDesktop_movesLiveWithoutClick() {
+        verifyFloatingHandleGesture(com.android.wm.shell.R.id.caption_handle, drag = true)
+    }
+
+    @Test
+    fun floatingBottomHandle_dragOutsideDesktop_movesLiveWithoutClick() {
+        verifyFloatingHandleGesture(com.android.wm.shell.R.id.floating_bottom_handle, drag = true)
+    }
+
+    @Test
+    fun floatingTopHandle_tapOutsideDesktop_opensMenu() {
+        verifyFloatingHandleGesture(com.android.wm.shell.R.id.caption_handle, drag = false)
+    }
+
+    @Test
+    fun floatingBottomHandle_tapOutsideDesktop_opensMenu() {
+        verifyFloatingHandleGesture(com.android.wm.shell.R.id.floating_bottom_handle, drag = false)
+    }
+
+    private fun verifyFloatingHandleGesture(handleId: Int, drag: Boolean) {
+        val task = createAppHeaderTask(TASK_BOUNDS).apply {
+            isFloatingWindow = true
+            displayId = DEFAULT_DISPLAY
+        }
+        val decor = mock<WindowDecorationWrapper>()
+        whenever(decor.taskInfo).thenReturn(task)
+        whenever(decor.handleMenuController).thenReturn(mock())
+        whenever(decor.taskSurface).thenReturn(mock())
+        val positioner = mock<DragPositioningCallback>()
+        whenever(positioner.onDragPositioningStart(any(), any(), any(), any(), any()))
+            .thenReturn(Rect(TASK_BOUNDS))
+        val moved = Rect(TASK_BOUNDS).apply { offset(150, 100) }
+        val settled = Rect(TASK_BOUNDS).apply { offset(250, 150) }
+        whenever(positioner.onDragPositioningMove(any(), eq(550f), eq(300f)))
+            .thenReturn(moved)
+        whenever(positioner.onDragPositioningMove(any(), eq(650f), eq(350f)))
+            .thenReturn(settled)
+        whenever(positioner.onDragPositioningEnd(any(), any(), any()))
+            .thenReturn(if (drag) settled else Rect(TASK_BOUNDS))
+        val repository = mock<com.android.wm.shell.desktopmode.data.DesktopRepository>()
+        val repositories = mock<DesktopUserRepositories>()
+        whenever(repositories.getProfile(any())).thenReturn(repository)
+        val shellDesktopState = mock<com.android.wm.shell.desktopmode.ShellDesktopState>()
+        whenever(shellDesktopState.isEligibleWindowDropTarget(any())).thenReturn(false)
+        val actions = mock<WindowDecorationActions>()
+        val listener = DesktopModeTouchEventListener(mContext, task, positioner, { decor },
+            mockDesktopTasksController, mockTaskOperations, mock(), actions, repositories,
+            mockWindowDecorationExclusionTracker, mock(), mock(), shellDesktopState, mock(),
+            { mock() }, null, mock(), mockPinnedLayerController)
+        // Match the touch/click contract of both FloatingBottomHandle view hosts.
+        val handle = android.view.View(mContext).apply {
+            id = handleId
+            setOnClickListener(listener)
+            setOnTouchListener { v, e ->
+                val handled = listener.onTouch(v, e)
+                if (!handled && e.actionMasked == MotionEvent.ACTION_UP) v.performClick()
+                true
+            }
+        }
+        fun dispatch(action: Int, time: Long, x: Float, y: Float) {
+            val event = MotionEvent.obtain(0, time, action, x, y, 0).apply {
+                source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                setDisplayId(DEFAULT_DISPLAY)
+            }
+            handle.dispatchTouchEvent(event)
+            event.recycle()
+        }
+        dispatch(MotionEvent.ACTION_DOWN, 0, 400f, 200f)
+        if (drag) {
+            dispatch(MotionEvent.ACTION_MOVE, 200, 550f, 300f)
+            verify(positioner).onDragPositioningMove(DEFAULT_DISPLAY, 550f, 300f)
+            verify(decor).setIsDragging(true)
+            dispatch(MotionEvent.ACTION_MOVE, 400, 650f, 350f)
+            verify(positioner).onDragPositioningMove(DEFAULT_DISPLAY, 650f, 350f)
+            // The positioner must receive each move before any release/commit.
+            org.mockito.kotlin.verify(positioner, org.mockito.kotlin.never())
+                .onDragPositioningEnd(any(), any(), any())
+        }
+        dispatch(MotionEvent.ACTION_UP, 500, if (drag) 650f else 400f,
+            if (drag) 350f else 200f)
+        verify(mockPinnedLayerController).onDragEnded(any(), eq(task), eq(TASK_BOUNDS),
+            eq(if (drag) settled else TASK_BOUNDS), eq(DEFAULT_DISPLAY))
+        org.mockito.kotlin.verify(actions, org.mockito.kotlin.times(if (drag) 0 else 1))
+            .onOpenHandleMenu(task.taskId)
+    }
+
 }
