@@ -438,7 +438,7 @@ public class AxSpoofManager implements IAxSpoofManager {
                         mResolver, Settings.Secure.SPOOF_TRICKYSTORE_KEYBOX, UserHandle.USER_SYSTEM))
                 && !KEYBOX_SOURCE_USER.equals(keyboxSource)
                 && Settings.System.getIntForUser(
-                        mResolver, TRICKYSTORE_ENABLED_KEY, 1, UserHandle.USER_SYSTEM) != 0;
+                        mResolver, TRICKYSTORE_ENABLED_KEY, 0, UserHandle.USER_SYSTEM) != 0;
 
         return pifMissing || keyboxMissing;
     }
@@ -579,7 +579,7 @@ public class AxSpoofManager implements IAxSpoofManager {
     private void refreshKeyboxIfStale() throws Exception {
         if (mResolver == null) return;
         if (Settings.System.getIntForUser(
-                mResolver, TRICKYSTORE_ENABLED_KEY, 1, UserHandle.USER_SYSTEM) == 0) {
+                mResolver, TRICKYSTORE_ENABLED_KEY, 0, UserHandle.USER_SYSTEM) == 0) {
             return;
         }
 
