@@ -497,6 +497,7 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     SensorPrivacyManager mSensorPrivacyManager;
     DisplayManager mDisplayManager;
     DisplayManagerInternal mDisplayManagerInternal;
+    private long mBlankExitPowerDownTime = -1;
     UserManagerInternal mUserManagerInternal;
     DockObserverInternal mDockObserverInternal;
 
@@ -5139,6 +5140,21 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         boolean isWakeKey = (policyFlags & WindowManagerPolicy.FLAG_WAKE) != 0
                 || event.isWakeKey();
         boolean isKeyGestureTriggered = (policyFlags & FLAG_KEY_GESTURE_TRIGGERED) != 0;
+
+        if (mSystemBooted && keyCode == KEYCODE_POWER) {
+            if (down && event.getRepeatCount() == 0
+                    && mDisplayManagerInternal.isBuiltInDisplayBlanked()) {
+                mBlankExitPowerDownTime = event.getDownTime();
+                mSingleKeyGestureDetector.reset();
+                mDisplayManagerInternal.unblankBuiltInDisplay();
+                mPowerManager.userActivity(SystemClock.uptimeMillis(),
+                        PowerManager.USER_ACTIVITY_EVENT_BUTTON, 0);
+            }
+            if (mBlankExitPowerDownTime == event.getDownTime()) {
+                if (!down) mBlankExitPowerDownTime = -1;
+                return 0;
+            }
+        }
 
         // There are key events that perform the operation as the current user,
         // and these should be ignored for visible background users.

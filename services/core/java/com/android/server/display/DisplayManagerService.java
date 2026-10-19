@@ -230,6 +230,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -510,6 +511,10 @@ public final class DisplayManagerService extends SystemService {
     // A map from LogicalDisplay ID to display power state.
     @GuardedBy("mSyncRoot")
     private final SparseIntArray mDisplayStates = new SparseIntArray();
+
+    @GuardedBy("mSyncRoot")
+    private BuiltInDisplayBlankSession mBuiltInDisplayBlankSession;
+    private volatile boolean mBuiltInDisplayBlanked;
 
     // A map from LogicalDisplay ID to display brightness.
     @GuardedBy("mSyncRoot")
@@ -1186,6 +1191,87 @@ public final class DisplayManagerService extends SystemService {
         return brightnessState;
     }
 
+    private final class BuiltInDisplayBlankSession implements IBinder.DeathRecipient {
+        final IBinder mToken;
+        final LocalDisplayAdapter.LocalDisplayDevice mDevice;
+
+        BuiltInDisplayBlankSession(IBinder token, LocalDisplayAdapter.LocalDisplayDevice device) {
+            mToken = token;
+            mDevice = device;
+        }
+
+        @Override
+        public void binderDied() {
+            synchronized (mSyncRoot) {
+                if (mBuiltInDisplayBlankSession == this) {
+                    endBuiltInDisplayBlankSessionLocked();
+                }
+            }
+        }
+    }
+
+    @GuardedBy("mSyncRoot")
+    private void endBuiltInDisplayBlankSessionLocked() {
+        final BuiltInDisplayBlankSession session = mBuiltInDisplayBlankSession;
+        if (session == null) return;
+        mBuiltInDisplayBlankSession = null;
+        mBuiltInDisplayBlanked = false;
+        session.mToken.unlinkToDeath(session, 0);
+        mHandler.post(session.mDevice.setBuiltInDisplayBlankedLocked(false));
+        updateBuiltInDisplayBlankViewportLocked();
+    }
+
+    @GuardedBy("mSyncRoot")
+    private void updateBuiltInDisplayBlankViewportLocked() {
+        final LogicalDisplay display = mLogicalDisplayMapper.getDisplayLocked(
+                Display.DEFAULT_DISPLAY);
+        if (display != null && display.isValidLocked()) {
+            updateViewportPowerStateLocked(display);
+        }
+        scheduleTraversalLocked(false);
+    }
+
+    private void setBuiltInDisplayBlankedInternal(IBinder token, boolean blanked) {
+        Objects.requireNonNull(token);
+        synchronized (mSyncRoot) {
+            if (!blanked) {
+                if (mBuiltInDisplayBlankSession != null
+                        && mBuiltInDisplayBlankSession.mToken == token) {
+                    endBuiltInDisplayBlankSessionLocked();
+                }
+                return;
+            }
+            final LogicalDisplay display = mLogicalDisplayMapper.getDisplayLocked(
+                    Display.DEFAULT_DISPLAY);
+            if (display == null || !display.isEnabledLocked()
+                    || mDisplayStates.get(Display.DEFAULT_DISPLAY) != Display.STATE_ON) {
+                return;
+            }
+            final DisplayDevice device = display.getPrimaryDisplayDeviceLocked();
+            if (!(device instanceof LocalDisplayAdapter.LocalDisplayDevice)
+                    || device.getDisplayDeviceInfoLocked().type != Display.TYPE_INTERNAL) {
+                return;
+            }
+            if (mBuiltInDisplayBlankSession != null
+                    && mBuiltInDisplayBlankSession.mToken == token) {
+                return;
+            }
+            final BuiltInDisplayBlankSession session = new BuiltInDisplayBlankSession(token,
+                    (LocalDisplayAdapter.LocalDisplayDevice) device);
+            try {
+                token.linkToDeath(session, 0);
+            } catch (RemoteException e) {
+                return;
+            }
+            endBuiltInDisplayBlankSessionLocked();
+            mBuiltInDisplayBlankSession = session;
+            mBuiltInDisplayBlanked = true;
+            final Runnable work = session.mDevice.setBuiltInDisplayBlankedLocked(true);
+            updateBuiltInDisplayBlankViewportLocked();
+            mHandler.post(work);
+        }
+    }
+
     private void requestDisplayStateInternal(int displayId, int state, float brightnessState,
             float sdrBrightnessState) {
         if (state == Display.STATE_UNKNOWN) {
@@ -1217,6 +1303,10 @@ public final class DisplayManagerService extends SystemService {
                         traceMessage, displayId);
             }
 
+            if (displayId == Display.DEFAULT_DISPLAY
+                    && state != mDisplayStates.valueAt(index)) {
+                endBuiltInDisplayBlankSessionLocked();
+            }
             mDisplayStates.setValueAt(index, state);
             brightnessPair.brightness = brightnessState;
             brightnessPair.sdrBrightness = sdrBrightnessState;
@@ -2832,6 +2922,9 @@ public final class DisplayManagerService extends SystemService {
     }
 
     private void handleLogicalDisplayRemovedPreProcessLocked(@NonNull LogicalDisplay display) {
+        if (display.getDisplayIdLocked() == Display.DEFAULT_DISPLAY) {
+            endBuiltInDisplayBlankSessionLocked();
+        }
         // The display is removed when disabled, and it might still exist.
         // Resources must only be released when the disconnected signal is received.
         if (display.isValidLocked()) {
@@ -2850,6 +2943,9 @@ public final class DisplayManagerService extends SystemService {
 
     private void releaseDisplay(LogicalDisplay display) {
         final int displayId = display.getDisplayIdLocked();
+        if (displayId == Display.DEFAULT_DISPLAY) {
+            endBuiltInDisplayBlankSessionLocked();
+        }
 
         final DisplayPowerController dpc =
                 mDisplayPowerControllers.removeReturnOld(displayId);
@@ -2917,6 +3013,11 @@ public final class DisplayManagerService extends SystemService {
             }
             final int displayId = display.getDisplayIdLocked();
             final int state = mDisplayStates.get(displayId);
+            if (displayId == Display.DEFAULT_DISPLAY && mBuiltInDisplayBlankSession != null
+                    && (state != Display.STATE_ON
+                            || mBuiltInDisplayBlankSession.mDevice != device)) {
+                endBuiltInDisplayBlankSessionLocked();
+            }
 
             // Only send a request for display state if display state has already been initialized.
             if (state != Display.STATE_UNKNOWN) {
@@ -3932,7 +4033,8 @@ public final class DisplayManagerService extends SystemService {
         device.populateViewportLocked(viewport);
         viewport.valid = true;
         viewport.displayId = displayId;
-        viewport.isActive = Display.isActiveState(info.state);
+        viewport.isActive = Display.isActiveState(info.state)
+                && (displayId != Display.DEFAULT_DISPLAY || mBuiltInDisplayBlankSession == null);
         viewport.densityDpi = info.densityDpi;
         viewport.xDpi = info.xDpi;
         viewport.yDpi = info.yDpi;
@@ -3946,7 +4048,9 @@ public final class DisplayManagerService extends SystemService {
             for (DisplayViewport d : mViewports) {
                 if (d.type == viewportType.get() && info.uniqueId.equals(d.uniqueId)) {
                     // Update display view port power state
-                    d.isActive = Display.isActiveState(info.state);
+                    d.isActive = Display.isActiveState(info.state)
+                            && (display.getDisplayIdLocked() != Display.DEFAULT_DISPLAY
+                                    || mBuiltInDisplayBlankSession == null);
                 }
             }
             if (mInputManagerInternal != null) {
@@ -4194,6 +4298,9 @@ public final class DisplayManagerService extends SystemService {
             pw.println("  mSafeMode=" + mSafeMode);
             pw.println("  mPendingTraversal=" + mPendingTraversal);
             pw.println("  mViewports=" + mViewports);
+            pw.println("  mBuiltInDisplayBlanked=" + (mBuiltInDisplayBlankSession != null));
+            pw.println("  mBuiltInDisplayBlankToken=" + (mBuiltInDisplayBlankSession == null
+                    ? null : mBuiltInDisplayBlankSession.mToken));
             pw.println("  mDefaultDisplayDefaultColorMode=" + mDefaultDisplayDefaultColorMode);
             pw.println("  mWifiDisplayScanRequestCount=" + mWifiDisplayScanRequestCount);
             pw.println("  mStableDisplaySize=" + mStableDisplaySize);
@@ -4353,6 +4460,9 @@ public final class DisplayManagerService extends SystemService {
                 brightnessState = PowerManager.BRIGHTNESS_OFF_FLOAT;
             }
 
+            if (displayId == Display.DEFAULT_DISPLAY && state != Display.STATE_ON) {
+                endBuiltInDisplayBlankSessionLocked();
+            }
             var runnable = display.getPrimaryDisplayDeviceLocked().requestDisplayStateLocked(
                     state,
                     brightnessState,
@@ -5542,6 +5652,28 @@ public final class DisplayManagerService extends SystemService {
 
     @VisibleForTesting
     final class BinderService extends IDisplayManager.Stub {
+        @EnforcePermission(android.Manifest.permission.DEVICE_POWER)
+        @Override
+        public void setBuiltInDisplayBlanked(IBinder token, boolean blanked) {
+            setBuiltInDisplayBlanked_enforcePermission();
+            final long identity = Binder.clearCallingIdentity();
+            try {
+                setBuiltInDisplayBlankedInternal(token, blanked);
+            } finally {
+                Binder.restoreCallingIdentity(identity);
+            }
+        }
+
+        @EnforcePermission(android.Manifest.permission.DEVICE_POWER)
+        @Override
+        public boolean isBuiltInDisplayBlanked(IBinder token) {
+            isBuiltInDisplayBlanked_enforcePermission();
+            synchronized (mSyncRoot) {
+                return mBuiltInDisplayBlankSession != null
+                        && mBuiltInDisplayBlankSession.mToken == token;
+            }
+        }
+
         BinderService() {
             super(PermissionEnforcer.fromContext(getContext()));
         }
@@ -6585,6 +6717,17 @@ public final class DisplayManagerService extends SystemService {
 
     @VisibleForTesting
     final class LocalService extends DisplayManagerInternal {
+        @Override
+        public boolean isBuiltInDisplayBlanked() {
+            return mBuiltInDisplayBlanked;
+        }
+
+        @Override
+        public void unblankBuiltInDisplay() {
+            synchronized (mSyncRoot) {
+                endBuiltInDisplayBlankSessionLocked();
+            }
+        }
 
         @Override
         public void initPowerManagement(final DisplayPowerCallbacks callbacks, Handler handler,

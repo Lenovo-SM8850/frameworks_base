@@ -48,6 +48,12 @@ import java.util.Set;
  * @hide Only for use within the system server.
  */
 public abstract class DisplayManagerInternal {
+    /** Returns whether a physical built-in display blank session is active. */
+    public abstract boolean isBuiltInDisplayBlanked();
+
+    /** Ends the physical blank session without changing logical display state. */
+    public abstract void unblankBuiltInDisplay();
+
 
     @IntDef(prefix = {"REFRESH_RATE_LIMIT_"}, value = {
             REFRESH_RATE_LIMIT_HIGH_BRIGHTNESS_MODE
