@@ -174,6 +174,7 @@ import com.android.wm.shell.desktopmode.DesktopUserRepositories;
 import com.android.wm.shell.desktopmode.data.DesktopRepository;
 import com.android.wm.shell.packageupdate.PackageUpdateController;
 import com.android.wm.shell.protolog.ShellProtoLogGroup;
+import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils;
 import com.android.wm.shell.recents.RecentTasksController;
 import com.android.wm.shell.shared.TransactionPool;
 import com.android.wm.shell.shared.TransitionUtil;
@@ -1303,6 +1304,10 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             final int taskId = taskIds[i];
             RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(taskId);
             if (task != null) {
+                if (task.isFloatingWindow) {
+                    wct.merge(PinnedLayerUtils.INSTANCE
+                            .getRemovedFromLayerWct(task.getToken()), true /* transfer */);
+                }
                 wct.setWindowingMode(task.getToken(), WINDOWING_MODE_UNDEFINED)
                         .setBounds(task.getToken(), null /* bounds */);
             } else {
