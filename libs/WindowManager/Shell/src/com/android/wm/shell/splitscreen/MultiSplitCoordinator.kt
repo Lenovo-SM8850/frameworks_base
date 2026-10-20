@@ -11,7 +11,12 @@ import android.content.res.Configuration
 import android.graphics.Insets
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.Binder
 import android.os.IBinder
+import android.os.RemoteException
+import android.util.Log
+import android.window.RemoteTransition
+import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
 import android.view.InsetsState
 import android.view.SurfaceControl
 import android.view.WindowManager.TRANSIT_CHANGE
@@ -56,6 +61,7 @@ class MultiSplitCoordinator(
 ) : Transitions.TransitionHandler, Transitions.TransitionObserver,
     DisplayInsetsController.OnInsetsChangedListener {
     interface Host {
+        fun groups(): MultiSplitGroupRepository?
         fun rootInfo(): RunningTaskInfo?
         fun rootLeash(): SurfaceControl?
         fun pairStages(): List<StageTaskListener>
@@ -70,6 +76,12 @@ class MultiSplitCoordinator(
         fun changed()
     }
 
+    private val groups = host.groups() ?: MultiSplitGroupRepository(Runnable {})
+    private val restoreRemotes = mutableMapOf<IBinder, RemoteTransition>()
+    private val recentsTransitions = mutableSetOf<IBinder>()
+    private val readyInfos = mutableMapOf<IBinder, TransitionInfo>()
+    private var restoring = false
+    private var projectedRepresentatives = emptyList<Int>()
     private val spare = mutableListOf<StageTaskListener>()
     private val attached = mutableSetOf<StageTaskListener>()
     private val stages = linkedMapOf<LeafId, StageTaskListener>()
@@ -118,7 +130,267 @@ class MultiSplitCoordinator(
         position(it.key) == requestedPosition
     }?.value?.topChildTaskId ?: -1
 
-    init { transitions.registerObserver(this) }
+    init {
+        groups.setValidator { group ->
+            val roots = (host.pairStages() + spare).filter { it.mHasRootTask }
+                .map { it.mRootTaskInfo.taskId }.toSet()
+            host.rootInfo()?.displayId == group.displayId && host.capacity() >= group.members.size &&
+                group.stageIds.values.all { it in roots }
+        }
+        transitions.registerObserver(this)
+    }
+
+    /** Publishes only complete snapshots; organizer launch callbacks replace placeholder IDs. */
+    fun publishGroup(): MultiSplitGroupRepository.Group? {
+        var model = layout ?: return null
+        if (stages.values.any { it.childCount == 0 }) return null
+        val tasks = stages.map { (id, stage) ->
+            val task = organizer.getRunningTaskInfo(stage.topChildTaskId) ?: return null
+            model = model.assign(id, task.taskId) ?: return null
+            task
+        }
+        layout = model
+        val group = groups.save(model, stages.mapValues { it.value.mRootTaskInfo.taskId },
+            tasks, displayBounds(), host.pairLayout().dividerSize)
+        return group
+    }
+
+    /** Projects exactly two stage identities, even when physical stage roots have other IDs. */
+    fun sendStatus(listener: SplitScreen.SplitScreenListener) {
+        val group = publishGroup() ?: return
+        val representatives = listOf(group.firstRepresentative, group.secondRepresentative)
+        projectedRepresentatives.filter { it !in representatives }.forEach {
+            listener.onTaskStageChanged(it, SplitScreen.STAGE_TYPE_UNDEFINED, false)
+        }
+        listener.onStagePositionChanged(SplitScreen.STAGE_TYPE_MAIN, SPLIT_POSITION_TOP_OR_LEFT)
+        listener.onStagePositionChanged(SplitScreen.STAGE_TYPE_SIDE, SPLIT_POSITION_BOTTOM_OR_RIGHT)
+        listener.onTaskStageChanged(representatives[0], SplitScreen.STAGE_TYPE_MAIN, isVisible)
+        listener.onTaskStageChanged(representatives[1], SplitScreen.STAGE_TYPE_SIDE, isVisible)
+        listener.onSplitBoundsChanged(displayBounds(), group.splitBounds.leftTopBounds,
+            group.splitBounds.rightBottomBounds)
+    }
+
+    fun representativesSent() {
+        val group = publishGroup()
+        projectedRepresentatives = group?.let {
+            listOf(it.firstRepresentative, it.secondRepresentative)
+        } ?: emptyList()
+    }
+
+    fun startRecents(info: TransitionInfo) {
+        publishGroup()
+        recentsTransitions.addAll(runningTransitions.filter { readyInfos[it] === info })
+        setDividerVisible(false, null)
+    }
+
+    private fun restoreBusy(): Boolean = keyguard || pending != null || interacting ||
+        runningTransitions.any { it !in recentsTransitions } ||
+        dividers.values.any { it.isCurrentlyDividerFlinging }
+
+    /** A pair-card launch is handled before the ordinary active-session guard. */
+    fun restorePair(first: Int, second: Int, firstOptions: Bundle?, secondOptions: Bundle?,
+        remote: RemoteTransition?): Boolean {
+        val group = groups.peek(first) ?: return false
+        if (second == -1) {
+            if (restoreBusy()) rejectRemote(remote)
+            else fallbackPair(first, second, firstOptions, secondOptions, remote)
+            return true
+        }
+        if (setOf(first, second) != setOf(group.firstRepresentative, group.secondRepresentative)) {
+            return false
+        }
+        if (restoreBusy()) {
+            rejectRemote(remote)
+            return true
+        }
+        if (listOfNotNull(firstOptions, secondOptions).any {
+                ActivityOptions.fromBundle(it).launchWindowingMode == WINDOWING_MODE_FULLSCREEN }) {
+            fallbackPair(first, second, firstOptions, secondOptions, remote)
+            return true
+        }
+        val wct = WindowContainerTransaction()
+        if (!prepareRestore(group, wct, first)) return false
+        pending = transitions.startTransition(TRANSIT_OPEN, wct, this)
+        if (remote != null) restoreRemotes[pending!!] = remote
+        setInteractive(false)
+        return true
+    }
+
+    /** Cleans up a previous session before the ordinary pair starter supplies its launch WCT. */
+    fun preparePairLaunch(wct: WindowContainerTransaction, remote: RemoteTransition?): Boolean {
+        if (restoreBusy()) {
+            rejectRemote(remote)
+            return false
+        }
+        if (isActive) exit(-1, wct)
+        return true
+    }
+
+    private fun fallbackPair(first: Int, second: Int, firstOptions: Bundle?, secondOptions: Bundle?,
+        remote: RemoteTransition?) {
+        val wct = WindowContainerTransaction()
+        if (isActive) exit(-1, wct)
+        groups.remove(first)
+        groups.remove(second)
+        listOf(second to secondOptions, first to firstOptions).filter { it.first >= 0 }
+            .forEach { (id, bundle) ->
+                val options = ActivityOptions.fromBundle(
+                    bundle ?: ActivityOptions.makeBasic().toBundle())
+                options.setLaunchRootTask(null)
+                options.launchWindowingMode = WINDOWING_MODE_FULLSCREEN
+                wct.startTask(id, options.toBundle())
+            }
+        pending = transitions.startTransition(TRANSIT_OPEN, wct, this)
+        if (remote != null) restoreRemotes[pending!!] = remote
+    }
+
+    /** Rejected overlapping pair launches still release the caller's animation bookkeeping. */
+    fun rejectRemote(remote: RemoteTransition?) {
+        if (remote == null) return
+        notifyRemote(remote, Binder(), true)
+    }
+
+    /** TO_FRONT covers startActivityFromRecents; explicit mode/location changes take precedence. */
+    fun restoreRequest(transition: IBinder, request: TransitionRequestInfo):
+        WindowContainerTransaction? {
+        val task = request.triggerTask ?: return null
+        val group = groups.peek(task.taskId) ?: return null
+        if (restoreBusy()) return null
+        if (request.fullscreenRequestChange != null || request.requestedLocation != null ||
+            request.windowingLayerChange != null || request.pipChange != null) {
+            val wct = WindowContainerTransaction()
+            if (isActive) exit(task.taskId, wct)
+            groups.remove(task.taskId)
+            if (wct.isEmpty) return null
+            pending = transition
+            request.remoteTransition?.let { restoreRemotes[transition] = it }
+            return wct
+        }
+        if (request.type != android.view.WindowManager.TRANSIT_TO_FRONT) return null
+        val wct = WindowContainerTransaction()
+        if (!prepareRestore(group, wct, task.taskId)) {
+            if (groups.peek(task.taskId) == null && isActive) {
+                exit(task.taskId, wct)
+                groups.remove(task.taskId)
+                pending = transition
+                request.remoteTransition?.let { restoreRemotes[transition] = it }
+                return wct
+            }
+            return null
+        }
+        pending = transition
+        request.remoteTransition?.let { restoreRemotes[transition] = it }
+        setInteractive(false)
+        return wct
+    }
+
+    private fun prepareRestore(group: MultiSplitGroupRepository.Group,
+        wct: WindowContainerTransaction, focusedTaskId: Int): Boolean {
+        if (restoreBusy()) return false
+        val tasks = group.members.map { organizer.getRunningTaskInfo(it.taskId) ?: run {
+            groups.remove(group.firstRepresentative)
+            return false
+        } }
+        if (!group.matches(tasks) || host.capacity() < group.members.size ||
+            host.rootInfo()?.displayId != group.displayId || tasks.any {
+                it.isFloatingWindow || it.windowingMode ==
+                    android.app.WindowConfiguration.WINDOWING_MODE_PINNED }) {
+            groups.remove(group.firstRepresentative)
+            return false
+        }
+        val restoredLayout = group.layout.reorient(if (host.pairLayout().isLeftRightSplit)
+            Orientation.LEFT_RIGHT else Orientation.TOP_BOTTOM)
+        val calculated = bounds(restoredLayout)
+        val resources = displays.getDisplayContext(group.displayId)?.resources
+        if (calculated == null || resources == null || !LayoutPolicy().isFeasible(calculated,
+                LayoutPolicy().getMinimumLeafSize(resources))) {
+            groups.remove(group.firstRepresentative)
+            return false
+        }
+        if (!ensureSpares()) return false
+        val available = (host.pairStages() + spare).distinct()
+        val restoredStages = group.stageIds.mapValues { (_, rootId) ->
+            available.firstOrNull { it.mHasRootTask && it.mRootTaskInfo.taskId == rootId }
+                ?: run {
+                    groups.remove(group.firstRepresentative)
+                    return false
+                }
+        }
+        if (isActive && layout?.getLeaves()?.map { it.taskId }?.toSet() !=
+            group.members.map { it.taskId }.toSet()) exit(-1, wct)
+        if (!isActive) {
+            available.forEach { it.evictOtherChildren(wct, tasks.map { task -> task.taskId }.toSet()) }
+            host.started()
+            if (!listening) {
+                listening = true
+                insets.addInsetsChangedListener(group.displayId, this)
+                ime.addPositionProcessor(imeProcessor)
+            }
+        }
+        pool.clear()
+        pool.addAll(available)
+        stages.clear()
+        stages.putAll(restoredStages)
+        layout = restoredLayout
+        nextLeaf = maxOf(nextLeaf, group.layout.getLeaves().maxOf { it.id.value } + 1)
+        fun maxDivider(node: Node): Int = when (node) {
+            is Leaf -> -1
+            is Split -> maxOf(node.id.value, maxDivider(node.first), maxDivider(node.second))
+        }
+        nextDivider = maxOf(nextDivider, maxDivider(group.layout.root) + 1)
+        tasks.forEach { task ->
+            val leaf = group.layout.getLeaves().first { it.taskId == task.taskId }.id
+            wct.reparent(task.token, stages.getValue(leaf).mRootTaskInfo.token, true)
+                .setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED).setBounds(task.token, Rect())
+        }
+        visible = true
+        restoring = true
+        revision++
+        applyTasks(wct)
+        val focusedLeaf = group.layout.getLeaves().first { it.taskId == focusedTaskId }.id
+        wct.reorder(stages.getValue(focusedLeaf).mRootTaskInfo.token, true)
+            .reorder(tasks.first { it.taskId == focusedTaskId }.token, true)
+            .reorder(host.rootInfo()!!.token, true)
+        return true
+    }
+
+    private fun consumeRestoreRemote(transition: IBinder, aborted: Boolean) {
+        val remote = restoreRemotes.remove(transition) ?: return
+        notifyRemote(remote, transition, aborted)
+    }
+
+    private fun notifyRemote(remote: RemoteTransition, transition: IBinder, aborted: Boolean) {
+        try {
+            remote.remoteTransition.onTransitionConsumed(transition, aborted)
+        } catch (e: RemoteException) {
+            Log.w("MultiSplitCoordinator", "Restore transition client disconnected", e)
+        }
+    }
+
+    /** Returning to apps restores every root and child endpoint in the recents finish WCT. */
+    fun finishRecents(returnToApp: Boolean, wct: WindowContainerTransaction,
+        t: SurfaceControl.Transaction) {
+        val showGroup = returnToApp || restoring
+        if (showGroup) {
+            applyTasks(wct)
+            wct.reorder(host.rootInfo()!!.token, true)
+            stages.values.forEach { stage ->
+                stage.mRootLeash?.takeIf { it.isValid }?.let { t.show(it).setAlpha(it, 1f) }
+                stage.restoreChildSurfaces(t)
+            }
+        }
+        setDividerVisible(showGroup, t)
+        applySurfaceChanges(t)
+        publishGroup()
+        recentsTransitions.clear()
+    }
+
+    fun isReorderingToTop(wct: WindowContainerTransaction): Boolean = wct.hierarchyOps.any { op ->
+        op.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REORDER &&
+            op.toTop && (op.container == host.rootInfo()?.token?.asBinder() || stages.values.any {
+                it.containsContainer(op.container) || it.mRootTaskInfo.token.asBinder() == op.container
+            })
+    }
 
     private val spareCallbacks = object : StageTaskListener.StageListenerCallbacks {
         override fun onRootTaskAppeared() { executor.execute { attachSpares() } }
@@ -259,6 +531,7 @@ class MultiSplitCoordinator(
         if (expected != slot.bounds) return false
         val wct = WindowContainerTransaction()
         if (!isActive) {
+            projectedRepresentatives = host.pairStages().map { it.topChildTaskId }
             pool.clear()
             pool.addAll(host.pairStages())
             pool.addAll(spare)
@@ -425,6 +698,7 @@ class MultiSplitCoordinator(
         cancelDrag()
         val model = layout ?: return
         val removed = stages.remove(id) ?: return
+        groups.remove(removed.topChildTaskId)
         removed.doForAllChildTaskInfos { task ->
             if (task.taskId != skipTask) wct.reparent(task.token, null, false)
         }
@@ -458,6 +732,7 @@ class MultiSplitCoordinator(
         if (stage != null && TransitionUtil.isOpeningType(request.type)) {
             if (task.windowingMode == WINDOWING_MODE_FULLSCREEN && !task.hasParentTask()) {
                 exit(task.taskId, wct)
+                groups.remove(task.taskId)
             } else {
                 visible = true
                 wct.reorder(host.rootInfo()!!.token, true)
@@ -474,10 +749,12 @@ class MultiSplitCoordinator(
         if (!isActive || isBusy) return
         val wct = WindowContainerTransaction()
         exit(taskId, wct)
+        groups.remove(taskId)
         pending = transitions.startTransition(TRANSIT_CHANGE, wct, this)
     }
 
     fun exit(taskId: Int, wct: WindowContainerTransaction) {
+        publishGroup()
         stages.values.toList().forEach { stage ->
             wct.clearAdjacentRoots(stage.mRootTaskInfo.token)
             stage.doForAllChildTaskInfos { task ->
@@ -499,10 +776,12 @@ class MultiSplitCoordinator(
     /** Removes dead leaves after organizer callbacks settle, including aborted launches. */
     fun onTaskChanged(stage: StageTaskListener, taskId: Int, present: Boolean) {
         if (!isActive || stage !in stages.values) return
+        if (!present) groups.remove(taskId)
         if (present) {
             val id = stages.entries.first { it.value == stage }.key
             layout = layout?.assign(id, stage.topChildTaskId.takeIf { it >= 0 } ?: taskId) ?: layout
         }
+        if (present) host.changed()
         scheduleReconcile()
     }
 
@@ -530,6 +809,7 @@ class MultiSplitCoordinator(
         if (active.all { it.mRootTaskInfo?.isVisible == true }) visible = true
         if (active.all { it.mRootTaskInfo?.isVisible != true }) visible = false
         setDividerVisible(visible, null)
+        host.changed()
     }
 
     fun setKeyguard(active: Boolean) {
@@ -769,6 +1049,7 @@ class MultiSplitCoordinator(
         cancelDrag()
         val model = layout ?: return
         if (configuration.smallestScreenWidthDp < 600 || host.capacity() <= 2) {
+            host.rootInfo()?.let { groups.clearDisplay(it.displayId) }
             val keep = model.getLeaves().take(2)
             stages.keys.toList().filter { id -> keep.none { it.id == id } }.forEach { id ->
                 stages.remove(id)?.let { stage ->
@@ -844,13 +1125,18 @@ class MultiSplitCoordinator(
         applySurfaceChanges(start)
         applySurfaceChanges(finish)
         start.apply()
-        executor.execute { callback.onTransitionFinished(null) }
+        executor.execute {
+            consumeRestoreRemote(transition, false)
+            callback.onTransitionFinished(null)
+        }
         return true
     }
 
     override fun onTransitionConsumed(transition: IBinder, aborted: Boolean,
         finish: SurfaceControl.Transaction?) {
+        consumeRestoreRemote(transition, aborted)
         if (transition == pending) {
+            restoring = false
             pending = null
             if (isActive) {
                 syncDividers(finish)
@@ -863,6 +1149,7 @@ class MultiSplitCoordinator(
     override fun onTransitionReady(transition: IBinder, info: TransitionInfo,
         start: SurfaceControl.Transaction, finish: SurfaceControl.Transaction) {
         runningTransitions.add(transition)
+        readyInfos[transition] = info
         if (!isActive) return
         cancelDrag()
         setInteractive(false)
@@ -876,20 +1163,45 @@ class MultiSplitCoordinator(
 
     override fun onTransitionMerged(merged: IBinder, playing: IBinder) {
         runningTransitions.remove(merged)
+        readyInfos.remove(merged)
         if (pending == merged) pending = playing
+        if (recentsTransitions.remove(merged)) recentsTransitions.add(playing)
+        consumeRestoreRemote(merged, false)
     }
 
     override fun onTransitionFinished(transition: IBinder, aborted: Boolean) {
         runningTransitions.remove(transition)
-        if (pending == transition) pending = null
+        readyInfos.remove(transition)
+        recentsTransitions.remove(transition)
+        consumeRestoreRemote(transition, aborted)
+        if (pending == transition) {
+            pending = null
+            restoring = false
+        }
         if (isActive) {
             visible = host.rootInfo()?.isVisible == true
             syncDividers()
             syncQueue.runInSync { applySurfaceChanges(it) }
             setInteractive(!isBusy)
             scheduleReconcile()
+            publishGroup()
             host.changed()
         }
+    }
+
+    /** A missing organizer root cannot own a restorable layout or auxiliary surfaces. */
+    fun onRootVanished() {
+        host.rootInfo()?.let { groups.clearDisplay(it.displayId) }
+        restoreRemotes.keys.toList().forEach { consumeRestoreRemote(it, true) }
+        pending = null
+        restoring = false
+        layout = null
+        stages.clear()
+        recentsTransitions.clear()
+        readyInfos.clear()
+        revision++
+        disposeDividers()
+        stopListening()
     }
 
     private fun disposeDividers() {

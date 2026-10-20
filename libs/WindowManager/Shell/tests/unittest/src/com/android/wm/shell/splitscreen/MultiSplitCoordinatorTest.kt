@@ -4,6 +4,17 @@ package com.android.wm.shell.splitscreen
 
 import android.app.ActivityManager.RunningTaskInfo
 import android.app.PendingIntent
+import android.app.ActivityOptions
+import android.app.Activity
+import android.view.SurfaceControl
+import android.view.WindowManager.TRANSIT_TO_FRONT
+import android.window.TransitionRequestInfo
+import android.window.RemoteTransition
+import android.window.IRemoteTransition
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.times
+import org.mockito.kotlin.never
+import org.mockito.kotlin.atLeastOnce
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Binder
@@ -38,6 +49,7 @@ import org.mockito.kotlin.whenever
 @SmallTest
 @RunWith(AndroidTestingRunner::class)
 class MultiSplitCoordinatorTest : ShellTestCase() {
+    private val groups = MultiSplitGroupRepository(Runnable {})
     private val host = mock<MultiSplitCoordinator.Host>()
     private val organizer = mock<ShellTaskOrganizer>()
     private val sync = mock<SyncTransactionQueue>()
@@ -83,6 +95,7 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
     @Before fun setup() {
         mContext.getOrCreateTestableResources().addOverride(
             com.android.internal.R.dimen.default_minimal_size_resizable_task, 100)
+        whenever(host.groups()).thenReturn(groups)
         pair = listOf(stage(10), stage(20))
         spare = listOf(stage(30), stage(40))
         val rootInfo = RunningTaskInfo().apply {
@@ -315,6 +328,198 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         val leftTop = coordinator.getSwapTargets(30)!!
         assertThat(leftTop.horizontal).isEqualTo(3)
         assertThat(leftTop.vertical).isEqualTo(0)
+    }
+
+    @Test fun pairLaunchRestoresAllMembersFromAnInactiveSnapshotInOneTransaction() {
+        add()
+        add()
+        val group = groups.get(10)!!
+        val before = group.layout.root
+        coordinator.exit(-1, WindowContainerTransaction())
+        assertThat(coordinator.isActive).isFalse()
+        val remote = mock<IRemoteTransition>()
+        assertThat(coordinator.restorePair(group.secondRepresentative, group.firstRepresentative,
+            null, null, RemoteTransition(remote))).isTrue()
+        assertThat(coordinator.activeStages).hasSize(4)
+        val wcts = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions, times(3)).startTransition(any(), wcts.capture(), any())
+        val restore = wcts.lastValue
+        val reparented = restore.hierarchyOps.filter {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REPARENT
+        }.map { it.container }
+        listOf(10, 20, 30, 40).forEach {
+            assertThat(reparented).contains(organizer.getRunningTaskInfo(it)!!.token.asBinder())
+        }
+        assertThat(groups.get(10)!!.layout.root).isEqualTo(before)
+        coordinator.onTransitionConsumed(token, false, null)
+        verify(remote).onTransitionConsumed(token, false)
+    }
+
+    @Test fun pairLaunchWithoutRemoteAndSingleCardLaunchRestoreTheSameGroup() {
+        add()
+        val group = groups.get(10)!!
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, null)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        coordinator.exit(-1, WindowContainerTransaction())
+        val task = organizer.getRunningTaskInfo(30)!!
+        task.configuration.windowConfiguration.windowingMode =
+            android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
+        task.parentTaskId = -1
+        val request = TransitionRequestInfo(TRANSIT_TO_FRONT, task, null)
+        val restore = coordinator.restoreRequest(Binder(), request)
+        assertThat(restore).isNotNull()
+        assertThat(coordinator.activeStages).hasSize(3)
+        assertThat(restore!!.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ADJACENT_ROOTS &&
+                it.containers.size == 3
+        }).isTrue()
+    }
+
+    @Test fun staleGroupWithLaunchableRepresentativesReturnsToOrdinaryPairStarter() {
+        add()
+        val group = groups.get(10)!!
+        whenever(organizer.getRunningTaskInfo(30)).thenReturn(null)
+        val remote = mock<IRemoteTransition>()
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, RemoteTransition(remote))).isFalse()
+        val wct = WindowContainerTransaction()
+        assertThat(coordinator.preparePairLaunch(wct, RemoteTransition(remote))).isTrue()
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(wct.hierarchyOps.none {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK
+        }).isTrue()
+        assertThat(groups.peek(10)).isNull()
+        verify(remote, never()).onTransitionConsumed(any(), any())
+    }
+
+    @Test fun explicitFullscreenRequestDoesNotRestoreAndClearsMembership() {
+        add()
+        val fullscreen = TransitionRequestInfo.FullscreenRequestChange(
+            Activity.FULLSCREEN_MODE_REQUEST_ENTER, null)
+        val request = TransitionRequestInfo(TRANSIT_TO_FRONT, organizer.getRunningTaskInfo(10),
+            null, null, null, null, null, null, fullscreen, 0, -1)
+        assertThat(coordinator.restoreRequest(Binder(), request)).isNotNull()
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(groups.peek(10)).isNull()
+    }
+
+    @Test fun listenerReportsOnlyRepresentativeMainAndSideIdentities() {
+        add()
+        add()
+        val group = groups.get(10)!!
+        val listener = mock<SplitScreen.SplitScreenListener>()
+        coordinator.sendStatus(listener)
+        val stages = argumentCaptor<Int>()
+        val ids = argumentCaptor<Int>()
+        verify(listener, times(2)).onTaskStageChanged(ids.capture(), stages.capture(), eq(true))
+        assertThat(stages.allValues).containsExactly(SplitScreen.STAGE_TYPE_MAIN,
+            SplitScreen.STAGE_TYPE_SIDE)
+        assertThat(ids.allValues).containsExactly(group.firstRepresentative, group.secondRepresentative)
+    }
+
+    @Test fun returnToAppsRetainsAllRootsInFinishTransaction() {
+        add()
+        add()
+        val wct = WindowContainerTransaction()
+        coordinator.finishRecents(true, wct, mock<SurfaceControl.Transaction>())
+        assertThat(coordinator.activeStages).hasSize(4)
+        assertThat(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ADJACENT_ROOTS &&
+                it.containers.size == 4
+        }).isTrue()
+        assertThat(coordinator.isReorderingToTop(wct)).isTrue()
+    }
+
+    @Test fun pairRestoreDuringOverviewRunsButAnOverlappingMutationIsRejected() {
+        add()
+        add()
+        val group = groups.get(10)!!
+        val recents = Binder()
+        val info = android.window.TransitionInfo(0, 0)
+        coordinator.onTransitionReady(recents, info, mock(), mock())
+        coordinator.startRecents(info)
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, null)).isTrue()
+        val rejected = mock<IRemoteTransition>()
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, RemoteTransition(rejected))).isTrue()
+        verify(rejected).onTransitionConsumed(any(), eq(true))
+    }
+
+    @Test fun overviewSingleAndPairDismissalsCollapseOnlyRemovedMembers() {
+        add()
+        add()
+        assertThat(groups.get(10)!!.members).hasSize(4)
+        assertThat(coordinator.closeTask(30)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.activeStages).hasSize(3)
+        assertThat(groups.get(10)!!.members.map { it.taskId }).containsExactly(10, 20, 40)
+        assertThat(coordinator.closeTask(10)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.closeTask(20)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.isActive).isFalse()
+    }
+
+    @Test fun losingTheOrganizerRootInvalidatesSavedGroupsAndRetiresTheSession() {
+        add()
+        coordinator.onRootVanished()
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(groups.peek(10)).isNull()
+    }
+
+    @Test fun invalidatedPairCleansUpWithoutLaunchingFullscreenTasks() {
+        add()
+        val group = groups.get(10)!!
+        groups.remove(10)
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, null)).isFalse()
+        val wct = WindowContainerTransaction()
+        assertThat(coordinator.preparePairLaunch(wct, null)).isTrue()
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(wct.hierarchyOps.none {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK
+        }).isTrue()
+        verify(transitions).startTransition(any(), any(), any())
+    }
+
+    @Test fun shellRestoreAnimationConsumesRemoteAndFinishesExactlyOnce() {
+        add()
+        val group = groups.get(10)!!
+        val remote = mock<IRemoteTransition>()
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, RemoteTransition(remote))).isTrue()
+        val callback = mock<Transitions.TransitionFinishCallback>()
+        assertThat(coordinator.startAnimation(token, android.window.TransitionInfo(0, 0),
+            mock(), mock(), callback)).isTrue()
+        val callbacks = argumentCaptor<Runnable>()
+        verify(executor, atLeastOnce()).execute(callbacks.capture())
+        callbacks.allValues.last().run()
+        coordinator.onTransitionConsumed(token, false, null)
+        coordinator.onTransitionFinished(token, false)
+        verify(remote).onTransitionConsumed(token, false)
+        verify(callback).onTransitionFinished(null)
+    }
+
+    @Test fun missingSavedStageRootInvalidatesTheRecentsProjection() {
+        add()
+        spare[0].mHasRootTask = false
+        assertThat(groups.get(10)).isNull()
+        assertThat(groups.peek(20)).isNull()
+    }
+    @Test fun downgradePublishesRemainingPairWithCapacityTwo() {
+        add()
+        add()
+        whenever(host.capacity()).thenReturn(2)
+        coordinator.onConfigurationChanged(Configuration().apply { smallestScreenWidthDp = 599 },
+            WindowContainerTransaction())
+        val group = coordinator.publishGroup()!!
+        assertThat(group.members).hasSize(2)
+        assertThat(groups.get(group.firstRepresentative)).isSameInstanceAs(group)
+        assertThat(groups.get(group.secondRepresentative)).isSameInstanceAs(group)
+        assertThat(group.stageIds.values).containsExactlyElementsIn(
+            coordinator.activeStages.map { it.mRootTaskInfo.taskId })
     }
 
     @Test fun swapRejectsDestinationBelowTaskMinimumWithoutChangingStagesOrRatios() {
