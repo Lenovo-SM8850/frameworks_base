@@ -53,6 +53,7 @@ import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.UserManager;
@@ -548,6 +549,80 @@ public class SplitScreenControllerTests extends ShellTestCase {
     }
 
     @Test
+    public void floatingSplit_usesVisualCentreAndExistingInsertionApi() {
+        ActivityManager.RunningTaskInfo task = new ActivityManager.RunningTaskInfo();
+        task.taskId = 42;
+        task.displayId = DEFAULT_DISPLAY;
+        task.isFloatingWindow = true;
+        task.supportsMultiWindow = true;
+        task.configuration.windowConfiguration.setBounds(new Rect(0, 0, 1000, 800));
+        task.positionInParent = new android.graphics.Point(1500, 900);
+        task.floatingWindowScale = 0.5f;
+        when(mTaskOrganizer.getRunningTaskInfo(42)).thenReturn(task);
+        when(mStageCoordinator.isSplitScreenVisible()).thenReturn(true);
+        when(mStageCoordinator.canMutateSplit()).thenReturn(true);
+        doReturn(4).when(mSplitScreenController).getSplitCapacity(DEFAULT_DISPLAY);
+        doReturn(2).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        SplitScreenController.AppDragSlot upper = new SplitScreenController.AppDragSlot(
+                1, 2, new Rect(1280, 0, 2560, 790), new Rect(1280, 0, 2560, 800),
+                false, 1, true, 4);
+        SplitScreenController.AppDragSlot lower = new SplitScreenController.AppDragSlot(
+                1, 2, new Rect(1280, 810, 2560, 1600), new Rect(1280, 800, 2560, 1600),
+                false, 1, false, 4);
+        doReturn(java.util.List.of(upper, lower)).when(mSplitScreenController)
+                .getAppDragSlots(DEFAULT_DISPLAY);
+        mSplitScreenController.moveFloatingTaskToSplit(42);
+        ArgumentCaptor<Runnable> action = ArgumentCaptor.forClass(Runnable.class);
+        verify(mMainExecutor).execute(action.capture());
+        action.getValue().run();
+        verify(mStageCoordinator).startTaskInSplitSlot(task, lower);
+    }
+
+    @Test
+    public void floatingSplit_withoutGroupLaunchesPairNearestWindow() throws Exception {
+        ActivityManager.RunningTaskInfo task = new ActivityManager.RunningTaskInfo();
+        task.taskId = 42;
+        task.displayId = DEFAULT_DISPLAY;
+        task.isFloatingWindow = true;
+        task.supportsMultiWindow = true;
+        task.configuration.windowConfiguration.setBounds(new Rect(1500, 400, 2000, 900));
+        ActivityManager.RunningTaskInfo behind = new ActivityManager.RunningTaskInfo();
+        behind.taskId = 43;
+        behind.displayId = DEFAULT_DISPLAY;
+        behind.isVisible = true;
+        behind.supportsMultiWindow = true;
+        behind.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FULLSCREEN);
+        behind.configuration.windowConfiguration.setActivityType(
+                android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD);
+        when(mTaskOrganizer.getRunningTaskInfo(42)).thenReturn(task);
+        when(activityTaskManager.getTasks(100, false, false, DEFAULT_DISPLAY))
+                .thenReturn(java.util.List.of(task, behind));
+        when(mStageCoordinator.canStartSplitEntry()).thenReturn(true);
+        doReturn(2).when(mSplitScreenController).getSplitCapacity(DEFAULT_DISPLAY);
+        SplitScreenController.AppDragSlot left = new SplitScreenController.AppDragSlot(
+                0, -1, new Rect(0, 0, 1270, 1600), new Rect(0, 0, 1280, 1600), false);
+        SplitScreenController.AppDragSlot right = new SplitScreenController.AppDragSlot(
+                1, -1, new Rect(1290, 0, 2560, 1600), new Rect(1280, 0, 2560, 1600), false);
+        doReturn(java.util.List.of(left, right)).when(mSplitScreenController)
+                .getAppDragSlots(DEFAULT_DISPLAY);
+        mSplitScreenController.moveFloatingTaskToSplit(42);
+        ArgumentCaptor<Runnable> action = ArgumentCaptor.forClass(Runnable.class);
+        verify(mMainExecutor).execute(action.capture());
+        action.getValue().run();
+        verify(mStageCoordinator).startFloatingPair(42, 43, 1);
+        verify(activityTaskManager).getTasks(100, false, false, DEFAULT_DISPLAY);
+    }
+
+    @Test
+    public void floatingSplit_rechecksTaskDeathAtExecution() {
+        mSplitScreenController.moveFloatingTaskToSplit(42);
+        ArgumentCaptor<Runnable> action = ArgumentCaptor.forClass(Runnable.class);
+        verify(mMainExecutor).execute(action.capture());
+        action.getValue().run();
+        verify(mStageCoordinator, never()).startTaskInSplitSlot(any(), any());
+    }
+
+    @Test
     public void sidebarImmutableIntentCarriesInstanceFlagsAndDisallowsPictureInPicture() {
         Intent activity = createStartIntent("multiActivity");
         PendingIntent pending = PendingIntent.getActivity(mContext, 0, activity, FLAG_IMMUTABLE);
@@ -581,6 +656,5 @@ public class SplitScreenControllerTests extends ShellTestCase {
         assertTrue(android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
                 .disallowEnterPictureInPictureWhileLaunching());
     }
-
 
 }

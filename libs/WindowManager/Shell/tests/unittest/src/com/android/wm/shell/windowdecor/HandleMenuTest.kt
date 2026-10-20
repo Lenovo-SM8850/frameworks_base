@@ -790,4 +790,42 @@ class HandleMenuTest : ShellTestCase() {
         }
     }
 
+    @Test fun addBelowRow_rechecksDestinationAndDispatchesSharedAction() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(splitScreenController.isTaskInSplitScreenForeground(task.taskId)).thenReturn(true)
+        val bounds = Rect(1280, 800, 2560, 1600)
+        val slot = SplitScreenController.AppDragSlot(1, 2, bounds, bounds, false, 1, false, 0, true)
+        whenever(splitScreenController.getAddBelowSlot(task.taskId)).thenReturn(slot)
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.rootView
+        val button = root.requireViewById<HandleMenuActionButton>(R.id.split_add_button)
+        assertEquals(View.VISIBLE, button.visibility)
+        assertEquals(mContext.getString(R.string.split_picker_add_below), button.textView.text.toString())
+        button.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onAddSplitBelow(task.taskId)
+        whenever(splitScreenController.getAddBelowSlot(task.taskId)).thenReturn(null)
+        button.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions, org.mockito.kotlin.times(1))
+            .onAddSplitBelow(task.taskId)
+        handleMenu.handleMenuView!!.bind(task, true)
+        assertEquals(View.GONE, button.visibility)
+    }
+
+    @Test fun addSideRowUsesAdaptiveLabelAndSharedPickerAction() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(splitScreenController.isTaskInSplitScreenForeground(task.taskId)).thenReturn(true)
+        val bounds = Rect(1280, 0, 2560, 800)
+        val slot = SplitScreenController.AppDragSlot(1, 2, bounds, bounds, false, 1, false, 0, false)
+        whenever(splitScreenController.getAddBelowSlot(task.taskId)).thenReturn(slot)
+        handleMenu = createAndShowHandleMenu()
+        val button = handleMenu.handleMenuView!!.rootView
+            .requireViewById<HandleMenuActionButton>(R.id.split_add_button)
+        assertEquals(View.VISIBLE, button.visibility)
+        assertEquals(mContext.getString(R.string.split_picker_add_to_side), button.textView.text.toString())
+        button.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onAddSplitBelow(task.taskId)
+    }
+
 }

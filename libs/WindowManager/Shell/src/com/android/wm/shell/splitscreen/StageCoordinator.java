@@ -1834,6 +1834,28 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         return INVALID_TASK_ID;
     }
 
+    boolean canStartSplitEntry() {
+        return mSplitLayout != null && mMultiSplit != null && !mMultiSplit.isBusy()
+                && !mIsExiting && !mIsDividerRemoteAnimating && !mSplitLayoutAnimating
+                && !mSplitLayout.isCurrentlySwapping() && !mSplitLayout.isCurrentlyDividerFlinging()
+                && mSplitTransitions.mPendingEnter == null
+                && mSplitTransitions.mPendingResize == null
+                && mSplitTransitions.mPendingDismiss == null
+                && mSplitTransitions.mPendingRemotePassthrough == null;
+    }
+
+    /** Explicit floating placement bypasses saved recents-pair restoration. */
+    boolean startFloatingPair(int taskId, int companionId, int position) {
+        if (!canStartSplitEntry() || isSplitScreenVisible()) return false;
+        final WindowContainerTransaction wct = new WindowContainerTransaction();
+        if (isMultiSplitActive()) mMultiSplit.exit(-1, wct);
+        mMultiSplit.forgetGroup(taskId);
+        mMultiSplit.forgetGroup(companionId);
+        prepareStartTasks(wct, taskId, null, companionId, null, position);
+        startWithTask(wct, companionId, null, SNAP_TO_2_50_50, null, null, position);
+        return true;
+    }
+
     /** Whether a visible split can accept a menu mutation on the Shell main thread. */
     boolean canMutateSplit() {
         if (isMultiSplitActive()) return mMultiSplit.isVisible() && !mMultiSplit.isBusy();
@@ -2482,6 +2504,25 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     boolean isMultiSplitActive() {
         return mMultiSplit != null && mMultiSplit.isActive();
+    }
+
+    java.util.List<Integer> getSplitLeafTaskIds() {
+        if (!isSplitScreenVisible()) return java.util.Collections.emptyList();
+        return isMultiSplitActive()
+                ? mMultiSplit.getActiveStages().stream().map(StageTaskListener::getTopChildTaskId)
+                        .filter(id -> id >= 0).toList()
+                : java.util.Arrays.asList(getTaskId(SPLIT_POSITION_TOP_OR_LEFT),
+                        getTaskId(SPLIT_POSITION_BOTTOM_OR_RIGHT)).stream()
+                        .filter(id -> id >= 0).toList();
+    }
+
+    @Nullable
+    SplitScreenController.AppDragSlot getAddBelowSlot(int taskId) {
+        return mMultiSplit == null ? null : mMultiSplit.getBelowSlot(taskId, canMutateSplit());
+    }
+
+    boolean startTaskInSplitSlot(TaskInfo task, SplitScreenController.AppDragSlot slot) {
+        return mMultiSplit != null && mMultiSplit.startTask(task, slot);
     }
 
     boolean startSidebarIntent(PendingIntent intent, Intent fillIn, Bundle options,
@@ -3147,6 +3188,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
         mIsRootTranslucent = translucent;
         wct.setForceTranslucent(mSplitRootTaskInfo.token, translucent);
+    }
+
+    @Override
+    public void onRootTaskInfoChanged(StageTaskListener stageListener) {
+        if (mMultiSplit != null) mMultiSplit.onStageChanged();
     }
 
     /** Callback when split roots visiblility changed.
@@ -5329,6 +5375,13 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         }
         if (!mPausingTasks.isEmpty()) {
             pw.println(childPrefix + "mPausingTasks=" + mPausingTasks);
+        }
+        if (mMultiSplit != null) {
+            pw.println(innerPrefix + "canMutateSplit=" + canMutateSplit()
+                    + " exiting=" + mIsExiting + " remoteAnimating=" + mIsDividerRemoteAnimating
+                    + " dividerInteracting=" + mDividerInteracting
+                    + " layoutAnimating=" + mSplitLayoutAnimating);
+            mMultiSplit.dump(pw, innerPrefix);
         }
     }
 

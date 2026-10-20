@@ -108,11 +108,19 @@ class MultiSplitLayoutTest {
     }
 
     @Test
-    fun insert_rejectsFifthLeafAndNestedOrParallelSplits() {
+    fun insert_allowsNestedAndParallelBranchesButRejectsFifthLeaf() {
         val three = below(pair(), a.id, c, left)!!
-        assertNull(below(three, c.id, d, right))
-        assertNull(below(pair(Orientation.TOP_BOTTOM), a.id, c, left))
+        val nested = below(three, c.id, d, right)!!
+        assertTiling(nested.calculateBounds(display, Insets.NONE, 10)!!, display)
+        val parallel = below(pair(Orientation.TOP_BOTTOM), a.id, c, left)!!
+        assertTiling(parallel.calculateBounds(display, Insets.NONE, 10)!!, display)
         assertNull(below(grid(), a.id, Leaf(LeafId(5), 105), DividerId(13)))
+        assertEquals(three.root, nested.remove(d.id)!!.root)
+        val resized = nested.resize(right, 0.7f)!!
+        assertEquals(0.5f, (resized.root.first as Split).ratio)
+        assertEquals(nested.root, resized.resize(right, 0.5f)!!.root)
+        assertTiling(nested.reorient(Orientation.TOP_BOTTOM)
+            .calculateBounds(display, Insets.NONE, 10)!!, display)
     }
 
     @Test
@@ -204,7 +212,7 @@ class MultiSplitLayoutTest {
     }
 
     @Test
-    fun topology_rejectsInvalidRatiosDuplicateIdsAndUnsupportedTrees() {
+    fun topology_rejectsInvalidRatiosDuplicateIdsAndExcessLeaves() {
         for (ratio in listOf(0f, 1f, -1f, Float.NaN, Float.NEGATIVE_INFINITY)) {
             assertThrows(IllegalArgumentException::class.java) { pair(ratio = ratio) }
         }
@@ -216,16 +224,14 @@ class MultiSplitLayoutTest {
         }
         assertThrows(IllegalArgumentException::class.java) {
             MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
-                Split(left, Orientation.LEFT_RIGHT, 0.5f, a, c), b))
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
                 Split(main, Orientation.TOP_BOTTOM, 0.5f, a, c), b))
         }
         assertThrows(IllegalArgumentException::class.java) {
             MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
                 Split(left, Orientation.TOP_BOTTOM, 0.5f, a,
-                    Split(right, Orientation.LEFT_RIGHT, 0.5f, c, d)), b))
+                    Split(right, Orientation.LEFT_RIGHT, 0.5f, c,
+                        Split(DividerId(13), Orientation.TOP_BOTTOM, 0.5f,
+                            d, Leaf(LeafId(5), 105)))), b))
         }
     }
 

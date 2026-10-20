@@ -422,4 +422,18 @@
     <string name="handle_menu_swap_vertical">Swap apps above and below</string>
     <string name="handle_menu_close_app">Close this app</string>
     <string name="handle_menu_close_named_app">Close %1$s</string>
+    <!-- Shell-owned destination app picker. -->
+    <string name="split_picker_add_below">Add split below</string>
+    <string name="split_picker_add_to_side">Add split to the side</string>
+    <string name="split_picker_title">Choose an app</string>
+    <string name="split_picker_search">Search apps</string>
+    <string name="split_picker_recent">Recent</string>
+    <string name="split_picker_all_apps">All apps</string>
+    <string name="split_picker_close">Close</string>
+    <string name="split_picker_already_open">Already open in this split</string>
+    <string name="split_picker_unavailable">Unavailable for this split</string>
+    <string name="split_picker_disabled_app">%1$s, %2$s</string>
+    <string name="split_picker_empty">No matching apps</string>
+    <string name="split_picker_loading">Loading apps…</string>
+    <string name="split_picker_launching">Opening app in split</string>
 </resources>

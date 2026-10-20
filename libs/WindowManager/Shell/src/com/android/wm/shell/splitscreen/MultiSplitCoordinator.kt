@@ -14,7 +14,10 @@ import android.os.Bundle
 import android.os.Binder
 import android.os.IBinder
 import android.os.RemoteException
+import android.os.SystemClock
 import android.util.Log
+import android.view.View
+import java.io.PrintWriter
 import android.window.RemoteTransition
 import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
 import android.view.InsetsState
@@ -103,9 +106,58 @@ class MultiSplitCoordinator(
     private val insetState = InsetsState()
     private var dragStart: MultiSplitLayout? = null
     private var dragDivider: DividerId? = null
+    private var lastBelowRejection = "Not queried"
+    private var lastInsertRejection = "Not attempted"
+    private class PendingInsertion(
+        val leaf: LeafId,
+        val stage: StageTaskListener,
+        val before: MultiSplitLayout,
+        val beforeStages: Map<LeafId, StageTaskListener>,
+        val previousTasks: Set<Int>,
+    ) {
+        var transition: IBinder? = null
+        var finished = false
+        var taskId: Int? = null
+        var failure: String? = null
+        var deadline = 0L
+        lateinit var timeout: Runnable
+        lateinit var probe: Runnable
+    }
+    private var insertion: PendingInsertion? = null
+    private val retiredStages = mutableSetOf<StageTaskListener>()
+    private var probingInsertion = false
+    private val unreportedTasks = mutableMapOf<StageTaskListener, MutableSet<Int>>()
+
+    private companion object {
+        // The grace period covers delayed organizer appearance, not animation timing.
+        const val INSERTION_GRACE_MS = 5_000L
+        const val INSERTION_TRANSITION_TIMEOUT_MS = 20_000L
+        const val INSERTION_PROBE_MS = 100L
+    }
+
+    fun dump(pw: PrintWriter, prefix: String) {
+        pw.println("${prefix}MultiSplitCoordinator: active=$isActive capacity=${host.capacity()} " +
+            "busy=$isBusy imeTop=$imeTop keyguard=$keyguard revision=$revision")
+        pw.println("$prefix  pending=$pending transitions=${runningTransitions.size} " +
+            "interacting=$interacting spares=${spare.count { it.mHasRootTask && it in attached }}")
+        pw.println("$prefix  belowSlot=$lastBelowRejection insertion=$lastInsertRejection")
+        insertion?.let {
+            pw.println("$prefix  awaitingStage=${it.stage.mRootTaskInfo?.taskId} leaf=${it.leaf.value} " +
+                "task=${it.taskId} transitionFinished=${it.finished} failure=${it.failure} " +
+                "remainingMs=${it.deadline - SystemClock.uptimeMillis()}")
+        }
+        pw.println("$prefix  retiredStages=${retiredStages.map { it.mRootTaskInfo?.taskId }}")
+        val model = layout ?: pairModel() ?: return
+        val rectangles = bounds(model)?.leaves
+        model.getLeaves().forEach { leaf ->
+            val task = organizer.getRunningTaskInfo(leaf.taskId)
+            pw.println("$prefix  leaf=${leaf.id.value} task=${leaf.taskId} " +
+                "bounds=${rectangles?.get(leaf.id)} min=${task?.minWidth}x${task?.minHeight}")
+        }
+    }
 
     val isActive: Boolean get() = layout != null
-    val isBusy: Boolean get() = keyguard || pending != null ||
+    val isBusy: Boolean get() = keyguard || insertion != null || pending != null ||
         runningTransitions.isNotEmpty() || interacting ||
         dividers.values.any { it.isCurrentlyDividerFlinging } ||
         (isActive && stages.values.any { it.childCount == 0 })
@@ -143,9 +195,11 @@ class MultiSplitCoordinator(
     /** Publishes only complete snapshots; organizer launch callbacks replace placeholder IDs. */
     fun publishGroup(): MultiSplitGroupRepository.Group? {
         var model = layout ?: return null
+        if (insertion?.taskId == null && insertion != null) return null
         if (stages.values.any { it.childCount == 0 }) return null
         val tasks = stages.map { (id, stage) ->
-            val task = organizer.getRunningTaskInfo(stage.topChildTaskId) ?: return null
+            val task = organizer.getRunningTaskInfo(stage.topChildTaskId)
+                ?: stage.mChildrenTaskInfo[stage.topChildTaskId] ?: return null
             model = model.assign(id, task.taskId) ?: return null
             task
         }
@@ -183,7 +237,7 @@ class MultiSplitCoordinator(
         setDividerVisible(false, null)
     }
 
-    private fun restoreBusy(): Boolean = keyguard || pending != null || interacting ||
+    private fun restoreBusy(): Boolean = keyguard || insertion != null || pending != null || interacting ||
         runningTransitions.any { it !in recentsTransitions } ||
         dividers.values.any { it.isCurrentlyDividerFlinging }
 
@@ -406,6 +460,7 @@ class MultiSplitCoordinator(
             }
         }
         override fun onStageVisibilityChanged(stage: StageTaskListener) { onStageChanged() }
+        override fun onRootTaskInfoChanged(stage: StageTaskListener) { onStageChanged() }
         override fun onChildTaskStatusChanged(stage: StageTaskListener, taskId: Int,
             present: Boolean, visible: Boolean) { onTaskChanged(stage, taskId, present) }
         override fun onChildTaskMovedToBubble(stage: StageTaskListener, taskId: Int) {
@@ -474,6 +529,49 @@ class MultiSplitCoordinator(
                 host.rootInfo()!!.displayId)!!.resources), first)
     }
 
+    /** Splits the longer axis, with the new app below or on the layout's end side. */
+    fun getBelowSlot(taskId: Int, canMutate: Boolean = true): AppDragSlot? {
+        fun reject(reason: String): AppDragSlot? {
+            lastBelowRejection = "task=$taskId $reason"
+            return null
+        }
+        if (host.capacity() < 4) return reject("Capacity")
+        if (isBusy) return reject("Busy")
+        if (imeTop != null) return reject("IME")
+        if (!canMutate || (!isActive && !host.canEnter())) return reject("Pair unavailable or busy")
+        val model = layout ?: pairModel() ?: return reject("Pair model unavailable")
+        val leaf = model.getLeaves().firstOrNull { it.taskId == taskId }
+            ?: return reject("Task is not a leaf")
+        if (model.getLeaves().size >= host.capacity()) return reject("At capacity")
+        val source = bounds(model)?.leaves?.get(leaf.id) ?: return reject("Source bounds")
+        val below = source.height() > source.width()
+        val first = !below && displays.getDisplayContext(host.rootInfo()!!.displayId)
+            ?.resources?.configuration?.layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val proposed = candidate(model, leaf.id, first) ?: return reject("Minimum leaf size")
+        existingTaskRejection(proposed)?.let { return reject(it) }
+        val rect = bounds(proposed)?.leaves?.get(LeafId(nextLeaf)) ?: return reject("Target bounds")
+        // Root creation is asynchronous; preview eligibility must not depend on its callbacks.
+        ensureSpares()
+        lastBelowRejection = "task=$taskId None"
+        return AppDragSlot(position(leaf.id, model), nextLeaf, rect, rect, false,
+            leaf.id.value, first, revision, below)
+    }
+
+    private fun existingTaskRejection(model: MultiSplitLayout): String? {
+        val rectangles = bounds(model)?.leaves ?: return "Layout bounds"
+        model.getLeaves().forEach { leaf ->
+            val task = organizer.getRunningTaskInfo(leaf.taskId) ?: return@forEach
+            val rect = rectangles.getValue(leaf.id)
+            if (rect.width() < task.minWidth || rect.height() < task.minHeight) {
+                return "Task ${leaf.taskId} min=${task.minWidth}x${task.minHeight} bounds=$rect"
+            }
+        }
+        return null
+    }
+
+    private fun fitsExistingTasks(model: MultiSplitLayout): Boolean =
+        existingTaskRejection(model) == null
+
     /** Each preview is the exact new leaf rectangle of its proposed immutable layout. */
     fun getSlots(displayId: Int): List<AppDragSlot> {
         if (host.rootInfo()?.displayId != displayId || isBusy || imeTop != null || keyguard) {
@@ -494,6 +592,7 @@ class MultiSplitCoordinator(
             val source = calculated.leaves.getValue(leaf.id)
             listOf(true, false).mapNotNull { first ->
                 val added = candidate(model, leaf.id, first) ?: return@mapNotNull null
+                if (!fitsExistingTasks(added)) return@mapNotNull null
                 val preview = bounds(added)?.leaves?.get(LeafId(nextLeaf)) ?: return@mapNotNull null
                 val hit = Rect(source)
                 if (source.width() >= source.height()) {
@@ -517,18 +616,46 @@ class MultiSplitCoordinator(
     } else 0
 
     /** Revalidates the preview revision and capacity at DROP, then launches in a single WCT. */
-    fun startIntent(intent: PendingIntent, fillIn: Intent?, options: Bundle?, slot: AppDragSlot): Boolean {
-        if (isBusy || slot.layoutVersion != revision || host.capacity() < 4 ||
-            (!isActive && !host.canEnter())) return false
-        val model = layout ?: pairModel() ?: return false
+    fun startIntent(intent: PendingIntent, fillIn: Intent?, options: Bundle?, slot: AppDragSlot): Boolean =
+        insert(slot, options, true) { wct, opts, _ -> wct.sendPendingIntent(intent, fillIn, opts.toBundle()) }
+
+    fun startTask(task: android.app.TaskInfo, slot: AppDragSlot): Boolean {
+        if (!task.supportsMultiWindow || task.displayId != host.rootInfo()?.displayId ||
+            task.minWidth > slot.bounds.width() || task.minHeight > slot.bounds.height() ||
+            (layout ?: pairModel())?.getLeaves()?.any { it.taskId == task.taskId } == true) {
+            return rejectInsertion("Task ${task.taskId} unavailable, visible or incompatible with ${slot.bounds}")
+        }
+        return insert(slot, null, true) { wct, opts, target ->
+            task.token?.let { token ->
+                if (task.isFloatingWindow) wct.merge(
+                    com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils
+                        .getRemovedFromLayerWct(token), true)
+                wct.setWindowingMode(token, android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED)
+                    .setBounds(token, Rect())
+                    .reparent(token, target.mRootTaskInfo.token, true)
+            }
+            wct.startTask(task.taskId, opts.toBundle())
+        }
+    }
+
+    private fun insert(slot: AppDragSlot, options: Bundle?, awaitTask: Boolean = false,
+        launch: (WindowContainerTransaction, ActivityOptions, StageTaskListener) -> Unit): Boolean {
+        if (isBusy) return rejectInsertion("Busy")
+        if (imeTop != null) return rejectInsertion("IME")
+        if (slot.layoutVersion != revision) return rejectInsertion("Stale revision ${slot.layoutVersion}")
+        if (!isActive && !host.canEnter()) return rejectInsertion("Pair unavailable or busy")
+        val model = layout ?: pairModel() ?: return rejectInsertion("Pair model unavailable")
         val targetId = LeafId(slot.leafId)
-        if (model.getLeaves().none { it.id == targetId }) return false
+        if (model.getLeaves().none { it.id == targetId }) return rejectInsertion("Unknown leaf $targetId")
         val inserting = !slot.occupied
-        if (inserting && (model.getLeaves().size >= host.capacity() || !ensureSpares())) return false
-        val proposed = if (inserting) candidate(model, targetId, slot.newTaskFirst) ?: return false
-            else model
+        if (inserting && host.capacity() < 4) return rejectInsertion("Capacity")
+        if (inserting && model.getLeaves().size >= host.capacity()) return rejectInsertion("At capacity")
+        if (inserting && !ensureSpares()) return rejectInsertion("Spare roots not ready")
+        val proposed = if (inserting) candidate(model, targetId, slot.newTaskFirst)
+            ?: return rejectInsertion("Minimum leaf size") else model
         val expected = bounds(proposed)?.leaves?.get(if (inserting) LeafId(nextLeaf) else targetId)
-        if (expected != slot.bounds) return false
+        if (expected != slot.bounds) return rejectInsertion("Stale bounds expected=$expected slot=${slot.bounds}")
+        existingTaskRejection(proposed)?.let { return rejectInsertion(it) }
         val wct = WindowContainerTransaction()
         if (!isActive) {
             projectedRepresentatives = host.pairStages().map { it.topChildTaskId }
@@ -545,28 +672,236 @@ class MultiSplitCoordinator(
             insets.addInsetsChangedListener(host.rootInfo()!!.displayId, this)
             ime.addPositionProcessor(imeProcessor)
         }
+        val beforeStages = stages.toMap()
         val target = if (inserting) {
-            val stage = pool.firstOrNull { it !in stages.values && it.mHasRootTask } ?: return false
+            val stage = pool.firstOrNull { it !in stages.values && it.mHasRootTask && reusable(it) }
+                ?: return rejectInsertion("No free stage root")
             stages[LeafId(nextLeaf)] = stage
             nextLeaf++
             nextDivider++
             stage
         } else stages.getValue(targetId)
         // Stage history must not resurface after the leaf's new app closes.
+        val previousTasks = ((0 until target.mChildrenTaskInfo.size())
+            .map { target.mChildrenTaskInfo.keyAt(it) } + childTasks(target).map { it.taskId }).toSet()
         target.evictAllChildren(wct)
+        // Evict unreported history too, before a new cold launch can enter this stage.
+        wct.reparentTasks(target.mRootTaskInfo.token, null, null, null, false)
         val opts = ActivityOptions.fromBundle(options ?: ActivityOptions.makeBasic().toBundle())
         opts.setLaunchRootTask(target.mRootTaskInfo.token)
         opts.setLaunchDisplayId(host.rootInfo()!!.displayId)
         opts.setDisallowEnterPictureInPictureWhileLaunching(true)
         opts.setPendingIntentBackgroundActivityStartMode(
             ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS)
-        wct.sendPendingIntent(intent, fillIn, opts.toBundle())
+        // A nested stage is a parent, not the outer root used by WM's launch-bounds path.
+        opts.launchBounds = null
         layout = proposed
         revision++
+        // Cold tasks must be born into an adjacent, foreground stage before WM resumes them.
         applyTasks(wct)
-        pending = transitions.startTransition(TRANSIT_OPEN, wct, this)
+        launch(wct, opts, target)
+        val waiting = if (awaitTask && inserting) {
+            PendingInsertion(LeafId(nextLeaf - 1), target, model, beforeStages, previousTasks).also {
+                insertion = it
+                it.timeout = Runnable {
+                    if (insertion === it) {
+                        if (it.taskId != null && !it.finished) requestInsertionRollback("Transition timed out")
+                        else if (!probeInsertion()) requestInsertionRollback("No task arrived")
+                    }
+                }
+                it.probe = Runnable {
+                    if (insertion === it && it.failure == null && !probeInsertion()) {
+                        executor.executeDelayed(it.probe, INSERTION_PROBE_MS)
+                    }
+                }
+            }
+        } else null
+        try {
+            pending = transitions.startTransition(TRANSIT_OPEN, wct, this)
+        } catch (e: RuntimeException) {
+            if (waiting != null) {
+                val rollback = WindowContainerTransaction()
+                rollbackInsertion(waiting, "Launch failed: ${e.javaClass.simpleName}", rollback)
+                organizer.applyTransaction(rollback)
+                syncDividers()
+                syncQueue.runInSync { applySurfaceChanges(it) }
+                publishGroup()
+                host.changed()
+            }
+            return rejectInsertion("Launch failed: ${e.javaClass.simpleName}")
+        }
+        waiting?.let {
+            it.transition = pending
+            armInsertionTimeout(it, INSERTION_TRANSITION_TIMEOUT_MS)
+            executor.executeDelayed(it.probe, INSERTION_PROBE_MS)
+        }
         setInteractive(false)
+        lastInsertRejection = if (waiting == null) "None"
+            else "Awaiting task in stage=${target.mRootTaskInfo.taskId}"
         return true
+    }
+
+    private fun childTasks(stage: StageTaskListener): List<RunningTaskInfo> =
+        if (!stage.mHasRootTask) emptyList() else try {
+            organizer.getChildTasks(stage.mRootTaskInfo.token, intArrayOf(
+                android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD,
+                android.app.WindowConfiguration.ACTIVITY_TYPE_UNDEFINED)).orEmpty()
+        } catch (e: RuntimeException) {
+            Log.w("MultiSplitCoordinator", "Unable to query prepared stage", e)
+            emptyList()
+        }
+
+    private fun reusable(stage: StageTaskListener): Boolean {
+        if (stage !in retiredStages) return true
+        if (childTasks(stage).isNotEmpty()) return false
+        retiredStages.remove(stage)
+        return true
+    }
+
+    private fun armInsertionTimeout(waiting: PendingInsertion, delay: Long) {
+        executor.removeCallbacks(waiting.timeout)
+        waiting.deadline = SystemClock.uptimeMillis() + delay
+        executor.executeDelayed(waiting.timeout, delay)
+    }
+
+    private fun clearInsertion(waiting: PendingInsertion) {
+        executor.removeCallbacks(waiting.timeout)
+        executor.removeCallbacks(waiting.probe)
+        if (insertion === waiting) insertion = null
+    }
+
+    /** Resolves membership by the reserved parent, without requiring an opaque/visible activity. */
+    private fun probeInsertion(info: TransitionInfo? = null, incoming: RunningTaskInfo? = null): Boolean {
+        val waiting = insertion ?: return false
+        if (waiting.failure != null || probingInsertion) return false
+        if (waiting.taskId != null) {
+            if (waiting.finished) clearInsertion(waiting)
+            return true
+        }
+        probingInsertion = true
+        try {
+            val stage = waiting.stage
+            if (!stage.mHasRootTask || stages[waiting.leaf] !== stage) return false
+            val known = stage.topChildTaskId.takeIf { stage.childCount > 0 && stage.containsTask(it) }
+                ?.let { organizer.getRunningTaskInfo(it) ?: stage.mChildrenTaskInfo[it] }
+            val task = known?.takeIf { it.taskId !in waiting.previousTasks }
+                ?: incoming?.takeIf {
+                    it.parentTaskId == stage.mRootTaskInfo.taskId &&
+                        it.taskId !in waiting.previousTasks && it.taskId != stage.mRootTaskInfo.taskId
+                } ?: info?.changes?.mapNotNull { it.taskInfo }?.firstOrNull {
+                    it.parentTaskId == stage.mRootTaskInfo.taskId &&
+                        it.taskId !in waiting.previousTasks && it.taskId != stage.mRootTaskInfo.taskId
+                } ?: childTasks(stage).firstOrNull {
+                    it.parentTaskId == stage.mRootTaskInfo.taskId && it.taskId !in waiting.previousTasks &&
+                        (it.topActivityInfo != null || it.numActivities > 0)
+                } ?: return false
+            val rect = bounds(layout ?: return false)?.leaves?.get(waiting.leaf) ?: return false
+            if (task.displayId != host.rootInfo()?.displayId ||
+                task.minWidth > rect.width() || task.minHeight > rect.height()) {
+                requestInsertionRollback("Arriving task does not fit")
+                return false
+            }
+            layout = layout?.assign(waiting.leaf, task.taskId) ?: return false
+            // Organizer appearance may still be deferred until the translucent app becomes visible.
+            val reported = stage.containsTask(task.taskId)
+            if (!reported) {
+                stage.mChildrenTaskInfo.put(task.taskId, task)
+                unreportedTasks.getOrPut(stage) { mutableSetOf() }.add(task.taskId)
+            }
+            waiting.taskId = task.taskId
+            executor.removeCallbacks(waiting.probe)
+            lastInsertRejection = "None"
+            if (!reported || waiting.finished) {
+                val wct = WindowContainerTransaction()
+                applyTasks(wct)
+                wct.setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED).setBounds(task.token, Rect())
+                    .reorder(task.token, true)
+                val options = ActivityOptions.makeBasic().apply {
+                    setLaunchRootTask(stage.mRootTaskInfo.token)
+                    setLaunchDisplayId(task.displayId)
+                    setDisallowEnterPictureInPictureWhileLaunching(true)
+                }
+                // Resume the resolved task by ID, including a paused translucent first activity.
+                wct.startTask(task.taskId, options.toBundle())
+                if (visible && !keyguard) host.rootInfo()?.let { wct.reorder(it.token, true) }
+                organizer.applyTransaction(wct)
+                syncQueue.runInSync { applySurfaceChanges(it) }
+            }
+            if (waiting.finished) clearInsertion(waiting)
+            publishGroup()
+            host.changed()
+            return true
+        } finally {
+            probingInsertion = false
+        }
+    }
+
+    private fun finishInsertion(transition: IBinder, aborted: Boolean) {
+        val waiting = insertion?.takeIf { it.transition == transition } ?: return
+        if (waiting.failure != null) return
+        if (aborted) {
+            requestInsertionRollback("Insertion transition aborted")
+        } else if (!waiting.finished) {
+            val bound = probeInsertion()
+            waiting.finished = true
+            if (bound) clearInsertion(waiting) else armInsertionTimeout(waiting, INSERTION_GRACE_MS)
+        }
+    }
+
+    /** Evicts even children whose own organizer callbacks have not been sent yet. */
+    private fun resetPreparedStage(stage: StageTaskListener, wct: WindowContainerTransaction) {
+        if (!stage.mHasRootTask) return
+        val root = stage.mRootTaskInfo.token
+        unreportedTasks.remove(stage)
+        wct.reparentTasks(root, null, null, null, false)
+            .clearAdjacentRoots(root).setBounds(root, Rect()).setAppBounds(root, null)
+            .setSmallestScreenWidthDp(root, 0).setScreenSizeDp(root, 0, 0)
+            .setHidden(root, true).setForceTranslucent(root, true)
+        for (i in stage.mChildrenTaskInfo.size() - 1 downTo 0) {
+            val task = stage.mChildrenTaskInfo.valueAt(i)
+            if (organizer.getRunningTaskInfo(task.taskId) == null) {
+                stage.mChildrenTaskInfo.removeAt(i)
+            }
+        }
+    }
+
+    private fun rollbackInsertion(waiting: PendingInsertion, reason: String,
+        wct: WindowContainerTransaction) {
+        clearInsertion(waiting)
+        waiting.taskId?.let { groups.remove(it) }
+        retiredStages.add(waiting.stage)
+        resetPreparedStage(waiting.stage, wct)
+        layout = waiting.before
+        stages.clear()
+        stages.putAll(waiting.beforeStages)
+        revision++
+        lastInsertRejection = "Rolled back: $reason"
+        applyTasks(wct)
+    }
+
+    private fun requestInsertionRollback(reason: String) {
+        val waiting = insertion ?: return
+        if (waiting.failure != null) return
+        waiting.failure = reason
+        executor.removeCallbacks(waiting.timeout)
+        executor.removeCallbacks(waiting.probe)
+        transitions.runOnIdle {
+            if (insertion !== waiting) return@runOnIdle
+            val wct = WindowContainerTransaction()
+            rollbackInsertion(waiting, reason, wct)
+            organizer.applyTransaction(wct)
+            syncDividers()
+            syncQueue.runInSync { applySurfaceChanges(it) }
+            setInteractive(!isBusy)
+            publishGroup()
+            scheduleReconcile()
+            host.changed()
+        }
+    }
+
+    private fun rejectInsertion(reason: String): Boolean {
+        lastInsertRejection = reason
+        return false
     }
 
     fun stageOfTask(taskId: Int): StageTaskListener? = stages.values.firstOrNull {
@@ -719,8 +1054,13 @@ class MultiSplitCoordinator(
         if (!isActive) return null
         if (pending != null || runningTransitions.isNotEmpty()) return null
         val task = request.triggerTask ?: return null
-        val stage = stageOfParent(task) ?: stageOfTask(task.taskId)
         val wct = WindowContainerTransaction()
+        insertion?.let {
+            if (task.parentTaskId == it.stage.mRootTaskInfo?.taskId ||
+                task.taskId == it.stage.mRootTaskInfo?.taskId) probeInsertion(incoming = task)
+            else rollbackInsertion(it, "Group changed", wct)
+        }
+        val stage = stageOfParent(task) ?: stageOfTask(task.taskId)
         if (stage != null && TransitionUtil.isClosingType(request.type) &&
             stage.childCount <= 1 && stages.containsValue(stage)) {
             val id = stages.entries.first { it.value == stage }.key
@@ -742,8 +1082,10 @@ class MultiSplitCoordinator(
             return wct
         }
         // Home, keyguard, and unrelated fullscreen apps keep the group in the background.
-        return null
+        return wct.takeUnless { it.isEmpty }
     }
+
+    fun forgetGroup(taskId: Int) { groups.remove(taskId) }
 
     fun moveToFullscreen(taskId: Int) {
         if (!isActive || isBusy) return
@@ -754,6 +1096,7 @@ class MultiSplitCoordinator(
     }
 
     fun exit(taskId: Int, wct: WindowContainerTransaction) {
+        insertion?.let { rollbackInsertion(it, "Group exited", wct) }
         publishGroup()
         stages.values.toList().forEach { stage ->
             wct.clearAdjacentRoots(stage.mRootTaskInfo.token)
@@ -775,7 +1118,23 @@ class MultiSplitCoordinator(
 
     /** Removes dead leaves after organizer callbacks settle, including aborted launches. */
     fun onTaskChanged(stage: StageTaskListener, taskId: Int, present: Boolean) {
+        unreportedTasks[stage]?.remove(taskId)
+        if (stage in retiredStages && stage !in stages.values) {
+            if (present) {
+                val wct = WindowContainerTransaction()
+                resetPreparedStage(stage, wct)
+                organizer.applyTransaction(wct)
+            }
+            return
+        }
         if (!isActive || stage !in stages.values) return
+        if (!present && insertion != null && insertion?.stage !== stage) {
+            requestInsertionRollback("Group member vanished")
+        }
+        insertion?.takeIf { it.stage === stage }?.let {
+            if (!present && taskId !in it.previousTasks) requestInsertionRollback("Task vanished")
+            else if (present) probeInsertion()
+        }
         if (!present) groups.remove(taskId)
         if (present) {
             val id = stages.entries.first { it.value == stage }.key
@@ -792,7 +1151,9 @@ class MultiSplitCoordinator(
             transitions.runOnIdle {
                 reconcileScheduled = false
                 if (isActive) {
-                    val empty = stages.entries.filter { it.value.childCount == 0 }.map { it.key }
+                    val empty = stages.entries.filter {
+                        it.value.childCount == 0 && it.key != insertion?.leaf
+                    }.map { it.key }
                     if (empty.isNotEmpty()) {
                         val wct = WindowContainerTransaction()
                         empty.forEach { removeLeaf(it, wct) }
@@ -804,16 +1165,43 @@ class MultiSplitCoordinator(
     }
 
     fun onStageChanged() {
+        unreportedTasks.toMap().forEach { (stage, ids) ->
+            val current = childTasks(stage).associateBy { it.taskId }
+            ids.toList().forEach { id ->
+                val task = current[id]
+                if (task == null) {
+                    stage.mChildrenTaskInfo.remove(id)
+                    ids.remove(id)
+                    groups.remove(id)
+                    if (insertion?.stage === stage) requestInsertionRollback("Unreported task vanished")
+                    else scheduleReconcile()
+                } else stage.mChildrenTaskInfo.put(id, task)
+            }
+            if (ids.isEmpty()) unreportedTasks.remove(stage)
+        }
+        retiredStages.filter { it.mHasRootTask && it !in stages.values }.forEach {
+            if (childTasks(it).isNotEmpty()) {
+                val wct = WindowContainerTransaction()
+                resetPreparedStage(it, wct)
+                organizer.applyTransaction(wct)
+            }
+        }
+        probeInsertion()
         if (!isActive) return
         val active = stages.values.toList()
         if (active.all { it.mRootTaskInfo?.isVisible == true }) visible = true
-        if (active.all { it.mRootTaskInfo?.isVisible != true }) visible = false
+        if (active.all { it.mRootTaskInfo?.isVisible != true } &&
+            (insertion == null || host.rootInfo()?.isVisible != true)) {
+            visible = false
+            if (!keyguard) requestInsertionRollback("Group hidden")
+        }
         setDividerVisible(visible, null)
         host.changed()
     }
 
     fun setKeyguard(active: Boolean) {
         keyguard = active
+        if (active) requestInsertionRollback("Keyguard")
         setDividerVisible(visible, null)
     }
 
@@ -833,6 +1221,8 @@ class MultiSplitCoordinator(
         stages.forEach { (id, stage) ->
             wct.reparent(stage.mRootTaskInfo.token, host.rootInfo()!!.token, true)
             wct.setBounds(stage.mRootTaskInfo.token, calculated.leaves.getValue(id))
+                .setHidden(stage.mRootTaskInfo.token, false)
+                .setForceTranslucent(stage.mRootTaskInfo.token, false)
                 .setAppBounds(stage.mRootTaskInfo.token, null)
                 .setSmallestScreenWidthDp(stage.mRootTaskInfo.token, 0)
                 .setScreenSizeDp(stage.mRootTaskInfo.token, 0, 0)
@@ -852,6 +1242,7 @@ class MultiSplitCoordinator(
             stage.mRootLeash?.takeIf { it.isValid }?.let { leash ->
                 t.setPosition(leash, rect.left - root.left.toFloat(), rect.top - root.top.toFloat())
                     .setWindowCrop(leash, rect.width(), rect.height())
+                if (visible && !keyguard) t.show(leash).setAlpha(leash, 1f) else t.hide(leash)
             }
             stage.mDimLayer?.takeIf { it.isValid }?.let { t.hide(it) }
         }
@@ -1046,6 +1437,7 @@ class MultiSplitCoordinator(
 
     /** Rotation and eligibility changes share the caller's display-change transaction. */
     fun onConfigurationChanged(configuration: Configuration, wct: WindowContainerTransaction) {
+        insertion?.let { rollbackInsertion(it, "Configuration changed", wct) }
         cancelDrag()
         val model = layout ?: return
         if (configuration.smallestScreenWidthDp < 600 || host.capacity() <= 2) {
@@ -1089,6 +1481,10 @@ class MultiSplitCoordinator(
         override fun onImeStartPositioning(displayId: Int, hiddenTop: Int, shownTop: Int,
             showing: Boolean, floating: Boolean, t: SurfaceControl.Transaction): Int {
             if (!isActive || host.rootInfo()?.displayId != displayId) return 0
+            val target = organizer.getImeLayeringTarget(displayId)
+            val owned = target != null && stages.values.any { it.containsToken(target) }
+            // A Shell panel's keyboard must not resize the apps behind its destination outline.
+            if (showing && !owned) return 0
             imeTop = if (showing && !floating) shownTop else null
             val wct = WindowContainerTransaction()
             applyTasks(wct)
@@ -1135,6 +1531,7 @@ class MultiSplitCoordinator(
     override fun onTransitionConsumed(transition: IBinder, aborted: Boolean,
         finish: SurfaceControl.Transaction?) {
         consumeRestoreRemote(transition, aborted)
+        finishInsertion(transition, aborted)
         if (transition == pending) {
             restoring = false
             pending = null
@@ -1150,6 +1547,7 @@ class MultiSplitCoordinator(
         start: SurfaceControl.Transaction, finish: SurfaceControl.Transaction) {
         runningTransitions.add(transition)
         readyInfos[transition] = info
+        probeInsertion(info)
         if (!isActive) return
         cancelDrag()
         setInteractive(false)
@@ -1165,6 +1563,7 @@ class MultiSplitCoordinator(
         runningTransitions.remove(merged)
         readyInfos.remove(merged)
         if (pending == merged) pending = playing
+        insertion?.takeIf { it.transition == merged }?.transition = playing
         if (recentsTransitions.remove(merged)) recentsTransitions.add(playing)
         consumeRestoreRemote(merged, false)
     }
@@ -1178,6 +1577,7 @@ class MultiSplitCoordinator(
             pending = null
             restoring = false
         }
+        finishInsertion(transition, aborted)
         if (isActive) {
             visible = host.rootInfo()?.isVisible == true
             syncDividers()
@@ -1191,6 +1591,9 @@ class MultiSplitCoordinator(
 
     /** A missing organizer root cannot own a restorable layout or auxiliary surfaces. */
     fun onRootVanished() {
+        insertion?.let { clearInsertion(it) }
+        retiredStages.clear()
+        unreportedTasks.clear()
         host.rootInfo()?.let { groups.clearDisplay(it.displayId) }
         restoreRemotes.keys.toList().forEach { consumeRestoreRemote(it, true) }
         pending = null
@@ -1222,6 +1625,9 @@ class MultiSplitCoordinator(
     }
 
     fun dispose() {
+        insertion?.let { clearInsertion(it) }
+        retiredStages.clear()
+        unreportedTasks.clear()
         disposeDividers()
         stopListening()
         layout = null

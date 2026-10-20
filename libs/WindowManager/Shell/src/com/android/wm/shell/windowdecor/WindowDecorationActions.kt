@@ -77,6 +77,8 @@ interface WindowDecorationActions {
     /** Moves task to split screen. */
     fun onToSplitScreen(taskId: Int)
 
+    fun onAddSplitBelow(taskId: Int) {}
+
     /** Moves task to desktop windowing. */
     fun onToDesktop(taskId: Int, transitionSource: DesktopModeTransitionSource)
 

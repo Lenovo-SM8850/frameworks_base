@@ -7,7 +7,7 @@ import android.graphics.Insets
 import android.graphics.Rect
 
 /**
- * Immutable geometry for sibling stages: two leaves, one perpendicular subdivision, or a 2x2.
+ * Immutable geometry for two to four sibling stages with independently resizable branches.
  * Branches describe geometry only and never represent task roots or own surfaces.
  */
 class MultiSplitLayout(val root: Split) {
@@ -47,8 +47,7 @@ class MultiSplitLayout(val root: Split) {
             when (node) {
                 is Leaf -> require(leaves.put(node.id, node) == null)
                 is Split -> {
-                    require(depth < 2 && dividers.add(node.id))
-                    if (depth == 1) require(node.orientation != root.orientation)
+                    require(depth < 3 && dividers.add(node.id))
                     validate(node.first, depth + 1)
                     validate(node.second, depth + 1)
                 }
@@ -117,11 +116,7 @@ class MultiSplitLayout(val root: Split) {
         require(minimumLeafSize >= 0)
         if (!ratio.isFinite() || ratio <= 0f || ratio >= 1f) return null
         if (leaves.size == 4 || chosenLeaf !in leaves || newLeaf.id in leaves ||
-            leaves.values.any { it.taskId == newLeaf.taskId } || dividerId in dividers ||
-            orientation == root.orientation) return null
-        // Only a direct child of the main split can be subdivided in v1.
-        if ((root.first as? Leaf)?.id != chosenLeaf &&
-            (root.second as? Leaf)?.id != chosenLeaf) return null
+            leaves.values.any { it.taskId == newLeaf.taskId } || dividerId in dividers) return null
         val chosen = leaves.getValue(chosenLeaf)
         val replacement = if (newTaskFirst) {
             Split(dividerId, orientation, ratio, newLeaf, chosen)

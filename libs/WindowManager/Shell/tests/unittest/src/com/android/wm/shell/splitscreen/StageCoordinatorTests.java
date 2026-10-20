@@ -1544,6 +1544,27 @@ public class StageCoordinatorTests extends ShellTestCase {
             return mAlwaysEnter;
         }
     }
+    @Test
+    public void floatingPair_bypassesRecentsRestoreAndExitsBackgroundGroupInSameWct() throws Exception {
+        MultiSplitCoordinator multi = installMultiSplitForRestoreTest();
+        doReturn(true).when(mStageCoordinator).canStartSplitEntry();
+        doReturn(false).when(mStageCoordinator).isSplitScreenVisible();
+        doAnswer(invocation -> {
+            when(multi.isActive()).thenReturn(false);
+            return null;
+        }).when(multi).exit(eq(-1), any());
+        assertTrue(mStageCoordinator.startFloatingPair(1, 2, SPLIT_POSITION_TOP_OR_LEFT));
+        ArgumentCaptor<WindowContainerTransaction> exiting =
+                ArgumentCaptor.forClass(WindowContainerTransaction.class);
+        verify(multi).exit(eq(-1), exiting.capture());
+        verify(multi).forgetGroup(1);
+        verify(multi).forgetGroup(2);
+        verify(multi, never()).restorePair(anyInt(), anyInt(), any(), any(), any());
+        assertEquals(2, exiting.getValue().getHierarchyOps().stream().filter(op ->
+                op.getType() == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK)
+                .count());
+    }
+
     private MultiSplitCoordinator installMultiForLaunchTest() throws Exception {
         MultiSplitCoordinator multi = mock(MultiSplitCoordinator.class);
         java.lang.reflect.Field field = StageCoordinator.class.getDeclaredField("mMultiSplit");
@@ -1670,6 +1691,5 @@ public class StageCoordinatorTests extends ShellTestCase {
         verify(mSplitScreenTransitions, never()).startEnterTransition(anyInt(), any(), any(),
                 any(), anyInt(), anyBoolean(), anyInt());
     }
-
 
 }

@@ -1052,8 +1052,8 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         if (decoration == null) {
             return;
         }
-        if (decoration.getTaskInfo().isFloatingWindow && mSplitScreenController != null
-                && !mSplitScreenController.canEnterSplitScreen(decoration.getTaskInfo())) {
+        if (decoration.getTaskInfo().isFloatingWindow && mSplitScreenController != null) {
+            mSplitScreenController.moveFloatingTaskToSplit(taskId);
             return;
         }
 
@@ -2342,6 +2342,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         public void onSwapLeaves(int firstLeafId, int secondLeafId) {
             if (mViewModel.mSplitScreenController != null) {
                 mViewModel.mSplitScreenController.swapLeaves(firstLeafId, secondLeafId);
+            }
+        }
+
+        @Override
+        public void onAddSplitBelow(int taskId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.showAddBelowPicker(taskId, mViewModel.mBgExecutor);
             }
         }
 

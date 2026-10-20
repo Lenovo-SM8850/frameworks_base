@@ -128,7 +128,8 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
     }
 
     private fun add(): AppDragSlot {
-        val slot = coordinator.getSlots(0).first { !it.occupied }
+        val slot = coordinator.getSlots(0).filter { !it.occupied }
+            .maxBy { it.bounds.width().toLong() * it.bounds.height() }
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
         coordinator.onTransitionFinished(token, false)
         return slot
@@ -508,6 +509,515 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(groups.get(10)).isNull()
         assertThat(groups.peek(20)).isNull()
     }
+
+    @Test fun addBelowKeepsCurrentTaskAboveAndInsertsInOneTransaction() {
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(slot.splitBelow).isTrue()
+        assertThat(slot.bounds).isEqualTo(Rect(1604, 1204, 3200, 2400))
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        val transaction = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(any(), transaction.capture(), any())
+        val wct = transaction.firstValue
+        assertThat(wct.changes[pair[1].mRootTaskInfo.token.asBinder()]!!
+            .configuration.windowConfiguration.bounds).isEqualTo(Rect(1604, 0, 3200, 1196))
+        assertThat(wct.changes[pair[0].mRootTaskInfo.token.asBinder()]!!
+            .configuration.windowConfiguration.bounds).isEqualTo(Rect(0, 0, 1596, 2400))
+        assertThat(wct.changes[spare[0].mRootTaskInfo.token.asBinder()]!!
+            .configuration.windowConfiguration.bounds).isEqualTo(slot.bounds)
+    }
+
+    @Test fun addActionExposesSubdividedLeavesAndHidesAtCapacity() {
+        val right = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), right)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val subdivided = coordinator.getBelowSlot(20)!!
+        assertThat(subdivided.splitBelow).isFalse()
+        val left = coordinator.getBelowSlot(10)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), left)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+    }
+
+    @Test fun stackedPairAddsOnEndSideThenRestoresFourLeavesInOneTransaction() {
+        whenever(split.isLeftRightSplit).thenReturn(false)
+        whenever(split.topLeftBounds).thenReturn(Rect(0, 0, 3200, 1196))
+        val top = coordinator.getBelowSlot(10)!!
+        assertThat(top.splitBelow).isFalse()
+        assertThat(top.bounds).isEqualTo(Rect(1604, 0, 3200, 1196))
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), top)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val bottom = coordinator.getBelowSlot(20)!!
+        assertThat(bottom.bounds).isEqualTo(Rect(1604, 1204, 3200, 2400))
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), bottom)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+        val group = groups.get(10)!!
+        val before = group.layout.calculateBounds(Rect(0, 0, 3200, 2400), android.graphics.Insets.NONE, 8)
+        val wct = WindowContainerTransaction()
+        coordinator.exit(-1, wct)
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, null)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.activeStages).hasSize(4)
+        assertThat(groups.get(10)!!.layout.calculateBounds(Rect(0, 0, 3200, 2400),
+            android.graphics.Insets.NONE, 8)).isEqualTo(before)
+    }
+
+    @Test fun addBelowRejectsInfeasibleExistingTaskAndCapabilityLoss() {
+        organizer.getRunningTaskInfo(10)!!.minHeight = 1500
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+        assertThat(coordinator.getBelowSlot(20)).isNotNull()
+        whenever(host.capacity()).thenReturn(2)
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+    }
+
+    @Test fun floatingAndBackgroundReuseShareInsertionAndClearFloatingProperties() {
+        val slot = coordinator.getBelowSlot(10)!!
+        val floating = RunningTaskInfo().apply {
+            taskId = 50
+            displayId = 0
+            token = taskToken()
+            supportsMultiWindow = true
+            isFloatingWindow = true
+        }
+        assertThat(coordinator.startTask(floating, slot)).isTrue()
+        val transaction = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(any(), transaction.capture(), any())
+        val wct = transaction.firstValue
+        val launch = wct.hierarchyOps.single {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK
+        }
+        assertThat(ActivityOptions.fromBundle(launch.launchOptions).launchBounds).isNull()
+        val change = wct.changes[floating.token.asBinder()]!!
+        assertThat(change.configuration.windowConfiguration.windowingMode)
+            .isEqualTo(android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED)
+        assertThat(change.changeMask and WindowContainerTransaction.Change.CHANGE_FLOATING_WINDOW)
+            .isNotEqualTo(0)
+        assertThat(wct.hierarchyOps.any { it.container == floating.token.asBinder() &&
+            it.newParent == spare[0].mRootTaskInfo.token.asBinder() }).isTrue()
+    }
+
+    @Test fun taskInsertionRejectsVisibleMemberMinimumsAndStaleSelection() {
+        val slot = coordinator.getBelowSlot(10)!!
+        val visible = organizer.getRunningTaskInfo(10)!!.apply { supportsMultiWindow = true }
+        assertThat(coordinator.startTask(visible, slot)).isFalse()
+        val incoming = RunningTaskInfo().apply {
+            taskId = 50; displayId = 0; minHeight = 5000; supportsMultiWindow = true
+        }
+        assertThat(coordinator.startTask(incoming, slot)).isFalse()
+        incoming.minHeight = 0
+        incoming.supportsMultiWindow = false
+        assertThat(coordinator.startTask(incoming, slot)).isFalse()
+        incoming.supportsMultiWindow = true
+        assertThat(coordinator.startTask(incoming, slot)).isTrue()
+        assertThat(coordinator.startTask(incoming, slot)).isFalse()
+    }
+
+    @Test fun pickerKeyboardDoesNotResizeGroupButMemberKeyboardStillDoes() {
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val processor = argumentCaptor<DisplayImeController.ImePositionProcessor>()
+        verify(ime).addPositionProcessor(processor.capture())
+        processor.firstValue.onImeStartPositioning(0, 2400, 1800, true, false, mock())
+        assertThat(coordinator.getBelowSlot(10)).isNotNull()
+        verify(organizer, never()).applyTransaction(any())
+        val target = organizer.getRunningTaskInfo(10)!!.token
+        whenever(organizer.getImeLayeringTarget(0)).thenReturn(target)
+        whenever(pair[0].containsToken(target)).thenReturn(true)
+        processor.firstValue.onImeStartPositioning(0, 2400, 1800, true, false, mock())
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+        verify(organizer).applyTransaction(any())
+    }
+
+    private fun dumpState(): String {
+        val text = java.io.StringWriter()
+        coordinator.dump(java.io.PrintWriter(text), "  ")
+        return text.toString()
+    }
+
+    @Test fun firstMenuPreviewDoesNotWaitForAsynchronousSpareRoots() {
+        spare.forEach { it.mHasRootTask = false }
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(slot.bounds).isEqualTo(Rect(1604, 1204, 3200, 2400))
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isFalse()
+        assertThat(dumpState()).contains("insertion=Spare roots not ready")
+        spare.forEach { it.mHasRootTask = true }
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+    }
+
+    @Test fun landscapeDevicePairOffersChromeLeafOnFirstQuery() {
+        whenever(split.rootBounds).thenReturn(Rect(0, 0, 2560, 1600))
+        whenever(split.topLeftBounds).thenReturn(Rect(0, 0, 1313, 1600))
+        spare.forEach { it.mHasRootTask = false }
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(slot.bounds).isEqualTo(Rect(1321, 804, 2560, 1600))
+        assertThat(slot.splitBelow).isTrue()
+        assertThat(dumpState()).contains("belowSlot=task=20 None")
+    }
+
+    @Test fun subdividedLeafInsertionOwnsOnlyItsBranchAndCollapsesCleanly() {
+        val first = coordinator.getBelowSlot(10)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), first)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val nested = coordinator.getBelowSlot(10)!!
+        assertThat(nested.splitBelow).isFalse()
+        assertThat(nested.bounds).isEqualTo(Rect(802, 0, 1596, 1196))
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), nested)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        verify(createdDividers[2]).setMultiSplitDivider(Rect(0, 0, 1596, 1196), true, 0.5f)
+        val group = groups.get(10)!!
+        val before = group.layout.root
+        coordinator.exit(-1, WindowContainerTransaction())
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, null)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(groups.get(10)!!.layout.root).isEqualTo(before)
+        assertThat(coordinator.closeTask(40)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.activeStages).hasSize(3)
+        assertThat(coordinator.getBelowSlot(10)!!.bounds).isEqualTo(nested.bounds)
+    }
+
+    @Test fun wideLeafInsertionUsesEndSideInRtl() {
+        val config = Configuration(context.resources.configuration).apply {
+            setLayoutDirection(java.util.Locale("ar"))
+        }
+        whenever(displays.getDisplayContext(0)).thenReturn(context.createConfigurationContext(config))
+        whenever(split.isLeftRightSplit).thenReturn(false)
+        whenever(split.topLeftBounds).thenReturn(Rect(0, 0, 3200, 1196))
+        val slot = coordinator.getBelowSlot(10)!!
+        assertThat(slot.newTaskFirst).isTrue()
+        assertThat(slot.splitBelow).isFalse()
+        assertThat(slot.bounds).isEqualTo(Rect(0, 0, 1596, 1196))
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+    }
+
+    @Test fun dumpExplainsBelowAndInsertionRejectionsAndReportsLiveLeaves() {
+        assertThat(coordinator.getBelowSlot(20, false)).isNull()
+        assertThat(dumpState()).contains("task=20 Pair unavailable or busy")
+        organizer.getRunningTaskInfo(10)!!.minHeight = 1500
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+        assertThat(dumpState()).contains("Task 10 min=0x1500")
+        organizer.getRunningTaskInfo(10)!!.minHeight = 0
+        val slot = coordinator.getBelowSlot(10)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+        assertThat(dumpState()).contains("Busy")
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isFalse()
+        val state = dumpState()
+        assertThat(state).contains("active=true capacity=4 busy=false imeTop=null keyguard=false")
+        assertThat(state).contains("insertion=Stale revision")
+        assertThat(state).contains("leaf=0 task=10 bounds=Rect")
+        assertThat(state).contains("leaf=2 task=30 bounds=Rect")
+        coordinator.setKeyguard(true)
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+        assertThat(dumpState()).contains("keyguard=true")
+        coordinator.setKeyguard(false)
+        whenever(host.capacity()).thenReturn(2)
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+        assertThat(dumpState()).contains("belowSlot=task=20 Capacity")
+    }
+
+    private fun verifyColdInsertion(stacked: Boolean) {
+        if (stacked) {
+            whenever(split.isLeftRightSplit).thenReturn(false)
+            whenever(split.rootBounds).thenReturn(Rect(0, 0, 2400, 3200))
+            whenever(split.topLeftBounds).thenReturn(Rect(0, 0, 2400, 1596))
+        }
+        val appeared = organizer.getRunningTaskInfo(30)!!
+        whenever(organizer.getRunningTaskInfo(30)).thenReturn(null)
+        whenever(spare[0].childCount).thenReturn(0)
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(slot.splitBelow).isEqualTo(!stacked)
+        // A caller's stale bounds must not divert a nested launch into WM's bounds-reparent path.
+        val supplied = ActivityOptions.makeBasic().apply { launchBounds = Rect(5, 5, 100, 100) }
+        assertThat(coordinator.startIntent(pendingIntent, null, supplied.toBundle(), slot)).isTrue()
+        val transaction = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(eq(android.view.WindowManager.TRANSIT_OPEN),
+            transaction.capture(), eq(coordinator))
+        val wct = transaction.firstValue
+        val ops = wct.hierarchyOps
+        val launch = ops.single { it.type ==
+            WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_PENDING_INTENT }
+        val launchIndex = ops.indexOf(launch)
+        val adjacent = ops.single { it.type ==
+            WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ADJACENT_ROOTS }
+        val preserve = ops.single { it.type ==
+            WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_REPARENT_LEAF_TASK_IF_RELAUNCH }
+        assertThat(ops.indexOf(adjacent)).isLessThan(launchIndex)
+        assertThat(ops.indexOf(preserve)).isLessThan(launchIndex)
+        assertThat(ops.last()).isSameInstanceAs(launch)
+        assertThat(launch.pendingIntent).isSameInstanceAs(pendingIntent)
+        val options = ActivityOptions.fromBundle(launch.launchOptions)
+        assertThat(options.launchRootTask).isEqualTo(spare[0].mRootTaskInfo.token)
+        assertThat(options.launchDisplayId).isEqualTo(0)
+        assertThat(options.launchBounds).isNull()
+        assertThat(wct.changes[spare[0].mRootTaskInfo.token.asBinder()]!!
+            .configuration.windowConfiguration.bounds).isEqualTo(slot.bounds)
+        whenever(organizer.getRunningTaskInfo(30)).thenReturn(appeared)
+        whenever(spare[0].childCount).thenReturn(1)
+        coordinator.onTaskChanged(spare[0], 30, true)
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.activeStages).hasSize(3)
+        assertThat(groups.get(30)!!.members.map { it.taskId }).containsExactly(10, 20, 30)
+        val actual = Rect()
+        assertThat(coordinator.getTaskBounds(30, actual)).isTrue()
+        assertThat(actual).isEqualTo(slot.bounds)
+    }
+
+    @Test fun coldIntentCreatesLeafBelowWithStagePreparedBeforeLaunch() {
+        verifyColdInsertion(false)
+    }
+
+    @Test fun coldIntentCreatesLeafToSideOfStackedPairWithSameLaunchContract() {
+        verifyColdInsertion(true)
+    }
+
+    @Test fun taskLaunchHasNoBoundsOverrideAndOnlyOneExplicitReparent() {
+        val slot = coordinator.getBelowSlot(20)!!
+        val task = RunningTaskInfo().apply {
+            taskId = 50; displayId = 0; supportsMultiWindow = true; token = taskToken()
+        }
+        assertThat(coordinator.startTask(task, slot)).isTrue()
+        val transaction = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(any(), transaction.capture(), any())
+        val ops = transaction.firstValue.hierarchyOps
+        val launch = ops.single { it.type ==
+            WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK }
+        val options = ActivityOptions.fromBundle(launch.launchOptions)
+        assertThat(options.launchBounds).isNull()
+        assertThat(options.launchRootTask).isEqualTo(spare[0].mRootTaskInfo.token)
+        val reparents = ops.filter { it.type ==
+            WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REPARENT &&
+                it.container == task.token.asBinder() }
+        assertThat(reparents).hasSize(1)
+        assertThat(reparents.single().newParent).isEqualTo(spare[0].mRootTaskInfo.token.asBinder())
+        assertThat(ops.indexOf(reparents.single())).isLessThan(ops.indexOf(launch))
+        assertThat(ops.indexOf(ops.single { it.type ==
+            WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ADJACENT_ROOTS }))
+            .isLessThan(ops.indexOf(launch))
+    }
+
+    private fun delayedStage(): StageTaskListener = spare[0].also { stage ->
+        whenever(stage.childCount).thenAnswer { stage.mChildrenTaskInfo.size() }
+        whenever(stage.topChildTaskId).thenAnswer {
+            if (stage.mChildrenTaskInfo.size() == 0) -1 else stage.mChildrenTaskInfo.valueAt(0).taskId
+        }
+        whenever(stage.containsTask(any())).thenAnswer {
+            stage.mChildrenTaskInfo[it.getArgument<Int>(0)] != null
+        }
+    }
+
+    private fun translucentTask(stage: StageTaskListener, id: Int = 69) = RunningTaskInfo().apply {
+        taskId = id
+        parentTaskId = stage.mRootTaskInfo.taskId
+        displayId = 0
+        token = taskToken()
+        supportsMultiWindow = true
+        topActivityInfo = android.content.pm.ActivityInfo()
+        isVisible = false
+        isVisibleRequested = false
+        isTopActivityTransparent = true
+        isActivityStackTransparent = true
+    }
+
+    private fun delayedCallback(delay: Long): Runnable {
+        val callbacks = argumentCaptor<Runnable>()
+        val delays = argumentCaptor<Long>()
+        verify(executor, atLeastOnce()).executeDelayed(callbacks.capture(), delays.capture())
+        return callbacks.allValues.zip(delays.allValues).last { it.second == delay }.first
+    }
+
+    private fun runLastIdle() {
+        val idle = argumentCaptor<Runnable>()
+        verify(transitions, atLeastOnce()).runOnIdle(idle.capture())
+        idle.lastValue.run()
+    }
+
+    @Test fun translucentChildAfterOpenFinishesIsAdoptedFromPreparedParent() {
+        val stage = delayedStage()
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionReady(token, android.window.TransitionInfo(0, 0), mock(), mock())
+        coordinator.onTransitionFinished(token, false)
+        val queued = argumentCaptor<Runnable>()
+        verify(executor, atLeastOnce()).execute(queued.capture())
+        queued.lastValue.run()
+        runLastIdle()
+        assertThat(coordinator.activeStages).hasSize(3)
+        assertThat(coordinator.isBusy).isTrue()
+        assertThat(dumpState()).contains("awaitingStage=130")
+        assertThat(dumpState()).contains("transitionFinished=true")
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+        val task = translucentTask(stage)
+        whenever(organizer.getChildTasks(eq(stage.mRootTaskInfo.token), any())).thenReturn(listOf(task))
+        delayedCallback(100L).run()
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(coordinator.activeStages).hasSize(3)
+        val actual = Rect()
+        assertThat(coordinator.getTaskBounds(task.taskId, actual)).isTrue()
+        assertThat(actual).isEqualTo(slot.bounds)
+        assertThat(stage.mChildrenTaskInfo[task.taskId]).isSameInstanceAs(task)
+        assertThat(task.isTopActivityTransparent).isTrue()
+        assertThat(groups.get(task.taskId)!!.members.map { it.taskId }).containsExactly(10, 20, 69)
+        val wcts = argumentCaptor<WindowContainerTransaction>()
+        verify(organizer).applyTransaction(wcts.capture())
+        val change = wcts.firstValue.changes[stage.mRootTaskInfo.token.asBinder()]!!
+        assertThat(change.hidden).isFalse()
+        assertThat(change.configuration.windowConfiguration.bounds).isEqualTo(slot.bounds)
+        assertThat(wcts.firstValue.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REORDER &&
+                it.container == task.token.asBinder() && it.toTop
+        }).isTrue()
+        val resume = wcts.firstValue.hierarchyOps.single {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK
+        }
+        val options = ActivityOptions.fromBundle(resume.launchOptions)
+        assertThat(options.launchRootTask).isEqualTo(stage.mRootTaskInfo.token)
+        assertThat(options.launchBounds).isNull()
+
+    }
+
+    @Test fun translucentTaskInTransitionBindsBeforeItsOrganizerCallback() {
+        val stage = delayedStage()
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        val task = translucentTask(stage)
+        val info = android.window.TransitionInfo(0, 0)
+        info.addChange(android.window.TransitionInfo.Change(task.token, mock()).apply { setTaskInfo(task) })
+        coordinator.onTransitionReady(token, info, mock(), mock())
+        assertThat(coordinator.activeStages).hasSize(3)
+        assertThat(dumpState()).contains("task=69 transitionFinished=false")
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(groups.get(69)!!.members).hasSize(3)
+    }
+
+    @Test fun callbackAfterTransitionBindsInvisibleChildWithoutWaitingForOpacity() {
+        val stage = delayedStage()
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val task = translucentTask(stage)
+        stage.mChildrenTaskInfo.put(task.taskId, task)
+        whenever(organizer.getRunningTaskInfo(task.taskId)).thenReturn(task)
+        coordinator.onTaskChanged(stage, task.taskId, true)
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(groups.get(69)!!.members.map { it.taskId }).containsExactly(10, 20, 69)
+    }
+
+    @Test fun timeoutRestoresOriginalTreeAndDrainsLateChildrenFromRetiredStage() {
+        val stage = delayedStage()
+        val before = coordinator.getBelowSlot(20)!!.bounds
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), coordinator.getBelowSlot(20)!!)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val oldProbe = delayedCallback(100L)
+        delayedCallback(5_000L).run()
+        runLastIdle()
+        assertThat(coordinator.activeStages).hasSize(2)
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(dumpState()).contains("Rolled back: No task arrived")
+        val rollback = argumentCaptor<WindowContainerTransaction>()
+        verify(organizer).applyTransaction(rollback.capture())
+        val reset = rollback.firstValue.changes[stage.mRootTaskInfo.token.asBinder()]!!
+        assertThat(reset.configuration.windowConfiguration.bounds).isEqualTo(Rect())
+        assertThat(reset.hidden).isTrue()
+        assertThat(rollback.firstValue.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_CHILDREN_TASKS_REPARENT &&
+                it.container == stage.mRootTaskInfo.token.asBinder() && it.newParent == null
+        }).isTrue()
+        val late = translucentTask(stage)
+        whenever(organizer.getChildTasks(eq(stage.mRootTaskInfo.token), any())).thenReturn(listOf(late))
+        oldProbe.run()
+        coordinator.onStageChanged()
+        assertThat(coordinator.activeStages).hasSize(2)
+        assertThat(groups.get(late.taskId)).isNull()
+        assertThat(stage.mChildrenTaskInfo.size()).isEqualTo(0)
+        whenever(organizer.getChildTasks(eq(stage.mRootTaskInfo.token), any())).thenReturn(emptyList())
+        assertThat(coordinator.getBelowSlot(20)!!.bounds).isEqualTo(before)
+    }
+
+    @Test fun abortedColdInsertionResetsStageAndRejectsStalePreview() {
+        delayedStage()
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionConsumed(token, true, null)
+        runLastIdle()
+        assertThat(coordinator.activeStages).hasSize(2)
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(dumpState()).contains("Rolled back: Insertion transition aborted")
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isFalse()
+    }
+
+    @Test fun coldLaunchExceptionRollsBackPreparedStageImmediately() {
+        delayedStage()
+        val slot = coordinator.getBelowSlot(20)!!
+        whenever(transitions.startTransition(any(), any(), any())).thenThrow(IllegalStateException())
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isFalse()
+        assertThat(coordinator.activeStages).hasSize(2)
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(dumpState()).contains("Launch failed: IllegalStateException")
+        verify(organizer).applyTransaction(any())
+    }
+
+    @Test fun configurationChangeCancelsPendingInsertionAndOldPollCannotAdopt() {
+        val stage = delayedStage()
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val oldProbe = delayedCallback(100L)
+        val wct = WindowContainerTransaction()
+        coordinator.onConfigurationChanged(Configuration().apply { smallestScreenWidthDp = 600 }, wct)
+        assertThat(coordinator.activeStages).hasSize(2)
+        assertThat(dumpState()).contains("Rolled back: Configuration changed")
+        val late = translucentTask(stage)
+        whenever(organizer.getChildTasks(eq(stage.mRootTaskInfo.token), any())).thenReturn(listOf(late))
+        oldProbe.run()
+        assertThat(groups.get(69)).isNull()
+    }
+
+    @Test fun unreportedTaskDeathDoesNotLeaveSyntheticMembershipBehind() {
+        val stage = delayedStage()
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val task = translucentTask(stage)
+        whenever(organizer.getChildTasks(eq(stage.mRootTaskInfo.token), any())).thenReturn(listOf(task))
+        delayedCallback(100L).run()
+        assertThat(groups.get(69)).isNotNull()
+        whenever(organizer.getChildTasks(eq(stage.mRootTaskInfo.token), any())).thenReturn(emptyList())
+        coordinator.onStageChanged()
+        assertThat(stage.mChildrenTaskInfo.size()).isEqualTo(0)
+        assertThat(groups.get(69)).isNull()
+        val queued = argumentCaptor<Runnable>()
+        verify(executor, atLeastOnce()).execute(queued.capture())
+        queued.lastValue.run()
+        runLastIdle()
+        assertThat(coordinator.activeStages).hasSize(2)
+    }
+
+    @Test fun downgradedSessionAllowsOccupiedReplacementsButNoAdditions() {
+        add()
+        add()
+        whenever(host.capacity()).thenReturn(2)
+        coordinator.onConfigurationChanged(Configuration().apply { smallestScreenWidthDp = 599 },
+            WindowContainerTransaction())
+        val slots = coordinator.getSlots(0)
+        assertThat(slots).hasSize(2)
+        assertThat(slots.all { it.occupied }).isTrue()
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slots.first())).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val incoming = RunningTaskInfo().apply {
+            taskId = 80; displayId = 0; supportsMultiWindow = true; token = taskToken()
+        }
+        assertThat(coordinator.startTask(incoming, coordinator.getSlots(0).last())).isTrue()
+        assertThat(coordinator.activeStages).hasSize(2)
+    }
+
     @Test fun downgradePublishesRemainingPairWithCapacityTwo() {
         add()
         add()
@@ -520,6 +1030,48 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(groups.get(group.secondRepresentative)).isSameInstanceAs(group)
         assertThat(group.stageIds.values).containsExactlyElementsIn(
             coordinator.activeStages.map { it.mRootTaskInfo.taskId })
+    }
+
+    @Test fun stoppedRecentTaskKeepsReservedLeafUntilTranslucentChildAppears() {
+        val stage = delayedStage()
+        val recent = android.app.ActivityManager.RecentTaskInfo().apply {
+            taskId = 69; displayId = 0; supportsMultiWindow = true
+        }
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startTask(recent, slot)).isTrue()
+        coordinator.onTransitionReady(token, android.window.TransitionInfo(0, 0), mock(), mock())
+        coordinator.onTransitionFinished(token, false)
+        val queued = argumentCaptor<Runnable>()
+        verify(executor, atLeastOnce()).execute(queued.capture())
+        queued.lastValue.run()
+        runLastIdle()
+        assertThat(coordinator.activeStages).hasSize(3)
+        assertThat(coordinator.isBusy).isTrue()
+        val child = translucentTask(stage, recent.taskId)
+        whenever(organizer.getChildTasks(eq(stage.mRootTaskInfo.token), any())).thenReturn(listOf(child))
+        delayedCallback(100L).run()
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(groups.get(recent.taskId)!!.members.map { it.taskId }).containsExactly(10, 20, 69)
+        val actual = Rect()
+        assertThat(coordinator.getTaskBounds(recent.taskId, actual)).isTrue()
+        assertThat(actual).isEqualTo(slot.bounds)
+    }
+
+    @Test fun stoppedRecentTaskWithoutAppearanceRollsBackAfterGrace() {
+        val stage = delayedStage()
+        val recent = android.app.ActivityManager.RecentTaskInfo().apply {
+            taskId = 69; displayId = 0; supportsMultiWindow = true
+        }
+        assertThat(coordinator.startTask(recent, coordinator.getBelowSlot(20)!!)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        delayedCallback(5_000L).run()
+        runLastIdle()
+        assertThat(coordinator.isBusy).isFalse()
+        assertThat(coordinator.activeStages).hasSize(2)
+        val rollback = argumentCaptor<WindowContainerTransaction>()
+        verify(organizer).applyTransaction(rollback.capture())
+        assertThat(rollback.firstValue.changes[stage.mRootTaskInfo.token.asBinder()]!!.hidden).isTrue()
+        assertThat(groups.peek(recent.taskId)).isNull()
     }
 
     @Test fun swapRejectsDestinationBelowTaskMinimumWithoutChangingStagesOrRatios() {
@@ -572,6 +1124,5 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(after).isEqualTo(before)
         verify(transitions).startTransition(any(), any(), any())
     }
-
 
 }

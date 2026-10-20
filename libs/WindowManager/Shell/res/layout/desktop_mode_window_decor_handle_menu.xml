@@ -132,6 +132,14 @@
         android:visibility="gone">
 
         <com.android.wm.shell.windowdecor.HandleMenuActionButton
+            android:id="@+id/split_add_button"
+            android:contentDescription="@string/split_picker_add_below"
+            android:text="@string/split_picker_add_below"
+            android:src="@drawable/desktop_mode_ic_handle_menu_splitscreen"
+            android:visibility="gone"
+            style="@style/DesktopModeHandleMenuActionButton"/>
+
+        <com.android.wm.shell.windowdecor.HandleMenuActionButton
             android:id="@+id/split_close_button"
             android:contentDescription="@string/handle_menu_close_app"
             android:text="@string/handle_menu_close_app"
@@ -245,4 +253,3 @@
             style="@style/DesktopModeHandleMenuWindowingButton"/>
     </LinearLayout>
 </LinearLayout>
-
