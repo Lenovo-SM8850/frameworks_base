@@ -158,6 +158,8 @@ class SidebarDragPolicy(
         destination.slot?.let { slot ->
             val controller = split ?: return false
             // Use a fresh options bundle: floating flags never enter a split transaction.
+            if (slot.leafId >= 0) return controller.startSidebarIntent(pending, user.identifier,
+                null, options.toBundle(), slot)
             controller.startIntent(pending, user.identifier, null, slot.position,
                 options.toBundle(), null, slot.index)
             return true
@@ -241,7 +243,9 @@ class SidebarDragPolicy(
             val valid = slots.filter { !it.bounds.isEmpty }
             if (!active || occupied >= capacity) return valid.firstOrNull { it.hitBounds.contains(x, y) }
             val free = valid.filter { !it.occupied }
-            return free.firstOrNull { it.hitBounds.contains(x, y) } ?: free.minByOrNull {
+            val hit = free.firstOrNull { it.hitBounds.contains(x, y) }
+            if (hit != null || free.any { it.leafId >= 0 }) return hit
+            return free.minByOrNull {
                 val dx = it.bounds.centerX().toLong() - x
                 val dy = it.bounds.centerY().toLong() - y
                 dx * dx + dy * dy

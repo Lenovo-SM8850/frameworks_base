@@ -166,4 +166,17 @@ class SidebarDragPolicyTest : ShellTestCase() {
             extras = PersistableBundle().apply { putBoolean(EXTRA_SIDEBAR_APP_DRAG, marked) }
         }, ClipData.Item(Intent().putExtra(ClipDescription.EXTRA_PENDING_INTENT, pending)
             .putExtra(Intent.EXTRA_USER, UserHandle.SYSTEM)))
+    @Test fun multiAppInsertionUsesHoveredHalfAndNeverAnUnrelatedLeaf() {
+        val upper = AppDragSlot(0, 2, Rect(0, 0, 495, 495), Rect(0, 0, 495, 500),
+            false, 0, true, 1)
+        val lower = AppDragSlot(0, 2, Rect(0, 505, 495, 1000), Rect(0, 500, 495, 1000),
+            false, 0, false, 1)
+        assertThat(SidebarDragPolicy.resolveSplitSlot(task(), true, true,
+            true, 2, 4, listOf(upper, lower), 100, 100)).isSameInstanceAs(upper)
+        assertThat(SidebarDragPolicy.resolveSplitSlot(task(), true, true,
+            true, 2, 4, listOf(upper, lower), 100, 900)).isSameInstanceAs(lower)
+        assertThat(SidebarDragPolicy.resolveSplitSlot(task(), true, true,
+            true, 3, 4, listOf(upper, lower), 900, 100)).isNull()
+    }
+
 }

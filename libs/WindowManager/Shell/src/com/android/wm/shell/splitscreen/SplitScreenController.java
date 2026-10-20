@@ -423,7 +423,11 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         }
         final ComponentName component = intent.getIntent().getComponent();
         final Intent launch = fillIn == null ? new Intent() : new Intent(fillIn);
-        launch.addFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        if (intent.isImmutable()) {
+            launch.removeFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        } else {
+            launch.addFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        }
         for (ActivityManager.RunningTaskInfo task : mTaskOrganizer.getRunningTasks()) {
             if (task.userId == userId && isTaskInSplitScreen(task.taskId)
                     && task.baseActivity != null && component != null
@@ -432,7 +436,8 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
                 launch.addFlags(FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
             }
         }
-        return mStageCoordinator.startSidebarIntent(intent, launch, options, slot);
+        return mStageCoordinator.startSidebarIntent(intent, launch,
+                pendingIntentLaunchOptions(options, launch.getFlags()), slot);
     }
 
     /** Checks same-app multi-instance support before promising a split destination. */
