@@ -1488,4 +1488,132 @@ public class StageCoordinatorTests extends ShellTestCase {
             return mAlwaysEnter;
         }
     }
+    private MultiSplitCoordinator installMultiForLaunchTest() throws Exception {
+        MultiSplitCoordinator multi = mock(MultiSplitCoordinator.class);
+        java.lang.reflect.Field field = StageCoordinator.class.getDeclaredField("mMultiSplit");
+        field.setAccessible(true);
+        field.set(mStageCoordinator, multi);
+        when(multi.isActive()).thenReturn(true);
+        when(multi.taskAtPosition(anyInt())).thenReturn(41);
+        doAnswer(invocation -> {
+            when(multi.isActive()).thenReturn(false);
+            WindowContainerTransaction wct = invocation.getArgument(1);
+            wct.reorder(mRunningTaskInfo.token, false);
+            return null;
+        }).when(multi).exit(anyInt(), any());
+        return multi;
+    }
+
+    @Test
+    public void multiLaunch_taskExitsAndStartsOrdinarySplitInSameWct() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        mStageCoordinator.startTask(mTaskId, SPLIT_POSITION_TOP_OR_LEFT, null, null,
+                SPLIT_INDEX_UNDEFINED);
+        verify(multi).exit(eq(41), mWctCaptor.capture());
+        WindowContainerTransaction wct = mWctCaptor.getValue();
+        verify(mSplitScreenTransitions).startEnterTransition(anyInt(), eq(wct), any(),
+                any(), anyInt(), anyBoolean(), anyInt());
+        assertThat(getHierarchyOpForType(wct, HIERARCHY_OP_TYPE_LAUNCH_TASK)).isNotNull();
+    }
+
+    @Test
+    public void multiLaunch_intentExitsAndPreservesTransactionAndTarget() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        PendingIntent intent = mock(PendingIntent.class);
+        when(intent.getIntent()).thenReturn(new Intent());
+        WindowContainerTransaction supplied = new WindowContainerTransaction();
+        supplied.setBounds(mRunningTaskInfo.token, new Rect(1, 2, 300, 400));
+        mStageCoordinator.startIntent(intent, null, SPLIT_POSITION_BOTTOM_OR_RIGHT, null, null,
+                supplied, SPLIT_INDEX_UNDEFINED, DEFAULT_DISPLAY);
+        verify(multi).exit(eq(41), mWctCaptor.capture());
+        WindowContainerTransaction wct = mWctCaptor.getValue();
+        verify(mSplitScreenTransitions).startEnterTransition(anyInt(), eq(wct), any(),
+                any(), anyInt(), anyBoolean(), anyInt());
+        assertThat(getHierarchyOpForType(wct, HIERARCHY_OP_TYPE_PENDING_INTENT)).isNotNull();
+        assertThat(wct.getChanges()).containsKey(mRunningTaskInfo.token.asBinder());
+    }
+
+    @Test
+    public void multiLaunch_shortcutExitsBeforeLegacyLauncherCall() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        android.content.pm.LauncherApps launcher = mock(android.content.pm.LauncherApps.class);
+        mContext.addMockSystemService(android.content.Context.LAUNCHER_APPS_SERVICE, launcher);
+        mStageCoordinator.startShortcut("test.pkg", "shortcut", SPLIT_POSITION_TOP_OR_LEFT,
+                null, android.os.UserHandle.of(0));
+        verify(multi).exit(eq(41), mWctCaptor.capture());
+        verify(mTaskOrganizer).applyTransaction(mWctCaptor.getValue());
+        verify(launcher).startShortcut(eq("test.pkg"), eq("shortcut"), isNull(), any(),
+                eq(android.os.UserHandle.of(0)));
+    }
+
+    @Test
+    public void multiLaunch_combinedIntentTaskPassesRemoteToOrdinarySplit() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        mStageCoordinator.setMixedHandler(mDefaultMixedHandler);
+        PendingIntent intent = mock(PendingIntent.class);
+        when(intent.getIntent()).thenReturn(new Intent());
+        mStageCoordinator.startIntentAndTask(intent, null, null, mTaskId, null,
+                SPLIT_POSITION_BOTTOM_OR_RIGHT, SNAP_TO_2_50_50, mRemoteTransition, null);
+        verify(multi).exit(eq(INVALID_TASK_ID), mWctCaptor.capture());
+        verify(mSplitScreenTransitions).startEnterTransition(anyInt(), eq(mWctCaptor.getValue()),
+                eq(mRemoteTransition), any(), anyInt(), anyBoolean(), eq(SNAP_TO_2_50_50));
+    }
+
+    @Test
+    public void multiLaunch_combinedShortcutTaskPassesRemoteToOrdinarySplit() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        ShortcutInfo shortcut = new ShortcutInfo.Builder(mContext, "test").build();
+        mStageCoordinator.startShortcutAndTask(shortcut, null, mTaskId, null,
+                SPLIT_POSITION_TOP_OR_LEFT, SNAP_TO_2_50_50, mRemoteTransition, null);
+        verify(multi).exit(eq(INVALID_TASK_ID), mWctCaptor.capture());
+        verify(mSplitScreenTransitions).startEnterTransition(anyInt(), eq(mWctCaptor.getValue()),
+                eq(mRemoteTransition), any(), anyInt(), anyBoolean(), eq(SNAP_TO_2_50_50));
+    }
+
+    @Test
+    public void multiLaunch_combinedIntentsPassRemoteToOrdinarySplit() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        mStageCoordinator.setMixedHandler(mDefaultMixedHandler);
+        PendingIntent first = mock(PendingIntent.class);
+        PendingIntent second = mock(PendingIntent.class);
+        when(first.getIntent()).thenReturn(new Intent());
+        when(second.getIntent()).thenReturn(new Intent());
+        mStageCoordinator.startIntents(first, null, null, null, second, null, null, null,
+                SPLIT_POSITION_BOTTOM_OR_RIGHT, SNAP_TO_2_50_50, mRemoteTransition, null);
+        verify(multi).exit(eq(INVALID_TASK_ID), mWctCaptor.capture());
+        verify(mSplitScreenTransitions).startEnterTransition(anyInt(), eq(mWctCaptor.getValue()),
+                eq(mRemoteTransition), any(), anyInt(), anyBoolean(), eq(SNAP_TO_2_50_50));
+    }
+
+    @Test
+    public void multiLaunch_existingTransitionExitsIntoOrdinaryPair() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        IBinder transition = new Binder();
+        WindowContainerTransaction wct = new WindowContainerTransaction();
+        mStageCoordinator.startTasksWithExistingTransition(transition, wct, 1, null, 2, null,
+                SPLIT_POSITION_BOTTOM_OR_RIGHT, SNAP_TO_2_50_50);
+        verify(multi).exit(INVALID_TASK_ID, wct);
+        verify(mSplitScreenTransitions).setEnterTransition(eq(transition), isNull(), anyInt(),
+                eq(false), eq(SNAP_TO_2_50_50));
+        assertEquals(2, wct.getHierarchyOps().stream().filter(op ->
+                op.getType() == HIERARCHY_OP_TYPE_LAUNCH_TASK).count());
+    }
+
+    @Test
+    public void multiLaunch_busyCombinedRequestConsumesRemote() throws Exception {
+        MultiSplitCoordinator multi = installMultiForLaunchTest();
+        when(multi.isBusy()).thenReturn(true);
+        android.window.IRemoteTransition client = mock(android.window.IRemoteTransition.class);
+        RemoteTransition remote = new RemoteTransition(client);
+        PendingIntent intent = mock(PendingIntent.class);
+        when(intent.getIntent()).thenReturn(new Intent());
+        mStageCoordinator.startIntentAndTask(intent, null, null, 1, null,
+                SPLIT_POSITION_TOP_OR_LEFT, SNAP_TO_2_50_50, remote, null);
+        verify(client).onTransitionConsumed(any(), eq(true));
+        verify(multi, never()).exit(anyInt(), any());
+        verify(mSplitScreenTransitions, never()).startEnterTransition(anyInt(), any(), any(),
+                any(), anyInt(), anyBoolean(), anyInt());
+    }
+
+
 }

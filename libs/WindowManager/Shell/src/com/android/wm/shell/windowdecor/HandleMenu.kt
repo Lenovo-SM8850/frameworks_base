@@ -481,7 +481,10 @@ private constructor(
             // stage position, not relative to the display as a whole.
             val inputRelativeToMenu =
                 PointF(inputPoint.x - globalMenuPosition.x, inputPoint.y - globalMenuPosition.y)
-            if (
+            val leafBounds = Rect()
+            if (splitScreenController.getMultiSplitTaskBounds(taskInfo.taskId, leafBounds)) {
+                inputRelativeToMenu.offset(leafBounds.left.toFloat(), leafBounds.top.toFloat())
+            } else if (
                 splitScreenController.getSplitPosition(taskInfo.taskId) ==
                     SplitScreenConstants.SPLIT_POSITION_BOTTOM_OR_RIGHT
             ) {
@@ -811,6 +814,7 @@ private constructor(
                     isInSplitScreen,
                     splitScreenController.isLeftRightSplit,
                     splitScreenController.canEnterSplitScreen(taskInfo),
+                    splitScreenController.getMultiSplitSwapTargets(taskInfo.taskId),
                 )
             }
             moreActionsPill.isGone = !shouldShowMoreActionsPill
@@ -928,6 +932,7 @@ private constructor(
                     splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId),
                     splitScreenController.isLeftRightSplit,
                     splitScreenController.canEnterSplitScreen(taskInfo),
+                    splitScreenController.getMultiSplitSwapTargets(taskInfo.taskId),
                 )
                 windowingPillView.updateSplitScreenButtonOrientation(configuration)
             }

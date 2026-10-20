@@ -2339,6 +2339,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         }
 
         @Override
+        public void onSwapLeaves(int firstLeafId, int secondLeafId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.swapLeaves(firstLeafId, secondLeafId);
+            }
+        }
+
+        @Override
         public void onToSplitScreen(int taskId) {
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to enter split for task=%d",
                     taskId);

@@ -334,6 +334,24 @@ public class SplitLayoutTests extends ShellTestCase {
                 .getDisplayLayout(anyInt());
     }
 
+    @Test
+    public void testMultiSplitDivider_isClippedToItsBranchAcrossAxesAndResize() {
+        final Rect branch = new Rect(0, 0, 1080, 1000);
+        mSplitLayout.setMultiSplitDivider(branch, true, 0.5f);
+        assertThat(mSplitLayout.getDividerBounds().top).isEqualTo(branch.top);
+        assertThat(mSplitLayout.getDividerBounds().bottom).isEqualTo(branch.bottom);
+        assertThat(mSplitLayout.getMultiSplitDividerCrop().height()).isEqualTo(branch.height());
+        final Rect resized = new Rect(0, 1100, 1080, 2160);
+        mSplitLayout.setMultiSplitDivider(resized, true, 0.7f);
+        assertThat(mSplitLayout.getDividerBounds().top).isEqualTo(resized.top);
+        assertThat(mSplitLayout.getDividerBounds().bottom).isEqualTo(resized.bottom);
+        assertThat(mSplitLayout.getMultiSplitDividerCrop().height()).isEqualTo(resized.height());
+        mSplitLayout.setMultiSplitDivider(resized, false, 0.5f);
+        assertThat(mSplitLayout.getDividerBounds().left).isEqualTo(resized.left);
+        assertThat(mSplitLayout.getDividerBounds().right).isEqualTo(resized.right);
+        assertThat(mSplitLayout.getMultiSplitDividerCrop().width()).isEqualTo(resized.width());
+    }
+
     private void waitDividerFlingFinished() {
         verify(mSplitLayout).flingDividerPosition(anyInt(), anyInt(), anyInt(), any(),
                 mRunnableCaptor.capture());

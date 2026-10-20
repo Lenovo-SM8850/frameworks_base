@@ -40,6 +40,7 @@ import com.android.window.flags.Flags
 import com.android.wm.shell.R
 import com.android.wm.shell.common.split.SplitScreenUtils
 import com.android.wm.shell.desktopmode.DesktopModeUiEventLogger
+import com.android.wm.shell.splitscreen.SplitScreenController.SplitSwapTargets
 import com.android.wm.shell.shared.desktopmode.DesktopModeTransitionSource
 import com.android.wm.shell.windowdecor.common.DecorThemeUtil
 import com.android.wm.shell.windowdecor.common.DrawableInsets
@@ -113,6 +114,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private lateinit var taskInfo: RunningTaskInfo
     private lateinit var windowDecorationActions: WindowDecorationActions
     private lateinit var desktopModeUiEventLogger: DesktopModeUiEventLogger
+    private var splitSwapTargets: SplitSwapTargets? = null
     private var shouldShowDesktopModeButton = false
 
     private lateinit var onPillItemClicked: (() -> Unit)
@@ -268,7 +270,14 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     override fun onClick(v: View) {
         when (v.id) {
             R.id.swap_horizontal_button, R.id.swap_vertical_button -> {
-                windowDecorationActions.onSwapSplit(taskInfo.taskId)
+                val targets = splitSwapTargets
+                if (targets == null) {
+                    windowDecorationActions.onSwapSplit(taskInfo.taskId)
+                } else {
+                    val other = if (v.id == R.id.swap_horizontal_button) targets.horizontal
+                        else targets.vertical
+                    if (other >= 0) windowDecorationActions.onSwapLeaves(targets.source, other)
+                }
             }
             R.id.rotate_window_button -> windowDecorationActions.onRotate(taskInfo)
             R.id.fullscreen_button -> {
@@ -297,7 +306,9 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         isInSplitScreen: Boolean,
         isLeftRightSplit: Boolean? = null,
         canEnterSplitScreen: Boolean = true,
+        splitSwapTargets: SplitSwapTargets? = null,
     ) {
+        this.splitSwapTargets = splitSwapTargets
         this.taskInfo = taskInfo
         this.style = calculateMenuStyle(taskInfo)
 
@@ -306,8 +317,10 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         layoutDirection = if (isInSplitScreen) View.LAYOUT_DIRECTION_LTR
             else context.resources.configuration.layoutDirection
         // The active split layout supplies the axis; task orientation can differ from it.
-        swapHorizontalBtn.isGone = !isInSplitScreen || isLeftRightSplit != true
-        swapVerticalBtn.isGone = !isInSplitScreen || isLeftRightSplit != false
+        swapHorizontalBtn.isGone = !isInSplitScreen ||
+            (splitSwapTargets?.let { it.horizontal < 0 } ?: (isLeftRightSplit != true))
+        swapVerticalBtn.isGone = !isInSplitScreen ||
+            (splitSwapTargets?.let { it.vertical < 0 } ?: (isLeftRightSplit != false))
         listOf(swapHorizontalBtn, swapVerticalBtn).forEach { button ->
             button.imageTintList = style.buttonColor
             button.background = createBackgroundDrawable(

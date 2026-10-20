@@ -56,6 +56,7 @@ public final class SplitWindowManager extends WindowlessWindowManager {
     private SurfaceControlViewHost mViewHost;
     private SurfaceControl mLeash;
     private DividerView mDividerView;
+    private Rect mMultiSplitTouchBounds;
 
     // The dynamically calculated amount to expand the window bounds to fit decorative elements.
     private int mWindowExpansionPx = 0;
@@ -86,7 +87,11 @@ public final class SplitWindowManager extends WindowlessWindowManager {
 
     void setTouchRegion(@NonNull Rect region) {
         if (mViewHost != null) {
-            setTouchRegion(mViewHost.getWindowToken().asBinder(), new Region(region));
+            final Rect touch = new Rect(region);
+            if (mMultiSplitTouchBounds != null && !touch.intersect(mMultiSplitTouchBounds)) {
+                touch.setEmpty();
+            }
+            setTouchRegion(mViewHost.getWindowToken().asBinder(), new Region(touch));
         }
     }
 
@@ -169,6 +174,8 @@ public final class SplitWindowManager extends WindowlessWindowManager {
         lp.setTitle(mWindowName);
         lp.privateFlags |= PRIVATE_FLAG_NO_MOVE_ANIMATION | PRIVATE_FLAG_TRUSTED_OVERLAY;
         lp.accessibilityTitle = mContext.getResources().getString(R.string.accessibility_divider);
+        mMultiSplitTouchBounds = splitLayout.isMultiSplitDivider()
+                ? splitLayout.getMultiSplitDividerCrop() : null;
         mViewHost.setView(mDividerView, lp);
         mDividerView.setup(splitLayout, this, mViewHost, insetsState, desktopState);
         if (isRestoring) {

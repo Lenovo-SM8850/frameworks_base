@@ -210,6 +210,23 @@ class HandleMenuTest : ShellTestCase() {
     }
 
     @Test
+    @EnableFlags(Flags.FLAG_ENABLE_HANDLE_INPUT_FIX)
+    fun multiSplitBottomRightMenu_usesOwningLeafInBothAxes() = runTest {
+        createTaskInfo(WINDOWING_MODE_MULTI_WINDOW, SPLIT_POSITION_BOTTOM_OR_RIGHT)
+        val leaf = Rect(SPLIT_RIGHT_BOUNDS.left, DISPLAY_BOUNDS.centerY(),
+            DISPLAY_BOUNDS.right, DISPLAY_BOUNDS.bottom)
+        whenever(splitScreenController.getMultiSplitTaskBounds(anyInt(), any())).thenAnswer {
+            (it.arguments[1] as Rect).set(leaf)
+            true
+        }
+        handleMenu = createAndShowHandleMenu(SPLIT_POSITION_BOTTOM_OR_RIGHT,
+            captionXOverride = leaf.width() / 2 - HANDLE_WIDTH / 2)
+        assertTrue(handleMenu.handleMenuViewContainer is AdditionalSystemViewContainer)
+        assertEquals(Point(leaf.centerX() - MENU_WIDTH / 2, leaf.top + MENU_TOP_MARGIN).toPointF(),
+            handleMenu.handleMenuPosition)
+    }
+
+    @Test
     fun testCreate_forceShowSystemBars_usesSystemViewContainer() = runTest {
         createTaskInfo(WINDOWING_MODE_FREEFORM)
 
@@ -431,6 +448,7 @@ class HandleMenuTest : ShellTestCase() {
         splitPosition: Int? = null,
         forceShowSystemBars: Boolean = false,
         shouldShowWindowingPill: Boolean = true,
+        captionXOverride: Int? = null,
     ): HandleMenu {
         val layoutId =
             if (mockDesktopWindowDecoration.mTaskInfo.isFreeform) {
@@ -439,7 +457,7 @@ class HandleMenuTest : ShellTestCase() {
                 R.layout.desktop_mode_app_handle
             }
         val captionX =
-            when (mockDesktopWindowDecoration.mTaskInfo.windowingMode) {
+            captionXOverride ?: when (mockDesktopWindowDecoration.mTaskInfo.windowingMode) {
                 WINDOWING_MODE_FULLSCREEN -> (DISPLAY_BOUNDS.width() / 2) - (HANDLE_WIDTH / 2)
                 WINDOWING_MODE_FREEFORM -> 0
                 WINDOWING_MODE_MULTI_WINDOW -> {
@@ -682,6 +700,30 @@ class HandleMenuTest : ShellTestCase() {
         assertEquals(View.VISIBLE, vertical.visibility)
         assertTrue(pill.requireViewById<View>(R.id.split_screen_button).isSelected)
         assertEquals(false, pill.requireViewById<View>(R.id.split_screen_button).isEnabled)
+    }
+
+    @Test fun multiSplitSwap_showsBothAxesAndDispatchesTheirLeafTargets() {
+        val actions = mock<WindowDecorationActions>()
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_MULTI_WINDOW).build()
+        val pill = LayoutInflater.from(mContext)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+            .requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.initialize(actions, mock(), false) {}
+        pill.bind(task, true, false, true, SplitScreenController.SplitSwapTargets(1, 0, 3))
+        val horizontal = pill.requireViewById<View>(R.id.swap_horizontal_button)
+        val vertical = pill.requireViewById<View>(R.id.swap_vertical_button)
+        assertEquals(View.VISIBLE, horizontal.visibility)
+        assertEquals(View.VISIBLE, vertical.visibility)
+        horizontal.performClick()
+        vertical.performClick()
+        org.mockito.kotlin.verify(actions).onSwapLeaves(1, 0)
+        org.mockito.kotlin.verify(actions).onSwapLeaves(1, 3)
+        pill.bind(task, true, false, true, SplitScreenController.SplitSwapTargets(1, -1, 3))
+        assertEquals(View.GONE, horizontal.visibility)
+        assertEquals(View.VISIBLE, vertical.visibility)
+        pill.bind(task, true, true, true, SplitScreenController.SplitSwapTargets(1, 0, -1))
+        assertEquals(View.VISIBLE, horizontal.visibility)
+        assertEquals(View.GONE, vertical.visibility)
     }
 
     @Test fun splitSwap_staysPhysicallyLeftInRtlWith48dpTargets() {

@@ -892,7 +892,10 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 mResult.mCaptionY,
                 mResult.mCaptionX + mResult.mCaptionWidth,
                 mResult.mCaptionY + mResult.mCaptionHeight);
-        if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
+        final Rect leafBounds = new Rect();
+        if (mSplitScreenController.getMultiSplitTaskBounds(mTaskInfo.taskId, leafBounds)) {
+            handleBounds.offset(leafBounds.left, leafBounds.top);
+        } else if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
                 == SPLIT_POSITION_BOTTOM_OR_RIGHT
         ) {
             if (mSplitScreenController.isLeftRightSplit()) {
@@ -973,7 +976,10 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
 
     private Point determineHandlePosition() {
         final Point position = new Point(mResult.mCaptionX, 0);
-        if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
+        final Rect leafBounds = new Rect();
+        if (mSplitScreenController.getMultiSplitTaskBounds(mTaskInfo.taskId, leafBounds)) {
+            position.offset(leafBounds.left, leafBounds.top);
+        } else if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
                 == SPLIT_POSITION_BOTTOM_OR_RIGHT
         ) {
             if (mSplitScreenController.isLeftRightSplit()) {

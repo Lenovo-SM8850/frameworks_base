@@ -114,6 +114,7 @@ import android.content.pm.LauncherApps;
 import android.content.pm.ShortcutInfo;
 import android.graphics.Rect;
 import android.hardware.devicestate.DeviceStateManager;
+import android.os.Binder;
 import android.os.Bundle;
 import android.os.Debug;
 import android.os.Handler;
@@ -234,6 +235,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     // The display ID that the split root task is currently on.
     private int mDisplayId;
     private SplitLayout mSplitLayout;
+    private MultiSplitCoordinator mMultiSplit;
     private final IActivityTaskManager mActivityTaskManager;
     private ValueAnimator mDividerFadeInAnimator;
     private boolean mDividerVisible;
@@ -377,6 +379,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Returns true if a divider fling animation is currently playing. */
     public boolean isDividerFlinging() {
+        if (isMultiSplitActive()) return mMultiSplit.isBusy();
         return mSplitLayout.isCurrentlyDividerFlinging();
     }
 
@@ -546,6 +549,79 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 mainHandler, taskOrganizer, transitions, displayController,
                 this::updateSplitFrameRates);
         mSplitState.registerSplitStateChangeListener(state -> updateSplitFrameRates());
+        mMultiSplit = new MultiSplitCoordinator(new MultiSplitCoordinator.Host() {
+            @Override
+            public RunningTaskInfo rootInfo() { return mSplitRootTaskInfo; }
+            @Override
+            public SurfaceControl rootLeash() { return mRootTaskLeash; }
+            @Override
+            public List<StageTaskListener> pairStages() {
+                return enableFlexibleSplit() ? mStageOrderOperator.getActiveStages()
+                        : java.util.Arrays.asList(getTopLeftStage(), getBottomRightStage());
+            }
+            @Override
+            public List<StageTaskListener> spareStages(
+                    StageTaskListener.StageListenerCallbacks callbacks) {
+                final List<StageTaskListener> result = new ArrayList<>();
+                if (enableFlexibleSplit()) {
+                    for (StageTaskListener stage : mStageOrderOperator.getAllStages()) {
+                        if (!mStageOrderOperator.getActiveStages().contains(stage)) result.add(stage);
+                    }
+                } else {
+                    result.add(new StageTaskListener(mContext, mTaskOrganizer, mDisplayId,
+                            callbacks, mSyncQueue, iconProvider, mWindowDecorViewModel,
+                            SplitScreen.STAGE_TYPE_C, mBubbleController));
+                }
+                result.add(new StageTaskListener(mContext, mTaskOrganizer, mDisplayId,
+                        callbacks, mSyncQueue, iconProvider, mWindowDecorViewModel,
+                        SplitScreen.STAGE_TYPE_D, mBubbleController));
+                return result;
+            }
+            @Override
+            public SplitLayout pairLayout() { return mSplitLayout; }
+            @Override
+            public int capacity() {
+                return SplitCapacityPolicy.getSplitCapacity(mDisplayController, mDisplayId);
+            }
+            @Override
+            public boolean canEnter() { return canMutateSplit(); }
+            @Override
+            public SplitLayout newDivider(SplitLayout.SplitLayoutHandler handler,
+                    SplitWindowManager.ParentContainerCallbacks parent) {
+                return new SplitLayout(TAG + "MultiDivider", mContext,
+                        mSplitRootTaskInfo.configuration, handler, parent, mDisplayController,
+                        mDisplayImeController, mTaskOrganizer, PARALLAX_ALIGN_CENTER,
+                        new SplitState(), mMainHandler, mStatusBarHider, mDesktopState, mMSDLPlayer);
+            }
+            @Override
+            public void started() {
+                mRecentTasks.ifPresent(recents -> pairStages().forEach(stage ->
+                        stage.doForAllChildTasks(recents::removeSplitPair)));
+                mSplitLayout.release();
+                mLaunchAdjacentController.clearLaunchAdjacentRoot();
+            }
+            @Override
+            public void ended(WindowContainerTransaction wct) {
+                deactivateSplit(wct, STAGE_TYPE_UNDEFINED);
+                final List<StageTaskListener> pair = enableFlexibleSplit()
+                        ? mStageOrderOperator.getAllStages().subList(0, 2)
+                        : java.util.Arrays.asList(mMainStage, mSideStage);
+                wct.setAdjacentRoots(pair.get(0).mRootTaskInfo.token, pair.get(1).mRootTaskInfo.token);
+                if (!enableFlexibleSplit() && !enableShellModes()) {
+                    mLaunchAdjacentController.setLaunchAdjacentRoot(mSideStage.mRootTaskInfo.token);
+                }
+                mIsRootTranslucent = true;
+                mDividerVisible = false;
+                setSplitsVisible(false);
+                mSplitState.exit();
+            }
+            @Override
+            public void changed() {
+                updateSplitFrameRates();
+                sendOnBoundsChanged();
+            }
+        }, mTaskOrganizer, mSyncQueue, mTransitions, mDisplayController,
+                mDisplayImeController, mDisplayInsetsController, mMainExecutor);
         updateSplitFrameRates();
     }
 
@@ -611,6 +687,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     private void updateSplitFrameRates() {
         if (mFrameRateController == null) return;
+        if (isMultiSplitActive()) { clearSplitFrameRates(); return; }
         if (mSplitLayout == null || mSplitRootTaskInfo == null || !isSplitActive()
                 || !mDividerVisible || mSplitState.get() == NOT_IN_SPLIT
                 || !allowOffscreenRatios(mContext.getResources())) {
@@ -676,6 +753,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     public boolean isSplitScreenVisible() {
+        if (isMultiSplitActive()) return mMultiSplit.isVisible();
         if (enableFlexibleSplit()) {
             return runForActiveStagesAllMatch((stage) -> stage.mVisible);
         } else {
@@ -685,6 +763,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Returns true if any of the stages in the split screen are focused, false otherwise */
     public boolean isSplitScreenFocused() {
+        if (isMultiSplitActive()) return mMultiSplit.getActiveStages().stream()
+                .anyMatch(StageTaskListener::isFocused);
         if (!isSplitActive() || !isSplitScreenVisible()) {
             return false;
         }
@@ -726,6 +806,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     public boolean isSplitActive() {
+        if (isMultiSplitActive()) return true;
         if (enableFlexibleSplit()) {
             return mStageOrderOperator.isActive();
         } else {
@@ -776,6 +857,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     /** Current stage as seen in StageTaskListener#mChildrenTaskInfo */
     @Nullable
     StageTaskListener getCurrentStageOfTask(int taskId) {
+        if (isMultiSplitActive()) return mMultiSplit.stageOfTask(taskId);
         if (enableFlexibleSplit()) {
             return mStageOrderOperator.getActiveStages().stream()
                     .filter(stage -> stage.containsTask(taskId))
@@ -792,6 +874,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     boolean isRootOrStageRoot(int taskId) {
+        if (isMultiSplitActive() && mMultiSplit.getActiveStages().stream()
+                .anyMatch(stage -> stage.isRootTaskId(taskId))) return true;
         if (mSplitRootTaskInfo != null && mSplitRootTaskInfo.taskId == taskId) {
             return true;
         }
@@ -806,6 +890,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     boolean moveToStage(RunningTaskInfo task, @SplitPosition int stagePosition,
             WindowContainerTransaction wct) {
+        if (isMultiSplitActive()) return false;
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "moveToStage: task=%d position=%d displayId=%d",
                 task.taskId, stagePosition, task.displayId);
         // TODO(b/349828130) currently pass in index_undefined until we can revisit these
@@ -835,6 +920,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     boolean requestEnterSplitSelect(RunningTaskInfo taskInfo,
             int splitPosition, Rect taskBounds, boolean startRecents,
             @Nullable WindowContainerTransaction withRecentsWct) {
+        if (isMultiSplitActive()) return false;
         Boolean requestHandled = false;
         for (SplitScreen.SplitSelectListener listener : mSelectListeners) {
             requestHandled |= listener.onRequestEnterSplitSelect(taskInfo, splitPosition,
@@ -843,8 +929,31 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         return requestHandled;
     }
 
+    /** Releases a multi-app session into the same ordinary launch transaction. */
+    private boolean exitMultiSplitForLaunch(WindowContainerTransaction wct,
+            @Nullable RemoteTransition remote, int taskToTop) {
+        if (!isMultiSplitActive()) return true;
+        if (mMultiSplit.isBusy()) {
+            if (remote != null) {
+                try {
+                    remote.getRemoteTransition().onTransitionConsumed(new Binder(), true);
+                } catch (RemoteException e) {
+                    Slog.w(TAG, "Split launch animation client disconnected", e);
+                }
+            }
+            return false;
+        }
+        mMultiSplit.exit(taskToTop, wct);
+        return true;
+    }
+
     void startShortcut(String packageName, String shortcutId, @SplitPosition int position,
             Bundle options, UserHandle user) {
+        final WindowContainerTransaction exit = new WindowContainerTransaction();
+        final int companion = isMultiSplitActive()
+                ? mMultiSplit.taskAtPosition(reverseSplitPosition(position)) : INVALID_TASK_ID;
+        if (!exitMultiSplitForLaunch(exit, null, companion)) return;
+        if (!exit.isEmpty()) mTaskOrganizer.applyTransaction(exit);
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "startShortcut: pkg=%s id=%s position=%d user=%d",
                 packageName, shortcutId, position, user.getIdentifier());
         final boolean isEnteringSplit = !isSplitActive();
@@ -917,6 +1026,9 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 taskId, position, index);
         mSplitRequest = new SplitRequest(taskId, position);
         final WindowContainerTransaction wct = new WindowContainerTransaction();
+        final int companion = isMultiSplitActive()
+                ? mMultiSplit.taskAtPosition(reverseSplitPosition(position)) : INVALID_TASK_ID;
+        if (!exitMultiSplitForLaunch(wct, null, companion)) return;
         options = enableFlexibleSplit()
                 ? resolveStartStageForIndex(options, null /*wct*/, index)
                 : resolveStartStage(STAGE_TYPE_UNDEFINED, position, options, null /* wct */);
@@ -975,6 +1087,9 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         mSplitRequest = new SplitRequest(intent.getIntent(), position);
 
         final WindowContainerTransaction wct = new WindowContainerTransaction();
+        final int companion = isMultiSplitActive()
+                ? mMultiSplit.taskAtPosition(reverseSplitPosition(position)) : INVALID_TASK_ID;
+        if (!exitMultiSplitForLaunch(wct, null, companion)) return;
         if (transaction != null) {
             wct.merge(transaction, true);
         }
@@ -1027,6 +1142,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     void startTasks(int taskId1, @Nullable Bundle options1, int taskId2, @Nullable Bundle options2,
             @SplitPosition int splitPosition, @PersistentSnapPosition int snapPosition,
             @Nullable RemoteTransition remoteTransition, InstanceId instanceId) {
+        if (isMultiSplitActive()) return;
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN,
                 "startTasks: task1=%d task2=%d position=%d snapPosition=%d",
                 taskId1, taskId2, splitPosition, snapPosition);
@@ -1072,6 +1188,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             @NonNull WindowContainerTransaction wct, int taskId1, @Nullable Bundle options1,
             int taskId2, @Nullable Bundle options2, @SplitPosition int splitPosition,
             @PersistentSnapPosition int snapPosition) {
+        if (!exitMultiSplitForLaunch(wct, null, INVALID_TASK_ID)) return;
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN,
                 "augmentStartTasks: task1=%d task2=%d position=%d snapPosition=%d transition=%s",
                 taskId1, taskId2, splitPosition, snapPosition, transition);
@@ -1132,6 +1249,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 "startIntentAndTask: intent=%s task1=%d position=%d snapPosition=%d",
                 pendingIntent.getIntent(), taskId, splitPosition, snapPosition);
         final WindowContainerTransaction wct = new WindowContainerTransaction();
+        if (!exitMultiSplitForLaunch(wct, remoteTransition, INVALID_TASK_ID)) return;
         boolean firstIntentPipped = mMixedHandler.isIntentInPip(pendingIntent);
         boolean secondTaskPipped = mMixedHandler.isTaskInPip(taskId, mTaskOrganizer);
         if (taskId == INVALID_TASK_ID || secondTaskPipped) {
@@ -1214,6 +1332,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 "startShortcutAndTask: shortcut=%s task1=%d position=%d snapPosition=%d",
                 shortcutInfo, taskId, splitPosition, snapPosition);
         final WindowContainerTransaction wct = new WindowContainerTransaction();
+        if (!exitMultiSplitForLaunch(wct, remoteTransition, INVALID_TASK_ID)) return;
         if (taskId == INVALID_TASK_ID) {
             options1 = options1 != null ? options1 : new Bundle();
             addActivityOptions(options1, null, WINDOWING_MODE_FULLSCREEN);
@@ -1421,6 +1540,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 (pendingIntent2 != null ? pendingIntent2.getIntent() : "null"),
                 splitPosition, snapPosition);
         final WindowContainerTransaction wct = new WindowContainerTransaction();
+        if (!exitMultiSplitForLaunch(wct, remoteTransition, INVALID_TASK_ID)) return;
         if (pendingIntent2 == null) {
             options1 = options1 != null ? options1 : new Bundle();
             addActivityOptions(options1, null, WINDOWING_MODE_FULLSCREEN);
@@ -1672,6 +1792,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     int getTaskId(@SplitPosition int splitPosition) {
+        if (isMultiSplitActive()) return mMultiSplit.taskAtPosition(splitPosition);
         if (splitPosition == SPLIT_POSITION_UNDEFINED) {
             return INVALID_TASK_ID;
         }
@@ -1704,6 +1825,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Whether a visible split can accept a menu mutation on the Shell main thread. */
     boolean canMutateSplit() {
+        if (isMultiSplitActive()) return mMultiSplit.isVisible() && !mMultiSplit.isBusy();
         return mSplitLayout != null && mSplitRootTaskInfo != null && isSplitActive()
                 && isSplitScreenVisible() && !mIsExiting && !mIsDividerRemoteAnimating
                 && !mDividerInteracting && !mSplitLayoutAnimating
@@ -1716,6 +1838,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     void switchSplitPosition(String reason) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.getActiveStages().stream().filter(StageTaskListener::isFocused)
+                    .findFirst().ifPresent(stage -> mMultiSplit.swapTask(stage.getTopChildTaskId()));
+            return;
+        }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "switchSplitPosition");
         final SurfaceControl.Transaction t = mTransactionPool.acquire();
         mTempRect1.setEmpty();
@@ -1838,6 +1965,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      */
     void onKeyguardStateChanged(boolean active, boolean occludingTaskRunning) {
         mKeyguardActive = active;
+        if (isMultiSplitActive()) { mMultiSplit.setKeyguard(active); return; }
         if (!isSplitActive()) {
             return;
         }
@@ -1863,6 +1991,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * stage of a split pair should be kept, in cases where system focus has moved elsewhere.
      */
     void recordLastActiveStage() {
+        if (isMultiSplitActive()) {
+            mMultiSplit.getActiveStages().stream().filter(StageTaskListener::isFocused)
+                    .findFirst().ifPresent(stage -> mLastActiveStage = stage.getId());
+            return;
+        }
         if (!isSplitActive() || !isSplitScreenVisible()) {
             mLastActiveStage = STAGE_TYPE_UNDEFINED;
         } else if (enableFlexibleSplit()) {
@@ -1906,6 +2039,13 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      */
     @VisibleForTesting
     void dismissSplit(@StageType int stageToTop, @ExitReason int exitReason) {
+        if (isMultiSplitActive()) {
+            final int task = mMultiSplit.getActiveStages().stream()
+                    .filter(stage -> stage.getId() == stageToTop).findFirst()
+                    .map(StageTaskListener::getTopChildTaskId).orElse(INVALID_TASK_ID);
+            mMultiSplit.moveToFullscreen(task);
+            return;
+        }
         if (!isSplitActive()) {
             return;
         }
@@ -2012,6 +2152,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     void dismissSplitScreen(int toTopTaskId, @ExitReason int exitReason) {
+        if (isMultiSplitActive()) { mMultiSplit.moveToFullscreen(toTopTaskId); return; }
         if (!isSplitActive()) return;
         final int stage = getCurrentStageTypeOfTask(toTopTaskId);
         final WindowContainerTransaction wct = new WindowContainerTransaction();
@@ -2328,6 +2469,33 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 getSideStagePosition(), mSideStage.getTopChildTaskUid(), isLeftRightSplit());
     }
 
+    boolean isMultiSplitActive() {
+        return mMultiSplit != null && mMultiSplit.isActive();
+    }
+
+    boolean startSidebarIntent(PendingIntent intent, Intent fillIn, Bundle options,
+            SplitScreenController.AppDragSlot slot) {
+        return mMultiSplit != null && mMultiSplit.startIntent(intent, fillIn, options, slot);
+    }
+
+    boolean getMultiSplitTaskBounds(int taskId, Rect outBounds) {
+        return isMultiSplitActive() && mMultiSplit.getTaskBounds(taskId, outBounds);
+    }
+
+    @Nullable
+    SplitScreenController.SplitSwapTargets getMultiSplitSwapTargets(int taskId) {
+        return isMultiSplitActive() ? mMultiSplit.getSwapTargets(taskId) : null;
+    }
+
+    void swapLeaves(int first, int second) {
+        if (isMultiSplitActive()) mMultiSplit.swapLeaves(first, second);
+    }
+
+    void swapSplitTask(int taskId) {
+        if (isMultiSplitActive()) mMultiSplit.swapTask(taskId);
+        else switchSplitPosition("handle menu");
+    }
+
     private boolean isOccupiedAppDragSlot(int position, int displayId) {
         final RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(getTaskId(position));
         return task != null && task.displayId == displayId && task.isVisible
@@ -2336,17 +2504,20 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     int getOccupiedSplitSlots(int displayId) {
+        if (isMultiSplitActive()) return mMultiSplit.occupied(displayId);
         if (!isSplitScreenVisible() || mSplitRootTaskInfo == null
                 || mSplitRootTaskInfo.displayId != displayId) return 0;
         int occupied = 0;
-        for (SplitScreenController.AppDragSlot slot : getAppDragSlots(displayId)) {
-            if (slot.occupied) occupied++;
-        }
+        if (isOccupiedAppDragSlot(SPLIT_POSITION_TOP_OR_LEFT, displayId)) occupied++;
+        if (isOccupiedAppDragSlot(SPLIT_POSITION_BOTTOM_OR_RIGHT, displayId)) occupied++;
         return occupied;
     }
 
     /** Returns final slot geometry without moving the divider or changing stage state. */
     java.util.List<SplitScreenController.AppDragSlot> getAppDragSlots(int displayId) {
+        if (mMultiSplit != null && isSplitScreenVisible()
+                && (isMultiSplitActive() || SplitCapacityPolicy.getSplitCapacity(
+                        mDisplayController, displayId) > 2)) return mMultiSplit.getSlots(displayId);
         if (mSplitLayout == null || mSplitRootTaskInfo == null
                 || mSplitRootTaskInfo.displayId != displayId) return java.util.Collections.emptyList();
         final Rect first = new Rect(mSplitLayout.getTopLeftBounds());
@@ -2391,12 +2562,23 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     void getStageBounds(Rect outTopOrLeftBounds, Rect outBottomOrRightBounds) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.getBranchBounds(outTopOrLeftBounds, outBottomOrRightBounds);
+            return;
+        }
         if (mSplitLayout == null) return;
         outTopOrLeftBounds.set(mSplitLayout.getTopLeftBounds());
         outBottomOrRightBounds.set(mSplitLayout.getBottomRightBounds());
     }
 
     void getRefStageBounds(Rect outTopOrLeftBounds, Rect outBottomOrRightBounds) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.getBranchBounds(outTopOrLeftBounds, outBottomOrRightBounds);
+            final Rect root = mSplitLayout.getRootBounds();
+            outTopOrLeftBounds.offset(-root.left, -root.top);
+            outBottomOrRightBounds.offset(-root.left, -root.top);
+            return;
+        }
         outTopOrLeftBounds.set(mSplitLayout.getTopLeftRefBounds());
         outBottomOrRightBounds.set(mSplitLayout.getBottomRightRefBounds());
     }
@@ -2412,6 +2594,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @SplitPosition
     public int getSplitPosition(int taskId) {
+        if (isMultiSplitActive()) return mMultiSplit.positionOfTask(taskId);
         if (mSideStage.getTopVisibleChildTaskId() == taskId) {
             return getSideStagePosition();
         } else if (mMainStage.getTopVisibleChildTaskId() == taskId) {
@@ -2436,6 +2619,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      */
     @SplitPosition
     public int getSplitPositionIgnoreVisible(int taskId) {
+        if (isMultiSplitActive()) return mMultiSplit.positionOfTask(taskId);
         if (mSideStage.getTopChildTaskId() == taskId) {
             return getSideStagePosition();
         } else if (mMainStage.getTopChildTaskId() == taskId) {
@@ -2557,6 +2741,14 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @Override
     public void onChildTaskStatusChanged(StageTaskListener stageListener, int taskId,
             boolean present, boolean visible) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.onTaskChanged(stageListener, taskId, present);
+            for (SplitScreen.SplitScreenListener listener : mListeners) {
+                listener.onTaskStageChanged(taskId,
+                        present ? stageListener.getId() : STAGE_TYPE_UNDEFINED, visible);
+            }
+            return;
+        }
         updateSplitFrameRates();
         int stage;
         if (present) {
@@ -2604,6 +2796,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onChildTaskMovedToBubble(StageTaskListener stage, int taskId) {
+        if (isMultiSplitActive()) { mMultiSplit.onTaskChanged(stage, taskId, false); return; }
         updateSplitFrameRates();
         if (stage.getChildCount() != 0) {
             ProtoLog.d(WM_SHELL_SPLIT_SCREEN,
@@ -2638,6 +2831,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     private void updateRecentTasksSplitPair() {
+        if (isMultiSplitActive()) return;
         // Preventing from single task update while processing recents.
         if (!mShouldUpdateRecents || !mPausingTasks.isEmpty()) {
             ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "updateRecentTasksSplitPair: skipping reason=%s",
@@ -2777,7 +2971,19 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                     + taskInfo);
         }
         if (mSplitRootTaskInfo.displayId != taskInfo.displayId) clearSplitFrameRates();
+        final boolean configurationChanged = !mSplitRootTaskInfo.configuration.equals(
+                taskInfo.configuration) || mSplitRootTaskInfo.displayId != taskInfo.displayId;
         mSplitRootTaskInfo = taskInfo;
+        if (isMultiSplitActive()) {
+            if (configurationChanged) {
+                mSplitLayout.updateConfiguration(taskInfo.configuration, taskInfo.displayId);
+                final WindowContainerTransaction wct = new WindowContainerTransaction();
+                mMultiSplit.onConfigurationChanged(taskInfo.configuration, wct);
+                mSyncQueue.queue(wct);
+            }
+            mMultiSplit.onStageChanged();
+            return;
+        }
         if (mSplitLayout != null
                 && mSplitLayout.updateConfiguration(taskInfo.configuration, taskInfo.displayId)
                 && isSplitActive()) {
@@ -2787,7 +2993,9 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             // the new rotation config.  Don't reset the IME state since those updates are not in
             // sync with task info changes.
             mIsDividerRemoteAnimating = false;
-            mSplitLayout.update(null /* t */, false /* resetImePosition */);
+            if (!isMultiSplitActive()) {
+                mSplitLayout.update(null /* t */, false /* resetImePosition */);
+            }
             onLayoutSizeChanged(mSplitLayout);
         }
         updateSplitFrameRates();
@@ -2856,11 +3064,12 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         }
 
         // Disallow child tasks to override bounds and always inherits from the stage root tasks
-        wct.setDisallowOverrideBoundsForChildren(mMainStage.mRootTaskInfo.token, true);
-        wct.setDisallowOverrideBoundsForChildren(mSideStage.mRootTaskInfo.token, true);
-        // Inherit Windowing Mode from the root stage tasks.
-        wct.setDisallowOverrideWindowingModeForChildren(mMainStage.mRootTaskInfo.token, true);
-        wct.setDisallowOverrideWindowingModeForChildren(mSideStage.mRootTaskInfo.token, true);
+        final List<StageTaskListener> roots = enableFlexibleSplit()
+                ? mStageOrderOperator.getAllStages() : java.util.Arrays.asList(mMainStage, mSideStage);
+        for (StageTaskListener stage : roots) {
+            wct.setDisallowOverrideBoundsForChildren(stage.mRootTaskInfo.token, true);
+            wct.setDisallowOverrideWindowingModeForChildren(stage.mRootTaskInfo.token, true);
+        }
 
         setRootForceTranslucent(true, wct);
         if (!enableFlexibleSplit()) {
@@ -2888,6 +3097,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onRootTaskVanished() {
+        if (mMultiSplit != null) mMultiSplit.dispose();
         mDividerInteracting = false;
         mSplitLayoutAnimating = false;
         clearSplitFrameRates();
@@ -2911,6 +3121,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * NOTICE: This only be called on legacy transition. */
     @Override
     public void onStageVisibilityChanged(StageTaskListener stageListener) {
+        if (isMultiSplitActive()) { mMultiSplit.onStageChanged(); return; }
         // If split didn't active, just ignore this callback because we should already did these
         // on #applyExitSplitScreen.
         if (!isSplitActive()) {
@@ -2955,6 +3166,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * See applyDividerVisibility for more detail.
      */
     public void setDividerVisibility(boolean visible, @Nullable SurfaceControl.Transaction t) {
+        if (isMultiSplitActive()) { mMultiSplit.setDividerVisible(visible, t); return; }
         if (visible == mDividerVisible) {
             return;
         }
@@ -3054,6 +3266,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @Override
     public void onNoLongerSupportMultiWindow(StageTaskListener stageTaskListener,
             RunningTaskInfo taskInfo) {
+        if (isMultiSplitActive()) { mMultiSplit.moveToFullscreen(taskInfo.taskId); return; }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onNoLongerSupportMultiWindow: task=%s", taskInfo);
         if (isSplitActive()) {
             final boolean isMainStage = mMainStage == stageTaskListener;
@@ -3113,6 +3326,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onLayoutPositionChanging(SplitLayout layout) {
+        if (isMultiSplitActive()) return;
         final SurfaceControl.Transaction t = mTransactionPool.acquire();
         t.setFrameTimelineVsync(Choreographer.getInstance().getVsyncId());
         updateSurfaceBounds(layout, t, false /* applyResizingOffset */);
@@ -3123,6 +3337,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @Override
     public void onLayoutSizeChanging(SplitLayout layout, int offsetX, int offsetY,
             boolean shouldUseParallaxEffect) {
+        if (isMultiSplitActive()) return;
         final SurfaceControl.Transaction t = mTransactionPool.acquire();
         t.setFrameTimelineVsync(Choreographer.getInstance().getVsyncId());
         updateSurfaceBounds(layout, t, shouldUseParallaxEffect);
@@ -3153,6 +3368,12 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onLayoutSizeChanged(SplitLayout layout) {
+        if (isMultiSplitActive()) {
+            final WindowContainerTransaction wct = new WindowContainerTransaction();
+            mMultiSplit.onConfigurationChanged(mSplitRootTaskInfo.configuration, wct);
+            mSyncQueue.queue(wct);
+            return;
+        }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onLayoutSizeChanged");
         // Reset this flag every time onLayoutSizeChanged.
         mShowDecorImmediately = false;
@@ -3218,6 +3439,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * create a top-bottom split.
      */
     boolean isLeftRightSplit() {
+        if (isMultiSplitActive()) return mMultiSplit.isLeftRightSplit();
         return mSplitLayout != null && mSplitLayout.isLeftRightSplit();
     }
 
@@ -3250,6 +3472,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     void updateSurfaceBounds(@Nullable SplitLayout layout, @NonNull SurfaceControl.Transaction t,
             boolean applyResizingOffset) {
+        if (isMultiSplitActive()) { mMultiSplit.applySurfaceChanges(t); return; }
         final StageTaskListener topLeftStage;
         final StageTaskListener bottomRightStage;
         if (enableFlexibleSplit()) {
@@ -3273,6 +3496,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public int getSplitItemPosition(WindowContainerToken token) {
+        if (isMultiSplitActive()) {
+            return mMultiSplit.getActiveStages().stream().filter(stage -> stage.containsToken(token))
+                    .findFirst().map(stage -> mMultiSplit.positionOfTask(stage.getTopChildTaskId()))
+                    .orElse(SPLIT_POSITION_UNDEFINED);
+        }
         if (token == null) {
             return SPLIT_POSITION_UNDEFINED;
         }
@@ -3305,6 +3533,10 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      */
     @StageType
     public int getSplitItemStage(@Nullable WindowContainerToken token) {
+        if (isMultiSplitActive()) {
+            return mMultiSplit.getActiveStages().stream().filter(stage -> stage.containsToken(token))
+                    .findFirst().map(StageTaskListener::getId).orElse(STAGE_TYPE_UNDEFINED);
+        }
         if (token == null) {
             return STAGE_TYPE_UNDEFINED;
         }
@@ -3320,6 +3552,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void setLayoutOffsetTarget(int offsetX, int offsetY, SplitLayout layout) {
+        if (isMultiSplitActive()) return;
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "setLayoutOffsetTarget: x=%d y=%d",
                 offsetX, offsetY);
         final StageTaskListener topLeftStage = getTopLeftStage();
@@ -3335,6 +3568,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * @param transaction to write the updates to
      */
     public void updateSurfaces(SurfaceControl.Transaction transaction) {
+        if (isMultiSplitActive()) { mMultiSplit.applySurfaceChanges(transaction); return; }
         updateSurfaceBounds(mSplitLayout, transaction, /* applyResizingOffset */ false);
         mSplitLayout.update(transaction, true /* resetImePosition */);
     }
@@ -3368,7 +3602,12 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         } else {
             mSplitLayout.rotateTo(toRotation);
         }
-        updateWindowBounds(mSplitLayout, wct);
+        if (isMultiSplitActive()) {
+            mMultiSplit.onConfigurationChanged(newDisplayAreaInfo != null
+                    ? newDisplayAreaInfo.configuration : mSplitRootTaskInfo.configuration, wct);
+        } else {
+            updateWindowBounds(mSplitLayout, wct);
+        }
         sendOnBoundsChanged();
     }
 
@@ -3446,6 +3685,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * this task (yet) so this can also be used to identify which stage to put a task into.
      */
     private StageTaskListener getStageOfTaskByParent(RunningTaskInfo taskInfo) {
+        if (isMultiSplitActive()) return mMultiSplit.stageOfParent(taskInfo);
         if (enableFlexibleSplit()) {
             return mStageOrderOperator.getActiveStages().stream()
                     .filter((stage) -> stage.mRootTaskInfo != null &&
@@ -3484,6 +3724,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @StageType
     private int getStageType(StageTaskListener stage) {
         if (stage == null) return STAGE_TYPE_UNDEFINED;
+        if (isMultiSplitActive()) return stage.getId();
         if (enableFlexibleSplit()) {
             return stage.getId();
         } else {
@@ -3494,6 +3735,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @Override
     public WindowContainerTransaction handleRequest(@NonNull IBinder transition,
             @Nullable TransitionRequestInfo request) {
+        if (isMultiSplitActive()) return mMultiSplit.handleRequest(transition, request);
         final RunningTaskInfo triggerTask = request.getTriggerTask();
         if (triggerTask == null) {
             boolean splitDisplayRotationAllowed = !enableNonDefaultDisplaySplitBugfix()
@@ -3898,6 +4140,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     @Override
     public void onTransitionConsumed(@NonNull IBinder transition, boolean aborted,
             @Nullable SurfaceControl.Transaction finishT) {
+        if (mMultiSplit != null) mMultiSplit.onTransitionConsumed(transition, aborted, finishT);
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onTransitionConsumed");
         mSplitTransitions.onTransitionConsumed(transition, aborted, finishT);
     }
@@ -3908,6 +4151,9 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             @NonNull SurfaceControl.Transaction startTransaction,
             @NonNull SurfaceControl.Transaction finishTransaction,
             @NonNull Transitions.TransitionFinishCallback finishCallback) {
+        if (mMultiSplit != null && mMultiSplit.startAnimation(transition, info,
+                startTransaction, finishTransaction, finishCallback)) return true;
+        if (isMultiSplitActive()) return false;
         if (!mSplitTransitions.isPendingTransition(transition)) {
             // Not entering or exiting, so just do some house-keeping and validation.
             ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "startAnimation: transition=%d isSplitActive=%b",
@@ -4473,6 +4719,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     public void goToFullscreenFromSplit() {
+        if (isMultiSplitActive()) {
+            mMultiSplit.getActiveStages().stream().filter(StageTaskListener::isFocused).findFirst()
+                    .ifPresent(stage -> mMultiSplit.moveToFullscreen(stage.getTopChildTaskId()));
+            return;
+        }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "goToFullscreenFromSplit");
         // If main stage is focused, toEnd = true if
         // mSideStagePosition = SPLIT_POSITION_BOTTOM_OR_RIGHT. Otherwise toEnd = false
@@ -4490,6 +4741,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Move the specified task to fullscreen, regardless of focus state. */
     public void moveTaskToFullscreen(int taskId, int exitReason) {
+        if (isMultiSplitActive()) { mMultiSplit.moveToFullscreen(taskId); return; }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "moveTaskToFullscreen");
         boolean leftOrTop;
         if (mMainStage.containsTask(taskId)) {
@@ -4509,6 +4761,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * @return Result of the close operation.
      */
     CloseTaskResult closeTask(int taskId) {
+        if (isMultiSplitActive()) {
+            if (!mMultiSplit.closeTask(taskId)) return CloseTaskResult.PENDING_DISMISS;
+            return isMultiSplitActive() ? CloseTaskResult.CLOSED_TASK_SPLIT_REMAINED
+                    : CloseTaskResult.CLOSED_TASK_SPLIT_DISMISSED;
+        }
         if (!isSplitActive()) {
             ProtoLog.w(WM_SHELL_SPLIT_SCREEN, "closeTask: taskId=%d: %s", taskId,
                     CloseTaskResult.NOT_ACTIVE);
@@ -4768,6 +5025,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Call this when starting the open-recents animation while split-screen is active. */
     public void onRecentsInSplitAnimationStart(TransitionInfo info) {
+        if (isMultiSplitActive()) { mMultiSplit.setDividerVisible(false, null); return; }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRecentsInSplitAnimationStart: transition=%d",
                 info.getDebugId());
         if (isSplitScreenVisible()) {
@@ -4808,6 +5066,10 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Call this when the recents animation canceled during split-screen. */
     public void onRecentsInSplitAnimationCanceled(@Nullable TransitionInfo info) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.setDividerVisible(mSplitRootTaskInfo.isVisible, null);
+            return;
+        }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRecentsInSplitAnimationCanceled");
         if (isHomeTransitionEndingOnDisplay(info, mDisplayId)) {
             mSplitLayout.setRecentsAnimating(false /* animating */);
@@ -4856,6 +5118,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     public void onRecentsInSplitAnimationFinishing(boolean returnToApp,
             @NonNull WindowContainerTransaction finishWct,
             @NonNull SurfaceControl.Transaction finishT, @Nullable TransitionInfo info) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.setDividerVisible(returnToApp, finishT);
+            mMultiSplit.applySurfaceChanges(finishT);
+            return;
+        }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRecentsInSplitAnimationFinish: returnToApp=%b",
                 returnToApp);
         if (isHomeTransitionEndingOnDisplay(info, mDisplayId)) {
@@ -5105,6 +5372,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public boolean hasEmptyStage() {
+        if (isMultiSplitActive()) return mMultiSplit.getActiveStages().stream()
+                .anyMatch(stage -> stage.getChildCount() == 0);
         return mMainStage.getChildCount() == 0 || mSideStage.getChildCount() == 0;
     }
 

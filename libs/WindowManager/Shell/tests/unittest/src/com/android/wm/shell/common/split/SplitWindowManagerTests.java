@@ -106,4 +106,24 @@ public class SplitWindowManagerTests extends ShellTestCase {
         // Assert: The leash is still null.
         assertThat(mSplitWindowManager.getSurfaceControl()).isNull();
     }
+    @Test
+    @UiThreadTest
+    public void testMultiSplitWindow_recreatesAtBranchSizeAndReleasesOldSurface() {
+        when(mSplitLayout.isMultiSplitDivider()).thenReturn(true);
+        when(mSplitLayout.isLeftRightSplit()).thenReturn(true);
+        when(mSplitLayout.getMultiSplitDividerCrop()).thenReturn(new Rect(0, 0, 100, 800));
+        when(mSplitLayout.getDividerBounds()).thenReturn(new Rect(500, 0, 600, 800));
+        mSplitWindowManager.init(mSplitLayout, new InsetsState(), false, mDesktopState);
+        assertThat(mSplitWindowManager.getDividerView().getLayoutParams().height).isEqualTo(800);
+        final SurfaceControl previous = mSplitWindowManager.getSurfaceControl();
+        mSplitWindowManager.release(null);
+        assertThat(mSplitWindowManager.getSurfaceControl()).isNull();
+        when(mSplitLayout.getDividerBounds()).thenReturn(new Rect(500, 808, 600, 2000));
+        when(mSplitLayout.getMultiSplitDividerCrop()).thenReturn(new Rect(0, 0, 100, 1192));
+        mSplitWindowManager.init(mSplitLayout, new InsetsState(), true, mDesktopState);
+        assertThat(mSplitWindowManager.getSurfaceControl()).isNotSameInstanceAs(previous);
+        assertThat(mSplitWindowManager.getDividerView().getLayoutParams().height).isEqualTo(1192);
+        mSplitWindowManager.release(null);
+    }
+
 }

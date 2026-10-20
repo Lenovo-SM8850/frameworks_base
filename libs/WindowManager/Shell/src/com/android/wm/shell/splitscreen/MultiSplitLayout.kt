@@ -101,6 +101,7 @@ class MultiSplitLayout(val root: Split) {
     }
 
     /** Returns null for an unsupported topology, reused ID, or infeasible insertion. */
+    @JvmOverloads
     fun insert(
         chosenLeaf: LeafId,
         newLeaf: Leaf,
@@ -111,6 +112,7 @@ class MultiSplitLayout(val root: Split) {
         insets: Insets,
         dividerSize: Int,
         minimumLeafSize: Int,
+        newTaskFirst: Boolean = false,
     ): MultiSplitLayout? {
         require(minimumLeafSize >= 0)
         if (!ratio.isFinite() || ratio <= 0f || ratio >= 1f) return null
@@ -121,7 +123,11 @@ class MultiSplitLayout(val root: Split) {
         if ((root.first as? Leaf)?.id != chosenLeaf &&
             (root.second as? Leaf)?.id != chosenLeaf) return null
         val chosen = leaves.getValue(chosenLeaf)
-        val replacement = Split(dividerId, orientation, ratio, chosen, newLeaf)
+        val replacement = if (newTaskFirst) {
+            Split(dividerId, orientation, ratio, newLeaf, chosen)
+        } else {
+            Split(dividerId, orientation, ratio, chosen, newLeaf)
+        }
         val candidate = MultiSplitLayout(replace(root, chosenLeaf) { replacement } as Split)
         val bounds = candidate.calculateBounds(displayBounds, insets, dividerSize) ?: return null
         return candidate.takeIf { LayoutPolicy().isFeasible(bounds, minimumLeafSize) }
@@ -166,6 +172,43 @@ class MultiSplitLayout(val root: Split) {
         val secondTask = leaves[second]?.taskId ?: return null
         val swapped = replace(root, first) { it.copy(taskId = secondTask) }
         return MultiSplitLayout(replace(swapped, second) { it.copy(taskId = firstTask) } as Split)
+    }
+
+    /** Stable slot order, independent of task assignments and stage allocation. */
+    fun getLeaves(): List<Leaf> = leaves.values.toList()
+
+    /** Replaces a slot's app without changing geometry. */
+    fun assign(id: LeafId, taskId: Int): MultiSplitLayout? {
+        if (id !in leaves || leaves.values.any { it.id != id && it.taskId == taskId }) return null
+        return MultiSplitLayout(replace(root, id) { it.copy(taskId = taskId) } as Split)
+    }
+
+    /** Reorients the whole topology for the display without changing task or divider identities. */
+    fun reorient(orientation: Orientation): MultiSplitLayout {
+        if (root.orientation == orientation) return this
+        fun rotate(node: Node): Node = when (node) {
+            is Leaf -> node
+            is Split -> node.copy(
+                orientation = if (node.orientation == Orientation.LEFT_RIGHT) {
+                    Orientation.TOP_BOTTOM
+                } else Orientation.LEFT_RIGHT,
+                first = rotate(node.first), second = rotate(node.second),
+            )
+        }
+        return MultiSplitLayout(rotate(root) as Split)
+    }
+
+    /** Updates only the selected divider's ratio; descendant ratios remain unchanged. */
+    fun resize(id: DividerId, ratio: Float): MultiSplitLayout? {
+        if (id !in dividers || !ratio.isFinite() || ratio <= 0f || ratio >= 1f) return null
+        fun update(node: Node): Node = when (node) {
+            is Leaf -> node
+            is Split -> node.copy(
+                ratio = if (node.id == id) ratio else node.ratio,
+                first = update(node.first), second = update(node.second),
+            )
+        }
+        return MultiSplitLayout(update(root) as Split)
     }
 
     private fun replace(node: Node, id: LeafId, transform: (Leaf) -> Node): Node = when (node) {

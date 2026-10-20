@@ -12,6 +12,7 @@ import com.android.wm.shell.splitscreen.MultiSplitLayout.Leaf
 import com.android.wm.shell.splitscreen.MultiSplitLayout.LeafId
 import com.android.wm.shell.splitscreen.MultiSplitLayout.Orientation
 import com.android.wm.shell.splitscreen.MultiSplitLayout.Split
+import com.google.common.truth.Truth.assertThat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -268,4 +269,36 @@ class MultiSplitLayoutTest {
         assertEquals(content.width().toLong() * content.height(), area)
         assertEquals(bounds.leaves.size - 1, bounds.dividers.size)
     }
+    @Test fun insertionCanPutNewTaskInFirstHalf() {
+        val initial = MultiSplitLayout(MultiSplitLayout.Split(
+            MultiSplitLayout.DividerId(0), MultiSplitLayout.Orientation.LEFT_RIGHT, 0.5f,
+            MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(0), 10),
+            MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(1), 20)))
+        val model = initial.insert(MultiSplitLayout.LeafId(0),
+            MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(2), 30), MultiSplitLayout.DividerId(1),
+            MultiSplitLayout.Orientation.TOP_BOTTOM, 0.5f, Rect(0, 0, 1200, 900),
+            Insets.NONE, 8, 100, true)!!
+        val bounds = model.calculateBounds(Rect(0, 0, 1200, 900), Insets.NONE, 8)!!
+        assertThat(bounds.leaves.getValue(MultiSplitLayout.LeafId(2)).bottom)
+            .isLessThan(bounds.leaves.getValue(MultiSplitLayout.LeafId(0)).top)
+    }
+
+    @Test fun resizingOneBranchPreservesTheOtherBranchRatio() {
+        val model = MultiSplitLayout(MultiSplitLayout.Split(
+            MultiSplitLayout.DividerId(0), MultiSplitLayout.Orientation.LEFT_RIGHT, 0.5f,
+            MultiSplitLayout.Split(MultiSplitLayout.DividerId(1),
+                MultiSplitLayout.Orientation.TOP_BOTTOM, 0.4f,
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(0), 10),
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(2), 30)),
+            MultiSplitLayout.Split(MultiSplitLayout.DividerId(2),
+                MultiSplitLayout.Orientation.TOP_BOTTOM, 0.6f,
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(1), 20),
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(3), 40))))
+        val resized = model.resize(MultiSplitLayout.DividerId(1), 0.7f)!!
+        assertThat((resized.root.first as MultiSplitLayout.Split).ratio).isEqualTo(0.7f)
+        assertThat((resized.root.second as MultiSplitLayout.Split).ratio).isEqualTo(0.6f)
+        assertThat(resized.root.ratio).isEqualTo(0.5f)
+        assertThat(model.resize(MultiSplitLayout.DividerId(1), Float.NaN)).isNull()
+    }
+
 }

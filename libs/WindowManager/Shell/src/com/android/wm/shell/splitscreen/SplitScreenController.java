@@ -389,8 +389,19 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         public final Rect bounds;
         public final Rect hitBounds;
         public final boolean occupied;
+        public final int leafId;
+        public final boolean newTaskFirst;
+        public final int layoutVersion;
 
         public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied) {
+            this(position, index, bounds, hitBounds, occupied, -1, false, -1);
+        }
+
+        public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied,
+                int leafId, boolean newTaskFirst, int layoutVersion) {
+            this.leafId = leafId;
+            this.newTaskFirst = newTaskFirst;
+            this.layoutVersion = layoutVersion;
             this.position = position;
             this.index = index;
             this.bounds = new Rect(bounds);
@@ -401,6 +412,27 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
 
     public java.util.List<AppDragSlot> getAppDragSlots(int displayId) {
         return mStageCoordinator.getAppDragSlots(displayId);
+    }
+
+    /** Starts a sidebar drop against its coordinator-owned preview, revalidating on Shell main. */
+    public boolean startSidebarIntent(PendingIntent intent, int userId, @Nullable Intent fillIn,
+            Bundle options, AppDragSlot slot) {
+        if (slot.leafId < 0) {
+            startIntent(intent, userId, fillIn, slot.position, options, null, slot.index);
+            return true;
+        }
+        final ComponentName component = intent.getIntent().getComponent();
+        final Intent launch = fillIn == null ? new Intent() : new Intent(fillIn);
+        launch.addFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        for (ActivityManager.RunningTaskInfo task : mTaskOrganizer.getRunningTasks()) {
+            if (task.userId == userId && isTaskInSplitScreen(task.taskId)
+                    && task.baseActivity != null && component != null
+                    && task.baseActivity.getPackageName().equals(component.getPackageName())) {
+                if (!mMultiInstanceHelpher.supportsMultiInstanceSplit(component, userId)) return false;
+                launch.addFlags(FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
+            }
+        }
+        return mStageCoordinator.startSidebarIntent(intent, launch, options, slot);
     }
 
     /** Checks same-app multi-instance support before promising a split destination. */
@@ -1210,8 +1242,38 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
     public void swapSplitTask(int taskId) {
         mMainExecutor.execute(() -> {
             if (!canMutateSplitTask(taskId)) return;
-            switchSplitPosition("handle menu");
+            if (mStageCoordinator.isMultiSplitActive()) mStageCoordinator.swapSplitTask(taskId);
+            else mStageCoordinator.switchSplitPosition("handle menu");
         });
+    }
+
+    /** Copies the owning multi-app leaf's screen bounds; returns false for a legacy pair. */
+    public boolean getMultiSplitTaskBounds(int taskId, @NonNull Rect outBounds) {
+        return mStageCoordinator.getMultiSplitTaskBounds(taskId, outBounds);
+    }
+
+    /** Stable leaf IDs for the menu's directional swaps; a missing neighbour is -1. */
+    public static final class SplitSwapTargets {
+        public final int source;
+        public final int horizontal;
+        public final int vertical;
+
+        public SplitSwapTargets(int source, int horizontal, int vertical) {
+            this.source = source;
+            this.horizontal = horizontal;
+            this.vertical = vertical;
+        }
+    }
+
+    /** Returns directional neighbours for a task in a three- or four-app split. */
+    @Nullable
+    public SplitSwapTargets getMultiSplitSwapTargets(int taskId) {
+        return mStageCoordinator.getMultiSplitSwapTargets(taskId);
+    }
+
+    /** Exchanges task assignments between stable leaf IDs without changing the geometry tree. */
+    public void swapLeaves(int firstLeafId, int secondLeafId) {
+        mMainExecutor.execute(() -> mStageCoordinator.swapLeaves(firstLeafId, secondLeafId));
     }
 
     void switchSplitPosition(String reason) {

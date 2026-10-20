@@ -6,6 +6,8 @@ import android.app.ActivityTaskManager;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.os.Build;
+import android.os.SystemProperties;
 
 import com.android.wm.shell.R;
 import com.android.wm.shell.common.DisplayController;
@@ -23,7 +25,9 @@ public final class SplitCapacityPolicy {
         }
         final Resources resources = displayContext.getResources();
         return getSplitCapacity(resources.getConfiguration(),
-                resources.getBoolean(R.bool.config_enableMultiAppSplit),
+                resources.getBoolean(R.bool.config_enableMultiAppSplit)
+                        || (Build.IS_DEBUGGABLE && SystemProperties.getBoolean(
+                                "persist.wm.debug.multi_split", false)),
                 ActivityTaskManager.supportsSplitScreenMultiWindow(displayContext));
     }
 
