@@ -373,7 +373,8 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
 
     /** Maximum visible split apps implemented by the current layout backend. */
     public int getSplitCapacity(int displayId) {
-        return displayId == DEFAULT_DISPLAY ? 2 : 0;
+        return displayId == DEFAULT_DISPLAY
+                ? SplitCapacityPolicy.getSplitCapacity(mDisplayController, displayId) : 0;
     }
 
     /** Visible leaf-app occupancy, excluding stage history and non-standard/floating tasks. */

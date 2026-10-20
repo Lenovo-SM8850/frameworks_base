@@ -159,6 +159,22 @@ public class SplitScreenControllerTests extends ShellTestCase {
     }
 
     @Test
+    public void getSplitCapacity_defaultCapabilityKeepsTwo() {
+        when(mDisplayController.getDisplayContext(DEFAULT_DISPLAY)).thenReturn(mContext);
+        assertEquals(2, mSplitScreenController.getSplitCapacity(DEFAULT_DISPLAY));
+    }
+
+    @Test
+    public void getSplitCapacity_unregisteredDisplayKeepsTwo() {
+        assertEquals(2, mSplitScreenController.getSplitCapacity(DEFAULT_DISPLAY));
+    }
+
+    @Test
+    public void getSplitCapacity_otherDisplaysKeepExistingBackendLimit() {
+        assertEquals(0, mSplitScreenController.getSplitCapacity(DEFAULT_DISPLAY + 1));
+    }
+
+    @Test
     public void swapSplitTask_checksMembershipWhenExecutorRuns() {
         final int taskId = 42;
         doReturn(true).when(mSplitScreenController).isTaskInSplitScreenForeground(taskId);
