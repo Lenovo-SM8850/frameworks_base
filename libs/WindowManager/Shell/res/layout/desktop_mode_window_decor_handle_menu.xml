@@ -121,6 +121,25 @@
     </FrameLayout>
 
     <LinearLayout
+        android:id="@+id/split_actions_pill"
+        android:layout_width="@dimen/desktop_mode_handle_menu_width"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/desktop_mode_handle_menu_pill_spacing_margin"
+        android:layout_marginStart="1dp"
+        android:orientation="vertical"
+        android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
+        android:background="@drawable/desktop_mode_decor_handle_menu_background"
+        android:visibility="gone">
+
+        <com.android.wm.shell.windowdecor.HandleMenuActionButton
+            android:id="@+id/split_close_button"
+            android:contentDescription="@string/handle_menu_close_app"
+            android:text="@string/handle_menu_close_app"
+            android:src="@drawable/ic_remove_no_shadow"
+            style="@style/DesktopModeHandleMenuActionButton"/>
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/more_actions_pill"
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="wrap_content"

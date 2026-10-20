@@ -1680,7 +1680,8 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 mTaskResourceLoader,
                 mRelayoutParams.mLayoutResId,
                 mSplitScreenController,
-                mDesktopState.canEnterDesktopModeOrShowAppHandle(),
+                mDesktopState.canEnterDesktopModeOrShowAppHandle()
+                        || mSplitScreenController.isTaskInSplitScreenForeground(mTaskInfo.taskId),
                 supportsMultiInstance,
                 shouldShowManageWindowsButton,
                 shouldShowChangeAspectRatioButton,

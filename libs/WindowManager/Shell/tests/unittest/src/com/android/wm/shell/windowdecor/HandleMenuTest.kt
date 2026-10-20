@@ -617,6 +617,96 @@ class HandleMenuTest : ShellTestCase() {
             .requireViewById<View>(R.id.floating_close_pill).visibility)
     }
 
+    @Test fun splitClose_rechecksMembershipAndPreservesFloatingCloseLabel() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(splitScreenController.isTaskInSplitScreenForeground(task.taskId)).thenReturn(true)
+        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(true)
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.rootView
+        assertEquals(View.VISIBLE, root.requireViewById<View>(R.id.split_actions_pill).visibility)
+        assertEquals(View.GONE, root.requireViewById<View>(R.id.floating_close_pill).visibility)
+        val close = root.requireViewById<HandleMenuActionButton>(R.id.split_close_button)
+        assertEquals(mContext.getString(R.string.handle_menu_close_app), close.textView.text.toString())
+        handleMenu.handleMenuView!!.setAppName("Test app")
+        assertEquals(mContext.getString(R.string.handle_menu_close_named_app, "Test app"),
+            close.contentDescription.toString())
+        close.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
+
+        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(false)
+        close.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions, org.mockito.kotlin.times(1)).onClose(task)
+    }
+
+    @Test fun fullscreen_hidesSplitActionsAndSwapButtons() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.rootView
+        listOf(R.id.split_actions_pill, R.id.swap_horizontal_button, R.id.swap_vertical_button)
+            .forEach { assertEquals(View.GONE, root.requireViewById<View>(it).visibility) }
+    }
+
+    @Test fun floatingSplitEntry_hidesAtCapacityAndReturnsWhenAvailable() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FREEFORM, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        task.isFloatingWindow = true
+        whenever(splitScreenController.canEnterSplitScreen(task)).thenReturn(false)
+        handleMenu = createAndShowHandleMenu()
+        val split = handleMenu.handleMenuView!!.windowingPillView
+            .requireViewById<View>(R.id.split_screen_button)
+        assertEquals(View.GONE, split.visibility)
+        whenever(splitScreenController.canEnterSplitScreen(task)).thenReturn(true)
+        handleMenu.handleMenuView!!.bind(task, true)
+        assertEquals(View.VISIBLE, split.visibility)
+    }
+
+    @Test fun splitSwap_usesLayoutAxisDespiteTaskOrientation() {
+        val actions = mock<WindowDecorationActions>()
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+        val pill = LayoutInflater.from(mContext)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+            .requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.initialize(actions, mock(), false) {}
+        pill.bind(task, true, true)
+        val horizontal = pill.requireViewById<View>(R.id.swap_horizontal_button)
+        val vertical = pill.requireViewById<View>(R.id.swap_vertical_button)
+        assertEquals(View.VISIBLE, horizontal.visibility)
+        assertEquals(View.GONE, vertical.visibility)
+        horizontal.performClick()
+        org.mockito.kotlin.verify(actions).onSwapSplit(task.taskId)
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        pill.bind(task, true, false)
+        assertEquals(View.GONE, horizontal.visibility)
+        assertEquals(View.VISIBLE, vertical.visibility)
+        assertTrue(pill.requireViewById<View>(R.id.split_screen_button).isSelected)
+        assertEquals(false, pill.requireViewById<View>(R.id.split_screen_button).isEnabled)
+    }
+
+    @Test fun splitSwap_staysPhysicallyLeftInRtlWith48dpTargets() {
+        val configuration = android.content.res.Configuration(mContext.resources.configuration)
+        configuration.setLayoutDirection(java.util.Locale.forLanguageTag("ar"))
+        val context = mContext.createConfigurationContext(configuration)
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        val pill = LayoutInflater.from(context)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+            .requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.initialize(mock(), mock(), false) {}
+        pill.bind(task, true, true)
+        val density = context.resources.displayMetrics.density
+        val width = (280 * density).toInt()
+        val height = (52 * density).toInt()
+        pill.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+        pill.layout(0, 0, width, height)
+        val swap = pill.requireViewById<View>(R.id.swap_horizontal_button)
+        val fullscreen = pill.requireViewById<View>(R.id.fullscreen_button)
+        assertTrue(swap.right <= fullscreen.left)
+        assertEquals((48 * density + 0.5f).toInt(), swap.width)
+        assertEquals((48 * density + 0.5f).toInt(), swap.height)
+    }
+
     @Test fun desktopFloat_requiresActiveDeskAndNeverShowsForFloatingTask() {
         val actions = mock<WindowDecorationActions>()
         val task = TestRunningTaskInfoBuilder().setWindowingMode(

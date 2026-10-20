@@ -1052,6 +1052,10 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         if (decoration == null) {
             return;
         }
+        if (decoration.getTaskInfo().isFloatingWindow && mSplitScreenController != null
+                && !mSplitScreenController.canEnterSplitScreen(decoration.getTaskInfo())) {
+            return;
+        }
 
         int displayId = decoration.getTaskInfo().displayId;
         final int orientation = mDisplayController.getDisplayContext(displayId).getResources()
@@ -2325,6 +2329,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to enter fullscreen for task=%d",
                     taskId);
             mViewModel.moveToFullscreen(taskId);
+        }
+
+        @Override
+        public void onSwapSplit(int taskId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.swapSplitTask(taskId);
+            }
         }
 
         @Override

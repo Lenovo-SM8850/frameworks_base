@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="20"
+    android:viewportHeight="20">
+    <path
+        android:fillColor="#1C1C14"
+        android:fillType="evenOdd"
+        android:pathData="M5,3.667 L6.179,4.846 L4.858,6.167 L18.333,6.167 L18.333,7.833 L4.858,7.833 L6.179,9.154 L5,10.333 L1.667,7 Z M15,9.667 L13.821,10.846 L15.142,12.167 L1.667,12.167 L1.667,13.833 L15.142,13.833 L13.821,15.154 L15,16.333 L18.333,13 Z"/>
+</vector>

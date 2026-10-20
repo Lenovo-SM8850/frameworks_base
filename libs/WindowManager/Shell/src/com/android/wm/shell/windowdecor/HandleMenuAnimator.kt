@@ -55,6 +55,7 @@ class HandleMenuAnimator(
     private val animators: MutableList<Animator> = mutableListOf()
     private var runningAnimation: AnimatorSet? = null
     private val windowingPill: ViewGroup = handleMenu.requireViewById(R.id.windowing_pill)
+    private val splitActionsPill: ViewGroup = handleMenu.requireViewById(R.id.split_actions_pill)
     private val moreActionsPill: ViewGroup = handleMenu.requireViewById(R.id.more_actions_pill)
     private val openInAppOrBrowserPill: ViewGroup =
         handleMenu.requireViewById(R.id.open_in_app_or_browser_pill)
@@ -72,6 +73,7 @@ class HandleMenuAnimator(
     private fun animateOpenMenu() {
         prepareMenuForAnimation()
         animateWindowingPillOpen()
+        animateMoreActionsPillOpen(splitActionsPill)
         animateMoreActionsPillOpen()
         animateOpenInAppOrBrowserPill()
         val animationCallback: () -> Unit = {
@@ -99,6 +101,7 @@ class HandleMenuAnimator(
 
     private fun animateCloseMenu(after: () -> Unit) {
         windowingPillClose()
+        moreActionsPillClose(splitActionsPill)
         moreActionsPillClose()
         openInAppOrBrowserPillClose()
         runAnimations(after)
@@ -106,7 +109,7 @@ class HandleMenuAnimator(
 
     private fun prepareMenuForAnimation() {
         // There is no app info row above the actions to use as their animation pivot.
-        listOf(windowingPill, moreActionsPill, openInAppOrBrowserPill).forEach {
+        listOf(windowingPill, splitActionsPill, moreActionsPill, openInAppOrBrowserPill).forEach {
             it.alpha = 0f
             it.pivotX = menuWidth / 2f
             it.pivotY = 0f
@@ -154,36 +157,36 @@ class HandleMenuAnimator(
         }
     }
 
-    private fun animateMoreActionsPillOpen() {
+    private fun animateMoreActionsPillOpen(pill: ViewGroup = moreActionsPill) {
         // More Actions X & Y Scaling Animation
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, SCALE_X, HALF_INITIAL_SCALE, 1f).apply {
+            ObjectAnimator.ofFloat(pill, SCALE_X, HALF_INITIAL_SCALE, 1f).apply {
                 startDelay = BODY_SCALE_OPEN_DELAY
                 duration = BODY_SCALE_OPEN_DURATION
             }
 
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, SCALE_Y, HALF_INITIAL_SCALE, 1f).apply {
+            ObjectAnimator.ofFloat(pill, SCALE_Y, HALF_INITIAL_SCALE, 1f).apply {
                 startDelay = BODY_SCALE_OPEN_DELAY
                 duration = BODY_SCALE_OPEN_DURATION
             }
 
         // More Actions Opacity Animation
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, ALPHA, 1f).apply {
+            ObjectAnimator.ofFloat(pill, ALPHA, 1f).apply {
                 startDelay = BODY_ALPHA_OPEN_DELAY
                 duration = BODY_ALPHA_OPEN_DURATION
             }
 
         // More Actions Elevation Animation
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, TRANSLATION_Z, 1f).apply {
+            ObjectAnimator.ofFloat(pill, TRANSLATION_Z, 1f).apply {
                 startDelay = ELEVATION_OPEN_DELAY
                 duration = BODY_ELEVATION_OPEN_DURATION
             }
 
         // More Actions Content Opacity Animation
-        moreActionsPill.children.forEach {
+        pill.children.forEach {
             animators +=
                 ObjectAnimator.ofFloat(it, ALPHA, 1f).apply {
                     startDelay = BODY_ALPHA_OPEN_DELAY
@@ -256,33 +259,33 @@ class HandleMenuAnimator(
             }
     }
 
-    private fun moreActionsPillClose() {
+    private fun moreActionsPillClose(pill: ViewGroup = moreActionsPill) {
         // More Actions X & Y Scaling Animation
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, SCALE_X, HALF_INITIAL_SCALE).apply {
+            ObjectAnimator.ofFloat(pill, SCALE_X, HALF_INITIAL_SCALE).apply {
                 duration = BODY_CLOSE_DURATION
             }
 
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, SCALE_Y, HALF_INITIAL_SCALE).apply {
+            ObjectAnimator.ofFloat(pill, SCALE_Y, HALF_INITIAL_SCALE).apply {
                 duration = BODY_CLOSE_DURATION
             }
 
         // More Actions Opacity Animation
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, ALPHA, 0f).apply {
+            ObjectAnimator.ofFloat(pill, ALPHA, 0f).apply {
                 duration = BODY_CLOSE_DURATION
             }
 
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, ALPHA, 0f).apply {
+            ObjectAnimator.ofFloat(pill, ALPHA, 0f).apply {
                 duration = BODY_CLOSE_DURATION
             }
 
-        // upward more actions pill y-translation animation
+        // Upward actions pill y-translation animation
         val yStart: Float = -captionHeight / 2
         animators +=
-            ObjectAnimator.ofFloat(moreActionsPill, TRANSLATION_Y, yStart).apply {
+            ObjectAnimator.ofFloat(pill, TRANSLATION_Y, yStart).apply {
                 duration = BODY_CLOSE_DURATION
             }
     }

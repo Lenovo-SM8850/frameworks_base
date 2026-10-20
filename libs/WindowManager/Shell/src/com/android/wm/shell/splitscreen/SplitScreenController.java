@@ -1194,6 +1194,25 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         mStageCoordinator.onDroppedToSplit(position, dragSessionId);
     }
 
+    /** Whether the task can enter split, keeping floating entry within its display's capacity. */
+    public boolean canEnterSplitScreen(@NonNull ActivityManager.RunningTaskInfo taskInfo) {
+        return !taskInfo.isFloatingWindow
+                || getOccupiedSplitSlots(taskInfo.displayId) < getSplitCapacity(taskInfo.displayId);
+    }
+
+    /** Whether this task still belongs to a visible split that can accept a menu action. */
+    public boolean canMutateSplitTask(int taskId) {
+        return isTaskInSplitScreenForeground(taskId) && mStageCoordinator.canMutateSplit();
+    }
+
+    /** Swaps a task with its split companion, rechecking eligibility on the Shell main thread. */
+    public void swapSplitTask(int taskId) {
+        mMainExecutor.execute(() -> {
+            if (!canMutateSplitTask(taskId)) return;
+            switchSplitPosition("handle menu");
+        });
+    }
+
     void switchSplitPosition(String reason) {
         if (isSplitScreenVisible()) {
             mStageCoordinator.switchSplitPosition(reason);

@@ -68,6 +68,9 @@ interface WindowDecorationActions {
     /** Moves task to fullscreen. */
     fun onToFullscreen(taskId: Int)
 
+    /** Swaps the task with its split companion. */
+    fun onSwapSplit(taskId: Int)
+
     /** Moves task to split screen. */
     fun onToSplitScreen(taskId: Int)
 

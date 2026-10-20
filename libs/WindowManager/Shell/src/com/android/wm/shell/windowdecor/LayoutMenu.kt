@@ -691,8 +691,14 @@ class LayoutMenu(
             updateSplitSnapSelection(SnapToHalfSelection.NONE)
 
             if (Flags.enableConsolidatedWindowOptions()) {
-                val isInSplitScreen = splitScreenController.isTaskInSplitScreen(taskInfo.taskId)
-                requireWindowingPillView().bind(taskInfo, isInSplitScreen)
+                val isInSplitScreen =
+                    splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId)
+                requireWindowingPillView().bind(
+                    taskInfo,
+                    isInSplitScreen,
+                    splitScreenController.isLeftRightSplit,
+                    splitScreenController.canEnterSplitScreen(taskInfo),
+                )
                 requireWindowingPillView().background.setTint(style.backgroundColor)
             }
         }

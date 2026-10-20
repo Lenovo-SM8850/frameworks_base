@@ -97,6 +97,8 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private val decorThemeUtil = DecorThemeUtil(context)
     private lateinit var style: MenuStyle
 
+    private val swapHorizontalBtn: ImageButton
+    private val swapVerticalBtn: ImageButton
     private val rotateBtn: ImageButton
     private val rotateDescriptionId = context.resources.getIdentifier(
         "accessibility_rotate_button", "string", "com.android.systemui")
@@ -119,6 +121,8 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         LayoutInflater.from(context)
             .inflate(R.layout.desktop_mode_window_decor_windowing_pill, this, true)
 
+        swapHorizontalBtn = requireViewById(R.id.swap_horizontal_button)
+        swapVerticalBtn = requireViewById(R.id.swap_vertical_button)
         rotateBtn = requireViewById(R.id.rotate_window_button)
         if (rotateDescriptionId != 0) {
             rotateBtn.contentDescription = context.getString(rotateDescriptionId)
@@ -166,7 +170,8 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         this.onPillItemClicked = onPillItemClicked
         this.showFloatingButton = showFloatingButton
 
-        listOf(rotateBtn, fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
+        listOf(swapHorizontalBtn, swapVerticalBtn, rotateBtn, fullscreenBtn, splitscreenBtn,
+            desktopBtn, floatingBtn).forEach {
             it.setOnClickListener(this)
         }
 
@@ -262,6 +267,9 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
 
     override fun onClick(v: View) {
         when (v.id) {
+            R.id.swap_horizontal_button, R.id.swap_vertical_button -> {
+                windowDecorationActions.onSwapSplit(taskInfo.taskId)
+            }
             R.id.rotate_window_button -> windowDecorationActions.onRotate(taskInfo)
             R.id.fullscreen_button -> {
                 windowDecorationActions.onToFullscreen(taskInfo.taskId)
@@ -283,11 +291,31 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     }
 
     /** Binds the menu views to the new data. */
-    fun bind(taskInfo: RunningTaskInfo, isInSplitScreen: Boolean) {
+    @JvmOverloads
+    fun bind(
+        taskInfo: RunningTaskInfo,
+        isInSplitScreen: Boolean,
+        isLeftRightSplit: Boolean? = null,
+        canEnterSplitScreen: Boolean = true,
+    ) {
         this.taskInfo = taskInfo
         this.style = calculateMenuStyle(taskInfo)
 
         background.setTint(style.backgroundColor)
+        // Split actions start at the physical left, including in RTL locales.
+        layoutDirection = if (isInSplitScreen) View.LAYOUT_DIRECTION_LTR
+            else context.resources.configuration.layoutDirection
+        // The active split layout supplies the axis; task orientation can differ from it.
+        swapHorizontalBtn.isGone = !isInSplitScreen || isLeftRightSplit != true
+        swapVerticalBtn.isGone = !isInSplitScreen || isLeftRightSplit != false
+        listOf(swapHorizontalBtn, swapVerticalBtn).forEach { button ->
+            button.imageTintList = style.buttonColor
+            button.background = createBackgroundDrawable(
+                color = style.textColor,
+                cornerRadius = iconButtonRippleRadius,
+                drawableInsets = iconButtonDrawableInsetsBase,
+            )
+        }
         rotateBtn.isGone = !taskInfo.isFloatingWindow || taskInfo.displayId != DEFAULT_DISPLAY ||
             rotateDescriptionId == 0
         rotateBtn.apply {
@@ -302,9 +330,8 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
             taskInfo.activityType != android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD ||
             (!taskInfo.isFullscreen && !isInSplitScreen && !floatDesk)
 
-        if (!Flags.enableNonDefaultDisplaySplitBugfix() && taskInfo.displayId != DEFAULT_DISPLAY) {
-            splitscreenBtn.visibility = View.GONE
-        }
+        splitscreenBtn.isGone = (taskInfo.isFloatingWindow && !canEnterSplitScreen) ||
+            (!Flags.enableNonDefaultDisplaySplitBugfix() && taskInfo.displayId != DEFAULT_DISPLAY)
 
         // Currently split screen doesn't override task windowing mode when it's entering split.
         // So a split task can have WINDOWING_MODE_FULLSCREEN. Use `isInSplitScreen` to check if

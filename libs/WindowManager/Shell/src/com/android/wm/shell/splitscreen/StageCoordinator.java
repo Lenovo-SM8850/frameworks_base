@@ -295,6 +295,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     private boolean mIsDropEnteringSplitVisible;
     private boolean mSkipEvictingMainStageChildren;
     private boolean mIsExiting;
+    private boolean mDividerInteracting;
+    private boolean mSplitLayoutAnimating;
     private boolean mIsRootTranslucent;
     private @StageType int mLastActiveStage;
     private boolean mBreakOnNextWake;
@@ -643,6 +645,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onDividerInteractionChanged(boolean interacting) {
+        mDividerInteracting = interacting;
         if (mFrameRateController != null) mFrameRateController.setDividerMoving(interacting);
     }
 
@@ -1699,6 +1702,19 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         return INVALID_TASK_ID;
     }
 
+    /** Whether a visible split can accept a menu mutation on the Shell main thread. */
+    boolean canMutateSplit() {
+        return mSplitLayout != null && mSplitRootTaskInfo != null && isSplitActive()
+                && isSplitScreenVisible() && !mIsExiting && !mIsDividerRemoteAnimating
+                && !mDividerInteracting && !mSplitLayoutAnimating
+                && !mSplitLayout.isCurrentlySwapping()
+                && !mSplitLayout.isCurrentlyDividerFlinging()
+                && mSplitTransitions.mPendingEnter == null
+                && mSplitTransitions.mPendingResize == null
+                && mSplitTransitions.mPendingDismiss == null
+                && mSplitTransitions.mPendingRemotePassthrough == null;
+    }
+
     void switchSplitPosition(String reason) {
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "switchSplitPosition");
         final SurfaceControl.Transaction t = mTransactionPool.acquire();
@@ -1932,6 +1948,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
         mShouldUpdateRecents = false;
         mIsDividerRemoteAnimating = false;
+        mDividerInteracting = false;
+        mSplitLayoutAnimating = false;
         mSplitRequest = null;
 
         mSplitLayout.getInvisibleBounds(mTempRect1);
@@ -2870,6 +2888,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     @Override
     public void onRootTaskVanished() {
+        mDividerInteracting = false;
+        mSplitLayoutAnimating = false;
         clearSplitFrameRates();
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRootTaskVanished");
         final WindowContainerTransaction wct = new WindowContainerTransaction();
@@ -5064,6 +5084,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     void notifySplitAnimationStatus(boolean animationRunning) {
+        mSplitLayoutAnimating = animationRunning;
         if (mFrameRateController != null) mFrameRateController.setAnimating(animationRunning);
         if (mSplitInvocationListener == null || mSplitInvocationListenerExecutor == null) {
             return;

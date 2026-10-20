@@ -159,6 +159,56 @@ public class SplitScreenControllerTests extends ShellTestCase {
     }
 
     @Test
+    public void swapSplitTask_checksMembershipWhenExecutorRuns() {
+        final int taskId = 42;
+        doReturn(true).when(mSplitScreenController).isTaskInSplitScreenForeground(taskId);
+        when(mStageCoordinator.canMutateSplit()).thenReturn(true);
+
+        mSplitScreenController.swapSplitTask(taskId);
+        ArgumentCaptor<Runnable> action = ArgumentCaptor.forClass(Runnable.class);
+        verify(mMainExecutor).execute(action.capture());
+        verify(mStageCoordinator, never()).switchSplitPosition(anyString());
+
+        doReturn(false).when(mSplitScreenController).isTaskInSplitScreenForeground(taskId);
+        action.getValue().run();
+        verify(mStageCoordinator, never()).switchSplitPosition(anyString());
+    }
+
+    @Test
+    public void swapSplitTask_ignoresFurtherTapsDuringMutation() {
+        final int taskId = 42;
+        doReturn(true).when(mSplitScreenController).isTaskInSplitScreenForeground(taskId);
+        when(mStageCoordinator.canMutateSplit()).thenReturn(true, false);
+        when(mStageCoordinator.isSplitScreenVisible()).thenReturn(true);
+        mSplitScreenController.swapSplitTask(taskId);
+        mSplitScreenController.swapSplitTask(taskId);
+        ArgumentCaptor<Runnable> actions = ArgumentCaptor.forClass(Runnable.class);
+        verify(mMainExecutor, times(2)).execute(actions.capture());
+
+        actions.getAllValues().forEach(Runnable::run);
+        verify(mStageCoordinator, times(1)).switchSplitPosition("handle menu");
+    }
+
+    @Test
+    public void floatingSplitEntry_tracksCapacityAndLeavesOtherTasksUnchanged() {
+        ActivityManager.RunningTaskInfo task = new ActivityManager.RunningTaskInfo();
+        task.displayId = DEFAULT_DISPLAY;
+        task.isFloatingWindow = true;
+        doReturn(2).when(mSplitScreenController).getSplitCapacity(DEFAULT_DISPLAY);
+        doReturn(2).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        assertEquals(false, mSplitScreenController.canEnterSplitScreen(task));
+        doReturn(1).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        assertEquals(true, mSplitScreenController.canEnterSplitScreen(task));
+        doReturn(4).when(mSplitScreenController).getSplitCapacity(DEFAULT_DISPLAY);
+        doReturn(3).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        assertEquals(true, mSplitScreenController.canEnterSplitScreen(task));
+        doReturn(4).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        assertEquals(false, mSplitScreenController.canEnterSplitScreen(task));
+        task.isFloatingWindow = false;
+        assertEquals(true, mSplitScreenController.canEnterSplitScreen(task));
+    }
+
+    @Test
     public void instantiateController_addInitCallback() {
         verify(mShellInit, times(1)).addInitCallback(any(), isA(SplitScreenController.class));
     }

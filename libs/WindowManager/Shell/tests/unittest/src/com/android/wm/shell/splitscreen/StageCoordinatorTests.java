@@ -45,6 +45,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -282,6 +283,59 @@ public class StageCoordinatorTests extends ShellTestCase {
             consumer.accept(mMainChildTaskInfo);
             return null;
         }).when(mMainStage).doForAllChildTaskInfos(any());
+    }
+
+    @Test
+    public void canMutateSplit_requiresVisibleActiveSplit() {
+        assertFalse(mStageCoordinator.canMutateSplit());
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        assertFalse(mStageCoordinator.canMutateSplit());
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        assertTrue(mStageCoordinator.canMutateSplit());
+    }
+
+    @Test
+    public void canMutateSplit_rejectsDividerDragFlingAndSwap() {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        mStageCoordinator.onDividerInteractionChanged(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        mStageCoordinator.onDividerInteractionChanged(false);
+        assertTrue(mStageCoordinator.canMutateSplit());
+        when(mSplitLayout.isCurrentlyDividerFlinging()).thenReturn(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        when(mSplitLayout.isCurrentlyDividerFlinging()).thenReturn(false);
+        when(mSplitLayout.isCurrentlySwapping()).thenReturn(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        when(mSplitLayout.isCurrentlySwapping()).thenReturn(false);
+        assertTrue(mStageCoordinator.canMutateSplit());
+    }
+
+    @Test
+    public void canMutateSplit_tracksAnimationWithoutReplacingListener() {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        SplitScreen.SplitInvocationListener listener = mock(SplitScreen.SplitInvocationListener.class);
+        mStageCoordinator.registerSplitAnimationListener(listener, Runnable::run);
+        mStageCoordinator.notifySplitAnimationStatus(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        verify(listener).onSplitAnimationInvoked(true);
+        mStageCoordinator.notifySplitAnimationStatus(false);
+        assertTrue(mStageCoordinator.canMutateSplit());
+        verify(listener).onSplitAnimationInvoked(false);
+    }
+
+    @Test
+    public void canMutateSplit_rejectsPendingResizeAndDismiss() {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        mSplitScreenTransitions.mPendingResize = mock(SplitScreenTransitions.TransitSession.class);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        mSplitScreenTransitions.mPendingResize = null;
+        mSplitScreenTransitions.mPendingDismiss = mock(SplitScreenTransitions.DismissSession.class);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        mSplitScreenTransitions.mPendingDismiss = null;
+        assertTrue(mStageCoordinator.canMutateSplit());
     }
 
     @Test
