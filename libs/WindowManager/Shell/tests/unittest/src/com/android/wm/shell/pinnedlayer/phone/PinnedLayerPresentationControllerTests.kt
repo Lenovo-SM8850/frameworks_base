@@ -790,4 +790,39 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(kotlin.math.abs(logical.width() * scale - requested.width())).isAtMost(1f)
     }
 
+    @Test
+    fun sidebarHover_preservesEntryScaleAndClampsDropPointToStableBounds() {
+        val task = createTaskInfo(Rect(0, 0, 500, 800)).apply {
+            baseActivity = android.content.ComponentName("test.sidebar", "Main")
+            userId = 10
+        }
+        val info = android.content.pm.ActivityInfo()
+        val scale = controller.entryScale(task)
+        val entry = requireNotNull(controller.calculateAppEntry(task.baseActivity!!, 10,
+            Display.DEFAULT_DISPLAY, info, task, 5000, -1000))
+        assertThat(Rect(0, 100, 1080, 1870).contains(entry.bounds)).isTrue()
+        assertThat(entry.bounds.right).isEqualTo(1080)
+        assertThat(entry.bounds.top).isEqualTo(100)
+        assertThat(controller.entryScale(task)).isEqualTo(scale)
+        val again = requireNotNull(controller.calculateAppEntry(task.baseActivity!!, 10,
+            Display.DEFAULT_DISPLAY, info, task, 5000, -1000))
+        assertThat(again).isEqualTo(entry)
+    }
+
+    @Test
+    fun sidebarHover_reusedFloatingTaskKeepsActualBoundsAndScale() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .8f
+            floatingWindowPosition.set(100, 200)
+            baseActivity = android.content.ComponentName("test.sidebar", "Main")
+            userId = 10
+        }
+        val entry = requireNotNull(controller.calculateAppEntry(task.baseActivity!!, 10,
+            Display.DEFAULT_DISPLAY, android.content.pm.ActivityInfo(), task, 900, 1600))
+        assertThat(entry.bounds).isEqualTo(task.floatingWindowRestoreBounds)
+        assertThat(entry.scale).isEqualTo(.8f)
+        assertThat(controller.entryScale(task)).isEqualTo(.8f)
+    }
+
 }

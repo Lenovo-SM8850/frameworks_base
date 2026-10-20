@@ -2246,8 +2246,10 @@ public abstract class WMShellModule {
             @ShellMainThread ShellExecutor mainExecutor,
             DesktopState desktopState,
             BubbleFeatureConfig bubbleFeatureConfig,
-            Optional<ContainerHierarchyDependency> containerHierarchyDependency) {
-        return new DragAndDropController(
+            Optional<ContainerHierarchyDependency> containerHierarchyDependency,
+            Lazy<Optional<PinnedLayerController>> pinnedLayerController,
+            TaskStackListenerImpl taskStackListener) {
+        DragAndDropController controller = new DragAndDropController(
                 context,
                 shellInit,
                 shellController,
@@ -2262,6 +2264,9 @@ public abstract class WMShellModule {
                 mainExecutor,
                 desktopState,
                 bubbleFeatureConfig);
+        controller.setSidebarFloatingController(pinnedLayerController);
+        controller.setSidebarTaskStackListener(taskStackListener);
+        return controller;
     }
 
     @WMSingleton

@@ -62,7 +62,7 @@ class FloatingWindowGeometryStore(
     }
 
     fun restore(packageName: String, userId: Int, orientation: Int, stable: Rect,
-        displayWidth: Int, displayHeight: Int, density: Int): Entry? {
+        displayWidth: Int, displayHeight: Int, density: Int, invalidate: Boolean = true): Entry? {
         if (stable.isEmpty) return null
         val key = "$packageName:$orientation"
         val value = user(userId).optJSONObject(key) ?: return null
@@ -71,8 +71,10 @@ class FloatingWindowGeometryStore(
         if (value.optInt("short") != min(displayWidth, displayHeight) ||
             value.optInt("long") != max(displayWidth, displayHeight) ||
             value.optInt("density") != density) {
-            user(userId).remove(key)
-            persist(userId)
+            if (invalidate) {
+                user(userId).remove(key)
+                persist(userId)
+            }
             return null
         }
         val x = value.optDouble("left", Double.NaN)

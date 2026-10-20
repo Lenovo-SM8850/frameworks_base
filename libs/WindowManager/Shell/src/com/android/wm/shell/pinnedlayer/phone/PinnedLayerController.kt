@@ -97,6 +97,11 @@ class PinnedLayerController(
     private val miniListeners = mutableSetOf<(TaskInfo) -> Unit>()
     private val taskLeashes = mutableMapOf<Int, SurfaceControl>()
     private val hdrLeashes = mutableMapOf<Int, SurfaceControl>()
+    private data class AppEntry(val component: android.content.ComponentName, val userId: Int,
+        val displayId: Int, val destination: PinnedLayerPresentationController.EntryDestination)
+    private val appEntries = mutableMapOf<IBinder, AppEntry>()
+    private var sidebarExecutor: com.android.wm.shell.common.ShellExecutor? = null
+
     private val pendingRotations = mutableMapOf<IBinder, Pair<Int, Rect>>()
 
     fun isMini(task: TaskInfo): Boolean =
@@ -143,6 +148,7 @@ class PinnedLayerController(
 
     fun configureInteractions(context: Context, displayController: DisplayController,
         mainExecutor: com.android.wm.shell.common.ShellExecutor) {
+        sidebarExecutor = mainExecutor
         frameRates = FloatingFrameRateController(context, shellTaskOrganizer, mainExecutor,
             presentationController.miniState, transitions = transitions)
         miniInteractions = FloatingMiniController(shellTaskOrganizer, displayController,
@@ -281,6 +287,16 @@ class PinnedLayerController(
                     }
                 }
                 if (taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
+                    consumeAppEntry(taskInfo, false)?.let { entry ->
+                        // Keep the entry until the opening request consumes its task snapshot.
+                        if (taskInfo.floatingWindowRestoreBounds != entry.bounds ||
+                            taskInfo.floatingWindowScale != entry.scale) {
+                            val wct = WindowContainerTransaction()
+                            presentationController.applyPresentation(taskInfo, entry.bounds, wct, entry.scale)
+                            shellTaskOrganizer.applyTransaction(wct)
+                        }
+                        return
+                    }
                     presentationController.recoverMini(taskInfo)?.let {
                         miniInteractions?.recover(taskInfo, it)
                     }
@@ -408,6 +424,44 @@ class PinnedLayerController(
             shellTaskOrganizer.applyTransaction(wct)
         }
         if (!hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, false)
+    }
+
+    fun canResolveSidebarSplit(): Boolean = !keyguardShowing && !recentsRunning && !overviewShowing
+
+    /** Read-only geometry query; no pinning or remembered-entry state changes during hover. */
+    fun calculateSidebarEntry(component: android.content.ComponentName, userId: Int, displayId: Int,
+        info: android.content.pm.ActivityInfo, existing: TaskInfo?, x: Int, y: Int):
+        PinnedLayerPresentationController.EntryDestination? =
+        presentationController.calculateAppEntry(component, userId, displayId, info, existing, x, y)
+
+    /** Carries the previewed presentation through the existing launch-cookie handoff. */
+    fun setSidebarLaunchOptions(options: android.app.ActivityOptions,
+        component: android.content.ComponentName, userId: Int, displayId: Int,
+        destination: PinnedLayerPresentationController.EntryDestination): IBinder? {
+        val logical = presentationController.logicalEntryBounds(destination, displayId) ?: return null
+        val cookie = android.os.Binder()
+        appEntries[cookie] = AppEntry(component, userId, displayId, destination)
+        // Expire refused launches on the same Shell executor that owns the presentation map.
+        sidebarExecutor?.executeDelayed({ appEntries.remove(cookie) }, 10_000)
+        options.setLaunchCookie(cookie)
+        options.setLaunchBounds(logical)
+        return cookie
+    }
+
+    fun clearSidebarLaunch(cookie: IBinder) { appEntries.remove(cookie) }
+
+    private fun consumeAppEntry(task: TaskInfo, consume: Boolean = true):
+        PinnedLayerPresentationController.EntryDestination? {
+        val cookie = task.launchCookies.firstOrNull { appEntries.containsKey(it) } ?: return null
+        val entry = appEntries[cookie] ?: return null
+        if (entry.userId != task.userId || entry.displayId != task.displayId ||
+            (entry.component != task.baseActivity && entry.component != task.realActivity &&
+                entry.component != task.baseIntent?.component)) {
+            appEntries.remove(cookie)
+            return null
+        }
+        if (consume) appEntries.remove(cookie)
+        return entry.destination
     }
 
     fun getFloatingLaunchBounds(task: TaskInfo): Rect? =
@@ -554,7 +608,8 @@ class PinnedLayerController(
         )
         return WindowContainerTransaction().apply {
             val transitions = activeTransitions.getOrPut(transition) { mutableSetOf() }
-            val bounds =
+            val appEntry = consumeAppEntry(task)
+            val bounds = appEntry?.bounds ?:
                 if (task.taskId !in pinnedTasks) {
                     presentationController.getPinEntryDestinationBounds(task)
                 } else {
@@ -569,7 +624,8 @@ class PinnedLayerController(
             minimizedTasks -= task.taskId
             removeMinimizeHandle(task.taskId)
             merge(getLayerPinnedWct(task.token), /* transfer= */ true)
-            bounds?.let { presentationController.applyPresentation(task, it, this) }
+            bounds?.let { presentationController.applyPresentation(task, it, this,
+                appEntry?.scale ?: presentationController.entryScale(task)) }
             setHidden(task.token, keyguardShowing || overviewShowing)
 
         }
@@ -1007,6 +1063,11 @@ class PinnedLayerController(
                 return@forEach
             }
             if (task.isFloatingWindow && change.mode != TRANSIT_CLOSE) {
+                consumeAppEntry(task)?.let { entry ->
+                    val wct = WindowContainerTransaction()
+                    presentationController.applyPresentation(task, entry.bounds, wct, entry.scale)
+                    shellTaskOrganizer.applyTransaction(wct)
+                }
                 val restoring = task.taskId in minimizedTasks &&
                     (TransitionUtil.isOpeningType(change.mode) ||
                         (change.mode == TRANSIT_CHANGE &&

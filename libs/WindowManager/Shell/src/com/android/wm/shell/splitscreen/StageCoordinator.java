@@ -20,8 +20,10 @@ import static android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_A
 import static android.app.ActivityTaskManager.INVALID_TASK_ID;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_HOME;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_RECENTS;
+import static android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
+import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
 import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
 import static android.content.Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT;
 import static android.content.res.Configuration.SMALLEST_SCREEN_WIDTH_DP_UNDEFINED;
@@ -2306,6 +2308,68 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         mLogger.logEnter(mSplitLayout.getDividerPositionAsFraction(),
                 getMainStagePosition(), mMainStage.getTopChildTaskUid(),
                 getSideStagePosition(), mSideStage.getTopChildTaskUid(), isLeftRightSplit());
+    }
+
+    private boolean isOccupiedAppDragSlot(int position, int displayId) {
+        final RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(getTaskId(position));
+        return task != null && task.displayId == displayId && task.isVisible
+                && task.isVisibleRequested && task.getActivityType() == ACTIVITY_TYPE_STANDARD
+                && !task.isFloatingWindow && task.getWindowingMode() != WINDOWING_MODE_PINNED;
+    }
+
+    int getOccupiedSplitSlots(int displayId) {
+        if (!isSplitScreenVisible() || mSplitRootTaskInfo == null
+                || mSplitRootTaskInfo.displayId != displayId) return 0;
+        int occupied = 0;
+        for (SplitScreenController.AppDragSlot slot : getAppDragSlots(displayId)) {
+            if (slot.occupied) occupied++;
+        }
+        return occupied;
+    }
+
+    /** Returns final slot geometry without moving the divider or changing stage state. */
+    java.util.List<SplitScreenController.AppDragSlot> getAppDragSlots(int displayId) {
+        if (mSplitLayout == null || mSplitRootTaskInfo == null
+                || mSplitRootTaskInfo.displayId != displayId) return java.util.Collections.emptyList();
+        final Rect first = new Rect(mSplitLayout.getTopLeftBounds());
+        final Rect second = new Rect(mSplitLayout.getBottomRightBounds());
+        final Rect root = mSplitLayout.getRootBounds();
+        if (!isSplitScreenVisible()) {
+            // Entry resets to the middle snap target; query that target without resetting layout.
+            final int length = isLeftRightSplit() ? root.width() : root.height();
+            final int position = mSplitLayout.findSnapTarget(length / 2, 0,
+                    false /* Hard dismiss */).position;
+            if (isLeftRightSplit()) {
+                final int divider = second.left - first.right;
+                first.set(root);
+                second.set(root);
+                first.right = root.left + position;
+                second.left = first.right + divider;
+            } else {
+                final int divider = second.top - first.bottom;
+                first.set(root);
+                second.set(root);
+                first.bottom = root.top + position;
+                second.top = first.bottom + divider;
+            }
+        }
+        if (first.isEmpty() || second.isEmpty()) return java.util.Collections.emptyList();
+        final Rect firstHit = new Rect(root);
+        final Rect secondHit = new Rect(root);
+        if (isLeftRightSplit()) {
+            firstHit.right = secondHit.left = (first.right + second.left) / 2;
+        } else {
+            firstHit.bottom = secondHit.top = (first.bottom + second.top) / 2;
+        }
+        return java.util.Arrays.asList(
+                new SplitScreenController.AppDragSlot(SPLIT_POSITION_TOP_OR_LEFT,
+                        enableFlexibleSplit() ? SPLIT_INDEX_0 : SPLIT_INDEX_UNDEFINED,
+                        first, firstHit, isSplitScreenVisible()
+                                && isOccupiedAppDragSlot(SPLIT_POSITION_TOP_OR_LEFT, displayId)),
+                new SplitScreenController.AppDragSlot(SPLIT_POSITION_BOTTOM_OR_RIGHT,
+                        enableFlexibleSplit() ? SPLIT_INDEX_1 : SPLIT_INDEX_UNDEFINED,
+                        second, secondHit, isSplitScreenVisible()
+                                && isOccupiedAppDragSlot(SPLIT_POSITION_BOTTOM_OR_RIGHT, displayId)));
     }
 
     void getStageBounds(Rect outTopOrLeftBounds, Rect outBottomOrRightBounds) {

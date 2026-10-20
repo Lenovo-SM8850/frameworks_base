@@ -371,6 +371,47 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         return mStageCoordinator.isSplitScreenVisible();
     }
 
+    /** Maximum visible split apps implemented by the current layout backend. */
+    public int getSplitCapacity(int displayId) {
+        return displayId == DEFAULT_DISPLAY ? 2 : 0;
+    }
+
+    /** Visible leaf-app occupancy, excluding stage history and non-standard/floating tasks. */
+    public int getOccupiedSplitSlots(int displayId) {
+        return mStageCoordinator.getOccupiedSplitSlots(displayId);
+    }
+
+    /** A coordinator-owned insertion/replacement slot with exact final task bounds. */
+    public static final class AppDragSlot {
+        public final int position;
+        public final int index;
+        public final Rect bounds;
+        public final Rect hitBounds;
+        public final boolean occupied;
+
+        public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied) {
+            this.position = position;
+            this.index = index;
+            this.bounds = new Rect(bounds);
+            this.hitBounds = new Rect(hitBounds);
+            this.occupied = occupied;
+        }
+    }
+
+    public java.util.List<AppDragSlot> getAppDragSlots(int displayId) {
+        return mStageCoordinator.getAppDragSlots(displayId);
+    }
+
+    /** Checks same-app multi-instance support before promising a split destination. */
+    public boolean canStartSidebarSplit(ComponentName component, int userId,
+            @Nullable ActivityManager.RunningTaskInfo companion) {
+        // An existing split can switch positions through the normal intent starter.
+        return isSplitScreenVisible() || companion == null || companion.userId != userId
+                || companion.baseActivity == null
+                || !component.getPackageName().equals(companion.baseActivity.getPackageName())
+                || mMultiInstanceHelpher.supportsMultiInstanceSplit(component, userId);
+    }
+
     public boolean isSplitScreenFocused() {
         return mStageCoordinator.isSplitScreenFocused();
     }
@@ -947,11 +988,13 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         ProtoLog.v(ShellProtoLogGroup.WM_SHELL_SPLIT_SCREEN,
                 "startIntent(): intent=%s user=%d fillInIntent=%s position=%d", intent, userId1,
                 fillInIntent, position);
-        // Flag this as a no-user-action launch to prevent sending user leaving event to the current
-        // top activity since it's going to be put into another side of the split. This prevents the
-        // current top activity from going into pip mode due to user leaving event.
+        // Mutable tokens retain their fill-in hint; immutable tokens use the PiP launch option.
         if (fillInIntent == null) fillInIntent = new Intent();
-        fillInIntent.addFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        if (intent.isImmutable()) {
+            fillInIntent.removeFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        } else {
+            fillInIntent.addFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        }
 
         final String packageName2 = getPackageName(reverseSplitPosition(position), hideTaskToken);
         final int userId2 = getUserId(reverseSplitPosition(position), hideTaskToken);
@@ -978,7 +1021,7 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
             if (mMultiInstanceHelpher.supportsMultiInstanceSplit(getComponent(intent), userId1)) {
                 // Flag with MULTIPLE_TASK if this is launching the same activity into both sides of
                 // the split and there is no reusable background task.
-                fillInIntent.addFlags(FLAG_ACTIVITY_MULTIPLE_TASK);
+                fillInIntent.addFlags(FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
                 ProtoLog.v(ShellProtoLogGroup.WM_SHELL_SPLIT_SCREEN, "Adding MULTIPLE_TASK");
             } else if (isSplitScreenVisible()) {
                 mStageCoordinator.switchSplitPosition("startIntent");
@@ -995,8 +1038,19 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
             }
         }
 
+        options = pendingIntentLaunchOptions(options, fillInIntent.getFlags());
         mStageCoordinator.startIntent(intent, fillInIntent, position, options, hideTaskToken,
                 wct, index, displayId);
+    }
+
+    /** Immutable tokens receive launch flags through options, independently of their fill-in. */
+    private static Bundle pendingIntentLaunchOptions(@Nullable Bundle options, int flags) {
+        ActivityOptions launch = ActivityOptions.fromBundle(options);
+        if (launch == null) launch = ActivityOptions.makeBasic();
+        final int launchFlags = flags & (FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
+        launch.setPendingIntentLaunchFlags(launch.getPendingIntentLaunchFlags() | launchFlags);
+        launch.setDisallowEnterPictureInPictureWhileLaunching(true);
+        return launch.toBundle();
     }
 
     /**

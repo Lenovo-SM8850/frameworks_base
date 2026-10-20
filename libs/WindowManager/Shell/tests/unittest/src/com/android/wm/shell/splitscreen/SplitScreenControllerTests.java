@@ -29,6 +29,7 @@ import static com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_POSIT
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_POSITION_TOP_OR_LEFT;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -132,6 +133,7 @@ public class SplitScreenControllerTests extends ShellTestCase {
     @Mock private IActivityTaskManager activityTaskManager;
     @Mock MSDLPlayer mMSDLPlayer;
     @Captor ArgumentCaptor<Intent> mIntentCaptor;
+    @Captor ArgumentCaptor<Bundle> mLaunchOptionsCaptor;
 
     private ShellController mShellController;
     private SplitScreenController mSplitScreenController;
@@ -212,7 +214,7 @@ public class SplitScreenControllerTests extends ShellTestCase {
     }
 
     @Test
-    public void testStartIntent_appendsNoUserActionFlag() {
+    public void testStartIntent_immutableDisallowsPictureInPicture() {
         Intent startIntent = createStartIntent("startActivity");
         PendingIntent pendingIntent =
                 PendingIntent.getActivity(mContext, 0, startIntent, FLAG_IMMUTABLE);
@@ -222,10 +224,33 @@ public class SplitScreenControllerTests extends ShellTestCase {
                 SPLIT_INDEX_0);
 
         verify(mStageCoordinator).startIntent(eq(pendingIntent), mIntentCaptor.capture(),
-                eq(SPLIT_POSITION_TOP_OR_LEFT), isNull(), isNull(), isNull(), eq(SPLIT_INDEX_0),
+                eq(SPLIT_POSITION_TOP_OR_LEFT), mLaunchOptionsCaptor.capture(), isNull(), isNull(), eq(SPLIT_INDEX_0),
                 eq(DEFAULT_DISPLAY));
+        assertEquals(0, mIntentCaptor.getValue().getFlags() & FLAG_ACTIVITY_NO_USER_ACTION);
+        assertTrue(pendingIntent.isImmutable());
+        assertEquals(0, mLaunchOptionsCaptor.getValue()
+                .getInt("android.activity.pendingIntentLaunchFlags") & FLAG_ACTIVITY_NO_USER_ACTION);
+        assertTrue(android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
+                .disallowEnterPictureInPictureWhileLaunching());
+    }
+
+    @Test
+    public void testStartIntent_mutableRetainsNoUserActionFlag() {
+        Intent startIntent = createStartIntent("mutableActivity");
+        PendingIntent pendingIntent = PendingIntent.getActivity(mContext, 0, startIntent,
+                PendingIntent.FLAG_MUTABLE);
+
+        mSplitScreenController.startIntent(pendingIntent, mContext.getUserId(), null,
+                SPLIT_POSITION_TOP_OR_LEFT, null /* options */, null /* hideTaskToken */,
+                SPLIT_INDEX_0);
+
+        verify(mStageCoordinator).startIntent(eq(pendingIntent), mIntentCaptor.capture(),
+                eq(SPLIT_POSITION_TOP_OR_LEFT), mLaunchOptionsCaptor.capture(), isNull(), isNull(),
+                eq(SPLIT_INDEX_0), eq(DEFAULT_DISPLAY));
         assertEquals(FLAG_ACTIVITY_NO_USER_ACTION,
                 mIntentCaptor.getValue().getFlags() & FLAG_ACTIVITY_NO_USER_ACTION);
+        assertTrue(android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
+                .disallowEnterPictureInPictureWhileLaunching());
     }
 
     @Test
@@ -244,10 +269,18 @@ public class SplitScreenControllerTests extends ShellTestCase {
                 SPLIT_INDEX_0);
 
         verify(mStageCoordinator).startIntent(eq(pendingIntent), mIntentCaptor.capture(),
-                eq(SPLIT_POSITION_TOP_OR_LEFT), isNull(), isNull(), isNull(), eq(SPLIT_INDEX_0),
+                eq(SPLIT_POSITION_TOP_OR_LEFT), mLaunchOptionsCaptor.capture(), isNull(), isNull(), eq(SPLIT_INDEX_0),
                 eq(DEFAULT_DISPLAY));
         assertEquals(FLAG_ACTIVITY_MULTIPLE_TASK,
                 mIntentCaptor.getValue().getFlags() & FLAG_ACTIVITY_MULTIPLE_TASK);
+        final int required = FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK;
+        assertTrue(pendingIntent.isImmutable());
+        assertEquals(required, android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
+                .getPendingIntentLaunchFlags() & required);
+        assertEquals(0, mLaunchOptionsCaptor.getValue()
+                .getInt("android.activity.pendingIntentLaunchFlags") & FLAG_ACTIVITY_NO_USER_ACTION);
+        assertTrue(android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
+                .disallowEnterPictureInPictureWhileLaunching());
     }
 
     @Test
@@ -267,7 +300,7 @@ public class SplitScreenControllerTests extends ShellTestCase {
                 null /* wct */, false, SPLIT_INDEX_0, secondDisplay);
 
         verify(mStageCoordinator).startIntent(eq(pendingIntent), mIntentCaptor.capture(),
-                eq(SPLIT_POSITION_TOP_OR_LEFT), isNull(), isNull(), isNull(), eq(SPLIT_INDEX_0),
+                eq(SPLIT_POSITION_TOP_OR_LEFT), mLaunchOptionsCaptor.capture(), isNull(), isNull(), eq(SPLIT_INDEX_0),
                 eq(secondDisplay));
     }
 

@@ -25,8 +25,6 @@ import android.app.ActivityManager
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Rect
-import android.graphics.Canvas
-import android.graphics.ColorFilter
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
@@ -84,8 +82,7 @@ constructor(
     private var indicatorLeash: SurfaceControl? = null
     @Volatile private var isReleased = false
     private var miniPreview = false
-    private val miniBounds = Rect()
-    private var miniOutline: LayerDrawable? = null
+    private var miniOutline: WindowPreviewOutline? = null
 
     /** Create a fullscreen indicator with no animation */
     @ShellMainThread
@@ -359,33 +356,13 @@ constructor(
         desktopExecutor.execute {
             if (isReleased) return@execute
             val view = indicatorView ?: return@execute
-            view.animate().cancel()
-            if (target != null) {
-                miniBounds.set(target)
-                val outline = miniOutline ?: (view.context.getDrawable(
-                    R.drawable.desktop_windowing_transition_background)?.mutate() as LayerDrawable)
-                    .also {
-                        it.findDrawableByLayerId(R.id.indicator_solid).alpha = 0
-                        miniOutline = it
-                        view.alpha = 0f
-                        view.background = object : Drawable() {
-                            override fun draw(canvas: Canvas) {
-                                it.bounds = miniBounds
-                                it.draw(canvas)
-                            }
-                            override fun setAlpha(alpha: Int) {
-                                it.alpha = alpha
-                                it.findDrawableByLayerId(R.id.indicator_solid).alpha = 0
-                            }
-                            override fun setColorFilter(filter: ColorFilter?) { it.colorFilter = filter }
-                            override fun getOpacity() = PixelFormat.TRANSLUCENT
-                        }
-                    }
-                (outline.findDrawableByLayerId(R.id.indicator_stroke) as GradientDrawable)
-                    .cornerRadius = radius
-                view.invalidate()
+            if (target != null || miniOutline != null) {
+                val outline = miniOutline ?: WindowPreviewOutline(view).also { miniOutline = it }
+                outline.update(target, radius)
+            } else {
+                view.animate().cancel()
+                view.animate().alpha(0f).setDuration(120).start()
             }
-            view.animate().alpha(if (target != null) 1f else 0f).setDuration(120).start()
         }
     }
 
