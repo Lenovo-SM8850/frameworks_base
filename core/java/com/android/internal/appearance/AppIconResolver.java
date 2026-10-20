@@ -92,8 +92,6 @@ public final class AppIconResolver {
         String name = ActivityThread.currentPackageName();
         return "com.google.android.apps.nexuslauncher".equals(name)
                 || "com.android.launcher3".equals(name)
-                || "com.android.settings".equals(name)
-                || "com.google.android.settings".equals(name)
                 || "com.android.systemui".equals(name);
     }
 
