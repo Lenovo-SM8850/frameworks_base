@@ -51,6 +51,12 @@ final class PerAppRotationSettings {
         }
     }
 
+    void clearUser(int userId) {
+        final JSONObject rotations = new JSONObject();
+        mRotations.put(userId, rotations);
+        persist(userId, rotations);
+    }
+
     void invalidate() {
         mRotations.clear();
     }

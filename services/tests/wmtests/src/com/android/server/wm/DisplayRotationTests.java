@@ -655,10 +655,11 @@ public class DisplayRotationTests {
     @Test
     public void manualAppRotation_autoRotateAppliesAndRecordsWithoutChangingGlobalSettings()
             throws Exception {
-        setupManualAppRotation("test.first", 0);
+        final ActivityRecord app = setupManualAppRotation("test.first", 0);
+        when(app.getRequestedOrientation()).thenReturn(SCREEN_ORIENTATION_LANDSCAPE);
         acceptRotationSuggestion(Surface.ROTATION_90);
         thawRotation();
-        assertEquals(Surface.ROTATION_90, mTarget.getAppRotation());
+        assertEquals(PerAppRotationSettings.NO_ROTATION, mTarget.getAppRotation());
         acceptRotationSuggestion(Surface.ROTATION_270);
         assertEquals(Surface.ROTATION_270, new PerAppRotationSettings(mMockResolver)
                 .getRotation("test.first", 0));
@@ -669,7 +670,107 @@ public class DisplayRotationTests {
         assertEquals(1, Settings.System.getInt(mMockResolver,
                 Settings.System.ACCELEROMETER_ROTATION));
         freezeRotation(Surface.ROTATION_0);
-        assertEquals(Surface.ROTATION_270, mTarget.getAppRotation());
+        assertEquals(PerAppRotationSettings.NO_ROTATION, mTarget.getAppRotation());
+    }
+
+    @Test
+    public void manualAppRotation_modeChangesClearAllChoicesForCurrentUser() throws Exception {
+        final ActivityRecord app = setupManualAppRotation("test.first", 0);
+        when(app.getRequestedOrientation()).thenReturn(SCREEN_ORIENTATION_LANDSCAPE);
+        for (int mode : new int[] {WindowManagerPolicy.USER_ROTATION_FREE,
+                WindowManagerPolicy.USER_ROTATION_LOCKED}) {
+            acceptRotationSuggestion(Surface.ROTATION_90);
+            final PerAppRotationSettings settings = new PerAppRotationSettings(mMockResolver);
+            settings.setRotation("test.second", 0, Surface.ROTATION_270);
+            settings.setRotation("test.first", 10, Surface.ROTATION_180);
+            if (mode == WindowManagerPolicy.USER_ROTATION_FREE) {
+                thawRotation();
+            } else {
+                freezeRotation(Surface.ROTATION_0);
+            }
+            assertEquals(mode, mTarget.getUserRotationMode());
+            assertEquals(PerAppRotationSettings.NO_ROTATION, mTarget.getAppRotation());
+            final PerAppRotationSettings reloaded = new PerAppRotationSettings(mMockResolver);
+            assertEquals(PerAppRotationSettings.NO_ROTATION,
+                    reloaded.getRotation("test.first", 0));
+            assertEquals(PerAppRotationSettings.NO_ROTATION,
+                    reloaded.getRotation("test.second", 0));
+            assertNull(Settings.Secure.getStringForUser(mMockResolver,
+                    PerAppRotationSettings.SETTING_NAME, 0));
+            assertEquals(Surface.ROTATION_180, reloaded.getRotation("test.first", 10));
+        }
+    }
+
+    @Test
+    public void manualAppRotation_sameModePreservesChoicesInBothModes() throws Exception {
+        final ActivityRecord app = setupManualAppRotation("test.first", 0);
+        when(app.getRequestedOrientation()).thenReturn(SCREEN_ORIENTATION_LANDSCAPE);
+        for (int mode : new int[] {WindowManagerPolicy.USER_ROTATION_LOCKED,
+                WindowManagerPolicy.USER_ROTATION_FREE}) {
+            if (mode == WindowManagerPolicy.USER_ROTATION_FREE) {
+                thawRotation();
+            }
+            acceptRotationSuggestion(Surface.ROTATION_90);
+            if (mode == WindowManagerPolicy.USER_ROTATION_FREE) {
+                thawRotation();
+            } else {
+                freezeRotation(Surface.ROTATION_180);
+            }
+            mAccelerometerRotationObserver.onChange(false);
+            assertEquals(Surface.ROTATION_90, mTarget.getAppRotation());
+            assertEquals(Surface.ROTATION_90, new PerAppRotationSettings(mMockResolver)
+                    .getRotation("test.first", 0));
+        }
+    }
+
+    @Test
+    public void manualAppRotation_initialSettingsPreserveChoicesInBothModes() throws Exception {
+        setupManualAppRotation("test.first", 0);
+        for (int mode : new int[] {WindowManagerPolicy.USER_ROTATION_LOCKED,
+                WindowManagerPolicy.USER_ROTATION_FREE}) {
+            Settings.System.putIntForUser(mMockResolver, Settings.System.ACCELEROMETER_ROTATION,
+                    mode == WindowManagerPolicy.USER_ROTATION_FREE ? 1 : 0, 0);
+            new PerAppRotationSettings(mMockResolver).setRotation("test.first", 0,
+                    Surface.ROTATION_90);
+            mTarget = new TestDisplayRotation(mMockDisplayContent, mMockDisplayAddress,
+                    mMockDisplayPolicy, mMockDisplayWindowSettings, mMockContext,
+                    mDeviceStateController);
+            assertEquals(mode, mTarget.getUserRotationMode());
+            assertEquals(Surface.ROTATION_90, mTarget.getAppRotation());
+            assertEquals(Surface.ROTATION_90, new PerAppRotationSettings(mMockResolver)
+                    .getRotation("test.first", 0));
+        }
+    }
+
+    @Test
+    public void manualAppRotation_userSwitchPreservesChoicesAndModeChangeClearsSwitchedUser()
+            throws Exception {
+        setupManualAppRotation("test.first", 0);
+        acceptRotationSuggestion(Surface.ROTATION_90);
+        new PerAppRotationSettings(mMockResolver).setRotation("test.first", 10,
+                Surface.ROTATION_270);
+        Settings.System.putIntForUser(mMockResolver, Settings.System.ACCELEROMETER_ROTATION,
+                1, 10);
+        try {
+            sMockWm.mCurrentUserId = 10;
+            mTarget.onUserSwitch();
+            assertEquals(WindowManagerPolicy.USER_ROTATION_FREE, mTarget.getUserRotationMode());
+            assertEquals(Surface.ROTATION_90, new PerAppRotationSettings(mMockResolver)
+                    .getRotation("test.first", 0));
+            assertEquals(Surface.ROTATION_270, new PerAppRotationSettings(mMockResolver)
+                    .getRotation("test.first", 10));
+            Settings.System.putIntForUser(mMockResolver, Settings.System.ACCELEROMETER_ROTATION,
+                    0, 10);
+            mAccelerometerRotationObserver.onChange(false);
+            assertEquals(WindowManagerPolicy.USER_ROTATION_LOCKED, mTarget.getUserRotationMode());
+            assertEquals(Surface.ROTATION_90, mTarget.getAppRotation());
+            assertEquals(Surface.ROTATION_90, new PerAppRotationSettings(mMockResolver)
+                    .getRotation("test.first", 0));
+            assertNull(Settings.Secure.getStringForUser(mMockResolver,
+                    PerAppRotationSettings.SETTING_NAME, 10));
+        } finally {
+            sMockWm.mCurrentUserId = 0;
+        }
     }
 
     @Test
@@ -1269,7 +1370,6 @@ public class DisplayRotationTests {
             throws Exception {
         final ActivityRecord app = setupManualAppRotation("test.first", 0);
         when(app.getRequestedOrientation()).thenReturn(SCREEN_ORIENTATION_LANDSCAPE);
-        acceptRotationSuggestion(Surface.ROTATION_0);
         enableOrientationSensor();
         for (boolean autoRotate : new boolean[] {true, false}) {
             if (autoRotate) {
@@ -1277,6 +1377,7 @@ public class DisplayRotationTests {
             } else {
                 freezeRotation(Surface.ROTATION_90);
             }
+            acceptRotationSuggestion(Surface.ROTATION_0);
             mOrientationSensorListener.onSensorChanged(createSensorEvent(Surface.ROTATION_270));
             assertEquals(Surface.ROTATION_0, mTarget.rotationForOrientation(
                     SCREEN_ORIENTATION_UNSPECIFIED, Surface.ROTATION_270));

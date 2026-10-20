@@ -216,6 +216,7 @@ public class DisplayRotation {
 
     @WindowManagerPolicy.UserRotationMode
     private int mUserRotationMode = WindowManagerPolicy.USER_ROTATION_FREE;
+    private int mRotationSettingsUserId = UserHandle.USER_NULL;
 
     @Surface.Rotation
     private int mUserRotation = Surface.ROTATION_0;
@@ -1726,15 +1727,21 @@ public class DisplayRotation {
                 shouldUpdateRotation = true;
             }
 
+            final int userId = mService.mCurrentUserId;
             final int userRotationMode = Settings.System.getIntForUser(resolver,
-                    Settings.System.ACCELEROMETER_ROTATION, 0, UserHandle.USER_CURRENT) != 0
+                    Settings.System.ACCELEROMETER_ROTATION, 0, userId) != 0
                             ? WindowManagerPolicy.USER_ROTATION_FREE
                             : WindowManagerPolicy.USER_ROTATION_LOCKED;
             if (mUserRotationMode != userRotationMode) {
+                // Initial settings and user switches do not represent a mode change.
+                if (mRotationSettingsUserId == userId) {
+                    mPerAppRotationSettings.clearUser(userId);
+                }
                 mUserRotationMode = userRotationMode;
                 shouldUpdateOrientationListener = true;
                 shouldUpdateRotation = true;
             }
+            mRotationSettingsUserId = userId;
 
             if (shouldUpdateOrientationListener) {
                 updateOrientationListenerLw(); // Enable or disable the orientation listener.
