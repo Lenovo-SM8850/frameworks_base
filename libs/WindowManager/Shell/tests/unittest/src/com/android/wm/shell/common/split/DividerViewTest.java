@@ -209,13 +209,13 @@ public class DividerViewTest extends ShellTestCase {
         verify(mSplitLayout, never()).snapToTarget(anyInt(), any(SnapTarget.class));
         // Verify dragging is finished.
         assertFalse(mDividerView.isMoving());
-        verify(mSplitLayout, never()).onDoubleTappedDivider();
+        verify(mSplitLayout).onDoubleTappedDivider();
         assertNoResizeMenu();
     }
 
     @Test
     @UiThreadTest
-    public void onTouch_doubleTapPair_doesNotShowMenuOrSwapAcrossAxes() {
+    public void onTouch_doubleTapPair_swapsOnceWithoutMenuAcrossAxes() {
         for (boolean leftRight : new boolean[]{true, false}) {
             doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
             tapDivider(2);
@@ -224,7 +224,7 @@ public class DividerViewTest extends ShellTestCase {
 
     @Test
     @UiThreadTest
-    public void onTouch_doubleTapBranch_doesNotShowMenuOrSwapAcrossAxes() {
+    public void onTouch_doubleTapBranch_swapsOnceWithoutMenuAcrossAxes() {
         for (boolean leftRight : new boolean[]{true, false}) {
             mSplitLayout.setMultiSplitDivider(new Rect(0, 0, 1080, 1000), leftRight, 0.5f);
             tapDivider(2);
@@ -233,7 +233,7 @@ public class DividerViewTest extends ShellTestCase {
 
     @Test
     @UiThreadTest
-    public void onTouch_tapPair_doesNotShowMenuOrSwapAcrossAxes() {
+    public void onTouch_tapPair_swapsOnceWithoutMenuAcrossAxes() {
         for (boolean leftRight : new boolean[]{true, false}) {
             doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
             tapDivider(1);
@@ -242,15 +242,19 @@ public class DividerViewTest extends ShellTestCase {
 
     @Test
     @UiThreadTest
-    public void onTouch_tapBranch_doesNotShowMenuOrSwapAcrossAxes() {
+    public void onTouch_tapBranch_swapsOnceWithoutMenuAcrossAxes() {
         for (boolean leftRight : new boolean[]{true, false}) {
             mSplitLayout.setMultiSplitDivider(new Rect(0, 0, 1080, 1000), leftRight, 0.5f);
             tapDivider(1);
         }
     }
+
+    private long mNextTapTime;
 
     private void tapDivider(int count) {
-        final long firstDown = SystemClock.uptimeMillis();
+        org.mockito.Mockito.clearInvocations(mSplitLayout);
+        final long firstDown = Math.max(SystemClock.uptimeMillis(), mNextTapTime);
+        mNextTapTime = firstDown + 1000;
         for (int i = 0; i < count; i++) {
             final long downTime = firstDown + i * 100;
             MotionEvent down = getMotionEvent(downTime, MotionEvent.ACTION_DOWN, 100, 100);
@@ -262,9 +266,31 @@ public class DividerViewTest extends ShellTestCase {
             up.recycle();
         }
         assertFalse(mDividerView.isMoving());
-        verify(mSplitLayout, never()).onDoubleTappedDivider();
+        verify(mSplitLayout).onDoubleTappedDivider();
         verify(mSplitLayout, never()).snapToTarget(anyInt(), any(SnapTarget.class));
         assertNoResizeMenu();
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_crossAxisAndCancelNeverSwap() {
+        long time = SystemClock.uptimeMillis();
+        mDividerView.onTouch(mDividerView, getMotionEvent(time, MotionEvent.ACTION_DOWN, 100, 100));
+        mDividerView.onTouch(mDividerView, getMotionEvent(time, time + 10,
+                MotionEvent.ACTION_UP, 100, 1000));
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
+        mDividerView.onTouch(mDividerView, getMotionEvent(time + 1000,
+                MotionEvent.ACTION_DOWN, 100, 100));
+        mDividerView.onTouch(mDividerView, getMotionEvent(time + 1000, time + 1010,
+                MotionEvent.ACTION_CANCEL, 100, 100));
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_independentTapAfterTimeoutSwapsAgain() {
+        tapDivider(2);
+        tapDivider(1);
     }
 
     private void assertNoResizeMenu() {

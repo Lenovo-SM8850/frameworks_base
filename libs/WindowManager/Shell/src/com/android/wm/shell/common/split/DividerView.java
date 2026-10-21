@@ -93,6 +93,11 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
 
     private VelocityTracker mVelocityTracker;
     private boolean mMoving;
+    private float mDownX;
+    private float mDownY;
+    private boolean mTapEligible;
+    private long mLastTapTime = Long.MIN_VALUE;
+    private boolean mSuppressTap;
     private int mStartPos;
     private boolean mInteractive;
     private boolean mHideHandle;
@@ -478,10 +483,20 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
             return false;
         }
 
+        if (action != MotionEvent.ACTION_DOWN && (event.getPointerCount() != 1
+                || action == MotionEvent.ACTION_POINTER_DOWN
+                || Math.hypot(event.getRawX() - mDownX, event.getRawY() - mDownY) > mTouchSlop)) {
+            mTapEligible = false;
+        }
         final boolean isLeftRightSplit = mSplitLayout.isLeftRightSplit();
         final int touchPos = (int) (isLeftRightSplit ? event.getX() : event.getY());
         switch (action) {
             case MotionEvent.ACTION_DOWN:
+                mDownX = event.getRawX();
+                mDownY = event.getRawY();
+                mTapEligible = event.getPointerCount() == 1;
+                mSuppressTap = mLastTapTime != Long.MIN_VALUE
+                        && event.getEventTime() - mLastTapTime <= ViewConfiguration.getDoubleTapTimeout();
                 mVelocityTracker = VelocityTracker.obtain();
                 mVelocityTracker.addMovement(event);
                 setTouching();
@@ -515,6 +530,10 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
                 releaseTouching();
                 if (!mMoving) {
                     mSplitLayout.onDraggingCancelled();
+                    if (action == MotionEvent.ACTION_UP && mTapEligible && !mSuppressTap) {
+                        mLastTapTime = event.getEventTime();
+                        mSplitLayout.onDoubleTappedDivider();
+                    }
                 } else {
                     mVelocityTracker.addMovement(event);
                     mVelocityTracker.computeCurrentVelocity(1000 /* units */);
