@@ -2346,6 +2346,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         }
 
         @Override
+        public void onReplaceSplitApp(int taskId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.showReplaceSplitPicker(taskId, mViewModel.mBgExecutor);
+            }
+        }
+
+        @Override
         public void onAddSplitBelow(int taskId) {
             if (mViewModel.mSplitScreenController != null) {
                 mViewModel.mSplitScreenController.showAddBelowPicker(taskId, mViewModel.mBgExecutor);

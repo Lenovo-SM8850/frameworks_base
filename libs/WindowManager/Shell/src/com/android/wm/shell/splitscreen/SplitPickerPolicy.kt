@@ -62,12 +62,14 @@ data class SplitPickerSession(
     val slot: AppDragSlot,
     val generation: Long,
     val currentUser: Int,
+    val replace: Boolean = false,
 ) {
     data class Member(val userId: Int, val token: IBinder, val component: android.content.ComponentName? = null)
 
     fun matches(destination: AppDragSlot?, group: Map<Int, Member>, serial: Long,
         user: Int): Boolean = destination != null && generation == serial && currentUser == user &&
-        members == group && slot.leafId == destination.leafId &&
+        members == group && slot.occupied == destination.occupied &&
+        replace == destination.occupied && slot.leafId == destination.leafId &&
         slot.layoutVersion == destination.layoutVersion && slot.splitBelow == destination.splitBelow &&
         slot.newTaskFirst == destination.newTaskFirst && slot.bounds == destination.bounds
 }

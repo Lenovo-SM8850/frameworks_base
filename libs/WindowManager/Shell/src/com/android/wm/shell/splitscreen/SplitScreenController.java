@@ -432,6 +432,25 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         return mStageCoordinator.startTaskInSplitSlot(task, slot);
     }
 
+    @Nullable
+    public AppDragSlot getReplaceSplitSlot(int taskId) {
+        return canMutateSplitTask(taskId) ? mStageCoordinator.getReplaceSplitSlot(taskId) : null;
+    }
+
+    /** Revalidates the exact occupied destination before reusing a recent or floating task. */
+    public boolean replaceSplitTask(TaskInfo task, AppDragSlot slot, int sourceTaskId) {
+        final AppDragSlot fresh = getReplaceSplitSlot(sourceTaskId);
+        if (fresh == null || !fresh.occupied || !slot.occupied || fresh.leafId != slot.leafId
+                || fresh.layoutVersion != slot.layoutVersion || !fresh.bounds.equals(slot.bounds)
+                || !task.supportsMultiWindow || task.displayId != android.view.Display.DEFAULT_DISPLAY
+                || task.minWidth > slot.bounds.width() || task.minHeight > slot.bounds.height()) {
+            return false;
+        }
+        if (slot.leafId >= 0) return startTaskInSplitSlot(task, slot);
+        mStageCoordinator.replacePairTask(task, slot);
+        return true;
+    }
+
     public java.util.List<Integer> getSplitLeafTaskIds() {
         return mStageCoordinator.getSplitLeafTaskIds();
     }
@@ -452,14 +471,22 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
 
     private SplitPickerController mSplitPicker;
 
+    public void showReplaceSplitPicker(int taskId, Executor backgroundExecutor) {
+        showSplitPicker(taskId, backgroundExecutor, true);
+    }
+
     public void showAddBelowPicker(int taskId, Executor backgroundExecutor) {
+        showSplitPicker(taskId, backgroundExecutor, false);
+    }
+
+    private void showSplitPicker(int taskId, Executor backgroundExecutor, boolean replace) {
         mMainExecutor.execute(() -> {
             if (mSplitPicker == null) {
                 mSplitPicker = new SplitPickerController(mContext, this, mTaskOrganizer,
                         mDisplayController, mTransitions, mMainExecutor, mMainHandler,
                         backgroundExecutor);
             }
-            mSplitPicker.show(taskId);
+            mSplitPicker.show(taskId, replace);
         });
     }
 

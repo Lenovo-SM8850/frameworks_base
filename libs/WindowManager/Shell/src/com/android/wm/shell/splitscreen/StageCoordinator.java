@@ -2521,6 +2521,33 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         return mMultiSplit == null ? null : mMultiSplit.getBelowSlot(taskId, canMutateSplit());
     }
 
+    @Nullable
+    SplitScreenController.AppDragSlot getReplaceSplitSlot(int taskId) {
+        if (isMultiSplitActive()) return mMultiSplit.getReplacementSlot(taskId);
+        final int position = getSplitPosition(taskId);
+        if (position == SPLIT_POSITION_UNDEFINED || !isSplitScreenVisible()) return null;
+        final Rect bounds = new Rect(position == SPLIT_POSITION_TOP_OR_LEFT
+                ? mSplitLayout.getTopLeftBounds() : mSplitLayout.getBottomRightBounds());
+        final Rect hit = new Rect(bounds);
+        if (bounds.isEmpty() || !hit.intersect(mSplitLayout.getRootBounds())) return null;
+        return new SplitScreenController.AppDragSlot(position,
+                enableFlexibleSplit() ? (position == SPLIT_POSITION_TOP_OR_LEFT
+                        ? SPLIT_INDEX_0 : SPLIT_INDEX_1) : SPLIT_INDEX_UNDEFINED,
+                bounds, hit, true);
+    }
+
+    void replacePairTask(TaskInfo task, SplitScreenController.AppDragSlot slot) {
+        WindowContainerTransaction wct = new WindowContainerTransaction();
+        if (task.isFloatingWindow && task.token != null) {
+            wct.merge(com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.INSTANCE
+                    .getRemovedFromLayerWct(task.token), true);
+            wct.setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED).setBounds(task.token, new Rect());
+        }
+        // Existing pair entry owns replacement eviction and transition bookkeeping.
+        if (!wct.isEmpty()) mTaskOrganizer.applyTransaction(wct);
+        startTask(task.taskId, slot.position, null, null, slot.index);
+    }
+
     boolean startTaskInSplitSlot(TaskInfo task, SplitScreenController.AppDragSlot slot) {
         return mMultiSplit != null && mMultiSplit.startTask(task, slot);
     }

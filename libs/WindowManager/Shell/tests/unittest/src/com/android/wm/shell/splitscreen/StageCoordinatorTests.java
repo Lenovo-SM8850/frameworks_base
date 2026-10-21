@@ -1800,6 +1800,18 @@ public class StageCoordinatorTests extends ShellTestCase {
         verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
     }
 
+    @Test
+    public void replacePairSlotTargetsWholeHalfInsteadOfFreeInsertionPreviews() {
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        doReturn(SPLIT_POSITION_TOP_OR_LEFT).when(mStageCoordinator).getSplitPosition(mTaskId);
+        final SplitScreenController.AppDragSlot slot =
+                mStageCoordinator.getReplaceSplitSlot(mTaskId);
+        assertThat(slot).isNotNull();
+        assertThat(slot.bounds).isEqualTo(mBounds1);
+        assertThat(slot.occupied).isTrue();
+        assertThat(slot.leafId).isEqualTo(-1);
+        verify(mStageCoordinator, never()).getAppDragSlots(anyInt());
+    }
 
     @Test
     public void sidebarRepeatTaskDropDuringPendingEnterDoesNotMutatePairLayout() {

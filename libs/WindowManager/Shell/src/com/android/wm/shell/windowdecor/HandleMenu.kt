@@ -556,6 +556,9 @@ private constructor(
         if (splitScreenController.getAddBelowSlot(taskInfo.taskId) != null) {
             menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
         }
+        if (splitScreenController.getReplaceSplitSlot(taskInfo.taskId) != null) {
+            menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
+        }
         if (taskInfo.isFloatingWindow) {
             menuHeight += loadDimensionPixelSize(R.dimen.bubble_menu_item_height) + pillTopMargin
         }
@@ -670,6 +673,9 @@ private constructor(
         private val splitCloseButton =
             splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_close_button)
 
+        private val splitReplaceButton =
+            splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_replace_button)
+
         private val splitAddButton =
             splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_add_button)
 
@@ -708,6 +714,7 @@ private constructor(
             listOf(
                 splitCloseButton,
                 splitAddButton,
+                splitReplaceButton,
                 floatingCloseButton,
                 newWindowBtn,
                 changeAspectRatioBtn,
@@ -757,6 +764,11 @@ private constructor(
                         windowDecorationActions.onAddSplitBelow(taskInfo.taskId)
                     }
                 }
+                R.id.split_replace_button -> {
+                    if (splitScreenController.getReplaceSplitSlot(taskInfo.taskId) != null) {
+                        windowDecorationActions.onReplaceSplitApp(taskInfo.taskId)
+                    }
+                }
                 R.id.split_close_button -> {
                     if (splitScreenController.canMutateSplitTask(taskInfo.taskId)) {
                         windowDecorationActions.onClose(taskInfo)
@@ -804,6 +816,8 @@ private constructor(
             splitActionsPill.isGone = !isInSplitScreen
             val addSlot = splitScreenController.getAddBelowSlot(taskInfo.taskId)
             splitAddButton.isGone = !isInSplitScreen || addSlot == null
+            splitReplaceButton.isGone = !isInSplitScreen ||
+                splitScreenController.getReplaceSplitSlot(taskInfo.taskId) == null
             splitAddButton.setText(getString(if (addSlot?.splitBelow != false) {
                 R.string.split_picker_add_below
             } else R.string.split_picker_add_to_side))
@@ -812,6 +826,13 @@ private constructor(
                 splitAddButton.setTextColor(style.textColor)
                 splitAddButton.setDrawableTint(style.textColor)
                 splitAddButton.background = createBackgroundDrawable(
+                    color = style.textColor,
+                    cornerRadius = handleMenuCornerRadius,
+                    drawableInsets = DrawableInsets(),
+                )
+                splitReplaceButton.setTextColor(style.textColor)
+                splitReplaceButton.setDrawableTint(style.textColor)
+                splitReplaceButton.background = createBackgroundDrawable(
                     color = style.textColor,
                     cornerRadius = handleMenuCornerRadius,
                     drawableInsets = DrawableInsets(),

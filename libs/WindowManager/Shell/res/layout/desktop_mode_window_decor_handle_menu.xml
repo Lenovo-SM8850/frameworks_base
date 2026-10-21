@@ -140,6 +140,13 @@
             style="@style/DesktopModeHandleMenuActionButton"/>
 
         <com.android.wm.shell.windowdecor.HandleMenuActionButton
+            android:id="@+id/split_replace_button"
+            android:contentDescription="@string/handle_menu_replace_app"
+            android:text="@string/handle_menu_replace_app"
+            android:src="@drawable/desktop_mode_ic_handle_menu_splitscreen"
+            style="@style/DesktopModeHandleMenuActionButton"/>
+
+        <com.android.wm.shell.windowdecor.HandleMenuActionButton
             android:id="@+id/split_close_button"
             android:contentDescription="@string/handle_menu_close_app"
             android:text="@string/handle_menu_close_app"

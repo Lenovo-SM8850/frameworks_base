@@ -436,4 +436,5 @@
     <string name="split_picker_empty">No matching apps</string>
     <string name="split_picker_loading">Loading apps…</string>
     <string name="split_picker_launching">Opening app in split</string>
+    <string name="handle_menu_replace_app">Replace with another app</string>
 </resources>

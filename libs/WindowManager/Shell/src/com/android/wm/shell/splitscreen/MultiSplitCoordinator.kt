@@ -641,6 +641,17 @@ class MultiSplitCoordinator(
     fun startIntent(intent: PendingIntent, fillIn: Intent?, options: Bundle?, slot: AppDragSlot): Boolean =
         insert(slot, options, true) { wct, opts, _ -> wct.sendPendingIntent(intent, fillIn, opts.toBundle()) }
 
+    /** Replacement addresses a whole existing leaf, including an unsplit half. */
+    fun getReplacementSlot(taskId: Int): AppDragSlot? {
+        if (isBusy || !isVisible || imeTop != null) return null
+        val model = layout ?: return null
+        val leaf = model.getLeaves().firstOrNull { it.taskId == taskId } ?: return null
+        val calculated = bounds(model) ?: return null
+        val rect = calculated.leaves[leaf.id] ?: return null
+        return AppDragSlot(position(leaf.id, model), leaf.id.value, rect, calculated.visibleLeaves.getValue(leaf.id), true,
+            leaf.id.value, false, revision)
+    }
+
     fun startTask(task: android.app.TaskInfo, slot: AppDragSlot): Boolean {
         if (!task.supportsMultiWindow || task.displayId != host.rootInfo()?.displayId ||
             task.minWidth > slot.bounds.width() || task.minHeight > slot.bounds.height() ||

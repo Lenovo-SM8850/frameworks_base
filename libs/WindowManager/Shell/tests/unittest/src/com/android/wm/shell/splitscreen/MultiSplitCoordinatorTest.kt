@@ -111,6 +111,18 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         verify(transitions, never()).startTransition(any(), any(), any())
     }
 
+    @Test fun replacementSlotUsesTheWholeSingleHalfAndEveryQuarter() {
+        add()
+        for (taskId in listOf(10, 20, 30)) {
+            val destination = coordinator.getReplacementSlot(taskId)!!
+            val before = coordinator.activeStages
+            assertThat(destination.occupied).isTrue()
+            assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), destination)).isTrue()
+            coordinator.onTransitionFinished(token, false)
+            assertThat(coordinator.activeStages).containsExactlyElementsIn(before)
+        }
+        assertThat(coordinator.getBelowSlot(20)).isNotNull()
+    }
 
     @Test fun rootAndInnerHandleCallbacksSwapOnlyTheirExistingNeighbourApps() {
         add()

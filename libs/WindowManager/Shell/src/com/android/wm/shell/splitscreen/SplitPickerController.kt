@@ -87,10 +87,12 @@ class SplitPickerController(
         }
     }
 
-    fun show(taskId: Int) {
+    @JvmOverloads
+    fun show(taskId: Int, replace: Boolean = false) {
         dismiss()
         val task = organizer.getRunningTaskInfo(taskId) ?: return
-        val slot = split.getAddBelowSlot(taskId) ?: return
+        val slot = (if (replace) split.getReplaceSplitSlot(taskId)
+            else split.getAddBelowSlot(taskId)) ?: return
         val stable = Rect().also {
             displays.getDisplayLayout(task.displayId)?.getStableBounds(it)
         }
@@ -99,7 +101,7 @@ class SplitPickerController(
         if (taskId !in group) return
         icons.evictAll()
         val selection = SplitPickerSession(task.displayId, taskId, group, slot,
-            ++generation, ActivityManager.getCurrentUser())
+            ++generation, ActivityManager.getCurrentUser(), replace)
         session = selection
         try {
             val displayContext = displays.getDisplayContext(task.displayId) ?: run { dismiss(); return }
@@ -146,7 +148,8 @@ class SplitPickerController(
         .associate { it.taskId to SplitPickerSession.Member(it.userId, it.token.asBinder(), it.baseActivity) }
 
     private fun valid(selection: SplitPickerSession): Boolean = session === selection &&
-        selection.matches(split.getAddBelowSlot(selection.sourceTaskId), members(), generation,
+        selection.matches(if (selection.replace) split.getReplaceSplitSlot(selection.sourceTaskId)
+            else split.getAddBelowSlot(selection.sourceTaskId), members(), generation,
             ActivityManager.getCurrentUser()) &&
         organizer.getRunningTaskInfo(selection.sourceTaskId)?.displayId == selection.displayId
 
@@ -308,6 +311,8 @@ class SplitPickerController(
                             incoming.baseIntent.component != checked.component ||
                             !incoming.supportsMultiWindow ||
                             (incoming.isVisible && !incoming.isFloatingWindow)) false
+                        else if (selection.replace) split.replaceSplitTask(incoming, selection.slot,
+                            selection.sourceTaskId)
                         else split.startTaskInSplitSlot(incoming, selection.slot)
                     } else {
                         val intent = Intent.makeMainActivity(checked.component).addFlags(

@@ -107,6 +107,14 @@ class SplitPickerPolicyTest : ShellTestCase() {
         val otherLeaf = AppDragSlot(0, 2, bounds, bounds, false, 1, false, 3, true)
         assertThat(session().matches(otherLeaf, members, 7, 0)).isFalse()
     }
+    @Test fun replacementSessionCannotTurnIntoInsertion() {
+        val occupied = slot(bounds, occupied = true)
+        val replacement = SplitPickerSession(0, 42, members, occupied, 7, 0, true)
+        assertThat(replacement.matches(occupied, members, 7, 0)).isTrue()
+        assertThat(replacement.matches(slot(bounds), members, 7, 0)).isFalse()
+        assertThat(session().matches(occupied, members, 7, 0)).isFalse()
+    }
+
     @Test fun searchMatchesLabelsWithoutCaseOrSurroundingWhitespace() {
         assertThat(SplitPickerPolicy.matchesQuery("Calendar", " cal ")).isTrue()
         assertThat(SplitPickerPolicy.matchesQuery("Calendar", "DAR")).isTrue()
