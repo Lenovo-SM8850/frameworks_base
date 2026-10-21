@@ -1692,4 +1692,89 @@ public class StageCoordinatorTests extends ShellTestCase {
                 any(), anyInt(), anyBoolean(), anyInt());
     }
 
+    @Test
+    @DisableFlags({com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_SPLIT,
+            com.android.wm.shell.Flags.FLAG_ENABLE_SHELL_MODES})
+    public void multiExit_restoresLaunchAdjacentOnlyAfterTheExitWctApplies() throws Exception {
+        final MultiSplitCoordinator multi = installMultiForLaunchTest();
+        doAnswer(invocation -> {
+            mStageCoordinator.onMultiSplitEnded(invocation.getArgument(1));
+            when(multi.isActive()).thenReturn(false);
+            return null;
+        }).when(multi).exit(anyInt(), any());
+        final ArgumentCaptor<Runnable> idle = ArgumentCaptor.forClass(Runnable.class);
+        doAnswer(invocation -> null).when(mTransitions).runOnIdle(idle.capture());
+        clearInvocations(mLaunchAdjacentController, mSyncQueue);
+        // A background sidebar/startIntent drop reuses a recent task through startTask.
+        mStageCoordinator.startTask(mTaskId, SPLIT_POSITION_BOTTOM_OR_RIGHT, null, null,
+                SPLIT_INDEX_UNDEFINED);
+        verify(multi).exit(eq(41), mWctCaptor.capture());
+        final WindowContainerTransaction wct = mWctCaptor.getValue();
+        verify(mSplitScreenTransitions).startEnterTransition(anyInt(), eq(wct), any(), any(),
+                anyInt(), anyBoolean(), anyInt());
+        assertThat(getHierarchyOpForType(wct, HIERARCHY_OP_TYPE_LAUNCH_TASK)).isNotNull();
+        assertThat(wct.getHierarchyOps().stream().anyMatch(op -> op.getType()
+                == HierarchyOp.HIERARCHY_OP_TYPE_SET_ADJACENT_ROOTS)).isTrue();
+        verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
+        verify(mSyncQueue, never()).queue(any(WindowContainerTransaction.class));
+        // Posting alone must not send the legacy sync while the exit is still collecting.
+        mMainExecutor.flushAll();
+        verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
+        idle.getValue().run();
+        verify(mLaunchAdjacentController).setLaunchAdjacentRoot(mSideStage.mRootTaskInfo.token);
+    }
+
+    @Test
+    @DisableFlags({com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_SPLIT,
+            com.android.wm.shell.Flags.FLAG_ENABLE_SHELL_MODES})
+    public void multiExit_newSessionCancelsDeferredLaunchAdjacentRestoration() throws Exception {
+        final ArgumentCaptor<Runnable> idle = ArgumentCaptor.forClass(Runnable.class);
+        doAnswer(invocation -> null).when(mTransitions).runOnIdle(idle.capture());
+        mStageCoordinator.onMultiSplitEnded(new WindowContainerTransaction());
+        mMainExecutor.flushAll();
+        installMultiSplitForRestoreTest();
+        clearInvocations(mLaunchAdjacentController);
+        idle.getValue().run();
+        verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
+    }
+
+    @Test
+    @DisableFlags({com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_SPLIT,
+            com.android.wm.shell.Flags.FLAG_ENABLE_SHELL_MODES})
+    public void multiExit_vanishedSideRootCancelsDeferredLaunchAdjacentRestoration() {
+        final ArgumentCaptor<Runnable> idle = ArgumentCaptor.forClass(Runnable.class);
+        doAnswer(invocation -> null).when(mTransitions).runOnIdle(idle.capture());
+        mStageCoordinator.onMultiSplitEnded(new WindowContainerTransaction());
+        mMainExecutor.flushAll();
+        mSideStage.mRootTaskInfo = null;
+        clearInvocations(mLaunchAdjacentController);
+        idle.getValue().run();
+        verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
+    }
+
+    @Test
+    public void sidebarRepeatTaskDropDuringPendingEnterDoesNotMutatePairLayout() {
+        mSplitScreenTransitions.mPendingEnter = mock(SplitScreenTransitions.EnterSession.class);
+        mStageCoordinator.startTask(mTaskId, SPLIT_POSITION_BOTTOM_OR_RIGHT, null, null,
+                SPLIT_INDEX_UNDEFINED);
+        verify(mStageCoordinator, never()).prepareEnterSplitScreen(any(), any(), anyInt(),
+                anyBoolean(), anyInt());
+        verify(mSplitLayout, never()).setDividerAtBorder(anyBoolean());
+        verify(mSplitScreenTransitions, never()).startEnterTransition(anyInt(), any(), any(),
+                any(), anyInt(), anyBoolean(), anyInt());
+    }
+
+    @Test
+    public void sidebarRepeatIntentDropDuringPendingEnterDoesNotMutatePairLayout() {
+        mSplitScreenTransitions.mPendingEnter = mock(SplitScreenTransitions.EnterSession.class);
+        mStageCoordinator.startIntent(mock(PendingIntent.class), null,
+                SPLIT_POSITION_BOTTOM_OR_RIGHT, null, null, null,
+                SPLIT_INDEX_UNDEFINED, DEFAULT_DISPLAY);
+        verify(mStageCoordinator, never()).prepareEnterSplitScreen(any(), any(), anyInt(),
+                anyBoolean(), anyInt());
+        verify(mSplitLayout, never()).setDividerAtBorder(anyBoolean());
+        verify(mSplitScreenTransitions, never()).startEnterTransition(anyInt(), any(), any(),
+                any(), anyInt(), anyBoolean(), anyInt());
+    }
+
 }

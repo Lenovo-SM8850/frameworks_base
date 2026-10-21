@@ -189,6 +189,94 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         verify(host).ended(any())
     }
 
+    private fun collapseOriginalColumn(): WindowContainerTransaction {
+        whenever(split.rootBounds).thenReturn(Rect(0, 0, 1600, 2560))
+        whenever(split.topLeftBounds).thenReturn(Rect(0, 0, 793, 2560))
+        whenever(split.dividerSize).thenReturn(14)
+        repeat(2) {
+            val slot = coordinator.getSlots(0).filter { !it.occupied && !it.newTaskFirst }
+                .maxBy { it.bounds.width().toLong() * it.bounds.height() }
+            assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+            coordinator.onTransitionFinished(token, false)
+        }
+        // Put the original pair in the left column and the two spare roots in the right.
+        assertThat(coordinator.swapLeaves(1, 2)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val wct = WindowContainerTransaction()
+        dividerHandlers[1].onDividerInteractionChanged(true)
+        dividerHandlers[1].onSnappedToDismiss(false,
+            SplitScreenController.EXIT_REASON_DRAG_DIVIDER, wct)
+        assertThat(coordinator.activeStages).containsExactlyElementsIn(spare).inOrder()
+        assertThat(coordinator.getSlots(0)).isEmpty()
+        coordinator.onTransitionFinished(token, false)
+        return wct
+    }
+
+    private fun assertSaneStageBounds(wct: WindowContainerTransaction) {
+        val root = split.rootBounds
+        coordinator.activeStages.forEach { stage ->
+            val bounds = wct.changes[stage.mRootTaskInfo.token.asBinder()]!!
+                .configuration.windowConfiguration.bounds
+            assertThat(bounds.width()).isGreaterThan(1)
+            assertThat(bounds.height()).isGreaterThan(1)
+            assertThat(root.contains(bounds)).isTrue()
+        }
+    }
+
+    @Test fun fullHeightDismissKeepsSparePairAndOneFullWidthDivider() {
+        val collapse = collapseOriginalColumn()
+        assertThat(coordinator.isActive).isTrue()
+        assertThat(coordinator.isVisible).isTrue()
+        assertThat(coordinator.isLeftRightSplit).isFalse()
+        assertSaneStageBounds(collapse)
+        val c = Rect()
+        val d = Rect()
+        assertThat(coordinator.getTaskBounds(30, c)).isTrue()
+        assertThat(coordinator.getTaskBounds(40, d)).isTrue()
+        assertThat(c).isEqualTo(Rect(0, 0, 1600, 1273))
+        assertThat(d).isEqualTo(Rect(0, 1287, 1600, 2560))
+        val first = Rect()
+        val second = Rect()
+        coordinator.getBranchBounds(first, second)
+        assertThat(first).isEqualTo(Rect(0, 0, 1600, 1273))
+        assertThat(second).isEqualTo(Rect(0, 1287, 1600, 2560))
+        assertThat(createdDividers).hasSize(4)
+        createdDividers.take(3).forEach { verify(it).release() }
+        verify(createdDividers[3]).setMultiSplitDivider(Rect(0, 0, 1600, 2560), false, 0.5f)
+        verify(host, never()).ended(any())
+        verify(sync, never()).queue(any<WindowContainerTransaction>())
+    }
+
+    @Test fun sidebarDropAfterColumnDismissInsertsIntoSparePairInOneOpenTransition() {
+        collapseOriginalColumn()
+        val slot = coordinator.getSlots(0).first { !it.occupied }
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        assertThat(coordinator.activeStages).hasSize(3)
+        val transactions = argumentCaptor<WindowContainerTransaction>()
+        val types = argumentCaptor<Int>()
+        verify(transitions, times(5)).startTransition(types.capture(), transactions.capture(), any())
+        assertThat(types.lastValue).isEqualTo(android.view.WindowManager.TRANSIT_OPEN)
+        assertSaneStageBounds(transactions.lastValue)
+        assertThat(transactions.lastValue.hierarchyOps.count {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_PENDING_INTENT
+        }).isEqualTo(1)
+        verify(host, never()).ended(any())
+        verify(split, never()).setDividerAtBorder(any())
+        verify(sync, never()).queue(any<WindowContainerTransaction>())
+    }
+
+    @Test fun backgroundPairLaunchAfterColumnDismissUsesTheCallersTransaction() {
+        collapseOriginalColumn()
+        coordinator.setDividerVisible(false, null)
+        assertThat(coordinator.isVisible).isFalse()
+        val wct = WindowContainerTransaction()
+        assertThat(coordinator.preparePairLaunch(wct, null)).isTrue()
+        assertThat(coordinator.isActive).isFalse()
+        verify(host).ended(wct)
+        verify(createdDividers[3]).release()
+        verify(sync, never()).queue(any<WindowContainerTransaction>())
+    }
+
     @Test fun swapMovesStagesBetweenStableSlotsAndKeepsTreeBounds() {
         add()
         add()

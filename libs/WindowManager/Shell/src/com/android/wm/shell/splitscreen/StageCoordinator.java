@@ -606,18 +606,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             }
             @Override
             public void ended(WindowContainerTransaction wct) {
-                deactivateSplit(wct, STAGE_TYPE_UNDEFINED);
-                final List<StageTaskListener> pair = enableFlexibleSplit()
-                        ? mStageOrderOperator.getAllStages().subList(0, 2)
-                        : java.util.Arrays.asList(mMainStage, mSideStage);
-                wct.setAdjacentRoots(pair.get(0).mRootTaskInfo.token, pair.get(1).mRootTaskInfo.token);
-                if (!enableFlexibleSplit() && !enableShellModes()) {
-                    mLaunchAdjacentController.setLaunchAdjacentRoot(mSideStage.mRootTaskInfo.token);
-                }
-                mIsRootTranslucent = true;
-                mDividerVisible = false;
-                setSplitsVisible(false);
-                mSplitState.exit();
+                onMultiSplitEnded(wct);
             }
             @Override
             public void changed() {
@@ -1027,6 +1016,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      */
     void startTask(int taskId, @SplitPosition int position, @Nullable Bundle options,
             @Nullable WindowContainerToken hideTaskToken, @SplitIndex int index) {
+        // Keep a second drop from mutating layout for an enter WCT that cannot be submitted.
+        if (mSplitTransitions.mPendingEnter != null) return;
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "startTask: task=%d position=%d index=%d",
                 taskId, position, index);
         mSplitRequest = new SplitRequest(taskId, position);
@@ -1087,6 +1078,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             @Nullable Bundle options, @Nullable WindowContainerToken hideTaskToken,
             @Nullable WindowContainerTransaction transaction, @SplitIndex int index,
             int displayId) {
+        // Keep a second drop from mutating layout for an enter WCT that cannot be submitted.
+        if (mSplitTransitions.mPendingEnter != null) return;
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "startIntent: intent=%s position=%d", intent.getIntent(),
                 position);
         mSplitRequest = new SplitRequest(intent.getIntent(), position);
@@ -4212,6 +4205,30 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "mergeAnimation: transition=%d", info.getDebugId());
         mSplitTransitions.mergeAnimation(transition, info, startT, finishT, mergeTarget,
                 finishCallback);
+    }
+
+    @VisibleForTesting
+    void onMultiSplitEnded(WindowContainerTransaction wct) {
+        deactivateSplit(wct, STAGE_TYPE_UNDEFINED);
+        final List<StageTaskListener> pair = enableFlexibleSplit()
+                ? mStageOrderOperator.getAllStages().subList(0, 2)
+                : java.util.Arrays.asList(mMainStage, mSideStage);
+        wct.setAdjacentRoots(pair.get(0).mRootTaskInfo.token, pair.get(1).mRootTaskInfo.token);
+        if (!enableFlexibleSplit() && !enableShellModes()) {
+            final WindowContainerToken sideRoot = mSideStage.mRootTaskInfo.token;
+            // Post past the caller submitting the exit WCT, then wait for its adjacency to apply.
+            mMainExecutor.executeDelayed(() -> mTransitions.runOnIdle(() -> {
+                if (!isMultiSplitActive() && mSplitRootTaskInfo != null
+                        && mSideStage.mRootTaskInfo != null
+                        && sideRoot.equals(mSideStage.mRootTaskInfo.token)) {
+                    mLaunchAdjacentController.setLaunchAdjacentRoot(sideRoot);
+                }
+            }), 0);
+        }
+        mIsRootTranslucent = true;
+        mDividerVisible = false;
+        setSplitsVisible(false);
+        mSplitState.exit();
     }
 
     /** Jump the current transition animation to the end. */
