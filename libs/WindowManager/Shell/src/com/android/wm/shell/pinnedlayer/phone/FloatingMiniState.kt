@@ -66,7 +66,7 @@ class FloatingMiniState {
         }
 
         fun tidyBounds(window: Rect, mini: Rect, stable: Rect, margin: Int,
-            occupied: List<Rect>): Rect? {
+            occupied: List<Rect>, nearest: Boolean = false): Rect? {
             val area = Rect(stable).apply { inset(margin, margin) }
             if (area.isEmpty || mini.width() > area.width() || mini.height() > area.height()) return null
             val corners = Corner.entries.sortedBy { corner ->
@@ -78,6 +78,7 @@ class FloatingMiniState {
                 val dy = window.exactCenterY().toDouble() - y
                 dx * dx + dy * dy
             }
+            val available = mutableListOf<Rect>()
             for (corner in corners) {
                 val anchor = snap(mini, stable, corner, margin)
                 val top = corner == Corner.TOP_LEFT || corner == Corner.TOP_RIGHT
@@ -93,10 +94,17 @@ class FloatingMiniState {
                 for (candidate in candidates) {
                     if (!area.contains(candidate)) continue
                     val spaced = Rect(candidate).apply { inset(-margin, -margin) }
-                    if (occupied.none { Rect.intersects(spaced, it) }) return candidate
+                    if (occupied.none { Rect.intersects(spaced, it) }) {
+                        if (!nearest) return candidate
+                        available += candidate
+                    }
                 }
             }
-            return null
+            return available.minByOrNull {
+                val dx = it.exactCenterX().toDouble() - window.exactCenterX()
+                val dy = it.exactCenterY().toDouble() - window.exactCenterY()
+                dx * dx + dy * dy
+            }
         }
 
         fun stashEdge(bounds: Rect, stable: Rect): Edge = when {

@@ -65,6 +65,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
         init {
             active += this
             whenever(organizer.initialTasks).thenReturn(listOf(Pair(task, leash)))
+            whenever(organizer.getRunningTasks(0)).thenReturn(arrayListOf(task))
             whenever(displays.getDisplayLayout(0)).thenReturn(layout)
             val displayContext = mock<android.content.Context>()
             val resources = mock<android.content.res.Resources>()
@@ -455,4 +456,147 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
         assertThat(h.changes).isEmpty()
     }
+
+    private fun Harness.occupy(bounds: Rect, id: Int = 43, user: Int = task.userId,
+        display: Int = 0, visible: Boolean = true,
+        edge: FloatingMiniState.Edge = FloatingMiniState.Edge.NONE): android.app.ActivityManager.RunningTaskInfo {
+        val other = TestRunningTaskInfoBuilder().setTaskId(id).setDisplayId(display).build().apply {
+            userId = user
+            isFloatingWindow = true
+            isVisible = visible
+        }
+        state.enter(user, id, FloatingMiniState.Restore(normal, Rect(0, 0, 800, 1200), .75f),
+            bounds, .45f).edge = edge
+        return other
+    }
+
+    @Test fun occupiedCorner_selectsNearestFreeSlotAtRequestedSizeAndDropMatchesPreview() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.floatingWindowScale = .75f
+        val occupied = Rect(8, 108, 368, 648)
+        val other = h.occupy(occupied)
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task, other))
+        val start = Rect(300, 500, 900, 1400)
+        val end = Rect(0, 100, 600, 1000)
+        val target = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+        assertThat(target.bounds).isEqualTo(Rect(376, 108, 736, 648))
+        assertThat(target.scale).isEqualTo(.45f)
+        assertThat(h.state.get(h.task.userId, h.task.taskId)).isNull()
+        assertThat(h.changes).isEmpty()
+        h.controller.onDragEnded(h.task, start, end)
+        assertThat(h.state.get(h.task.userId, h.task.taskId)!!.bounds).isEqualTo(target.bounds)
+        assertThat(h.state.get(other.userId, other.taskId)!!.bounds).isEqualTo(occupied)
+    }
+
+    @Test fun miniCornerDrop_excludesItselfAndKeepsStationaryMinisAndSize() {
+        val h = Harness()
+        val occupied = Rect(8, 108, 508, 408)
+        val other = h.occupy(occupied)
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task, other))
+        val start = Rect(300, 500, 660, 1040)
+        val end = Rect(0, 100, 360, 640)
+        val target = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+        assertThat(target.bounds).isEqualTo(Rect(8, 416, 368, 956))
+        h.controller.onDragEnded(h.task, start, end)
+        h.interrupt()
+        assertThat(h.state.get(h.task.userId, h.task.taskId)!!.bounds).isEqualTo(target.bounds)
+        assertThat(h.state.get(other.userId, other.taskId)!!.bounds).isEqualTo(occupied)
+        assertThat(target.scale).isEqualTo(.45f)
+    }
+
+    @Test fun placement_filtersDisplaysHiddenTasksAndStashedStrips() {
+        val h = Harness()
+        val bounds = Rect(8, 108, 368, 648)
+        val others = listOf(h.occupy(bounds, id = 44, display = 2),
+            h.occupy(bounds, id = 45, visible = false),
+            h.occupy(bounds, id = 46, edge = FloatingMiniState.Edge.LEFT))
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(ArrayList(listOf(h.task) + others))
+        val target = requireNotNull(h.controller.getDragTarget(h.task,
+            Rect(300, 500, 660, 1040), Rect(0, 100, 360, 640)))
+        assertThat(target.bounds).isEqualTo(bounds)
+        assertThat(h.changes).isEmpty()
+    }
+
+    @Test fun crowdedEdges_noFitUsesDeterministicSnapWithoutShrinkingOrMovingOthers() {
+        val h = Harness()
+        val occupied = Rect(8, 108, 1192, 1892)
+        val other = h.occupy(occupied)
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task, other))
+        val start = Rect(300, 500, 660, 1040)
+        val end = Rect(0, 100, 360, 640)
+        val target = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+        assertThat(target.bounds).isEqualTo(Rect(8, 108, 368, 648))
+        assertThat(h.controller.getDragTarget(h.task, start, end)).isEqualTo(target)
+        h.controller.onDragEnded(h.task, start, end)
+        h.interrupt()
+        assertThat(h.state.get(h.task.userId, h.task.taskId)!!.scale).isEqualTo(.45f)
+        assertThat(h.state.get(other.userId, other.taskId)!!.bounds).isEqualTo(occupied)
+    }
+
+    @Test fun drop_requeriesOccupancyAfterTaskVanishAndUsesCurrentDisplayGeometry() {
+        val h = Harness()
+        val other = h.occupy(Rect(8, 108, 368, 648))
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task, other))
+        val start = Rect(300, 500, 660, 1040)
+        val end = Rect(0, 100, 360, 640)
+        val hovered = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task))
+        h.controller.onDragEnded(h.task, start, end)
+        h.interrupt()
+        val entry = h.state.get(h.task.userId, h.task.taskId)!!
+        assertThat(entry.bounds).isEqualTo(Rect(8, 108, 368, 648))
+        assertThat(entry.bounds).isNotEqualTo(hovered.bounds)
+        doAnswer { it.getArgument<Rect>(0).set(0, 100, 1920, 1200); null }
+            .whenever(h.layout).getStableBounds(any())
+        val rotatedEnd = Rect(1600, 800, 1960, 1340)
+        val rotated = requireNotNull(h.controller.getDragTarget(h.task, start, rotatedEnd))
+        h.controller.onDragEnded(h.task, start, rotatedEnd)
+        h.interrupt()
+        assertThat(entry.bounds).isEqualTo(rotated.bounds)
+        assertThat(Rect(0, 100, 1920, 1200).contains(entry.bounds)).isTrue()
+    }
+
+    @Test fun vanishedMovingTask_cannotAcquirePreviewOrCommitPlacement() {
+        val h = Harness()
+        val listener = argumentCaptor<ShellTaskOrganizer.TaskVanishedListener>()
+        verify(h.organizer).addTaskVanishedListener(listener.capture())
+        listener.firstValue.onTaskVanished(h.task)
+        val start = Rect(300, 500, 660, 1040)
+        val end = Rect(0, 100, 360, 640)
+        assertThat(h.controller.getDragTarget(h.task, start, end)).isNull()
+        assertThat(h.controller.onDragEnded(h.task, start, end)).isFalse()
+        assertThat(h.changes).isEmpty()
+    }
+    @Test fun floatingCornerAvoidsVisibleMiniFromAnotherProfileUsingItsUserKey() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.floatingWindowScale = .75f
+        val occupied = Rect(8, 108, 368, 648)
+        val other = h.occupy(occupied, user = h.task.userId + 10)
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task, other))
+        val start = Rect(300, 500, 900, 1400)
+        val end = Rect(0, 100, 600, 1000)
+        val target = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+        assertThat(target.bounds).isEqualTo(Rect(376, 108, 736, 648))
+        h.controller.onDragEnded(h.task, start, end)
+        assertThat(h.state.get(h.task.userId, h.task.taskId)!!.bounds).isEqualTo(target.bounds)
+        assertThat(h.state.get(other.userId, other.taskId)!!.bounds).isEqualTo(occupied)
+    }
+
+    @Test fun existingMiniAvoidsVisibleMiniFromAnotherProfileWithoutMovingIt() {
+        val h = Harness()
+        val occupied = Rect(8, 108, 508, 408)
+        val other = h.occupy(occupied, user = h.task.userId + 10)
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task, other))
+        val start = Rect(300, 500, 660, 1040)
+        val end = Rect(0, 100, 360, 640)
+        val target = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+        assertThat(target.bounds).isEqualTo(Rect(8, 416, 368, 956))
+        h.controller.onDragEnded(h.task, start, end)
+        h.interrupt()
+        assertThat(h.state.get(h.task.userId, h.task.taskId)!!.bounds).isEqualTo(target.bounds)
+        assertThat(h.state.get(other.userId, other.taskId)!!.bounds).isEqualTo(occupied)
+    }
+
 }
