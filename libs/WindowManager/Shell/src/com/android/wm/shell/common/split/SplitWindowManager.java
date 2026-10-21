@@ -148,15 +148,11 @@ public final class SplitWindowManager extends WindowlessWindowManager {
 
         final Rect dividerBounds = splitLayout.getDividerBounds();
 
-        int buttonSize = mContext.getResources()
-                .getDimensionPixelSize(R.dimen.split_divider_button_size);
-        int buttonGap = mContext.getResources()
-                .getDimensionPixelSize(R.dimen.split_divider_button_margin);
-        int handleThickness = mContext.getResources().getDimensionPixelSize(
-                splitLayout.isLeftRightSplit()
-                        ? R.dimen.split_divider_handle_height : R.dimen.split_divider_handle_width);
-
-        int requiredThickness = handleThickness + 2 * (buttonSize + buttonGap);
+        // Preserve the input region as well as the existing display-corner allowance.
+        int requiredThickness = mContext.getResources().getDimensionPixelSize(
+                !splitLayout.isLeftRightSplit() && desktopState.canEnterDesktopMode()
+                        ? R.dimen.desktop_mode_portrait_split_divider_handle_region_height
+                        : R.dimen.split_divider_handle_region_height);
         int currentThickness = splitLayout.isLeftRightSplit()
                 ? dividerBounds.width() : dividerBounds.height();
         mWindowExpansionPx = Math.max(0, requiredThickness - currentThickness);

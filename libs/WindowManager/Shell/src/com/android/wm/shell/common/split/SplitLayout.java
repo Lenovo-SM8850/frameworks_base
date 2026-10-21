@@ -442,7 +442,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
 
     /**
      * Gets the actual expanded bounds of the divider leash in parent-based coordinates.
-     * This includes the expansion buffer added to avoid clipping accessibility buttons.
+     * This includes the expansion buffer added to avoid clipping the input region.
      */
     public void getDividerLeashBounds(Rect rect) {
         getRefDividerBounds(rect);
@@ -452,8 +452,10 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             int offsetY = mIsLeftRightSplit ? 0 : expansionOffset;
             rect.left -= offsetX;
             rect.top -= offsetY;
-            rect.right += offsetX;
-            rect.bottom += offsetY;
+            rect.right += mIsLeftRightSplit
+                    ? mSplitWindowManager.getWindowExpansion() - offsetX : 0;
+            rect.bottom += mIsLeftRightSplit
+                    ? 0 : mSplitWindowManager.getWindowExpansion() - offsetY;
         }
     }
 
@@ -1202,8 +1204,10 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             int offsetYD = mIsLeftRightSplit ? 0 : expansionOffset;
             endDividerLeashBounds.left -= offsetXD;
             endDividerLeashBounds.top -= offsetYD;
-            endDividerLeashBounds.right += offsetXD;
-            endDividerLeashBounds.bottom += offsetYD;
+            endDividerLeashBounds.right += mIsLeftRightSplit
+                    ? mSplitWindowManager.getWindowExpansion() - offsetXD : 0;
+            endDividerLeashBounds.bottom += mIsLeftRightSplit
+                    ? 0 : mSplitWindowManager.getWindowExpansion() - offsetYD;
         }
 
         ValueAnimator animator1 = moveSurface(t, topLeftStage, getTopLeftRefBounds(), endBounds1,

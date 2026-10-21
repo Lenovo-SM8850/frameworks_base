@@ -35,7 +35,6 @@ import android.os.Bundle;
 import android.provider.DeviceConfig;
 import android.util.AttributeSet;
 import android.util.Property;
-import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.InsetsController;
 import android.view.InsetsSource;
@@ -95,7 +94,6 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
     private VelocityTracker mVelocityTracker;
     private boolean mMoving;
     private int mStartPos;
-    private GestureDetector mDoubleTapDetector;
     private boolean mInteractive;
     private boolean mHideHandle;
     private boolean mSetTouchRegion = true;
@@ -389,13 +387,8 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
         mDividerBar.setClipChildren(false);
         mDividerBar.setClipToPadding(false);
 
-        mResizeMenu = new DividerResizeMenu(getContext());
-        mDividerBar.addView(mResizeMenu, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
         mTouchElevation = getResources().getDimensionPixelSize(
                 R.dimen.docked_stack_divider_lift_elevation);
-        mDoubleTapDetector = new GestureDetector(getContext(), new DoubleTapListener());
         mInteractive = true;
         mHideHandle = false;
         setOnTouchListener(this);
@@ -471,8 +464,6 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
                 return false;
             }
         }
-
-        mDoubleTapDetector.onTouchEvent(event);
 
         // Convert to use screen-based coordinates to prevent lost track of motion events while
         // moving divider bar and calculating dragging velocity.
@@ -550,17 +541,6 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
         }
 
         return true;
-    }
-
-    /** Toggles the visibility of the accessibility resize menu buttons. */
-    private void toggleButtons() {
-        if (mResizeMenu != null) {
-            if (mResizeMenu.isShowing()) {
-                mResizeMenu.hide();
-            } else {
-                mResizeMenu.show();
-            }
-        }
     }
 
     private void hideButtons() {
@@ -794,30 +774,5 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
     /** Returns true if the divider is currently being physically controlled by the user. */
     boolean isMoving() {
         return mMoving;
-    }
-
-    private class DoubleTapListener extends GestureDetector.SimpleOnGestureListener {
-
-        @Override
-        public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
-            if (!mMoving) {
-                toggleButtons();
-            }
-            return true;
-        }
-
-        @Override
-        public boolean onDoubleTapEvent(@NonNull MotionEvent e) {
-            // User could have started double tap and then dragged before letting go. Skip the
-            // swap if so
-            if (!mMoving && e.getAction() == MotionEvent.ACTION_UP) {
-                if (mSplitLayout != null) {
-                    hideButtons();
-                    mSplitLayout.onDoubleTappedDivider();
-                }
-                return true;
-            }
-            return false;
-        }
     }
 }

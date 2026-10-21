@@ -20,6 +20,7 @@ import static android.content.res.Configuration.ORIENTATION_LANDSCAPE;
 import static com.android.internal.config.sysui.SystemUiDeviceConfigFlags.CURSOR_HOVER_STATES_ENABLED;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -40,6 +41,7 @@ import android.view.InputDevice;
 import android.view.InsetsState;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 
 import androidx.test.annotation.UiThreadTest;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -207,6 +209,70 @@ public class DividerViewTest extends ShellTestCase {
         verify(mSplitLayout, never()).snapToTarget(anyInt(), any(SnapTarget.class));
         // Verify dragging is finished.
         assertFalse(mDividerView.isMoving());
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
+        assertNoResizeMenu();
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_doubleTapPair_doesNotShowMenuOrSwapAcrossAxes() {
+        for (boolean leftRight : new boolean[]{true, false}) {
+            doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
+            tapDivider(2);
+        }
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_doubleTapBranch_doesNotShowMenuOrSwapAcrossAxes() {
+        for (boolean leftRight : new boolean[]{true, false}) {
+            mSplitLayout.setMultiSplitDivider(new Rect(0, 0, 1080, 1000), leftRight, 0.5f);
+            tapDivider(2);
+        }
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_tapPair_doesNotShowMenuOrSwapAcrossAxes() {
+        for (boolean leftRight : new boolean[]{true, false}) {
+            doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
+            tapDivider(1);
+        }
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_tapBranch_doesNotShowMenuOrSwapAcrossAxes() {
+        for (boolean leftRight : new boolean[]{true, false}) {
+            mSplitLayout.setMultiSplitDivider(new Rect(0, 0, 1080, 1000), leftRight, 0.5f);
+            tapDivider(1);
+        }
+    }
+
+    private void tapDivider(int count) {
+        final long firstDown = SystemClock.uptimeMillis();
+        for (int i = 0; i < count; i++) {
+            final long downTime = firstDown + i * 100;
+            MotionEvent down = getMotionEvent(downTime, MotionEvent.ACTION_DOWN, 100, 100);
+            assertTrue(mDividerView.onTouch(mDividerView, down));
+            down.recycle();
+            MotionEvent up = getMotionEvent(downTime, downTime + 10,
+                    MotionEvent.ACTION_UP, 100, 100);
+            assertTrue(mDividerView.onTouch(mDividerView, up));
+            up.recycle();
+        }
+        assertFalse(mDividerView.isMoving());
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
+        verify(mSplitLayout, never()).snapToTarget(anyInt(), any(SnapTarget.class));
+        assertNoResizeMenu();
+    }
+
+    private void assertNoResizeMenu() {
+        ViewGroup bar = mDividerView.findViewById(R.id.divider_bar);
+        assertNotNull(bar);
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            assertFalse(bar.getChildAt(i) instanceof DividerResizeMenu);
+        }
     }
 
     private static MotionEvent getMotionEvent(long eventTime, int action, float x, float y) {

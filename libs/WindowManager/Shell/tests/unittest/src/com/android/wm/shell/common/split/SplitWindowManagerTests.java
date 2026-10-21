@@ -21,14 +21,17 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.mockito.Mockito.when;
 
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.graphics.Rect;
 import android.view.InsetsState;
 import android.view.SurfaceControl;
+import android.view.ViewGroup;
 
 import androidx.test.annotation.UiThreadTest;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.filters.SmallTest;
 
+import com.android.wm.shell.R;
 import com.android.wm.shell.ShellTestCase;
 import com.android.wm.shell.shared.desktopmode.FakeDesktopState;
 
@@ -126,4 +129,69 @@ public class SplitWindowManagerTests extends ShellTestCase {
         mSplitWindowManager.release(null);
     }
 
+    @Test
+    @UiThreadTest
+    public void testPairWindow_fitsInputRegionAcrossAxesAndDesktopModes() {
+        assertWindowThickness(false, false);
+    }
+
+    @Test
+    @UiThreadTest
+    public void testBranchWindow_fitsInputRegionAcrossAxesAndDesktopModes() {
+        assertWindowThickness(true, false);
+    }
+
+    @Test
+    @UiThreadTest
+    public void testPairWindow_preservesLargerCornerAllowanceAcrossAxes() {
+        assertWindowThickness(false, true);
+    }
+
+    @Test
+    @UiThreadTest
+    public void testBranchWindow_preservesLargerCornerAllowanceAcrossAxes() {
+        assertWindowThickness(true, true);
+    }
+
+    private void assertWindowThickness(boolean branch, boolean largeCorners) {
+        final Resources resources = mContext.getResources();
+        final int regionThickness = resources.getDimensionPixelSize(
+                R.dimen.split_divider_handle_region_height);
+        final int baseThickness = resources.getDimensionPixelSize(R.dimen.split_divider_bar_width)
+                + 2 * resources.getDimensionPixelSize(
+                        com.android.internal.R.dimen.docked_stack_divider_insets);
+        for (boolean leftRight : new boolean[]{true, false}) {
+            for (boolean desktop : new boolean[]{false, true}) {
+                mDesktopState.setCanEnterDesktopMode(desktop);
+                final int inputThickness = !leftRight && desktop
+                        ? resources.getDimensionPixelSize(
+                                R.dimen.desktop_mode_portrait_split_divider_handle_region_height)
+                        : regionThickness;
+                final int decorationThickness = largeCorners
+                        ? Math.max(baseThickness, regionThickness) + 20 : baseThickness;
+                final int expectedThickness = Math.max(decorationThickness, inputThickness);
+                final int length = 800;
+                when(mSplitLayout.isMultiSplitDivider()).thenReturn(branch);
+                when(mSplitLayout.isLeftRightSplit()).thenReturn(leftRight);
+                when(mSplitLayout.getDividerBounds()).thenReturn(leftRight
+                        ? new Rect(500, 0, 500 + decorationThickness, length)
+                        : new Rect(0, 500, length, 500 + decorationThickness));
+                when(mSplitLayout.getMultiSplitDividerCrop()).thenReturn(leftRight
+                        ? new Rect(0, 0, expectedThickness, length)
+                        : new Rect(0, 0, length, expectedThickness));
+                mSplitWindowManager.init(mSplitLayout, new InsetsState(), false, mDesktopState);
+                try {
+                    final ViewGroup.LayoutParams params =
+                            mSplitWindowManager.getDividerView().getLayoutParams();
+                    assertThat(leftRight ? params.width : params.height)
+                            .isEqualTo(expectedThickness);
+                    assertThat(leftRight ? params.height : params.width).isEqualTo(length);
+                    assertThat(mSplitWindowManager.getWindowExpansion())
+                            .isEqualTo(expectedThickness - decorationThickness);
+                } finally {
+                    mSplitWindowManager.release(null);
+                }
+            }
+        }
+    }
 }

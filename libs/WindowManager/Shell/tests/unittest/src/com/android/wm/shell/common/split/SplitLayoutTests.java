@@ -30,6 +30,8 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -350,6 +352,39 @@ public class SplitLayoutTests extends ShellTestCase {
         assertThat(mSplitLayout.getDividerBounds().left).isEqualTo(resized.left);
         assertThat(mSplitLayout.getDividerBounds().right).isEqualTo(resized.right);
         assertThat(mSplitLayout.getMultiSplitDividerCrop().width()).isEqualTo(resized.width());
+    }
+
+    @Test
+    @UiThreadTest
+    public void testBranchDivider_expandedWindowAndCropMatchAcrossAxes() {
+        for (boolean leftRight : new boolean[]{true, false}) {
+            // Force an odd expansion to check both edges of the leash and input crop.
+            final int inputThickness = mContext.getResources().getDimensionPixelSize(
+                    com.android.wm.shell.R.dimen.split_divider_handle_region_height);
+            final Rect branch = new Rect(0, 0, 1080, 1000);
+            mSplitLayout.setMultiSplitDivider(branch, leftRight, 0.5f);
+            final Rect divider = leftRight
+                    ? new Rect(500, 0, 500 + inputThickness - 3, branch.height())
+                    : new Rect(0, 500, branch.width(), 500 + inputThickness - 3);
+            doReturn(divider).when(mSplitLayout).getDividerBounds();
+            doAnswer(invocation -> {
+                ((Rect) invocation.getArgument(0)).set(divider);
+                return null;
+            }).when(mSplitLayout).getDividerBounds(any(Rect.class));
+            mSplitLayout.init();
+            try {
+                final Rect leash = new Rect();
+                mSplitLayout.getDividerLeashBounds(leash);
+                final Rect crop = mSplitLayout.getMultiSplitDividerCrop();
+                assertThat(leftRight ? leash.width() : leash.height())
+                        .isEqualTo(inputThickness);
+                assertThat(crop).isEqualTo(new Rect(0, 0, leash.width(), leash.height()));
+                assertThat(leftRight ? leash.height() : leash.width())
+                        .isEqualTo(leftRight ? branch.height() : branch.width());
+            } finally {
+                mSplitLayout.release();
+            }
+        }
     }
 
     private void waitDividerFlingFinished() {
