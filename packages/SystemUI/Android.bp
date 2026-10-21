@@ -1141,3 +1141,20 @@ filegroup {
         "proguard_kotlin.flags",
     ],
 }
+
+// Exercise the status indicator without pulling in unrelated SystemUI test fixtures.
+android_ravenwood_test {
+    name: "DolbyAtmosControllerTests",
+    srcs: [
+        "src/com/android/systemui/statusbar/policy/DolbyAtmosController.java",
+        "tests/src/com/android/systemui/statusbar/policy/DolbyAtmosControllerTest.java",
+    ],
+    static_libs: [
+        "junit",
+        "androidx.test.ext.junit",
+        "androidx.test.runner",
+        "frameworks-base-testutils",
+        "platform-test-annotations",
+    ],
+    auto_gen_config: true,
+}

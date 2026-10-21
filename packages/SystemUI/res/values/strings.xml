@@ -5070,4 +5070,5 @@
     <!-- Notification long-press action to launch the app beside another app. -->
     <string name="notification_open_split_screen">Open in split screen</string>
     <string name="notification_open_floating">Open in floating window</string>
+    <string name="dolby_atmos" translatable="false">Dolby Atmos</string>
 </resources>

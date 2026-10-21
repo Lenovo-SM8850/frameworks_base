@@ -29,6 +29,11 @@
         android:title="@string/headset" />
 
     <com.android.systemui.tuner.StatusBarSwitch
+        android:icon="@drawable/stat_sys_dolby_atmos"
+        android:key="dolby_atmos"
+        android:title="@string/dolby_atmos" />
+
+    <com.android.systemui.tuner.StatusBarSwitch
         android:icon="@drawable/ic_statusbar_firewall"
         android:key="firewall"
         android:title="@string/status_bar_firewall" />
