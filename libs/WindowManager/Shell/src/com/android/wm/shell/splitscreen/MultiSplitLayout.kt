@@ -42,7 +42,27 @@ class MultiSplitLayout(val root: Split) {
     private val leaves = mutableMapOf<LeafId, Leaf>()
     private val dividers = mutableSetOf<DividerId>()
 
+    companion object {
+        /** A root has two halves, each containing one app or a perpendicular pair. */
+        @JvmStatic
+        fun isAllowed(root: Split): Boolean {
+            fun half(node: Node): Boolean = node is Leaf || node is Split &&
+                node.orientation != root.orientation && node.first is Leaf && node.second is Leaf
+            return half(root.first) && half(root.second)
+        }
+    }
+
+    /** Only a single-app half can acquire a second app. */
+    fun insertionAxis(id: LeafId): Orientation? {
+        if (!isAllowed(root) || listOf(root.first, root.second).none { it is Leaf && it.id == id }) {
+            return null
+        }
+        return if (root.orientation == Orientation.LEFT_RIGHT) Orientation.TOP_BOTTOM
+            else Orientation.LEFT_RIGHT
+    }
+
     init {
+        require(isAllowed(root))
         fun validate(node: Node, depth: Int) {
             when (node) {
                 is Leaf -> require(leaves.put(node.id, node) == null)
@@ -117,6 +137,7 @@ class MultiSplitLayout(val root: Split) {
         if (!ratio.isFinite() || ratio <= 0f || ratio >= 1f) return null
         if (leaves.size == 4 || chosenLeaf !in leaves || newLeaf.id in leaves ||
             leaves.values.any { it.taskId == newLeaf.taskId } || dividerId in dividers) return null
+        if (insertionAxis(chosenLeaf) != orientation) return null
         val chosen = leaves.getValue(chosenLeaf)
         val replacement = if (newTaskFirst) {
             Split(dividerId, orientation, ratio, newLeaf, chosen)

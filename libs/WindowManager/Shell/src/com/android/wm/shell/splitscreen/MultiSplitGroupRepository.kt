@@ -41,7 +41,7 @@ class MultiSplitGroupRepository(private val onChanged: Runnable) {
 
     fun get(taskId: Int): Group? {
         val group = records[taskId] ?: return null
-        if (!validator.test(group)) {
+        if (!MultiSplitLayout.isAllowed(group.layout.root) || !validator.test(group)) {
             remove(taskId)
             return null
         }
@@ -67,19 +67,21 @@ class MultiSplitGroupRepository(private val onChanged: Runnable) {
             val group = records[task.taskId] ?: return@forEach
             val member = group.members.first { it.taskId == task.taskId }
             if (member.userId != task.userId || group.displayId != task.displayId ||
-                !validator.test(group)) remove(task.taskId)
+                !MultiSplitLayout.isAllowed(group.layout.root) || !validator.test(group)) remove(task.taskId)
         }
     }
 
     fun validate(tasks: Collection<TaskInfo>) {
         records.values.toSet().forEach {
-            if (!it.matches(tasks) || !validator.test(it)) remove(it.firstRepresentative)
+            if (!MultiSplitLayout.isAllowed(it.layout.root) || !it.matches(tasks) ||
+                !validator.test(it)) remove(it.firstRepresentative)
         }
     }
 
     /** Representatives remain stable while they remain in the same outer branch. */
     fun save(layout: MultiSplitLayout, stageIds: Map<LeafId, Int>, tasks: List<RunningTaskInfo>,
         displayBounds: Rect, dividerSize: Int): Group? {
+        if (!MultiSplitLayout.isAllowed(layout.root)) return null
         val leaves = layout.getLeaves()
         if (leaves.any { it.taskId < 0 } || stageIds.keys != leaves.map { it.id }.toSet() ||
             stageIds.values.distinct().size != leaves.size ||

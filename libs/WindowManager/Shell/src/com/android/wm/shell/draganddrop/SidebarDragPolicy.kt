@@ -230,7 +230,7 @@ class SidebarDragPolicy(
                 Process.SYSTEM_UID
         }
 
-        /** Full splits replace the pointed slot; partial splits always insert into a free slot. */
+        /** Full splits and occupied multi-app leaves replace locally; other partial slots insert. */
         @com.android.internal.annotations.VisibleForTesting
         fun resolveSplitSlot(front: RunningTaskInfo?, incomingSupportsSplit: Boolean,
             systemAllowsSplit: Boolean, active: Boolean, occupied: Int, capacity: Int,
@@ -242,6 +242,8 @@ class SidebarDragPolicy(
                 return null
             val valid = slots.filter { !it.bounds.isEmpty }
             if (!active || occupied >= capacity) return valid.firstOrNull { it.hitBounds.contains(x, y) }
+            val replacement = valid.firstOrNull { it.leafId >= 0 && it.occupied && it.hitBounds.contains(x, y) }
+            if (replacement != null) return replacement
             val free = valid.filter { !it.occupied }
             val hit = free.firstOrNull { it.hitBounds.contains(x, y) }
             if (hit != null || free.any { it.leafId >= 0 }) return hit

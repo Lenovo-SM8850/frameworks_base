@@ -108,20 +108,51 @@ class MultiSplitLayoutTest {
     }
 
     @Test
-    fun insert_allowsNestedAndParallelBranchesButRejectsFifthLeaf() {
-        val three = below(pair(), a.id, c, left)!!
-        val nested = below(three, c.id, d, right)!!
-        assertTiling(nested.calculateBounds(display, Insets.NONE, 10)!!, display)
-        val parallel = below(pair(Orientation.TOP_BOTTOM), a.id, c, left)!!
-        assertTiling(parallel.calculateBounds(display, Insets.NONE, 10)!!, display)
-        assertNull(below(grid(), a.id, Leaf(LeafId(5), 105), DividerId(13)))
-        assertEquals(three.root, nested.remove(d.id)!!.root)
-        val resized = nested.resize(right, 0.7f)!!
-        assertEquals(0.5f, (resized.root.first as Split).ratio)
-        assertEquals(nested.root, resized.resize(right, 0.5f)!!.root)
-        assertTiling(nested.reorient(Orientation.TOP_BOTTOM)
-            .calculateBounds(display, Insets.NONE, 10)!!, display)
+    fun insert_rejectsNestedParallelAndFifthLeavesInBothOrientations() {
+        for (orientation in Orientation.entries) {
+            val pair = pair(orientation)
+            val axis = pair.insertionAxis(a.id)!!
+            val three = pair.insert(a.id, c, left, axis, 0.5f, display, Insets.NONE, 10, 0)!!
+            assertNull(three.insert(c.id, d, right, axis, 0.5f, display, Insets.NONE, 10, 0))
+            assertNull(three.insert(a.id, d, right, orientation, 0.5f, display, Insets.NONE, 10, 0))
+            assertNull(pair.insert(a.id, c, left, orientation, 0.5f, display, Insets.NONE, 10, 0))
+            val four = three.insert(b.id, d, right, axis, 0.5f, display, Insets.NONE, 10, 0)!!
+            assertTiling(four.calculateBounds(display, Insets.NONE, 10)!!, display)
+            for (leaf in four.getLeaves()) assertNull(four.insertionAxis(leaf.id))
+            val rotated = four.reorient(if (orientation == Orientation.LEFT_RIGHT)
+                Orientation.TOP_BOTTOM else Orientation.LEFT_RIGHT)
+            assertEquals(four.root.first.let { (it as Split).first },
+                (rotated.root.first as Split).first)
+            assertEquals(four.root, rotated.reorient(orientation).root)
+        }
     }
+
+    @Test
+    fun policyEnumeratesEveryBinaryShapeAndAxisThroughFiveApps() {
+        fun trees(count: Int, offset: Int = 0): List<MultiSplitLayout.Node> {
+            if (count == 1) return listOf(Leaf(LeafId(offset), 100 + offset))
+            return (1 until count).flatMap { leftCount ->
+                trees(leftCount, offset).flatMap { first ->
+                    trees(count - leftCount, offset + leftCount).flatMap { second ->
+                        Orientation.entries.map { axis ->
+                            Split(DividerId(offset * 10 + count), axis, 0.5f, first, second)
+                        }
+                    }
+                }
+            }
+        }
+        for (count in 2..5) for (tree in trees(count)) {
+            val root = tree as Split
+            fun half(node: MultiSplitLayout.Node): Boolean = when (node) {
+                is Leaf -> true
+                is Split -> node.orientation != root.orientation &&
+                    node.first is Leaf && node.second is Leaf
+            }
+            assertEquals(count <= 4 && half(root.first) && half(root.second),
+                MultiSplitLayout.isAllowed(root))
+        }
+    }
+
 
     @Test
     fun insert_rejectsUnknownLeafAndReusedIdentities() {

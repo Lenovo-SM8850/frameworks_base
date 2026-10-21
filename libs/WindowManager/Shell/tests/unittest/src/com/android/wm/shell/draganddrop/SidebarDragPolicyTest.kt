@@ -48,6 +48,19 @@ class SidebarDragPolicyTest : ShellTestCase() {
         supportsMultiWindow = true
     }
 
+    @Test fun partialGroupDropOnQuarterReplacesThatQuarter() {
+        val quarter = com.android.wm.shell.splitscreen.SplitScreenController.AppDragSlot(
+            0, 2, android.graphics.Rect(0, 0, 490, 390),
+            android.graphics.Rect(0, 0, 490, 390), true, 2, false, 7)
+        val free = com.android.wm.shell.splitscreen.SplitScreenController.AppDragSlot(
+            1, 3, android.graphics.Rect(510, 0, 1000, 390),
+            android.graphics.Rect(510, 0, 1000, 390), false, 1, false, 7)
+        org.junit.Assert.assertSame(quarter, SidebarDragPolicy.resolveSplitSlot(null,
+            true, true, true, 3, 4, listOf(quarter, free), 100, 100))
+        org.junit.Assert.assertSame(free, SidebarDragPolicy.resolveSplitSlot(null,
+            true, true, true, 3, 4, listOf(quarter, free), 700, 100))
+    }
+
     @Test fun homeWithoutSplitUsesFloatingFallback() {
         assertThat(SidebarDragPolicy.resolveSplitSlot(task(ACTIVITY_TYPE_HOME), true, true,
             false, 0, 2, slots, 100, 500)).isNull()

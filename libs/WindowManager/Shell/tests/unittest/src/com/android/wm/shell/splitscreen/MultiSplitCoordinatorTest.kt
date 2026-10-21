@@ -67,6 +67,25 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
     private lateinit var pair: List<StageTaskListener>
     private lateinit var spare: List<StageTaskListener>
 
+    @Test fun legacyInvalidSnapshotIsRefusedBeforeAnyRestoreTransaction() {
+        add()
+        val saved = groups.get(10)!!
+        coordinator.exit(-1, WindowContainerTransaction())
+        val invalid = mock<MultiSplitLayout>()
+        val child = saved.layout.root.first as MultiSplitLayout.Split
+        whenever(invalid.root).thenReturn(saved.layout.root.copy(orientation = child.orientation))
+        val recordsField = MultiSplitGroupRepository::class.java.getDeclaredField("records")
+        recordsField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val records = recordsField.get(groups) as MutableMap<Int, MultiSplitGroupRepository.Group>
+        saved.members.forEach { records[it.taskId] = saved.copy(layout = invalid) }
+        org.mockito.Mockito.clearInvocations(transitions)
+        assertThat(coordinator.restorePair(saved.firstRepresentative, saved.secondRepresentative,
+            null, null, null)).isFalse()
+        assertThat(groups.peek(10)).isNull()
+        verify(transitions, never()).startTransition(any(), any(), any())
+    }
+
     private fun taskToken(): WindowContainerToken {
         val container = mock<IWindowContainerToken>()
         whenever(container.asBinder()).thenReturn(Binder())
@@ -618,8 +637,7 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         val right = coordinator.getBelowSlot(20)!!
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), right)).isTrue()
         coordinator.onTransitionFinished(token, false)
-        val subdivided = coordinator.getBelowSlot(20)!!
-        assertThat(subdivided.splitBelow).isFalse()
+        assertThat(coordinator.getBelowSlot(20)).isNull()
         val left = coordinator.getBelowSlot(10)!!
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), left)).isTrue()
         coordinator.onTransitionFinished(token, false)
@@ -745,27 +763,20 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(dumpState()).contains("belowSlot=task=20 None")
     }
 
-    @Test fun subdividedLeafInsertionOwnsOnlyItsBranchAndCollapsesCleanly() {
+    @Test fun quarterDropReplacesWhileOtherHalfRemainsAvailableForInsertion() {
         val first = coordinator.getBelowSlot(10)!!
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), first)).isTrue()
         coordinator.onTransitionFinished(token, false)
-        val nested = coordinator.getBelowSlot(10)!!
-        assertThat(nested.splitBelow).isFalse()
-        assertThat(nested.bounds).isEqualTo(Rect(802, 0, 1596, 1196))
-        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), nested)).isTrue()
-        coordinator.onTransitionFinished(token, false)
-        verify(createdDividers[2]).setMultiSplitDivider(Rect(0, 0, 1596, 1196), true, 0.5f)
-        val group = groups.get(10)!!
-        val before = group.layout.root
-        coordinator.exit(-1, WindowContainerTransaction())
-        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
-            null, null, null)).isTrue()
-        coordinator.onTransitionFinished(token, false)
-        assertThat(groups.get(10)!!.layout.root).isEqualTo(before)
-        assertThat(coordinator.closeTask(40)).isTrue()
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+        val replacement = coordinator.getSlots(0).first { it.occupied && it.leafId == 0 }
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), replacement)).isTrue()
         coordinator.onTransitionFinished(token, false)
         assertThat(coordinator.activeStages).hasSize(3)
-        assertThat(coordinator.getBelowSlot(10)!!.bounds).isEqualTo(nested.bounds)
+        assertThat(coordinator.getBelowSlot(20)).isNotNull()
+        val fresh = coordinator.getSlots(0).first { it.occupied && it.leafId == 0 }
+        val fabricated = AppDragSlot(fresh.position, fresh.index,
+            fresh.bounds, fresh.hitBounds, false, fresh.leafId, false, fresh.layoutVersion)
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), fabricated)).isFalse()
     }
 
     @Test fun wideLeafInsertionUsesEndSideInRtl() {

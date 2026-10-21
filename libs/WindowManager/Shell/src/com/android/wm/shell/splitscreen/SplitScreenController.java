@@ -1284,8 +1284,8 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
 
     /** Whether the task can enter split, keeping floating entry within its display's capacity. */
     public boolean canEnterSplitScreen(@NonNull ActivityManager.RunningTaskInfo taskInfo) {
-        return !taskInfo.isFloatingWindow
-                || getOccupiedSplitSlots(taskInfo.displayId) < getSplitCapacity(taskInfo.displayId);
+        return !taskInfo.isFloatingWindow || getFloatingSplitSlot(taskInfo,
+                isSplitScreenVisible() ? null : getFloatingSplitCompanion(taskInfo)) != null;
     }
 
     @Nullable

@@ -341,6 +341,10 @@ class MultiSplitCoordinator(
     private fun prepareRestore(group: MultiSplitGroupRepository.Group,
         wct: WindowContainerTransaction, focusedTaskId: Int): Boolean {
         if (restoreBusy()) return false
+        if (!MultiSplitLayout.isAllowed(group.layout.root)) {
+            groups.remove(group.firstRepresentative)
+            return false
+        }
         val tasks = group.members.map { organizer.getRunningTaskInfo(it.taskId) ?: run {
             groups.remove(group.firstRepresentative)
             return false
@@ -521,8 +525,7 @@ class MultiSplitCoordinator(
     }
 
     private fun candidate(model: MultiSplitLayout, leaf: LeafId, first: Boolean): MultiSplitLayout? {
-        val rect = bounds(model)?.leaves?.get(leaf) ?: return null
-        val axis = if (rect.width() >= rect.height()) Orientation.LEFT_RIGHT else Orientation.TOP_BOTTOM
+        val axis = model.insertionAxis(leaf) ?: return null
         return model.insert(leaf, Leaf(LeafId(nextLeaf), -100 - nextLeaf), DividerId(nextDivider),
             axis, 0.5f, displayBounds(), layoutInsets(), host.pairLayout().dividerSize,
             LayoutPolicy().getMinimumLeafSize(displays.getDisplayContext(
@@ -544,7 +547,8 @@ class MultiSplitCoordinator(
             ?: return reject("Task is not a leaf")
         if (model.getLeaves().size >= host.capacity()) return reject("At capacity")
         val source = bounds(model)?.leaves?.get(leaf.id) ?: return reject("Source bounds")
-        val below = source.height() > source.width()
+        val below = model.insertionAxis(leaf.id)?.let { it == Orientation.TOP_BOTTOM }
+            ?: return reject("At capacity")
         val first = !below && displays.getDisplayContext(host.rootInfo()!!.displayId)
             ?.resources?.configuration?.layoutDirection == View.LAYOUT_DIRECTION_RTL
         val proposed = candidate(model, leaf.id, first) ?: return reject("Minimum leaf size")
@@ -590,12 +594,15 @@ class MultiSplitCoordinator(
         }
         return model.getLeaves().flatMap { leaf ->
             val source = calculated.leaves.getValue(leaf.id)
+            val axis = model.insertionAxis(leaf.id)
+            if (axis == null) return@flatMap listOf(AppDragSlot(position(leaf.id, model),
+                leaf.id.value, source, source, true, leaf.id.value, false, revision))
             listOf(true, false).mapNotNull { first ->
                 val added = candidate(model, leaf.id, first) ?: return@mapNotNull null
                 if (!fitsExistingTasks(added)) return@mapNotNull null
                 val preview = bounds(added)?.leaves?.get(LeafId(nextLeaf)) ?: return@mapNotNull null
                 val hit = Rect(source)
-                if (source.width() >= source.height()) {
+                if (axis == Orientation.LEFT_RIGHT) {
                     if (first) hit.right = source.centerX() else hit.left = source.centerX()
                 } else {
                     if (first) hit.bottom = source.centerY() else hit.top = source.centerY()

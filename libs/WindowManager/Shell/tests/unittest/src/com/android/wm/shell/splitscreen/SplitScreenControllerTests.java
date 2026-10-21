@@ -207,19 +207,24 @@ public class SplitScreenControllerTests extends ShellTestCase {
     }
 
     @Test
-    public void floatingSplitEntry_tracksCapacityAndLeavesOtherTasksUnchanged() {
+    public void floatingSplitEntry_requiresAnActualFreeCompatibleSlot() {
         ActivityManager.RunningTaskInfo task = new ActivityManager.RunningTaskInfo();
         task.displayId = DEFAULT_DISPLAY;
         task.isFloatingWindow = true;
-        doReturn(2).when(mSplitScreenController).getSplitCapacity(DEFAULT_DISPLAY);
-        doReturn(2).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
-        assertEquals(false, mSplitScreenController.canEnterSplitScreen(task));
-        doReturn(1).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
-        assertEquals(true, mSplitScreenController.canEnterSplitScreen(task));
+        task.supportsMultiWindow = true;
+        task.configuration.windowConfiguration.setBounds(new Rect(100, 100, 500, 500));
+        doReturn(true).when(mSplitScreenController).isSplitScreenVisible();
+        doReturn(true).when(mStageCoordinator).canMutateSplit();
         doReturn(4).when(mSplitScreenController).getSplitCapacity(DEFAULT_DISPLAY);
         doReturn(3).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        doReturn(java.util.Collections.emptyList()).when(mSplitScreenController)
+                .getAppDragSlots(DEFAULT_DISPLAY);
+        assertEquals(false, mSplitScreenController.canEnterSplitScreen(task));
+        final SplitScreenController.AppDragSlot slot = new SplitScreenController.AppDragSlot(
+                1, 3, new Rect(510, 0, 1000, 800), new Rect(510, 0, 1000, 800), false);
+        doReturn(java.util.List.of(slot)).when(mSplitScreenController).getAppDragSlots(DEFAULT_DISPLAY);
         assertEquals(true, mSplitScreenController.canEnterSplitScreen(task));
-        doReturn(4).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        task.minWidth = 1000;
         assertEquals(false, mSplitScreenController.canEnterSplitScreen(task));
         task.isFloatingWindow = false;
         assertEquals(true, mSplitScreenController.canEnterSplitScreen(task));
@@ -547,6 +552,8 @@ public class SplitScreenControllerTests extends ShellTestCase {
         verify(mStageCoordinator, never()).startIntent(any(), any(), anyInt(), any(), any(), any(),
                 anyInt(), anyInt());
     }
+
+
 
     @Test
     public void floatingSplit_usesVisualCentreAndExistingInsertionApi() {
