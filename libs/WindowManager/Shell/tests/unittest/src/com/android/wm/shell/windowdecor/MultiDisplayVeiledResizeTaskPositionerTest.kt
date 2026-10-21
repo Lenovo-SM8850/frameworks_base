@@ -1480,4 +1480,34 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         verify(mockShellTaskOrganizer, never()).applyTransaction(any())
     }
 
+
+    @Test fun floatingResizeFeedback_rearmsAfterLeavingMinimumAndAfterCancel() = runOnUiThread {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.floatingWindowPosition.set(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 800, 1200))
+        fun begin(method: Int) = taskPositioner.onDragPositioningStart(
+            CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM, DISPLAY_ID_0, 700f, 1000f, method)
+        begin(DragPositioningCallback.INPUT_METHOD_TYPE_TOUCH)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1000f, -1000f)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1100f, -1100f)
+        verify(mockWindowDecoration).performFloatingTargetHapticFeedback()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 700f, 1000f)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1000f, -1000f)
+        verify(mockWindowDecoration, times(2)).performFloatingTargetHapticFeedback()
+        taskPositioner.onDragPositioningCancel()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1200f, -1200f)
+        verify(mockWindowDecoration, times(2)).performFloatingTargetHapticFeedback()
+        begin(DragPositioningCallback.INPUT_METHOD_TYPE_TOUCH)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1000f, -1000f)
+        verify(mockWindowDecoration, times(3)).performFloatingTargetHapticFeedback()
+        taskPositioner.onDragPositioningCancel()
+        begin(DragPositioningCallback.INPUT_METHOD_TYPE_MOUSE)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1000f, -1000f)
+        taskPositioner.onDragPositioningCancel()
+        begin(DragPositioningCallback.INPUT_METHOD_TYPE_TOUCHPAD)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1000f, -1000f)
+        verify(mockWindowDecoration, times(3)).performFloatingTargetHapticFeedback()
+    }
 }

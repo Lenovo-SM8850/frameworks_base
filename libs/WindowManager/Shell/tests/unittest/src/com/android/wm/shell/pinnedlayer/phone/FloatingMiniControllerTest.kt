@@ -442,4 +442,17 @@ class FloatingMiniControllerTest : ShellTestCase() {
         }
     }
 
+
+    @Test fun stashTargetQuery_usesExistingThresholdWithoutMutatingEntry() {
+        val h = Harness()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        val before = Rect(entry.bounds)
+        assertThat(h.controller.getStashTarget(h.task, Rect(-216, 200, 144, 740)))
+            .isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(h.controller.getStashTarget(h.task, Rect(-217, 200, 143, 740)))
+            .isEqualTo(FloatingMiniState.Edge.LEFT)
+        assertThat(entry.bounds).isEqualTo(before)
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(h.changes).isEmpty()
+    }
 }

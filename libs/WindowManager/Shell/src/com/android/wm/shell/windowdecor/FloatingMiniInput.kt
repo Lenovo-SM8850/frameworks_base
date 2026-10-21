@@ -40,6 +40,13 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var downY = 0f
     private var dragging = false
     private var blockedGesture = false
+    private var touchGesture = false
+    private val stashFeedback = FloatingTargetFeedback()
+
+    fun cancelTargetFeedback() {
+        stashFeedback.reset()
+        touchGesture = false
+    }
     private val handler = Handler(Looper.myLooper() ?: Looper.getMainLooper())
     private var inputDispatchDepth = 0
     private var gestureActive = false
@@ -119,7 +126,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                 if (event.actionMasked == MotionEvent.ACTION_UP) task?.let(controller::restoreMini)
                 return true
             }
-        }).apply { setIsLongpressEnabled(false) }
+        }, handler).apply { setIsLongpressEnabled(false) }
         return object : View(context) {
             override fun dispatchTouchEvent(event: MotionEvent): Boolean {
                 inputDispatchDepth++
@@ -142,6 +149,9 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                         v.requestUnbufferedDispatch(event)
                         // Windowless hosts do not forward gesture exclusions to WM.
                         pilferPointers(v)
+                        cancelTargetFeedback()
+                        touchGesture = event.isFromSource(android.view.InputDevice.SOURCE_TOUCHSCREEN) &&
+                            event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
                         blockedGesture = controller.isMiniAnimating(current)
                     }
                     if (blockedGesture) {
@@ -154,6 +164,9 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                         MotionEvent.ACTION_DOWN -> {
                             gestureActive = true
                             start = controller.beginMiniDrag(current)
+                            stashFeedback.update(controller.getMiniStashTarget(current, start).takeUnless {
+                                it == com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Edge.NONE
+                            }, false) {}
                             moved.set(start)
                             downX = event.rawX
                             downY = event.rawY
@@ -174,10 +187,18 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                                 dragging = true
                                 moved.set(start)
                                 moved.offset(dx.roundToInt(), dy.roundToInt())
+                                val edge = controller.getMiniStashTarget(current, moved)
+                                stashFeedback.update(edge.takeUnless {
+                                    it == com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Edge.NONE
+                                }, touchGesture) {
+                                    if (v.isAttachedToWindow) v.performHapticFeedback(
+                                        android.view.HapticFeedbackConstants.SEGMENT_TICK)
+                                }
                                 controller.moveMini(current, moved)
                             }
                         }
                         MotionEvent.ACTION_UP -> {
+                            cancelTargetFeedback()
                             if (!gestureActive) return@setOnTouchListener true
                             gestureActive = false
                             if (dragging) controller.endMiniDrag(current, start, moved)
@@ -187,6 +208,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             }
                         }
                         MotionEvent.ACTION_CANCEL -> {
+                            cancelTargetFeedback()
                             if (!gestureActive) return@setOnTouchListener true
                             gestureActive = false
                             taps.onTouchEvent(event)
@@ -199,6 +221,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     }
 
     override fun close() {
+        cancelTargetFeedback()
         val oldHost = host
         val oldSurface = surface
         val oldTask = task

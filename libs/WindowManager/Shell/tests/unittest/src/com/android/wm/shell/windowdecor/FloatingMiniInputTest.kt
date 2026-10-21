@@ -131,4 +131,77 @@ class FloatingMiniInputTest : ShellTestCase() {
         verify(controller, never()).restoreMini(task)
     }
 
+
+    @Test fun stashFeedback_rearmsAndResetsOnTransitionCancelAndClose() {
+        val view = org.mockito.kotlin.spy(view())
+        whenever(view.isAttachedToWindow).thenReturn(true)
+        org.mockito.kotlin.doReturn(true).whenever(view).performHapticFeedback(
+            android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        val edge = com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Edge.LEFT
+        val none = com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Edge.NONE
+        whenever(controller.getMiniStashTarget(org.mockito.kotlin.eq(task), org.mockito.kotlin.any()))
+            .thenReturn(none, edge, edge, none, edge, edge, none, edge, none, edge)
+        val time = SystemClock.uptimeMillis()
+        var tick = 0L
+        fun event(action: Int, x: Float, source: Int = android.view.InputDevice.SOURCE_TOUCHSCREEN) {
+            val pointer = MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+            val coords = MotionEvent.PointerCoords().apply { this.x = x; y = 20f }
+            MotionEvent.obtain(time, time + tick++, action, 1, arrayOf(pointer), arrayOf(coords),
+                0, 0, 1f, 1f, 0, 0, source, 0).also {
+                view.dispatchTouchEvent(it)
+                it.recycle()
+            }
+        }
+        event(MotionEvent.ACTION_DOWN, 20f)
+        repeat(4) { event(MotionEvent.ACTION_MOVE, -400f - it) }
+        verify(view, times(2)).performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        input.cancelTargetFeedback()
+        event(MotionEvent.ACTION_MOVE, -410f)
+        verify(view, times(2)).performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        event(MotionEvent.ACTION_CANCEL, -410f)
+        event(MotionEvent.ACTION_DOWN, 20f)
+        event(MotionEvent.ACTION_MOVE, -420f)
+        verify(view, times(3)).performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        event(MotionEvent.ACTION_CANCEL, -420f)
+        event(MotionEvent.ACTION_DOWN, 20f, android.view.InputDevice.SOURCE_MOUSE)
+        event(MotionEvent.ACTION_MOVE, -420f, android.view.InputDevice.SOURCE_MOUSE)
+        verify(view, times(3)).performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        input.close()
+        event(MotionEvent.ACTION_MOVE, -450f)
+        verify(view, times(3)).performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+    }
+
+    @Test fun alreadyStashedFeedback_isSilentUntilTheDragLeavesAndReenters() {
+        val view = org.mockito.kotlin.spy(view())
+        whenever(view.isAttachedToWindow).thenReturn(true)
+        org.mockito.kotlin.doReturn(true).whenever(view).performHapticFeedback(
+            android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        val edge = com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Edge.LEFT
+        val none = com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Edge.NONE
+        whenever(controller.getMiniStashTarget(org.mockito.kotlin.eq(task), org.mockito.kotlin.any()))
+            .thenReturn(edge, edge, none, edge)
+        val time = SystemClock.uptimeMillis()
+        fun event(action: Int, x: Float) {
+            val pointer = MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+            val coords = MotionEvent.PointerCoords().apply { this.x = x; y = 20f }
+            MotionEvent.obtain(time, time + 20, action, 1, arrayOf(pointer), arrayOf(coords),
+                0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0).also {
+                view.dispatchTouchEvent(it)
+                it.recycle()
+            }
+        }
+        event(MotionEvent.ACTION_DOWN, 20f)
+        event(MotionEvent.ACTION_MOVE, -400f)
+        verify(view, never()).performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        event(MotionEvent.ACTION_MOVE, -300f)
+        event(MotionEvent.ACTION_MOVE, -400f)
+        verify(view).performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+        input.close()
+    }
 }

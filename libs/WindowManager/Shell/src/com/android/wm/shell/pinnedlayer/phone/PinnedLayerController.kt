@@ -117,6 +117,8 @@ class PinnedLayerController(
     }
     fun beginMiniDrag(task: TaskInfo): Rect = miniInteractions?.beginDrag(task) ?: task.presentationBounds
     fun moveMini(task: TaskInfo, bounds: Rect) { miniInteractions?.move(task, bounds) }
+    fun getMiniStashTarget(task: TaskInfo, bounds: Rect): FloatingMiniState.Edge =
+        miniInteractions?.getStashTarget(task, bounds) ?: FloatingMiniState.Edge.NONE
     fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect) {
         miniInteractions?.onDragEnded(task, start, end)
     }

@@ -46,4 +46,38 @@ class FloatingMiniPreviewTest : ShellTestCase() {
         preview.update(task, leash, null)
         verifyNoInteractions(container)
     }
+
+    @Test fun feedback_tracksSemanticCornerRatherThanBoundsAndResetsOnClose() {
+        val preview = FloatingMiniPreview { _, _ -> null }
+        val task = TestRunningTaskInfoBuilder().build()
+        var cues = 0
+        val target = DragTarget(Rect(8, 108, 368, 648), .45f, 24f,
+            com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Corner.TOP_LEFT)
+        preview.updateFeedback(task, target, true) { cues++ }
+        preview.updateFeedback(task, target.copy(bounds = Rect(8, 656, 368, 1196)), true) { cues++ }
+        org.junit.Assert.assertEquals(1, cues)
+        preview.updateFeedback(task, null, true) { cues++ }
+        preview.updateFeedback(task, target, true) { cues++ }
+        org.junit.Assert.assertEquals(2, cues)
+        preview.close()
+        preview.updateFeedback(task, target, true) { cues++ }
+        org.junit.Assert.assertEquals(3, cues)
+    }
+
+    @Test fun feedback_nonTouchIsSilentAndTargetsRearmOnlyAfterExit() {
+        val state = FloatingTargetFeedback()
+        var cues = 0
+        state.update("left", false) { cues++ }
+        state.update("left", true) { cues++ }
+        org.junit.Assert.assertEquals(0, cues)
+        state.update(null, true) { cues++ }
+        state.update("left", true) { cues++ }
+        repeat(10) { state.update("left", true) { cues++ } }
+        org.junit.Assert.assertEquals(1, cues)
+        state.update("right", true) { cues++ }
+        org.junit.Assert.assertEquals(2, cues)
+        state.reset()
+        state.update("right", true) { cues++ }
+        org.junit.Assert.assertEquals(3, cues)
+    }
 }

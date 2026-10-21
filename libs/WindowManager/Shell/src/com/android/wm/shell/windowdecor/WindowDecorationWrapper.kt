@@ -102,6 +102,12 @@ private constructor(
         }
     }
 
+    fun performFloatingTargetHapticFeedback() {
+        val view = floatingTopHandle?.getTargetFeedbackView()
+            ?: floatingBottomHandle?.getTargetFeedbackView()
+        view?.performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+    }
+
     private fun updateFloatingBottomHandle(t: SurfaceControl.Transaction? = null) {
         floatingBottomHandle?.update(decorTaskInfo, taskSurface, t)
         floatingTopHandle?.update(decorTaskInfo, taskSurface, t)
@@ -372,6 +378,7 @@ private constructor(
         inSyncWithTransition: Boolean,
         taskSurface: SurfaceControl?,
     ) {
+        if (inSyncWithTransition) floatingMiniInput?.cancelTargetFeedback()
         if (inSyncWithTransition && floatingPreviewBounds != null) {
             finishFloatingWindowPreview()
             floatingWindowTransitionListener?.invoke()

@@ -123,7 +123,15 @@ class FloatingMiniController(
             min(layout.width(), layout.height()), (8 * density(task)).toInt()))
     }
 
-    data class DragTarget(val bounds: Rect, val scale: Float, val radius: Float)
+    data class DragTarget(val bounds: Rect, val scale: Float, val radius: Float,
+        val corner: FloatingMiniState.Corner? = null)
+
+    fun getStashTarget(task: TaskInfo, bounds: Rect): FloatingMiniState.Edge {
+        if (state.get(task.userId, task.taskId) == null) return FloatingMiniState.Edge.NONE
+        val stable = stable(task)
+        return if (stable.isEmpty) FloatingMiniState.Edge.NONE else
+            FloatingMiniState.stashEdge(bounds, stable)
+    }
 
     fun getDragTarget(task: TaskInfo, start: Rect, end: Rect): DragTarget? {
         if (!task.isFloatingWindow || state.get(task.userId, task.taskId) != null || start == end) return null
@@ -136,7 +144,7 @@ class FloatingMiniController(
             stable, corner, (8 * density(task)).toInt())
         val radius = displays.getDisplayContext(task.displayId)?.resources?.getDimension(
             com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius) ?: 0f
-        return DragTarget(bounds, scale, radius)
+        return DragTarget(bounds, scale, radius, corner)
     }
 
     fun onDragEnded(task: TaskInfo, start: Rect, end: Rect): Boolean {

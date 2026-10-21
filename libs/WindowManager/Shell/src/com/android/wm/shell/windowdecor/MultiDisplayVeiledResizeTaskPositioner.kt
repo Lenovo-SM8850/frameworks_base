@@ -130,6 +130,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var floatingEdgeMove = false
     private val miniPreview = FloatingMiniPreview(desktopTasksController::createFloatingMiniPreview)
     private var miniPreviewCancelled = false
+    private val resizeFeedback = FloatingTargetFeedback()
+    private var allowFloatingFeedback = false
     private val floatingFrameCallback = Choreographer.FrameCallback {
         if (floatingMovePending) flushFloatingMove() else flushFloatingResizePreview()
     }
@@ -181,6 +183,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     ): Rect {
         miniPreview.close()
         miniPreviewCancelled = false
+        resizeFeedback.reset()
+        allowFloatingFeedback = true
         windowDecoration.floatingMiniPreviewCancellation = ::onDragPositioningCancel
         floatingEdgeMove = windowDecoration.taskInfo.isFloatingWindow &&
             Integer.bitCount(ctrlType) == 1
@@ -312,6 +316,13 @@ class MultiDisplayVeiledResizeTaskPositioner(
             if (isResizing) return moveFloatingResize(x, y)
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
+            if (!miniPreviewCancelled) {
+                miniPreview.updateFeedback(windowDecoration.taskInfo,
+                    windowDecoration.pinnedLayerController?.getMiniDragTarget(windowDecoration.taskInfo,
+                        taskBoundsAtDragStart, repositionTaskBounds),
+                    allowFloatingFeedback && inputMethod == InputMethod.TOUCH,
+                    windowDecoration::performFloatingTargetHapticFeedback)
+            }
             if (!floatingMovePending) {
                 floatingMovePending = true
                 Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
@@ -483,6 +494,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun onDragPositioningEnd(displayId: Int, x: Float, y: Float): Rect {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
         windowDecoration.floatingMiniPreviewCancellation = null
         miniPreview.close()
         logD(
@@ -640,6 +653,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun close() {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
         windowDecoration.floatingMiniPreviewCancellation = null
         miniPreview.close()
         closing = true
@@ -672,6 +687,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
             floatingMinWidth, floatingMinHeight, floatingResizeScratch, floatingMinimumScale,
             floatingMinimumVisibleSize)
         floatingResize = result
+        val entersMini = result.atMinimum && (result.visible != taskBoundsAtDragStart ||
+            result.scale < floatingStartScale - .001f || result.commitsBounds)
+        resizeFeedback.update(if (entersMini) true else null,
+            allowFloatingFeedback && inputMethod == InputMethod.TOUCH,
+            windowDecoration::performFloatingTargetHapticFeedback)
         previewFloatingResize(result.visible, if (result.commitsBounds) 1f else result.scale,
             result.commitsBounds)
         repositionTaskBounds.set(result.visible)
@@ -750,6 +770,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun stopFloatingObserver() {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
         floatingDragActive = false
         SurfaceFrameRate.setInteracting(this, false)
         if (floatingObserverRegistered) {
@@ -760,6 +782,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun cancelFloatingDragForTransition() {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
         miniPreview.close()
         miniPreviewCancelled = true
         cancelFloatingFrame()

@@ -138,6 +138,8 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         }
     }
 
+    fun getTargetFeedbackView(): View? = pill?.takeIf { it.isAttachedToWindow }
+
     fun setFocusAlpha(alpha: Float) { pill?.alpha = alpha }
 
     override fun close() {
