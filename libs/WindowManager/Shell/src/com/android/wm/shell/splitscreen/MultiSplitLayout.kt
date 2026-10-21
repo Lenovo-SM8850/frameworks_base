@@ -10,7 +10,7 @@ import android.graphics.Rect
  * Immutable geometry for two to four sibling stages with independently resizable branches.
  * Branches describe geometry only and never represent task roots or own surfaces.
  */
-class MultiSplitLayout(val root: Split) {
+class MultiSplitLayout @JvmOverloads constructor(val root: Split, val strip: LeafId? = null) {
     data class LeafId(val value: Int)
     data class DividerId(val value: Int)
 
@@ -37,7 +37,8 @@ class MultiSplitLayout(val root: Split) {
         }
     }
 
-    data class Bounds(val leaves: Map<LeafId, Rect>, val dividers: Map<DividerId, Rect>)
+    data class Bounds @JvmOverloads constructor(val leaves: Map<LeafId, Rect>, val dividers: Map<DividerId, Rect>,
+        val visibleLeaves: Map<LeafId, Rect> = leaves)
 
     private val leaves = mutableMapOf<LeafId, Leaf>()
     private val dividers = mutableSetOf<DividerId>()
@@ -63,6 +64,7 @@ class MultiSplitLayout(val root: Split) {
 
     init {
         require(isAllowed(root))
+        require(strip == null || listOf(root.first, root.second).any { it is Leaf && it.id == strip })
         fun validate(node: Node, depth: Int) {
             when (node) {
                 is Leaf -> require(leaves.put(node.id, node) == null)
@@ -116,7 +118,20 @@ class MultiSplitLayout(val root: Split) {
             result.leafNodeBounds.mapKeys { leafNodes.getValue(it.key) },
             result.dividerBounds.mapKeys { dividerNodes.getValue(it.key) },
         )
-        return bounds.takeIf { it.leaves.values.all { rect -> !rect.isEmpty } }
+        if (strip == null) return bounds.takeIf { it.leaves.values.all { rect -> !rect.isEmpty } }
+        val logical = bounds.leaves.mapValues { Rect(it.value) }
+        val rect = logical[strip] ?: return null
+        val first = (root.first as? Leaf)?.id == strip
+        // Keep the hidden app large, as in flexible pairs, while exposing only its peek.
+        if (root.orientation == Orientation.LEFT_RIGHT) {
+            if (first) rect.left = rect.right - (content.width() - rect.width() - dividerSize)
+            else rect.right = rect.left + (content.width() - rect.width() - dividerSize)
+        } else {
+            if (first) rect.top = rect.bottom - (content.height() - rect.height() - dividerSize)
+            else rect.bottom = rect.top + (content.height() - rect.height() - dividerSize)
+        }
+        return Bounds(logical, bounds.dividers, bounds.leaves)
+            .takeIf { it.leaves.values.all { rect -> !rect.isEmpty } }
     }
 
     /** Returns null for an unsupported topology, reused ID, or infeasible insertion. */
@@ -144,7 +159,9 @@ class MultiSplitLayout(val root: Split) {
         } else {
             Split(dividerId, orientation, ratio, chosen, newLeaf)
         }
-        val candidate = MultiSplitLayout(replace(root, chosenLeaf) { replacement } as Split)
+        val source = if (strip == chosenLeaf) normal() else this
+        val candidate = MultiSplitLayout(source.replace(source.root, chosenLeaf) { replacement } as Split,
+            source.strip)
         val bounds = candidate.calculateBounds(displayBounds, insets, dividerSize) ?: return null
         return candidate.takeIf { LayoutPolicy().isFeasible(bounds, minimumLeafSize) }
     }
@@ -179,7 +196,12 @@ class MultiSplitLayout(val root: Split) {
                 }
             }
         }
-        return MultiSplitLayout(collapse(root) as Split)
+        val collapsed = collapse(root) as Split
+        val retained = strip?.takeIf { id ->
+            listOf(collapsed.first, collapsed.second).any { it is Leaf && it.id == id }
+        }
+        val result = MultiSplitLayout(collapsed, retained).reorient(root.orientation)
+        return if (retained == null) result.normal() else result
     }
 
     /** Exchanges task assignments without changing slot IDs, branches, divider IDs, or ratios. */
@@ -187,7 +209,7 @@ class MultiSplitLayout(val root: Split) {
         val firstTask = leaves[first]?.taskId ?: return null
         val secondTask = leaves[second]?.taskId ?: return null
         val swapped = replace(root, first) { it.copy(taskId = secondTask) }
-        return MultiSplitLayout(replace(swapped, second) { it.copy(taskId = firstTask) } as Split)
+        return MultiSplitLayout(replace(swapped, second) { it.copy(taskId = firstTask) } as Split, strip)
     }
 
     /** Stable slot order, independent of task assignments and stage allocation. */
@@ -196,7 +218,7 @@ class MultiSplitLayout(val root: Split) {
     /** Replaces a slot's app without changing geometry. */
     fun assign(id: LeafId, taskId: Int): MultiSplitLayout? {
         if (id !in leaves || leaves.values.any { it.id != id && it.taskId == taskId }) return null
-        return MultiSplitLayout(replace(root, id) { it.copy(taskId = taskId) } as Split)
+        return MultiSplitLayout(replace(root, id) { it.copy(taskId = taskId) } as Split, strip)
     }
 
     /** Reorients the whole topology for the display without changing task or divider identities. */
@@ -211,7 +233,7 @@ class MultiSplitLayout(val root: Split) {
                 first = rotate(node.first), second = rotate(node.second),
             )
         }
-        return MultiSplitLayout(rotate(root) as Split)
+        return MultiSplitLayout(rotate(root) as Split, strip)
     }
 
     /** Updates only the selected divider's ratio; descendant ratios remain unchanged. */
@@ -224,8 +246,14 @@ class MultiSplitLayout(val root: Split) {
                 first = update(node.first), second = update(node.second),
             )
         }
-        return MultiSplitLayout(update(root) as Split)
+        return MultiSplitLayout(update(root) as Split, strip)
     }
+
+    /** A structural change without a surviving peek starts at the normal middle target. */
+    fun normal(): MultiSplitLayout = MultiSplitLayout(root.copy(ratio = 0.5f))
+
+    fun withRootRatio(ratio: Float, strip: LeafId? = null): MultiSplitLayout =
+        MultiSplitLayout(root.copy(ratio = ratio), strip)
 
     private fun replace(node: Node, id: LeafId, transform: (Leaf) -> Node): Node = when (node) {
         is Leaf -> if (node.id == id) transform(node) else node

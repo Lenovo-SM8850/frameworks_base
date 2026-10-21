@@ -222,6 +222,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     private final InteractionJankMonitor mInteractionJankMonitor;
     private boolean mIsLeftRightSplit;
     private boolean mIsMultiSplitDivider;
+    private int mFlexibleBranchSide = -1;
     private ValueAnimator mDividerFlingAnimator;
     private AnimatorSet mSwapAnimator;
     private boolean mRecentsAnimating;
@@ -293,6 +294,13 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      * Multi-app IME adjustment is owned by the session, rather than by each branch's pair helper.
      */
     public void setMultiSplitDivider(Rect branchBounds, boolean leftRight, float ratio) {
+        setMultiSplitDivider(branchBounds, leftRight, ratio, -1);
+    }
+
+    /** Only the root's single-app half may have a peek endpoint. */
+    public void setMultiSplitDivider(Rect branchBounds, boolean leftRight, float ratio,
+            int flexibleSide) {
+        mFlexibleBranchSide = flexibleSide;
         final boolean branchChanged = !mIsMultiSplitDivider || !mRootBounds.equals(branchBounds);
         mIsMultiSplitDivider = true;
         mRootBounds.set(branchBounds);
@@ -323,6 +331,16 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
         crop.offset(-window.left, -window.top);
         if (!crop.intersect(0, 0, window.width(), window.height())) crop.setEmpty();
         return crop;
+    }
+
+    public float getFirstNonDismissRatio() {
+        return (float) mDividerSnapAlgorithm.getFirstSplitTarget().position
+                / Math.max(1, (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height()) - mDividerSize);
+    }
+
+    public float getLastNonDismissRatio() {
+        return (float) mDividerSnapAlgorithm.getLastSplitTarget().position
+                / Math.max(1, (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height()) - mDividerSize);
     }
 
     /** Returns the visible divider thickness used by geometry and drag previews. */
@@ -708,6 +726,10 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      */
     private void updateBounds(int position, Rect bounds1, Rect bounds2, Rect dividerBounds,
             boolean setEffectBounds) {
+        if (mIsMultiSplitDivider) {
+            position = Math.max(mDividerSnapAlgorithm.getFirstSplitTarget().position,
+                    Math.min(position, mDividerSnapAlgorithm.getLastSplitTarget().position));
+        }
         dividerBounds.set(mRootBounds);
         bounds1.set(mRootBounds);
         bounds2.set(mRootBounds);
@@ -948,6 +970,13 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      */
     public void snapToTarget(int currentPosition, SnapTarget snapTarget, int duration,
             Interpolator interpolator) {
+        if (mIsMultiSplitDivider && (snapTarget.snapPosition == SNAP_TO_START_AND_DISMISS
+                || snapTarget.snapPosition == SNAP_TO_END_AND_DISMISS)) {
+            snapToTarget(currentPosition, snapTarget.snapPosition == SNAP_TO_START_AND_DISMISS
+                    ? mDividerSnapAlgorithm.getFirstSplitTarget()
+                    : mDividerSnapAlgorithm.getLastSplitTarget(), duration, interpolator);
+            return;
+        }
         mSplitState.setAnimatingToState(snapTarget.snapPosition);
         switch (snapTarget.snapPosition) {
             case SNAP_TO_START_AND_DISMISS:
@@ -1004,7 +1033,15 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      */
     public SnapTarget findSnapTarget(int position, float velocity,
             boolean hardDismiss) {
-        return mDividerSnapAlgorithm.calculateSnapTarget(position, velocity, hardDismiss);
+        final SnapTarget target = mDividerSnapAlgorithm.calculateSnapTarget(position, velocity,
+                hardDismiss);
+        if (target == mDividerSnapAlgorithm.getDismissStartTarget()) {
+            return mDividerSnapAlgorithm.getFirstSplitTarget();
+        }
+        if (target == mDividerSnapAlgorithm.getDismissEndTarget()) {
+            return mDividerSnapAlgorithm.getLastSplitTarget();
+        }
+        return target;
     }
 
     /**
@@ -1042,7 +1079,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
                 insets,
                 mPinnedTaskbarInsets.toRect(),
                 mIsLeftRightSplit ? DOCKED_LEFT : DOCKED_TOP /* dockSide */,
-                mContext.getDisplay().getDisplayId(), false, true, mIsMultiSplitDivider);
+                mContext.getDisplay().getDisplayId(), false, true, mIsMultiSplitDivider, mFlexibleBranchSide);
     }
 
     /** Fling divider from current position to end or start position then exit */

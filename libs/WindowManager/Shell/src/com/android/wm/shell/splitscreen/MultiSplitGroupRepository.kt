@@ -100,7 +100,7 @@ class MultiSplitGroupRepository(private val onChanged: Runnable) {
         val firstRep = previous?.firstRepresentative?.takeIf { it in first } ?: first.first()
         val secondRep = previous?.secondRepresentative?.takeIf { it in second } ?: second.first()
         fun branchBounds(node: Node): Rect = when (node) {
-            is Leaf -> Rect(calculated.leaves.getValue(node.id))
+            is Leaf -> Rect(calculated.visibleLeaves.getValue(node.id))
             is Split -> branchBounds(node.first).apply { union(branchBounds(node.second)) }
         }
         val group = Group(layout, stageIds.toMap(), tasks.map { Member(it.taskId, it.userId) },

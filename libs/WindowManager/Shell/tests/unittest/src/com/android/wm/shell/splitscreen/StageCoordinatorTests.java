@@ -1753,6 +1753,55 @@ public class StageCoordinatorTests extends ShellTestCase {
     }
 
     @Test
+    @DisableFlags({com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_SPLIT,
+            com.android.wm.shell.Flags.FLAG_ENABLE_SHELL_MODES})
+    @UiThreadTest
+    public void captionCollapse_defersPairInputAndLaunchAdjacencyUntilCallerWctSettles() {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        // This test checks handoff ordering before the divider surface becomes ready.
+        doReturn(null).when(mSplitLayout).getDividerLeash();
+        final ArgumentCaptor<Runnable> idle = ArgumentCaptor.forClass(Runnable.class);
+        doAnswer(invocation -> null).when(mTransitions).runOnIdle(idle.capture());
+        final WindowContainerTransaction wct = new WindowContainerTransaction();
+        clearInvocations(mLaunchAdjacentController, mSyncQueue, mSplitLayout);
+        assertTrue(mStageCoordinator.returnMultiSplitToPair(
+                java.util.Arrays.asList(mMainStage, mSideStage), 0.5f, wct));
+        assertThat(wct.getHierarchyOps().stream().anyMatch(op -> op.getType()
+                == HierarchyOp.HIERARCHY_OP_TYPE_SET_ADJACENT_ROOTS)).isTrue();
+        verify(mSplitLayout).setDivideRatio(SNAP_TO_2_50_50);
+        verify(mSplitLayout, never()).init();
+        verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
+        verify(mSyncQueue, never()).queue(any(WindowContainerTransaction.class));
+        mMainExecutor.flushAll();
+        verify(mSplitLayout, never()).init();
+        verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
+        idle.getValue().run();
+        verify(mSplitLayout).init();
+        verify(mSplitLayout).populateTouchZones();
+        verify(mLaunchAdjacentController).setLaunchAdjacentRoot(mSideStage.mRootTaskInfo.token);
+        verify(mSyncQueue, never()).queue(any(WindowContainerTransaction.class));
+    }
+
+    @Test
+    @DisableFlags({com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_SPLIT,
+            com.android.wm.shell.Flags.FLAG_ENABLE_SHELL_MODES})
+    public void captionCollapse_newSessionCancelsDeferredPairRestoration() throws Exception {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        final ArgumentCaptor<Runnable> idle = ArgumentCaptor.forClass(Runnable.class);
+        doAnswer(invocation -> null).when(mTransitions).runOnIdle(idle.capture());
+        assertTrue(mStageCoordinator.returnMultiSplitToPair(
+                java.util.Arrays.asList(mMainStage, mSideStage), 0.5f,
+                new WindowContainerTransaction()));
+        mMainExecutor.flushAll();
+        installMultiSplitForRestoreTest();
+        clearInvocations(mLaunchAdjacentController, mSplitLayout);
+        idle.getValue().run();
+        verify(mSplitLayout, never()).init();
+        verify(mLaunchAdjacentController, never()).setLaunchAdjacentRoot(any());
+    }
+
+
+    @Test
     public void sidebarRepeatTaskDropDuringPendingEnterDoesNotMutatePairLayout() {
         mSplitScreenTransitions.mPendingEnter = mock(SplitScreenTransitions.EnterSession.class);
         mStageCoordinator.startTask(mTaskId, SPLIT_POSITION_BOTTOM_OR_RIGHT, null, null,

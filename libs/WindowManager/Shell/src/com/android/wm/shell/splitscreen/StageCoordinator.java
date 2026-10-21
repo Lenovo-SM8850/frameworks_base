@@ -609,6 +609,12 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 onMultiSplitEnded(wct);
             }
             @Override
+            public boolean returnToPair(List<StageTaskListener> survivors, float ratio,
+                    WindowContainerTransaction wct) {
+                return returnMultiSplitToPair(survivors, ratio, wct);
+            }
+
+            @Override
             public void changed() {
                 updateSplitFrameRates();
                 sendOnBoundsChanged();
@@ -1851,6 +1857,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Whether a visible split can accept a menu mutation on the Shell main thread. */
     boolean canMutateSplit() {
+        if (mMultiSplit != null && mMultiSplit.isBusy()) return false;
         if (isMultiSplitActive()) return mMultiSplit.isVisible() && !mMultiSplit.isBusy();
         return mSplitLayout != null && mSplitRootTaskInfo != null && isSplitActive()
                 && isSplitScreenVisible() && !mIsExiting && !mIsDividerRemoteAnimating
@@ -4205,6 +4212,64 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "mergeAnimation: transition=%d", info.getDebugId());
         mSplitTransitions.mergeAnimation(transition, info, startT, finishT, mergeTarget,
                 finishCallback);
+    }
+
+    @VisibleForTesting
+    boolean returnMultiSplitToPair(List<StageTaskListener> survivors, float ratio,
+            WindowContainerTransaction wct) {
+        final List<StageTaskListener> destination = enableFlexibleSplit()
+                ? mStageOrderOperator.getActiveStages()
+                : java.util.Arrays.asList(getTopLeftStage(), getBottomRightStage());
+        if (destination.size() != 2 || survivors.size() != 2) return false;
+        for (StageTaskListener stage : survivors) {
+            wct.clearAdjacentRoots(stage.mRootTaskInfo.token);
+        }
+        final java.util.Set<Integer> kept = survivors.stream()
+                .map(StageTaskListener::getTopChildTaskId).collect(java.util.stream.Collectors.toSet());
+        destination.forEach(stage -> stage.evictOtherChildren(wct, kept));
+        for (int i = 0; i < 2; i++) {
+            final StageTaskListener source = survivors.get(i);
+            final StageTaskListener target = destination.get(i);
+            // Move tasks individually when source and destination roots cross.
+            // This keeps both apps from collecting into one stage in the same WCT.
+            if (source != target) source.doForAllChildTaskInfos(task ->
+                    wct.reparent(task.token, target.mRootTaskInfo.token, true));
+            wct.setHidden(target.mRootTaskInfo.token, false)
+                    .setForceTranslucent(target.mRootTaskInfo.token, false);
+        }
+        survivors.stream().filter(stage -> !destination.contains(stage)).forEach(stage ->
+                wct.setHidden(stage.mRootTaskInfo.token, true)
+                        .setForceTranslucent(stage.mRootTaskInfo.token, true));
+        final int snap = ratio < 0.2f ? com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_10_90
+                : ratio > 0.8f ? com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_90_10
+                : SNAP_TO_2_50_50;
+        mSplitLayout.setDivideRatio(snap);
+        mSplitLayout.updateStateWithCurrentPosition();
+        updateWindowBounds(mSplitLayout, wct);
+        wct.setAdjacentRoots(destination.get(0).mRootTaskInfo.token,
+                destination.get(1).mRootTaskInfo.token);
+        wct.setForceTranslucent(mSplitRootTaskInfo.token, false);
+        mIsRootTranslucent = false;
+        mDividerVisible = false;
+        final WindowContainerToken pairRoot = mSplitRootTaskInfo.token;
+        final WindowContainerToken sideRoot = mSideStage.mRootTaskInfo.token;
+        // Submit the caller's WCT before restoring pair input and launch adjacency.
+        mMainExecutor.executeDelayed(() -> mTransitions.runOnIdle(() -> {
+            if (isMultiSplitActive() || !isSplitActive() || mSplitRootTaskInfo == null
+                    || !pairRoot.equals(mSplitRootTaskInfo.token)
+                    || mSideStage.mRootTaskInfo == null
+                    || !sideRoot.equals(mSideStage.mRootTaskInfo.token)) return;
+            mSplitLayout.init();
+            setSplitsVisible(true);
+            setDividerVisibility(true, null);
+            mSyncQueue.runInSync(t -> updateSurfaceBounds(mSplitLayout, t, false));
+            mSplitLayout.populateTouchZones();
+            if (!enableFlexibleSplit() && !enableShellModes()) {
+                mLaunchAdjacentController.setLaunchAdjacentRoot(mSideStage.mRootTaskInfo.token);
+            }
+            updateRecentTasksSplitPair();
+        }), 0);
+        return true;
     }
 
     @VisibleForTesting

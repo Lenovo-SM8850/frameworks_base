@@ -77,6 +77,8 @@ class MultiSplitCoordinator(
         fun started()
         fun ended(wct: WindowContainerTransaction)
         fun changed()
+        fun returnToPair(survivors: List<@JvmSuppressWildcards StageTaskListener>, ratio: Float,
+            wct: WindowContainerTransaction): Boolean = false
     }
 
     private val groups = host.groups() ?: MultiSplitGroupRepository(Runnable {})
@@ -92,6 +94,9 @@ class MultiSplitCoordinator(
     private val dividers = linkedMapOf<DividerId, SplitLayout>()
     private val dividerHandlers = mutableMapOf<DividerId, DividerHandler>()
     private var layout: MultiSplitLayout? = null
+    private var stripZone: OffscreenTouchZone? = null
+    private var stripZoneLeaf: LeafId? = null
+    private var stripZoneStage: StageTaskListener? = null
     private var revision = 0
     private var nextLeaf = 2
     private var nextDivider = 1
@@ -356,8 +361,9 @@ class MultiSplitCoordinator(
             groups.remove(group.firstRepresentative)
             return false
         }
-        val restoredLayout = group.layout.reorient(if (host.pairLayout().isLeftRightSplit)
+        var restoredLayout = group.layout.reorient(if (host.pairLayout().isLeftRightSplit)
             Orientation.LEFT_RIGHT else Orientation.TOP_BOTTOM)
+        if (!fitsExistingTasks(restoredLayout)) restoredLayout = restoredLayout.normal()
         val calculated = bounds(restoredLayout)
         val resources = displays.getDisplayContext(group.displayId)?.resources
         if (calculated == null || resources == null || !LayoutPolicy().isFeasible(calculated,
@@ -409,6 +415,7 @@ class MultiSplitCoordinator(
         wct.reorder(stages.getValue(focusedLeaf).mRootTaskInfo.token, true)
             .reorder(tasks.first { it.taskId == focusedTaskId }.token, true)
             .reorder(host.rootInfo()!!.token, true)
+        returnPair(wct)
         return true
     }
 
@@ -506,10 +513,18 @@ class MultiSplitCoordinator(
         val available = (if (leftRight) root.width() else root.height()) - split.dividerSize
         val before = if (leftRight) first.width() else first.height()
         if (available <= 0) return null
+        val measured = split.dividerPositionAsFraction
+        val fraction = if (measured > 0f && measured < 1f) measured
+            else (before.toFloat() / available).coerceIn(0.01f, 0.99f)
+        val ratio = if (fraction < 0.2f || fraction > 0.8f) fraction
+            else (before.toFloat() / available).coerceIn(0.01f, 0.99f)
+        val strip = if (com.android.wm.shell.Flags.enableFlexibleTwoAppSplit()) {
+            when { ratio < 0.2f -> LeafId(0); ratio > 0.8f -> LeafId(1); else -> null }
+        } else null
         return MultiSplitLayout(Split(DividerId(0),
             if (leftRight) Orientation.LEFT_RIGHT else Orientation.TOP_BOTTOM,
-            (before.toFloat() / available).coerceIn(0.01f, 0.99f),
-            Leaf(LeafId(0), pair[0].topChildTaskId), Leaf(LeafId(1), pair[1].topChildTaskId)))
+            ratio, Leaf(LeafId(0), pair[0].topChildTaskId),
+            Leaf(LeafId(1), pair[1].topChildTaskId)), strip)
     }
 
     private fun displayBounds(): Rect = host.pairLayout().rootBounds
@@ -593,7 +608,7 @@ class MultiSplitCoordinator(
             }
         }
         return model.getLeaves().flatMap { leaf ->
-            val source = calculated.leaves.getValue(leaf.id)
+            val source = calculated.visibleLeaves.getValue(leaf.id)
             val axis = model.insertionAxis(leaf.id)
             if (axis == null) return@flatMap listOf(AppDragSlot(position(leaf.id, model),
                 leaf.id.value, source, source, true, leaf.id.value, false, revision))
@@ -883,7 +898,7 @@ class MultiSplitCoordinator(
         stages.putAll(waiting.beforeStages)
         revision++
         lastInsertRejection = "Rolled back: $reason"
-        applyTasks(wct)
+        if (!returnPair(wct)) applyTasks(wct)
     }
 
     private fun requestInsertionRollback(reason: String) {
@@ -1051,8 +1066,23 @@ class MultiSplitCoordinator(
         } else {
             layout = collapsed
             revision++
-            applyTasks(wct)
+            if (!returnPair(wct)) applyTasks(wct)
         }
+    }
+
+    private fun returnPair(wct: WindowContainerTransaction): Boolean {
+        val model = layout ?: return false
+        if (model.getLeaves().size != 2) return false
+        val survivors = model.getLeaves().map { stages.getValue(it.id) }
+        val ratio = if (model.strip != null) model.root.ratio else 0.5f
+        if (!host.returnToPair(survivors, ratio, wct)) return false
+        model.getLeaves().forEach { groups.remove(it.taskId) }
+        layout = null
+        stages.clear()
+        disposeDividers()
+        stopListening()
+        host.changed()
+        return true
     }
 
     /** Handles task finish/removal before legacy pair-only transition classification. */
@@ -1219,6 +1249,7 @@ class MultiSplitCoordinator(
             if (show && !keyguard) t.show(it).setAlpha(it, 1f) else t.hide(it)
         } }
         if (transaction == null) { t.apply(); t.close() }
+        syncStripZone()
     }
 
     private fun applyTasks(wct: WindowContainerTransaction) {
@@ -1276,6 +1307,11 @@ class MultiSplitCoordinator(
             is Split -> {
                 // Keep each branch rectangle independent when expanding its parent.
                 val rect = Rect(walk(node.first)).apply { union(walk(node.second)) }
+                if (node.id == model.root.id) {
+                    rect.set(displayBounds())
+                    val padding = layoutInsets()
+                    rect.inset(padding.left, padding.top, padding.right, padding.bottom)
+                }
                 branches[node.id] = node to rect
                 rect
             }
@@ -1308,17 +1344,91 @@ class MultiSplitCoordinator(
             val changed = split.rootBounds != rect || split.isLeftRightSplit !=
                 (node.orientation == Orientation.LEFT_RIGHT)
             if (!interacting || id != dragDivider) {
-                split.setMultiSplitDivider(rect, node.orientation == Orientation.LEFT_RIGHT, node.ratio)
+                val singleSide = if (node.id == model.root.id && model.getLeaves().size == 3) {
+                    if (node.first is Leaf) 0 else 1
+                } else -1
+                split.setMultiSplitDivider(rect, node.orientation == Orientation.LEFT_RIGHT,
+                    node.ratio, singleSide)
             }
             if (created) {
                 split.init()
                 split.insetsChanged(insetState)
             } else if (changed) split.update(t, false)
         }
+        syncStripZone()
         setInteractive(!isBusy)
     }
 
+    private fun clearStripZone() {
+        if (stripZone == null) return
+        val transaction = SurfaceControl.Transaction()
+        stripZone?.release(transaction)
+        transaction.apply()
+        transaction.close()
+        stripZone = null
+        stripZoneLeaf = null
+        stripZoneStage = null
+    }
+
+    private fun syncStripZone() {
+        val model = layout
+        val leaf = model?.strip
+        if (leaf == null || model.getLeaves().size != 3 || isBusy || keyguard || !visible || imeTop != null) {
+            clearStripZone()
+            return
+        }
+        val stage = stages[leaf] ?: return
+        if (stripZoneLeaf == leaf && stripZoneStage === stage) return
+        clearStripZone()
+        val leash = stage.mRootLeash ?: return
+        val first = (model.root.first as? Leaf)?.id == leaf
+        val zone = OffscreenTouchZone(first) { expandStrip() }
+        zone.inflate(displays.getDisplayContext(host.rootInfo()!!.displayId)!!,
+            leash, stage.mRootTaskInfo)
+        stripZone = zone
+        stripZoneLeaf = leaf
+        stripZoneStage = stage
+    }
+
+    /** A strip tap expands its app while retaining the other half's normal minimum. */
+    fun expandStrip(): Boolean {
+        val current = layout ?: return false
+        val leaf = current.strip ?: return false
+        if (current.getLeaves().size != 3 || !isVisible || isBusy || keyguard || imeTop != null) return false
+        val rootSplit = dividers[current.root.id] ?: return false
+        val first = (current.root.first as? Leaf)?.id == leaf
+        val endpoint = if (first) rootSplit.lastNonDismissRatio else rootSplit.firstNonDismissRatio
+        if (endpoint <= 0f || endpoint >= 1f) return false
+        fun feasible(ratio: Float): Boolean {
+            val candidate = current.withRootRatio(ratio)
+            val rectangles = bounds(candidate) ?: return false
+            val resources = displays.getDisplayContext(host.rootInfo()!!.displayId)!!.resources
+            return LayoutPolicy().isFeasible(rectangles, LayoutPolicy().getMinimumLeafSize(resources)) &&
+                fitsExistingTasks(candidate)
+        }
+        var ratio = endpoint
+        if (!feasible(ratio)) {
+            if (!feasible(0.5f)) return false
+            var valid = 0.5f
+            var invalid = endpoint
+            repeat(24) {
+                val middle = (valid + invalid) / 2f
+                if (feasible(middle)) valid = middle else invalid = middle
+            }
+            ratio = valid
+        }
+        layout = current.withRootRatio(ratio)
+        revision++
+        clearStripZone()
+        val wct = WindowContainerTransaction()
+        applyTasks(wct)
+        pending = transitions.startTransition(TRANSIT_CHANGE, wct, this)
+        setInteractive(false)
+        return true
+    }
+
     private fun setInteractive(enabled: Boolean) {
+        if (!enabled) clearStripZone()
         dividers.forEach { (id, divider) ->
             val keepDrag = interacting && id == dragDivider && pending == null &&
                 runningTransitions.isEmpty()
@@ -1350,6 +1460,7 @@ class MultiSplitCoordinator(
             }
             interacting = active
             if (active) {
+                clearStripZone()
                 dragStart = layout
                 dragDivider = id
                 setInteractive(false)
@@ -1363,7 +1474,18 @@ class MultiSplitCoordinator(
         private fun resized(split: SplitLayout, commit: Boolean) {
             if (retired || pending != null || runningTransitions.isNotEmpty()) return
             val original = dragStart ?: layout ?: return
-            val candidate = original.resize(id, split.branchRatio) ?: return
+            var candidate = original.resize(id, split.branchRatio) ?: return
+            if (id == original.root.id) {
+                val first = original.root.first as? Leaf
+                val second = original.root.second as? Leaf
+                val peek = when {
+                    !com.android.wm.shell.Flags.enableFlexibleTwoAppSplit() -> null
+                    first != null && split.branchRatio < 0.2f -> first.id
+                    second != null && split.branchRatio > 0.8f -> second.id
+                    else -> null
+                }
+                candidate = candidate.withRootRatio(split.branchRatio, peek)
+            }
             val rectangles = bounds(candidate) ?: return
             val resources = displays.getDisplayContext(host.rootInfo()!!.displayId)!!.resources
             if (!LayoutPolicy().isFeasible(rectangles, LayoutPolicy().getMinimumLeafSize(resources)) ||
@@ -1400,20 +1522,10 @@ class MultiSplitCoordinator(
             syncQueue.runInSync { applySurfaceChanges(it) }
         }
         override fun onSnappedToDismiss(end: Boolean, reason: Int, wct: WindowContainerTransaction) {
-            if (retired || pending != null || runningTransitions.isNotEmpty()) return
-            val model = layout ?: return
-            fun find(node: Node): Split? = when (node) {
-                is Leaf -> null
-                is Split -> if (node.id == id) node else find(node.first) ?: find(node.second)
-            }
-            val node = find(model.root) ?: return
-            fun leaves(node: Node): List<LeafId> = when (node) {
-                is Leaf -> listOf(node.id)
-                is Split -> leaves(node.first) + leaves(node.second)
-            }
-            interacting = false
-            leaves(if (end) node.second else node.first).forEach { removeLeaf(it, wct) }
-            pending = transitions.startTransition(TRANSIT_CHANGE, wct, this@MultiSplitCoordinator)
+            if (retired) return
+            cancelDrag()
+            syncDividers()
+            syncQueue.runInSync { applySurfaceChanges(it) }
         }
         override fun onDoubleTappedDivider() {
             if (retired) return
@@ -1460,9 +1572,18 @@ class MultiSplitCoordinator(
                 if (host.pairLayout().isLeftRightSplit) Orientation.LEFT_RIGHT else Orientation.TOP_BOTTOM,
                 0.5f, keep[0], keep[1]))
         }
+        if (returnPair(wct)) return
         layout = layout?.reorient(if (host.pairLayout().isLeftRightSplit) {
             Orientation.LEFT_RIGHT
         } else Orientation.TOP_BOTTOM)
+        layout?.takeIf { it.strip != null }?.let { rotated ->
+            val rectangles = bounds(rotated)
+            val resources = displays.getDisplayContext(host.rootInfo()!!.displayId)!!.resources
+            if (rectangles == null || !LayoutPolicy().isFeasible(rectangles,
+                    LayoutPolicy().getMinimumLeafSize(resources)) || !fitsExistingTasks(rotated)) {
+                layout = rotated.normal()
+            }
+        }
         revision++
         applyTasks(wct)
         disposeDividers()
@@ -1615,6 +1736,7 @@ class MultiSplitCoordinator(
     }
 
     private fun disposeDividers() {
+        clearStripZone()
         dividerHandlers.values.forEach { it.retired = true }
         dividerHandlers.clear()
         dividers.values.forEach { it.release() }

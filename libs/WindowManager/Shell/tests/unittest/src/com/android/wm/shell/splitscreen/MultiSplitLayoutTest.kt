@@ -153,6 +153,27 @@ class MultiSplitLayoutTest {
         }
     }
 
+    @Test
+    fun stripGrowthAndCollapseKeepOnlyValidSingleHalfStrips() {
+        for (axis in Orientation.entries) {
+            val original = pair(axis).withRootRatio(0.1f, a.id)
+            val direction = original.insertionAxis(b.id)!!
+            val expandedHalf = original.insert(b.id, c, left, direction, 0.5f,
+                display, Insets.NONE, 10, 0)!!
+            assertEquals(a.id, expandedHalf.strip)
+            val bounds = expandedHalf.calculateBounds(display, Insets.NONE, 10)!!
+            assertEquals(true, bounds.leaves.getValue(a.id) != bounds.visibleLeaves.getValue(a.id))
+            assertEquals(a.id, expandedHalf.remove(c.id)!!.strip)
+            val four = expandedHalf.insert(a.id, d, right, direction, 0.5f,
+                display, Insets.NONE, 10, 0)!!
+            assertNull(four.strip)
+            assertEquals(0.5f, four.root.ratio)
+            val stripHalf = original.insert(a.id, c, left, direction, 0.5f,
+                display, Insets.NONE, 10, 0)!!
+            assertNull(stripHalf.strip)
+            assertEquals(0.5f, stripHalf.root.ratio)
+        }
+    }
 
     @Test
     fun insert_rejectsUnknownLeafAndReusedIdentities() {
@@ -223,7 +244,7 @@ class MultiSplitLayoutTest {
         val three = below(pair(), a.id, c, left)!!
         val promoted = three.remove(b.id)!!
         assertEquals(left, promoted.root.id)
-        assertEquals(Orientation.TOP_BOTTOM, promoted.root.orientation)
+        assertEquals(Orientation.LEFT_RIGHT, promoted.root.orientation)
         assertEquals(
             setOf(a.id, c.id), promoted.calculateBounds(display, Insets.NONE, 10)!!.leaves.keys
         )

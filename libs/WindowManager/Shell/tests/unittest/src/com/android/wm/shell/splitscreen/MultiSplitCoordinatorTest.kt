@@ -67,6 +67,111 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
     private lateinit var pair: List<StageTaskListener>
     private lateinit var spare: List<StageTaskListener>
 
+    @Test fun captionCollapseReturnsToOrdinaryPairWithTheCallersTransaction() {
+        add()
+        whenever(host.returnToPair(any(), any(), any())).thenReturn(true)
+        assertThat(coordinator.closeTask(30)).isTrue()
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(host).returnToPair(eq(pair), eq(0.5f), wct.capture())
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(wct.firstValue.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
+        }).isTrue()
+    }
+
+    @Test fun restoringAnOlderTwoAppGroupReturnsItToOrdinaryPairMode() {
+        add()
+        assertThat(coordinator.closeTask(30)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val saved = groups.get(10)!!
+        assertThat(saved.members).hasSize(2)
+        coordinator.exit(-1, WindowContainerTransaction())
+        whenever(host.returnToPair(any(), any(), any())).thenReturn(true)
+        org.mockito.Mockito.clearInvocations(host)
+        assertThat(coordinator.restorePair(saved.firstRepresentative, saved.secondRepresentative,
+            null, null, null)).isTrue()
+        verify(host).returnToPair(eq(pair), eq(0.5f), any())
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(groups.peek(10)).isNull()
+        coordinator.onTransitionFinished(token, false)
+    }
+
+    @Test fun dividerDismissCallbackCannotCloseAnyBranch() {
+        add()
+        add()
+        val before = coordinator.activeStages
+        org.mockito.Mockito.clearInvocations(transitions)
+        repeat(3) { index ->
+            val handler = dividerHandlers.takeLast(3)[index]
+            handler.onDividerInteractionChanged(true)
+            handler.onSnappedToDismiss(index % 2 == 0, SplitScreenController.EXIT_REASON_DRAG_DIVIDER,
+                WindowContainerTransaction())
+        }
+        assertThat(coordinator.activeStages).containsExactlyElementsIn(before)
+        verify(transitions, never()).startTransition(any(), any(), any())
+    }
+
+
+    @Test fun rootAndInnerHandleCallbacksSwapOnlyTheirExistingNeighbourApps() {
+        add()
+        add()
+        for (handler in dividerHandlers.toList()) {
+            val before = coordinator.activeStages
+            handler.onDoubleTappedDivider()
+            coordinator.onTransitionFinished(token, false)
+            val after = coordinator.activeStages
+            assertThat(after).containsExactlyElementsIn(before)
+            assertThat(after.zip(before).count { (a, b) -> a !== b }).isEqualTo(2)
+        }
+    }
+
+    @Test
+    @android.platform.test.annotations.EnableFlags(com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_TWO_APP_SPLIT)
+    fun addingToExpandedHalfRetainsStripAndStripTapKeepsDoubleHalfOnscreen() {
+        whenever(split.dividerPositionAsFraction).thenReturn(0.1f)
+        val slot = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val narrow = groups.get(10)!!.layout
+        assertThat(narrow.strip).isEqualTo(MultiSplitLayout.LeafId(0))
+        assertThat(narrow.root.ratio).isEqualTo(0.1f)
+        coordinator.setDividerVisible(false, null)
+        assertThat(coordinator.expandStrip()).isFalse()
+        coordinator.setDividerVisible(true, null)
+        assertThat(coordinator.expandStrip()).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val expanded = groups.get(10)!!.layout
+        assertThat(expanded.strip).isNull()
+        assertThat(expanded.root.ratio).isEqualTo(0.7f)
+        assertThat(expanded.getLeaves().map { it.taskId }).containsExactly(10, 20, 30)
+    }
+
+    @Test
+    @android.platform.test.annotations.EnableFlags(com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_TWO_APP_SPLIT)
+    fun addingToStripNormalizesBeforePreparingTheNewStage() {
+        whenever(split.dividerPositionAsFraction).thenReturn(0.1f)
+        val slot = coordinator.getBelowSlot(10)!!
+        assertThat(slot.bounds.width()).isEqualTo(1596)
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(groups.get(10)!!.layout.strip).isNull()
+        assertThat(groups.get(10)!!.layout.root.ratio).isEqualTo(0.5f)
+    }
+
+    @Test
+    @android.platform.test.annotations.EnableFlags(com.android.wm.shell.Flags.FLAG_ENABLE_FLEXIBLE_TWO_APP_SPLIT)
+    fun growingStripThreeToFourNormalizesTheRoot() {
+        whenever(split.dividerPositionAsFraction).thenReturn(0.1f)
+        val first = coordinator.getBelowSlot(20)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), first)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val second = coordinator.getBelowSlot(10)!!
+        assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), second)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(groups.get(10)!!.layout.strip).isNull()
+        assertThat(groups.get(10)!!.layout.root.ratio).isEqualTo(0.5f)
+    }
+
     @Test fun legacyInvalidSnapshotIsRefusedBeforeAnyRestoreTransaction() {
         add()
         val saved = groups.get(10)!!
@@ -139,6 +244,8 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
             dividerHandlers.add(it.arguments[0] as SplitLayout.SplitLayoutHandler)
             mock<SplitLayout>().also { divider ->
                 whenever(divider.rootBounds).thenReturn(Rect())
+                whenever(divider.firstNonDismissRatio).thenReturn(0.3f)
+                whenever(divider.lastNonDismissRatio).thenReturn(0.7f)
                 createdDividers.add(divider)
             }
         }
@@ -208,7 +315,7 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         verify(host).ended(any())
     }
 
-    private fun collapseOriginalColumn(): WindowContainerTransaction {
+    private fun closeOriginalColumn(): WindowContainerTransaction {
         whenever(split.rootBounds).thenReturn(Rect(0, 0, 1600, 2560))
         whenever(split.topLeftBounds).thenReturn(Rect(0, 0, 793, 2560))
         whenever(split.dividerSize).thenReturn(14)
@@ -221,12 +328,27 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         // Put the original pair in the left column and the two spare roots in the right.
         assertThat(coordinator.swapLeaves(1, 2)).isTrue()
         coordinator.onTransitionFinished(token, false)
-        val wct = WindowContainerTransaction()
-        dividerHandlers[1].onDividerInteractionChanged(true)
-        dividerHandlers[1].onSnappedToDismiss(false,
-            SplitScreenController.EXIT_REASON_DRAG_DIVIDER, wct)
-        assertThat(coordinator.activeStages).containsExactlyElementsIn(spare).inOrder()
-        assertThat(coordinator.getSlots(0)).isEmpty()
+        // Simulate the production host moving both surviving spare tasks to canonical pair roots.
+        whenever(host.returnToPair(any(), any(), any())).thenAnswer {
+            val survivors = it.arguments[0] as List<StageTaskListener>
+            survivors.forEachIndexed { index, source ->
+                val id = source.topChildTaskId
+                whenever(pair[index].topChildTaskId).thenReturn(id)
+                whenever(pair[index].containsTask(id)).thenReturn(true)
+            }
+            true
+        }
+        // Initial spare attachment is expected; only subsequent stranded sync work is forbidden.
+        org.mockito.Mockito.clearInvocations(sync)
+        assertThat(coordinator.closeTask(10)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(coordinator.closeTask(20)).isTrue()
+        val transactions = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions, times(5)).startTransition(any(), transactions.capture(), any())
+        val wct = transactions.lastValue
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(coordinator.activeStages).isEmpty()
+        verify(host).returnToPair(eq(spare), eq(0.5f), eq(wct))
         coordinator.onTransitionFinished(token, false)
         return wct
     }
@@ -242,38 +364,31 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         }
     }
 
-    @Test fun fullHeightDismissKeepsSparePairAndOneFullWidthDivider() {
-        val collapse = collapseOriginalColumn()
-        assertThat(coordinator.isActive).isTrue()
-        assertThat(coordinator.isVisible).isTrue()
-        assertThat(coordinator.isLeftRightSplit).isFalse()
-        assertSaneStageBounds(collapse)
-        val c = Rect()
-        val d = Rect()
-        assertThat(coordinator.getTaskBounds(30, c)).isTrue()
-        assertThat(coordinator.getTaskBounds(40, d)).isTrue()
-        assertThat(c).isEqualTo(Rect(0, 0, 1600, 1273))
-        assertThat(d).isEqualTo(Rect(0, 1287, 1600, 2560))
-        val first = Rect()
-        val second = Rect()
-        coordinator.getBranchBounds(first, second)
-        assertThat(first).isEqualTo(Rect(0, 0, 1600, 1273))
-        assertThat(second).isEqualTo(Rect(0, 1287, 1600, 2560))
-        assertThat(createdDividers).hasSize(4)
-        createdDividers.take(3).forEach { verify(it).release() }
-        verify(createdDividers[3]).setMultiSplitDivider(Rect(0, 0, 1600, 2560), false, 0.5f)
+    @Test fun captionCloseReturnsSurvivingSpareAppsToNormalPairWithoutStrandedSync() {
+        val collapse = closeOriginalColumn()
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(coordinator.activeStages).isEmpty()
+        verify(host).returnToPair(eq(spare), eq(0.5f), eq(collapse))
+        assertThat(collapse.hierarchyOps.count {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
+        }).isEqualTo(1)
+        createdDividers.forEach { divider ->
+            assertThat(org.mockito.Mockito.mockingDetails(divider).invocations.any {
+                it.method.name == "release"
+            }).isTrue()
+        }
         verify(host, never()).ended(any())
         verify(sync, never()).queue(any<WindowContainerTransaction>())
     }
 
-    @Test fun sidebarDropAfterColumnDismissInsertsIntoSparePairInOneOpenTransition() {
-        collapseOriginalColumn()
+    @Test fun sidebarDropAfterCaptionCloseInsertsInOneOpenTransitionWithoutStrandedSync() {
+        closeOriginalColumn()
         val slot = coordinator.getSlots(0).first { !it.occupied }
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
         assertThat(coordinator.activeStages).hasSize(3)
         val transactions = argumentCaptor<WindowContainerTransaction>()
         val types = argumentCaptor<Int>()
-        verify(transitions, times(5)).startTransition(types.capture(), transactions.capture(), any())
+        verify(transitions, times(6)).startTransition(types.capture(), transactions.capture(), any())
         assertThat(types.lastValue).isEqualTo(android.view.WindowManager.TRANSIT_OPEN)
         assertSaneStageBounds(transactions.lastValue)
         assertThat(transactions.lastValue.hierarchyOps.count {
@@ -284,15 +399,20 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         verify(sync, never()).queue(any<WindowContainerTransaction>())
     }
 
-    @Test fun backgroundPairLaunchAfterColumnDismissUsesTheCallersTransaction() {
-        collapseOriginalColumn()
+    @Test fun backgroundPairLaunchAfterCaptionCloseUsesTheCallersTransaction() {
+        closeOriginalColumn()
         coordinator.setDividerVisible(false, null)
         assertThat(coordinator.isVisible).isFalse()
         val wct = WindowContainerTransaction()
         assertThat(coordinator.preparePairLaunch(wct, null)).isTrue()
         assertThat(coordinator.isActive).isFalse()
-        verify(host).ended(wct)
-        verify(createdDividers[3]).release()
+        assertThat(wct.isEmpty).isTrue()
+        verify(host, never()).ended(any())
+        createdDividers.forEach { divider ->
+            assertThat(org.mockito.Mockito.mockingDetails(divider).invocations.any {
+                it.method.name == "release"
+            }).isTrue()
+        }
         verify(sync, never()).queue(any<WindowContainerTransaction>())
     }
 
@@ -404,10 +524,10 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
     @Test fun dividerWindowsFollowBranchesAndRetireOnCollapseAndRotation() {
         add()
         assertThat(createdDividers).hasSize(2)
-        verify(createdDividers[0]).setMultiSplitDivider(Rect(0, 0, 1596, 2400), false, 0.5f)
+        verify(createdDividers[0]).setMultiSplitDivider(Rect(0, 0, 1596, 2400), false, 0.5f, -1)
         add()
         assertThat(createdDividers).hasSize(3)
-        verify(createdDividers[2]).setMultiSplitDivider(Rect(1604, 0, 3200, 2400), false, 0.5f)
+        verify(createdDividers[2]).setMultiSplitDivider(Rect(1604, 0, 3200, 2400), false, 0.5f, -1)
         assertThat(coordinator.closeTask(40)).isTrue()
         coordinator.onTransitionFinished(token, false)
         verify(createdDividers[2]).release(null)
@@ -418,7 +538,7 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         verify(createdDividers[0]).release()
         verify(createdDividers[1]).release()
         assertThat(createdDividers).hasSize(5)
-        verify(createdDividers[3]).setMultiSplitDivider(Rect(0, 0, 2400, 1596), true, 0.5f)
+        verify(createdDividers[3]).setMultiSplitDivider(Rect(0, 0, 2400, 1596), true, 0.5f, -1)
     }
 
     @Test fun directionalSwapKeepsCorrespondingCellsWithIndependentBranchRatios() {
@@ -633,7 +753,7 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
             .configuration.windowConfiguration.bounds).isEqualTo(slot.bounds)
     }
 
-    @Test fun addActionExposesSubdividedLeavesAndHidesAtCapacity() {
+    @Test fun addActionRejectsQuartersAndHidesAtCapacity() {
         val right = coordinator.getBelowSlot(20)!!
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), right)).isTrue()
         coordinator.onTransitionFinished(token, false)
@@ -1191,7 +1311,7 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         val before = Rect().also { coordinator.getTaskBounds(20, it) }
         val divider = createdDividers.last()
         val handler = dividerHandlers.last()
-        whenever(divider.branchRatio).thenReturn(0.9f)
+        whenever(divider.branchRatio).thenReturn(0.75f)
         handler.onDividerInteractionChanged(true)
         handler.onLayoutSizeChanging(divider, 0, 0, false)
         val preview = Rect().also { coordinator.getTaskBounds(20, it) }
