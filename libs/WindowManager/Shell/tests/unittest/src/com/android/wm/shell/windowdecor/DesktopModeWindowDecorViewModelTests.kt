@@ -712,6 +712,36 @@ class DesktopModeWindowDecorViewModelTests : DesktopModeWindowDecorViewModelTest
     }
 
     @Test
+    fun testDecor_onClickToSplitScreen_floatingWithoutCompanion_requestsSplit() {
+        val windowDecorationActions = createDefaultWindowActions()
+        spyContext.resources.configuration.orientation = Configuration.ORIENTATION_PORTRAIT
+        val decor = createOpenTaskDecoration(windowingMode = WINDOWING_MODE_FREEFORM)
+        decor.taskInfo.isFloatingWindow = true
+        whenever(mockSplitScreenController.isSplitScreenVisible()).thenReturn(false)
+        whenever(mockSplitScreenController.hasFloatingSplitCompanion(decor.taskInfo))
+            .thenReturn(false)
+
+        windowDecorationActions.onToSplitScreen(decor.taskInfo.taskId)
+
+        verify(mockDesktopTasksController).requestSplit(decor.taskInfo, leftOrTop = true)
+        verify(mockSplitScreenController, never()).moveFloatingTaskToSplit(decor.taskInfo.taskId)
+    }
+
+    @Test
+    fun testDecor_onClickToSplitScreen_floatingWithCompanion_movesToSplit() {
+        val windowDecorationActions = createDefaultWindowActions()
+        val decor = createOpenTaskDecoration(windowingMode = WINDOWING_MODE_FREEFORM)
+        decor.taskInfo.isFloatingWindow = true
+        whenever(mockSplitScreenController.hasFloatingSplitCompanion(decor.taskInfo))
+            .thenReturn(true)
+
+        windowDecorationActions.onToSplitScreen(decor.taskInfo.taskId)
+
+        verify(mockSplitScreenController).moveFloatingTaskToSplit(decor.taskInfo.taskId)
+        verify(mockDesktopTasksController, never()).requestSplit(any(), any())
+    }
+
+    @Test
     fun testDecor_onClickToOpenBrowser_opensBrowser() {
         doNothing().whenever(spyContext).startActivity(any())
         val uri = Uri.parse("https://www.google.com")

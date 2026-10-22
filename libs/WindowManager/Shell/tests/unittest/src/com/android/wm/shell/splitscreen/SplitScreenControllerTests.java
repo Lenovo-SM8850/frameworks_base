@@ -18,6 +18,7 @@ package com.android.wm.shell.splitscreen;
 
 import static android.app.PendingIntent.FLAG_IMMUTABLE;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD;
+import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
 import static android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW;
 import static android.content.Intent.FLAG_ACTIVITY_MULTIPLE_TASK;
@@ -213,6 +214,9 @@ public class SplitScreenControllerTests extends ShellTestCase {
         task.displayId = DEFAULT_DISPLAY;
         task.isFloatingWindow = true;
         task.supportsMultiWindow = true;
+        task.supportsMultiWindowWithoutConstraints = true;
+        task.configuration.windowConfiguration.setActivityType(ACTIVITY_TYPE_STANDARD);
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
         task.configuration.windowConfiguration.setBounds(new Rect(100, 100, 500, 500));
         doReturn(true).when(mSplitScreenController).isSplitScreenVisible();
         doReturn(true).when(mStageCoordinator).canMutateSplit();
@@ -229,6 +233,39 @@ public class SplitScreenControllerTests extends ShellTestCase {
         assertEquals(false, mSplitScreenController.canEnterSplitScreen(task));
         task.isFloatingWindow = false;
         assertEquals(true, mSplitScreenController.canEnterSplitScreen(task));
+    }
+
+    @Test
+    public void settingsLikeTask_fullscreenAndFloatingShareAppCapability() {
+        ActivityManager.RunningTaskInfo task = new ActivityManager.RunningTaskInfo();
+        task.displayId = DEFAULT_DISPLAY;
+        task.supportsMultiWindow = true;
+        task.supportsMultiWindowWithoutConstraints = true;
+        task.configuration.windowConfiguration.setActivityType(ACTIVITY_TYPE_STANDARD);
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FULLSCREEN);
+        task.configuration.windowConfiguration.setBounds(new Rect(100, 100, 500, 500));
+        task.minWidth = 100;
+        task.minHeight = 100;
+        assertTrue(mSplitScreenController.canEnterSplitScreen(task));
+
+        task.isFloatingWindow = true;
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
+        doReturn(false).when(mSplitScreenController).isSplitScreenVisible();
+        when(mStageCoordinator.canStartSplitEntry()).thenReturn(true);
+        doReturn(4).when(mSplitScreenController).getSplitCapacity(DEFAULT_DISPLAY);
+        doReturn(0).when(mSplitScreenController).getOccupiedSplitSlots(DEFAULT_DISPLAY);
+        doReturn(java.util.List.of(
+                new SplitScreenController.AppDragSlot(SPLIT_POSITION_TOP_OR_LEFT, 0,
+                        new Rect(0, 0, 800, 1200), new Rect(0, 0, 800, 1280), false),
+                new SplitScreenController.AppDragSlot(SPLIT_POSITION_BOTTOM_OR_RIGHT, 1,
+                        new Rect(0, 1280, 1600, 2560), new Rect(0, 1280, 1600, 2560), false)))
+                .when(mSplitScreenController).getAppDragSlots(DEFAULT_DISPLAY);
+        assertTrue(mSplitScreenController.canEnterSplitScreen(task));
+
+        task.supportsMultiWindowWithoutConstraints = false;
+        assertFalse(mSplitScreenController.canEnterSplitScreen(task));
+        task.isFloatingWindow = false;
+        assertFalse(mSplitScreenController.canEnterSplitScreen(task));
     }
 
     @Test
@@ -604,6 +641,9 @@ public class SplitScreenControllerTests extends ShellTestCase {
         task.displayId = DEFAULT_DISPLAY;
         task.isFloatingWindow = true;
         task.supportsMultiWindow = true;
+        task.supportsMultiWindowWithoutConstraints = true;
+        task.configuration.windowConfiguration.setActivityType(ACTIVITY_TYPE_STANDARD);
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
         task.configuration.windowConfiguration.setBounds(new Rect(0, 0, 1000, 800));
         task.positionInParent = new android.graphics.Point(1500, 900);
         task.floatingWindowScale = 0.5f;
@@ -634,12 +674,16 @@ public class SplitScreenControllerTests extends ShellTestCase {
         task.displayId = DEFAULT_DISPLAY;
         task.isFloatingWindow = true;
         task.supportsMultiWindow = true;
+        task.supportsMultiWindowWithoutConstraints = true;
+        task.configuration.windowConfiguration.setActivityType(ACTIVITY_TYPE_STANDARD);
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
         task.configuration.windowConfiguration.setBounds(new Rect(1500, 400, 2000, 900));
         ActivityManager.RunningTaskInfo behind = new ActivityManager.RunningTaskInfo();
         behind.taskId = 43;
         behind.displayId = DEFAULT_DISPLAY;
         behind.isVisible = true;
         behind.supportsMultiWindow = true;
+        behind.supportsMultiWindowWithoutConstraints = true;
         behind.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FULLSCREEN);
         behind.configuration.windowConfiguration.setActivityType(
                 android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD);

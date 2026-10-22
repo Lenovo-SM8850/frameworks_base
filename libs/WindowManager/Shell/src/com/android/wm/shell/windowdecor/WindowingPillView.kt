@@ -343,7 +343,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
             taskInfo.activityType != android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD ||
             (!taskInfo.isFullscreen && !isInSplitScreen && !floatDesk)
 
-        splitscreenBtn.isGone = (taskInfo.isFloatingWindow && !canEnterSplitScreen) ||
+        splitscreenBtn.isGone = !canEnterSplitScreen ||
             (!Flags.enableNonDefaultDisplaySplitBugfix() && taskInfo.displayId != DEFAULT_DISPLAY)
 
         // Currently split screen doesn't override task windowing mode when it's entering split.

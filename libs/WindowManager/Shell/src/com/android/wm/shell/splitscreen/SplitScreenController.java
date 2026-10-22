@@ -31,6 +31,8 @@ import static com.android.wm.shell.common.split.SplitScreenUtils.isValidToSplit;
 import static com.android.wm.shell.common.split.SplitScreenUtils.reverseSplitPosition;
 import static com.android.wm.shell.common.split.SplitScreenUtils.splitFailureMessage;
 import static com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_SPLIT_SCREEN;
+import static com.android.wm.shell.shared.split.SplitScreenConstants.CONTROLLED_ACTIVITY_TYPES;
+import static com.android.wm.shell.shared.split.SplitScreenConstants.CONTROLLED_WINDOWING_MODES_WHEN_ACTIVE;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.KEY_EXTRA_WIDGET_INTENT;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_INDEX_0;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_INDEX_1;
@@ -78,6 +80,7 @@ import androidx.annotation.Nullable;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.logging.InstanceId;
 import com.android.internal.protolog.ProtoLog;
+import com.android.internal.util.ArrayUtils;
 import com.android.launcher3.icons.IconProvider;
 import com.android.wm.shell.Flags;
 import com.android.wm.shell.R;
@@ -1309,27 +1312,42 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         mStageCoordinator.onDroppedToSplit(position, dragSessionId);
     }
 
+    /**
+     * Whether the platform allows this task in split, regardless of its current windowing mode.
+     * Both the fullscreen and floating caption handle menus share this app-capability check.
+     */
+    public static boolean supportsSplitScreen(@NonNull ActivityManager.RunningTaskInfo taskInfo) {
+        return taskInfo.supportsMultiWindowWithoutConstraints
+                && ArrayUtils.contains(CONTROLLED_ACTIVITY_TYPES, taskInfo.getActivityType())
+                && ArrayUtils.contains(CONTROLLED_WINDOWING_MODES_WHEN_ACTIVE,
+                        taskInfo.getWindowingMode());
+    }
+
     /** Whether the task can enter split, keeping floating entry within its display's capacity. */
     public boolean canEnterSplitScreen(@NonNull ActivityManager.RunningTaskInfo taskInfo) {
+        if (!supportsSplitScreen(taskInfo)) return false;
         return !taskInfo.isFloatingWindow || getFloatingSplitSlot(taskInfo,
                 isSplitScreenVisible() ? null : getFloatingSplitCompanion(taskInfo)) != null;
+    }
+
+    /** Whether a floating task can be placed directly beside a visible fullscreen task. */
+    public boolean hasFloatingSplitCompanion(@NonNull ActivityManager.RunningTaskInfo taskInfo) {
+        return getFloatingSplitCompanion(taskInfo) != null;
     }
 
     @Nullable
     private AppDragSlot getFloatingSplitSlot(ActivityManager.RunningTaskInfo task,
             @Nullable ActivityManager.RunningTaskInfo companion) {
-        if (!task.isFloatingWindow || !task.supportsMultiWindow
+        if (!task.isFloatingWindow || !supportsSplitScreen(task)
                 || task.displayId != DEFAULT_DISPLAY
                 || getOccupiedSplitSlots(task.displayId) >= getSplitCapacity(task.displayId)) {
             return null;
         }
         if (isSplitScreenVisible() && getSplitCapacity(task.displayId) <= 2) return null;
-        if (!isSplitScreenVisible() && (!mStageCoordinator.canStartSplitEntry()
-                || companion == null)) return null;
+        if (!isSplitScreenVisible() && !mStageCoordinator.canStartSplitEntry()) return null;
         if (isSplitScreenVisible() && !mStageCoordinator.canMutateSplit()) return null;
         java.util.List<AppDragSlot> slots = getAppDragSlots(task.displayId);
-        if (!isSplitScreenVisible()) {
-            if (companion == null) return null;
+        if (!isSplitScreenVisible() && companion != null) {
             final java.util.List<AppDragSlot> all = slots;
             slots = slots.stream().filter(slot -> all.stream().anyMatch(other ->
                     other.position != slot.position && other.bounds.width() >= companion.minWidth
