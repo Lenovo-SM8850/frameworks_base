@@ -361,6 +361,9 @@ public class SplitLayoutTests extends ShellTestCase {
             // Force an odd expansion to check both edges of the leash and input crop.
             final int inputThickness = mContext.getResources().getDimensionPixelSize(
                     com.android.wm.shell.R.dimen.split_divider_handle_region_height);
+            final int menuThickness = mContext.getResources().getDimensionPixelSize(
+                    com.android.wm.shell.R.dimen.split_divider_handle_menu_size);
+            final int expectedThickness = Math.max(inputThickness, menuThickness);
             final Rect branch = new Rect(0, 0, 1080, 1000);
             mSplitLayout.setMultiSplitDivider(branch, leftRight, 0.5f);
             final Rect divider = leftRight
@@ -377,7 +380,7 @@ public class SplitLayoutTests extends ShellTestCase {
                 mSplitLayout.getDividerLeashBounds(leash);
                 final Rect crop = mSplitLayout.getMultiSplitDividerCrop();
                 assertThat(leftRight ? leash.width() : leash.height())
-                        .isEqualTo(inputThickness);
+                        .isEqualTo(expectedThickness);
                 assertThat(crop).isEqualTo(new Rect(0, 0, leash.width(), leash.height()));
                 assertThat(leftRight ? leash.height() : leash.width())
                         .isEqualTo(leftRight ? branch.height() : branch.width());

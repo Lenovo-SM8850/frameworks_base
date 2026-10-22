@@ -696,9 +696,7 @@ class LayoutMenu(
                 requireWindowingPillView().bind(
                     taskInfo,
                     isInSplitScreen,
-                    splitScreenController.isLeftRightSplit,
                     splitScreenController.canEnterSplitScreen(taskInfo),
-                    splitScreenController.getMultiSplitSwapTargets(taskInfo.taskId),
                 )
                 requireWindowingPillView().background.setTint(style.backgroundColor)
             }

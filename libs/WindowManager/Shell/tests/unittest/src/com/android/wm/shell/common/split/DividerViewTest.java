@@ -19,6 +19,7 @@ import static android.content.res.Configuration.ORIENTATION_LANDSCAPE;
 
 import static com.android.internal.config.sysui.SystemUiDeviceConfigFlags.CURSOR_HOVER_STATES_ENABLED;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -40,8 +41,10 @@ import android.provider.DeviceConfig;
 import android.view.InputDevice;
 import android.view.InsetsState;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 
 import androidx.test.annotation.UiThreadTest;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -81,6 +84,7 @@ public class DividerViewTest extends ShellTestCase {
     private @Mock SnapTarget mSnapTarget;
     private FakeDesktopState mDesktopState;
     private SplitLayout mSplitLayout;
+    private DividerView mRealDividerView;
     private DividerView mDividerView;
 
     @Before
@@ -97,7 +101,8 @@ public class DividerViewTest extends ShellTestCase {
                 mContext, configuration, mCallbacks);
         splitWindowManager.init(mSplitLayout, new InsetsState(), false /* isRestoring */,
                 mDesktopState);
-        mDividerView = spy(splitWindowManager.getDividerView());
+        mRealDividerView = splitWindowManager.getDividerView();
+        mDividerView = spy(mRealDividerView);
         doReturn(mSnapTarget).when(mSplitLayout).findSnapTarget(anyInt(), anyFloat(), anyBoolean());
     }
 
@@ -186,7 +191,7 @@ public class DividerViewTest extends ShellTestCase {
 
     @Test
     @UiThreadTest
-    public void onTouch_tapWithoutMove_cancelsDragging() {
+    public void onTouch_tapWithoutMove_cancelsDraggingAndShowsMenu() {
         // Define touch coordinates.
         final int startX = 100;
         final int startY = 100;
@@ -204,69 +209,124 @@ public class DividerViewTest extends ShellTestCase {
         // Verify that dragging was initiated but then cancelled because there was no move.
         verify(mSplitLayout).onStartDragging();
         verify(mSplitLayout).onDraggingCancelled();
-        // Verify that no snapping occurs for a simple tap.
+        // Verify that no snapping or swap occurs for a simple tap.
         verify(mSplitLayout, never()).findSnapTarget(anyInt(), anyFloat(), anyBoolean());
         verify(mSplitLayout, never()).snapToTarget(anyInt(), any(SnapTarget.class));
-        // Verify dragging is finished.
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
         assertFalse(mDividerView.isMoving());
-        verify(mSplitLayout).onDoubleTappedDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
         assertNoResizeMenu();
     }
 
     @Test
     @UiThreadTest
-    public void onTouch_doubleTapPair_swapsOnceWithoutMenuAcrossAxes() {
-        for (boolean leftRight : new boolean[]{true, false}) {
-            doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
-            tapDivider(2);
-        }
+    public void onTouch_tapPair_showsHorizontalSwapForVerticalDivider() {
+        doReturn(true).when(mSplitLayout).isLeftRightSplit();
+        tapDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
+        assertEquals(View.VISIBLE,
+                mDividerView.findViewById(R.id.divider_handle_menu).getVisibility());
+        ImageButton swap = mDividerView.findViewById(R.id.divider_handle_menu_swap);
+        assertEquals(mContext.getString(R.string.handle_menu_swap_horizontal),
+                swap.getContentDescription());
     }
 
     @Test
     @UiThreadTest
-    public void onTouch_doubleTapBranch_swapsOnceWithoutMenuAcrossAxes() {
-        for (boolean leftRight : new boolean[]{true, false}) {
-            mSplitLayout.setMultiSplitDivider(new Rect(0, 0, 1080, 1000), leftRight, 0.5f);
-            tapDivider(2);
-        }
+    public void onTouch_tapPair_showsVerticalSwapForHorizontalDivider() {
+        doReturn(false).when(mSplitLayout).isLeftRightSplit();
+        tapDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
+        ImageButton swap = mDividerView.findViewById(R.id.divider_handle_menu_swap);
+        assertEquals(mContext.getString(R.string.handle_menu_swap_vertical),
+                swap.getContentDescription());
     }
 
     @Test
     @UiThreadTest
-    public void onTouch_tapPair_swapsOnceWithoutMenuAcrossAxes() {
-        for (boolean leftRight : new boolean[]{true, false}) {
-            doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
-            tapDivider(1);
-        }
+    public void onTouch_tapBranch_showsMenuWithoutSwapping() {
+        mSplitLayout.setMultiSplitDivider(new Rect(0, 0, 1080, 1000), true, 0.5f);
+        tapDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
     }
 
     @Test
     @UiThreadTest
-    public void onTouch_tapBranch_swapsOnceWithoutMenuAcrossAxes() {
-        for (boolean leftRight : new boolean[]{true, false}) {
-            mSplitLayout.setMultiSplitDivider(new Rect(0, 0, 1080, 1000), leftRight, 0.5f);
-            tapDivider(1);
-        }
-    }
-
-    private long mNextTapTime;
-
-    private void tapDivider(int count) {
+    public void handleMenuSwap_clickRunsExistingDividerSwap() {
+        doReturn(true).when(mSplitLayout).isLeftRightSplit();
         org.mockito.Mockito.clearInvocations(mSplitLayout);
-        final long firstDown = Math.max(SystemClock.uptimeMillis(), mNextTapTime);
-        mNextTapTime = firstDown + 1000;
-        for (int i = 0; i < count; i++) {
-            final long downTime = firstDown + i * 100;
-            MotionEvent down = getMotionEvent(downTime, MotionEvent.ACTION_DOWN, 100, 100);
-            assertTrue(mDividerView.onTouch(mDividerView, down));
-            down.recycle();
-            MotionEvent up = getMotionEvent(downTime, downTime + 10,
-                    MotionEvent.ACTION_UP, 100, 100);
-            assertTrue(mDividerView.onTouch(mDividerView, up));
-            up.recycle();
-        }
-        assertFalse(mDividerView.isMoving());
+        long now = SystemClock.uptimeMillis();
+        mRealDividerView.onTouch(mRealDividerView,
+                getMotionEvent(now, MotionEvent.ACTION_DOWN, 100, 100));
+        mRealDividerView.onTouch(mRealDividerView,
+                getMotionEvent(now, now + 10, MotionEvent.ACTION_UP, 100, 100));
+        assertTrue(mRealDividerView.isHandleMenuShowing());
+        mRealDividerView.findViewById(R.id.divider_handle_menu_swap).performClick();
         verify(mSplitLayout).onDoubleTappedDivider();
+        assertFalse(mRealDividerView.isHandleMenuShowing());
+        assertEquals(View.GONE,
+                mRealDividerView.findViewById(R.id.divider_handle_menu).getVisibility());
+    }
+
+    @Test
+    @UiThreadTest
+    public void dispatchTouchEvent_outsideTouchHidesHandleMenu() {
+        tapDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
+        MotionEvent outside = getMotionEvent(SystemClock.uptimeMillis(),
+                MotionEvent.ACTION_OUTSIDE, 100, 100);
+        assertTrue(mDividerView.dispatchTouchEvent(outside));
+        outside.recycle();
+        assertFalse(mDividerView.isHandleMenuShowing());
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_dragHidesHandleMenuAndStillResizes() {
+        org.mockito.Mockito.doNothing().when(mSplitLayout).snapToTarget(anyInt(),
+                any(SnapTarget.class));
+        tapDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
+        final int touchSlop = ViewConfiguration.get(mContext).getScaledTouchSlop();
+        long downTime = SystemClock.uptimeMillis();
+        mDividerView.onTouch(mDividerView, getMotionEvent(downTime, MotionEvent.ACTION_DOWN, 100,
+                100));
+        mDividerView.onTouch(mDividerView, getMotionEvent(downTime, downTime + 10,
+                MotionEvent.ACTION_MOVE, 100 + touchSlop + 50, 100));
+        assertTrue(mDividerView.isMoving());
+        assertFalse(mDividerView.isHandleMenuShowing());
+        mDividerView.onTouch(mDividerView, getMotionEvent(downTime, downTime + 20,
+                MotionEvent.ACTION_UP, 100 + touchSlop + 50, 100));
+        verify(mSplitLayout).snapToTarget(anyInt(), any(SnapTarget.class));
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
+    }
+
+    @Test
+    @UiThreadTest
+    public void onTouch_tapOutsideDismissesMenuWithoutReopening() {
+        tapDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
+        long time = SystemClock.uptimeMillis();
+        mDividerView.onTouch(mDividerView,
+                getMotionEvent(time, MotionEvent.ACTION_DOWN, 10000, 10000));
+        mDividerView.onTouch(mDividerView, getMotionEvent(time, time + 10, MotionEvent.ACTION_UP,
+                10000, 10000));
+        assertFalse(mDividerView.isHandleMenuShowing());
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
+    }
+
+    private void tapDivider() {
+        org.mockito.Mockito.clearInvocations(mSplitLayout);
+        final long now = SystemClock.uptimeMillis();
+        MotionEvent down = getMotionEvent(now, MotionEvent.ACTION_DOWN, 100, 100);
+        assertTrue(mDividerView.onTouch(mDividerView, down));
+        down.recycle();
+        MotionEvent up = getMotionEvent(now, now + 10, MotionEvent.ACTION_UP, 100, 100);
+        assertTrue(mDividerView.onTouch(mDividerView, up));
+        up.recycle();
+        assertFalse(mDividerView.isMoving());
         verify(mSplitLayout, never()).snapToTarget(anyInt(), any(SnapTarget.class));
         assertNoResizeMenu();
     }
@@ -284,13 +344,6 @@ public class DividerViewTest extends ShellTestCase {
         mDividerView.onTouch(mDividerView, getMotionEvent(time + 1000, time + 1010,
                 MotionEvent.ACTION_CANCEL, 100, 100));
         verify(mSplitLayout, never()).onDoubleTappedDivider();
-    }
-
-    @Test
-    @UiThreadTest
-    public void onTouch_independentTapAfterTimeoutSwapsAgain() {
-        tapDivider(2);
-        tapDivider(1);
     }
 
     @Test
@@ -360,8 +413,10 @@ public class DividerViewTest extends ShellTestCase {
 
     @Test
     @UiThreadTest
-    public void onTouch_motionAtSlopStillSwapsAndCrossAxisExcursionDoesNot() {
+    public void onTouch_motionAtSlopStillShowsMenuAndCrossAxisExcursionDoesNot() {
         doReturn(false).when(mSplitLayout).isLeftRightSplit();
+        org.mockito.Mockito.doNothing().when(mSplitLayout).snapToTarget(anyInt(),
+                any(SnapTarget.class));
         int slop = ViewConfiguration.get(mContext).getScaledTouchSlop();
         long time = SystemClock.uptimeMillis();
         mDividerView.onTouch(mDividerView, getMotionEvent(time, MotionEvent.ACTION_DOWN, 100, 100));
@@ -369,14 +424,17 @@ public class DividerViewTest extends ShellTestCase {
                 MotionEvent.ACTION_MOVE, 100 + slop, 100));
         mDividerView.onTouch(mDividerView, getMotionEvent(time, time + 10,
                 MotionEvent.ACTION_UP, 100 + slop, 100));
-        verify(mSplitLayout).onDoubleTappedDivider();
+        assertTrue(mDividerView.isHandleMenuShowing());
+        verify(mSplitLayout, never()).onDoubleTappedDivider();
         org.mockito.Mockito.clearInvocations(mSplitLayout);
         time += 1000;
-        mDividerView.onTouch(mDividerView, getMotionEvent(time, MotionEvent.ACTION_DOWN, 100, 100));
+        mDividerView.onTouch(mDividerView,
+                getMotionEvent(time, MotionEvent.ACTION_DOWN, 10000, 10000));
         mDividerView.onTouch(mDividerView, getMotionEvent(time, time + 5,
-                MotionEvent.ACTION_MOVE, 100 + slop + 1, 100));
+                MotionEvent.ACTION_MOVE, 10000 + slop + 1, 10000));
         mDividerView.onTouch(mDividerView, getMotionEvent(time, time + 10,
-                MotionEvent.ACTION_UP, 100, 100));
+                MotionEvent.ACTION_UP, 10000 + slop + 1, 10000));
+        assertFalse(mDividerView.isHandleMenuShowing());
         verify(mSplitLayout, never()).onDoubleTappedDivider();
     }
 

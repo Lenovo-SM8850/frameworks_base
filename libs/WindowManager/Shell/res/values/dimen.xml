@@ -100,6 +100,7 @@
     <dimen name="split_divider_handle_width">40dp</dimen>
     <dimen name="split_divider_handle_height">3dp</dimen>
     <dimen name="split_divider_button_size">48dp</dimen>
+    <dimen name="split_divider_handle_menu_size">52dp</dimen>
     <dimen name="split_divider_button_margin">16dp</dimen>
 
     <dimen name="split_divider_bar_width">6dp</dimen>

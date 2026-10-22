@@ -157,6 +157,8 @@ public class SplitWindowManagerTests extends ShellTestCase {
         final Resources resources = mContext.getResources();
         final int regionThickness = resources.getDimensionPixelSize(
                 R.dimen.split_divider_handle_region_height);
+        final int menuThickness = resources.getDimensionPixelSize(
+                R.dimen.split_divider_handle_menu_size);
         final int baseThickness = resources.getDimensionPixelSize(R.dimen.split_divider_bar_width)
                 + 2 * resources.getDimensionPixelSize(
                         com.android.internal.R.dimen.docked_stack_divider_insets);
@@ -169,7 +171,8 @@ public class SplitWindowManagerTests extends ShellTestCase {
                         : regionThickness;
                 final int decorationThickness = largeCorners
                         ? Math.max(baseThickness, regionThickness) + 20 : baseThickness;
-                final int expectedThickness = Math.max(decorationThickness, inputThickness);
+                final int expectedThickness = Math.max(
+                        Math.max(decorationThickness, inputThickness), menuThickness);
                 final int length = 800;
                 when(mSplitLayout.isMultiSplitDivider()).thenReturn(branch);
                 when(mSplitLayout.isLeftRightSplit()).thenReturn(leftRight);

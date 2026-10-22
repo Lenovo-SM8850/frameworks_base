@@ -857,9 +857,7 @@ private constructor(
                 windowingPillView.bind(
                     taskInfo,
                     isInSplitScreen,
-                    splitScreenController.isLeftRightSplit,
                     splitScreenController.canEnterSplitScreen(taskInfo),
-                    splitScreenController.getMultiSplitSwapTargets(taskInfo.taskId),
                 )
             }
             moreActionsPill.isGone = !shouldShowMoreActionsPill
@@ -975,9 +973,7 @@ private constructor(
                 windowingPillView.bind(
                     taskInfo,
                     splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId),
-                    splitScreenController.isLeftRightSplit,
                     splitScreenController.canEnterSplitScreen(taskInfo),
-                    splitScreenController.getMultiSplitSwapTargets(taskInfo.taskId),
                 )
                 windowingPillView.updateSplitScreenButtonOrientation(configuration)
             }
