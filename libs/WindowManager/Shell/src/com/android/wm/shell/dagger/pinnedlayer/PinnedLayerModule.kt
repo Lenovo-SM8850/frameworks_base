@@ -87,7 +87,8 @@ object PinnedLayerModule {
         desktopUserRepositories: Optional<DesktopUserRepositories>,
     ): Optional<PinnedLayerHandler> {
         if (PinnedLayerFlags.isPinnedLayerEnabled()) {
-            pinnedLayerController.get().configureVisibility(shellController, recentsTransitionHandler)
+            pinnedLayerController.get().configureVisibility(
+                shellController, recentsTransitionHandler)
             val powerManager = context.getSystemService(PowerManager::class.java)
             val keyguardManager = context.getSystemService(KeyguardManager::class.java)
             val pinned = pinnedLayerController.get()

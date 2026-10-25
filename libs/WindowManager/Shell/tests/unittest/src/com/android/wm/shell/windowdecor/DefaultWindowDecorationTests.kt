@@ -193,6 +193,16 @@ class DefaultWindowDecorationTests : ShellTestCase() {
         assertTrue(relayoutParams.isCaptionVisible)
     }
 
+    @Test
+    fun recentsRunning_regularFreeformStillDefersCornerRadius() {
+        val task = WindowDecorationTestHelper.createAppHeaderTask()
+        val decoration = setUpWindowDecoration(task)
+
+        val recents = decoration.getRelayoutParams(task, shouldIgnoreCornerRadius = true)
+
+        assertEquals(android.content.res.Resources.ID_NULL, recents.cornerRadiusId)
+    }
+
     private fun setUpWindowDecoration(taskInfo: RunningTaskInfo): DefaultWindowDecoration {
         val wrappedDecoration =
             WindowDecorationTestHelper.createWindowDecoration(
