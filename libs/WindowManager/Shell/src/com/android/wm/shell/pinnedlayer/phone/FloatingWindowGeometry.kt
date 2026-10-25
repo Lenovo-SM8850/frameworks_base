@@ -16,6 +16,8 @@ import kotlin.math.sqrt
 object FloatingWindowGeometry {
     const val DEFAULT_SCALE = 1f / 1.3f
     const val MIN_SCALE = .5f
+    // tan(22.5°): drags closer to an axis than to a diagonal change the ratio
+    private const val AXIS_DRAG_TANGENT = .4142f
 
     fun movedBaseBounds(base: Rect, start: Rect, end: Rect): Rect? {
         val dx = end.left - start.left
@@ -70,88 +72,6 @@ object FloatingWindowGeometry {
         return out
     }
 
-    fun fixedLandscape(requested: Int, current: Rect): Boolean? = when {
-        ActivityInfo.isFixedOrientationLandscape(requested) -> true
-        ActivityInfo.isFixedOrientationPortrait(requested) -> false
-        requested == ActivityInfo.SCREEN_ORIENTATION_LOCKED -> current.width() > current.height()
-        else -> null
-    }
-
-    fun corner(start: Rect, stable: Rect, ctrl: Int, dx: Float, dy: Float,
-        minWidth: Int, minHeight: Int, out: Rect = Rect()): Rect {
-        val w = start.width().toFloat()
-        val h = start.height().toFloat()
-        if (w <= 0 || h <= 0) return out.apply { set(start) }
-        val left = ctrl and CTRL_TYPE_LEFT != 0
-        val top = ctrl and CTRL_TYPE_TOP != 0
-        val dw = if (left) -dx else dx
-        val dh = if (top) -dy else dy
-        val horizontal = ctrl and (CTRL_TYPE_LEFT or CTRL_TYPE_RIGHT) != 0
-        val vertical = ctrl and (CTRL_TYPE_TOP or CTRL_TYPE_BOTTOM) != 0
-        val scale = 1f + when {
-            horizontal && vertical -> (dw * w + dh * h) / (w * w + h * h)
-            horizontal -> dw / w
-            else -> dh / h
-        }
-        val maxWidth = if (left) start.right - stable.left else stable.right - start.left
-        val maxHeight = if (top) start.bottom - stable.top else stable.bottom - start.top
-        val maxScale = min(maxWidth / w, maxHeight / h).coerceAtLeast(0.01f)
-        val minScale = max(minWidth / w, minHeight / h).coerceAtMost(maxScale)
-        val s = scale.coerceIn(minScale, maxScale)
-        val width = (w * s).roundToInt().coerceAtLeast(1)
-        val height = (h * s).roundToInt().coerceAtLeast(1)
-        val x = if (left) start.right - width else start.left
-        val y = if (top) start.bottom - height else start.top
-        return out.apply { set(x, y, x + width, y + height) }
-    }
-
-    fun aspectBounds(start: Rect, stable: Rect, aspect: Float, minWidth: Int,
-        minHeight: Int, centerX: Float = start.exactCenterX(),
-        centerY: Float = start.exactCenterY()): Rect? {
-        if (start.isEmpty || stable.isEmpty || !aspect.isFinite() || aspect <= 0f) return null
-        val width = sqrt(start.width().toFloat() * start.height() * aspect).coerceAtLeast(1f)
-        val height = width / aspect
-        val maxScale = min(stable.width() / width, stable.height() / height)
-        val minScale = max(minWidth / width, minHeight / height)
-        if (minScale > maxScale) return null
-        val scale = 1f.coerceIn(minScale, maxScale)
-        val w = (width * scale).roundToInt().coerceIn(1, stable.width())
-        val h = (height * scale).roundToInt().coerceIn(1, stable.height())
-        if (w < minWidth || h < minHeight) return null
-        val x = (centerX - w / 2f).roundToInt().coerceIn(stable.left, stable.right - w)
-        val y = (centerY - h / 2f).roundToInt().coerceIn(stable.top, stable.bottom - h)
-        return Rect(x, y, x + w, y + h)
-    }
-
-    fun scaledAspectBounds(start: Rect, logical: Rect, stable: Rect, aspect: Float,
-        scale: Float, minWidth: Int, minHeight: Int, centerX: Float = start.exactCenterX(),
-        centerY: Float = start.exactCenterY()): Rect? {
-        val fitted = aspectBounds(logical, stable, aspect, minWidth, minHeight) ?: return null
-        val width = (fitted.width() * scale).roundToInt().coerceAtLeast(1)
-        val height = (fitted.height() * scale).roundToInt().coerceAtLeast(1)
-        val left = (centerX - width / 2f).roundToInt().coerceIn(stable.left, stable.right - width)
-        val top = (centerY - height / 2f).roundToInt().coerceIn(stable.top, stable.bottom - height)
-        return Rect(left, top, left + width, top + height)
-    }
-
-    fun displayAspect(width: Int, height: Int, landscape: Boolean): Float {
-        val short = min(width, height).coerceAtLeast(1).toFloat()
-        val long = max(width, height).coerceAtLeast(1).toFloat()
-        return if (landscape) long / short else short / long
-    }
-
-    /** Fits logical geometry while preserving presentation size and aspect. */
-    fun logicalBounds(visible: Rect, stable: Rect, scale: Float, out: Rect = Rect()): Rect {
-        val width = (visible.width() / scale).roundToInt().coerceIn(1, stable.width())
-        val height = (visible.height() / scale).roundToInt().coerceIn(1, stable.height())
-        val left = visible.left.coerceIn(stable.left, stable.right - width)
-        val top = visible.top.coerceIn(stable.top, stable.bottom - height)
-        return out.apply { set(left, top, left + width, top + height) }
-    }
-
-    data class ScaledResize(val visible: Rect, val logical: Rect, var scale: Float,
-        var commitsBounds: Boolean, var atMinimum: Boolean = false)
-
     /**
      * Selection belongs to one gesture; the original ratio belongs to the floating session.
      * [reshaping] is decided by the gesture's first movement: along one axis it changes the
@@ -159,6 +79,38 @@ object FloatingWindowGeometry {
      */
     data class AspectSnapState(val originalAspect: Float, var selectedAspect: Float,
         var reshaping: Boolean? = null)
+
+    /**
+     * Prefer the natural display ratio, then 4:3 and 1:1, without offering near duplicates.
+     * A square keeps the window's orientation by the orientation margin of [presetCorner].
+     */
+    fun aspectPresets(displayWidth: Int, displayHeight: Int, originalAspect: Float,
+        landscape: Boolean, minAspect: Float = 0f, maxAspect: Float = 0f): List<Float> {
+        val minimum = max(1f, minAspect.takeIf { it.isFinite() } ?: 0f)
+        val maximum = maxAspect.takeIf { it.isFinite() && it > 1f }
+            ?: Float.POSITIVE_INFINITY
+        val original = if (landscape) originalAspect else 1f / originalAspect
+        val ratios = mutableListOf<Float>()
+        for (ratio in listOf(displayAspect(displayWidth, displayHeight, true), 4f / 3f, 1f,
+            original)) {
+            if (!ratio.isFinite() || ratio !in minimum..maximum ||
+                ratios.any { abs(ln(ratio / it)) < .02f }) continue
+            ratios.add(ratio)
+        }
+        return ratios.map { if (landscape) it else 1f / it }.sorted()
+    }
+
+    /** Require an advantage to switch, capped for distinct but closely spaced presets. */
+    fun snapAspect(requested: Float, presets: List<Float>, state: AspectSnapState): Float? {
+        if (presets.isEmpty()) return null
+        val nearest = presets.minBy { abs(ln(requested / it)) }
+        val current = presets.minBy { abs(ln(state.selectedAspect / it)) }
+        val hysteresis = min(.03f, abs(ln(nearest / current)) * .25f)
+        val target = if (abs(ln(requested / nearest)) + hysteresis < abs(ln(requested / current)))
+            nearest else current
+        state.selectedAspect = target
+        return target
+    }
 
     /**
      * A corner dragged along one axis chooses a preset; a diagonal drag keeps scale resizing, so
@@ -276,38 +228,85 @@ object FloatingWindowGeometry {
         return out
     }
 
-    // tan(22.5°): drags closer to an axis than to a diagonal change the ratio
-    private const val AXIS_DRAG_TANGENT = .4142f
+    fun fixedLandscape(requested: Int, current: Rect): Boolean? = when {
+        ActivityInfo.isFixedOrientationLandscape(requested) -> true
+        ActivityInfo.isFixedOrientationPortrait(requested) -> false
+        requested == ActivityInfo.SCREEN_ORIENTATION_LOCKED -> current.width() > current.height()
+        else -> null
+    }
 
-    /**
-     * Prefer the natural display ratio, then 4:3 and 1:1, without offering near duplicates.
-     * A square keeps the window's orientation by the orientation margin of [presetCorner].
-     */
-    fun aspectPresets(displayWidth: Int, displayHeight: Int, originalAspect: Float,
-        landscape: Boolean, minAspect: Float = 0f, maxAspect: Float = 0f): List<Float> {
-        val minimum = max(1f, minAspect.takeIf { it.isFinite() } ?: 0f)
-        val maximum = maxAspect.takeIf { it.isFinite() && it > 1f }
-            ?: Float.POSITIVE_INFINITY
-        val original = if (landscape) originalAspect else 1f / originalAspect
-        val ratios = mutableListOf<Float>()
-        for (ratio in listOf(displayAspect(displayWidth, displayHeight, true), 4f / 3f, 1f,
-            original)) {
-            if (!ratio.isFinite() || ratio !in minimum..maximum ||
-                ratios.any { abs(ln(ratio / it)) < .02f }) continue
-            ratios.add(ratio)
+    fun corner(start: Rect, stable: Rect, ctrl: Int, dx: Float, dy: Float,
+        minWidth: Int, minHeight: Int, out: Rect = Rect()): Rect {
+        val w = start.width().toFloat()
+        val h = start.height().toFloat()
+        if (w <= 0 || h <= 0) return out.apply { set(start) }
+        val left = ctrl and CTRL_TYPE_LEFT != 0
+        val top = ctrl and CTRL_TYPE_TOP != 0
+        val dw = if (left) -dx else dx
+        val dh = if (top) -dy else dy
+        val horizontal = ctrl and (CTRL_TYPE_LEFT or CTRL_TYPE_RIGHT) != 0
+        val vertical = ctrl and (CTRL_TYPE_TOP or CTRL_TYPE_BOTTOM) != 0
+        val scale = 1f + when {
+            horizontal && vertical -> (dw * w + dh * h) / (w * w + h * h)
+            horizontal -> dw / w
+            else -> dh / h
         }
-        return ratios.map { if (landscape) it else 1f / it }.sorted()
+        val maxWidth = if (left) start.right - stable.left else stable.right - start.left
+        val maxHeight = if (top) start.bottom - stable.top else stable.bottom - start.top
+        val maxScale = min(maxWidth / w, maxHeight / h).coerceAtLeast(0.01f)
+        val minScale = max(minWidth / w, minHeight / h).coerceAtMost(maxScale)
+        val s = scale.coerceIn(minScale, maxScale)
+        val width = (w * s).roundToInt().coerceAtLeast(1)
+        val height = (h * s).roundToInt().coerceAtLeast(1)
+        val x = if (left) start.right - width else start.left
+        val y = if (top) start.bottom - height else start.top
+        return out.apply { set(x, y, x + width, y + height) }
     }
 
-    /** Require an advantage to switch, capped for distinct but closely spaced presets. */
-    fun snapAspect(requested: Float, presets: List<Float>, state: AspectSnapState): Float? {
-        if (presets.isEmpty()) return null
-        val nearest = presets.minBy { abs(ln(requested / it)) }
-        val current = presets.minBy { abs(ln(state.selectedAspect / it)) }
-        val hysteresis = min(.03f, abs(ln(nearest / current)) * .25f)
-        val target = if (abs(ln(requested / nearest)) + hysteresis < abs(ln(requested / current)))
-            nearest else current
-        state.selectedAspect = target
-        return target
+    fun aspectBounds(start: Rect, stable: Rect, aspect: Float, minWidth: Int,
+        minHeight: Int, centerX: Float = start.exactCenterX(),
+        centerY: Float = start.exactCenterY()): Rect? {
+        if (start.isEmpty || stable.isEmpty || !aspect.isFinite() || aspect <= 0f) return null
+        val width = sqrt(start.width().toFloat() * start.height() * aspect).coerceAtLeast(1f)
+        val height = width / aspect
+        val maxScale = min(stable.width() / width, stable.height() / height)
+        val minScale = max(minWidth / width, minHeight / height)
+        if (minScale > maxScale) return null
+        val scale = 1f.coerceIn(minScale, maxScale)
+        val w = (width * scale).roundToInt().coerceIn(1, stable.width())
+        val h = (height * scale).roundToInt().coerceIn(1, stable.height())
+        if (w < minWidth || h < minHeight) return null
+        val x = (centerX - w / 2f).roundToInt().coerceIn(stable.left, stable.right - w)
+        val y = (centerY - h / 2f).roundToInt().coerceIn(stable.top, stable.bottom - h)
+        return Rect(x, y, x + w, y + h)
     }
+
+    fun scaledAspectBounds(start: Rect, logical: Rect, stable: Rect, aspect: Float,
+        scale: Float, minWidth: Int, minHeight: Int, centerX: Float = start.exactCenterX(),
+        centerY: Float = start.exactCenterY()): Rect? {
+        val fitted = aspectBounds(logical, stable, aspect, minWidth, minHeight) ?: return null
+        val width = (fitted.width() * scale).roundToInt().coerceAtLeast(1)
+        val height = (fitted.height() * scale).roundToInt().coerceAtLeast(1)
+        val left = (centerX - width / 2f).roundToInt().coerceIn(stable.left, stable.right - width)
+        val top = (centerY - height / 2f).roundToInt().coerceIn(stable.top, stable.bottom - height)
+        return Rect(left, top, left + width, top + height)
+    }
+
+    fun displayAspect(width: Int, height: Int, landscape: Boolean): Float {
+        val short = min(width, height).coerceAtLeast(1).toFloat()
+        val long = max(width, height).coerceAtLeast(1).toFloat()
+        return if (landscape) long / short else short / long
+    }
+
+    /** Fits logical geometry while preserving presentation size and aspect. */
+    fun logicalBounds(visible: Rect, stable: Rect, scale: Float, out: Rect = Rect()): Rect {
+        val width = (visible.width() / scale).roundToInt().coerceIn(1, stable.width())
+        val height = (visible.height() / scale).roundToInt().coerceIn(1, stable.height())
+        val left = visible.left.coerceIn(stable.left, stable.right - width)
+        val top = visible.top.coerceIn(stable.top, stable.bottom - height)
+        return out.apply { set(left, top, left + width, top + height) }
+    }
+
+    data class ScaledResize(val visible: Rect, val logical: Rect, var scale: Float,
+        var commitsBounds: Boolean, var atMinimum: Boolean = false)
 }

@@ -77,6 +77,7 @@ class PinnedLayerController(
     // Stores ids of pinned TaskInfo.
     private val pinnedTasks = mutableSetOf<Int>()
     private var currentPinnedTaskId: Int? = null
+    fun originalFloatingAspect(task: TaskInfo): Float = presentationController.originalAspect(task)
 
 
     private val pinnedTasksListeners = mutableSetOf<PinnedTasksListener>()
@@ -581,8 +582,6 @@ class PinnedLayerController(
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
     }
-
-    fun originalFloatingAspect(task: TaskInfo): Float = presentationController.originalAspect(task)
 
     fun getMiniDragTarget(task: TaskInfo, start: Rect, end: Rect) =
         miniInteractions?.getDragTarget(task, start, end)
