@@ -34,6 +34,7 @@ import android.platform.test.flag.junit.FlagsParameterization
 import android.provider.Settings
 import android.testing.TestableLooper.RunWithLooper
 import android.util.ArraySet
+import android.view.Display
 import android.view.View
 import android.view.accessibility.AccessibilityManager
 import androidx.test.filters.SmallTest
@@ -70,6 +71,7 @@ import com.android.systemui.shared.system.activityManagerWrapper
 import com.android.systemui.statusbar.NotificationLockscreenUserManager
 import com.android.systemui.statusbar.NotificationPresenter
 import com.android.systemui.statusbar.notification.NotificationActivityStarter
+import com.android.systemui.statusbar.notification.mockNotificationActivityStarter
 import com.android.systemui.statusbar.notification.collection.NotificationEntry
 import com.android.systemui.statusbar.notification.collection.NotificationEntryBuilder
 import com.android.systemui.statusbar.notification.collection.buildNotificationEntry
@@ -241,6 +243,65 @@ class NotificationGutsManagerTest(flags: FlagsParameterization) : SysuiTestCase(
         )
         gutsManager.setNotificationActivityStarter(notificationActivityStarter)
         gutsManager.start()
+    }
+
+    @Test
+    fun testFloatingButtonWithActivityIntentIsVisibleAndDispatches() {
+        assertEquals(Display.DEFAULT_DISPLAY, mContext.displayId)
+        val row = createTestNotificationRow()
+        row.ensureGutsInflated()
+        row.entryAdapter.sbn!!.notification.contentIntent =
+            android.app.PendingIntent.getActivity(
+                mContext, 0, Intent("test_activity"), android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        whenever(manager.supportsFloatingWindows()).thenReturn(true)
+
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+
+        val button =
+            (item.gutsContent as GutsContent).contentView.findViewById<View>(
+                com.android.systemui.res.R.id.notification_open_floating
+            )
+        assertEquals(View.VISIBLE, button.visibility)
+        assertTrue(button.performClick())
+        verify(kosmos.mockNotificationActivityStarter)
+            .onNotificationFloatingWindowClicked(any(), eq(row))
+    }
+
+    @Test
+    fun testFloatingButtonWithoutContentIntentIsHidden() {
+        val row = createTestNotificationRow()
+        val item = createTestMenuItem(row)
+
+        gutsManager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+
+        val button =
+            (item.gutsContent as GutsContent).contentView.findViewById<View>(
+                com.android.systemui.res.R.id.notification_open_floating
+            )
+        assertEquals(View.GONE, button.visibility)
+        assertFalse(button.hasOnClickListeners())
+    }
+
+    @Test
+    fun testFloatingButtonWithNonActivityIntentIsHidden() {
+        val row = createTestNotificationRow()
+        row.entryAdapter.sbn!!.notification.contentIntent =
+            android.app.PendingIntent.getBroadcast(
+                mContext, 0, Intent("test_activity"), android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+        val item = createTestMenuItem(row)
+
+        gutsManager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+
+        val button =
+            (item.gutsContent as GutsContent).contentView.findViewById<View>(
+                com.android.systemui.res.R.id.notification_open_floating
+            )
+        assertEquals(View.GONE, button.visibility)
+        assertFalse(button.hasOnClickListeners())
     }
 
     @Test
@@ -771,4 +832,63 @@ class NotificationGutsManagerTest(flags: FlagsParameterization) : SysuiTestCase(
         assertNotNull(menuItem)
         return menuItem
     }
+
+    @Test
+    fun testSplitButtonVisibleAboveFloatingAndDispatches() {
+        val row = createTestNotificationRow()
+        row.ensureGutsInflated()
+        row.entryAdapter.sbn!!.notification.contentIntent = android.app.PendingIntent.getActivity(
+            mContext, 0, Intent("test_split_activity"), android.app.PendingIntent.FLAG_IMMUTABLE)
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        whenever(manager.supportsFloatingWindows()).thenReturn(true)
+        whenever(manager.supportsSplitScreen()).thenReturn(true)
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+        val content = (item.gutsContent as GutsContent).contentView
+        val split = content.findViewById<View>(com.android.systemui.res.R.id.notification_open_split_screen)
+        val floating = content.findViewById<View>(com.android.systemui.res.R.id.notification_open_floating)
+        assertEquals(View.VISIBLE, split.visibility)
+        assertEquals(floating.parent, split.parent)
+        val parent = split.parent as android.view.ViewGroup
+        assertEquals(parent.indexOfChild(floating) - 1, parent.indexOfChild(split))
+        assertTrue(split.performClick())
+        verify(kosmos.mockNotificationActivityStarter).onNotificationSplitScreenClicked(any(), eq(row))
+    }
+
+    @Test
+    fun testSplitButtonHiddenWithoutSplitOrFloatingSupport() {
+        val row = createTestNotificationRow()
+        row.entryAdapter.sbn!!.notification.contentIntent = android.app.PendingIntent.getActivity(
+            mContext, 0, Intent("test_split_activity"), android.app.PendingIntent.FLAG_IMMUTABLE)
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        val split = (item.gutsContent as GutsContent).contentView.findViewById<View>(
+            com.android.systemui.res.R.id.notification_open_split_screen)
+        for ((floatingSupported, splitSupported) in listOf(true to false, false to true)) {
+            whenever(manager.supportsFloatingWindows()).thenReturn(floatingSupported)
+            whenever(manager.supportsSplitScreen()).thenReturn(splitSupported)
+            manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+            assertEquals(View.GONE, split.visibility)
+            assertFalse(split.hasOnClickListeners())
+        }
+    }
+
+    @Test
+    fun testSplitButtonHiddenWithoutActivityIntent() {
+        val row = createTestNotificationRow()
+        val item = createTestMenuItem(row)
+        val manager = spy(gutsManager)
+        whenever(manager.supportsFloatingWindows()).thenReturn(true)
+        whenever(manager.supportsSplitScreen()).thenReturn(true)
+        val split = (item.gutsContent as GutsContent).contentView.findViewById<View>(
+            com.android.systemui.res.R.id.notification_open_split_screen)
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+        assertEquals(View.GONE, split.visibility)
+        row.entryAdapter.sbn!!.notification.contentIntent = android.app.PendingIntent.getBroadcast(
+            mContext, 0, Intent("test_split_activity"), android.app.PendingIntent.FLAG_IMMUTABLE)
+        manager.bindFloatingWindowButton(row, row.entryAdapter.sbn, item)
+        assertEquals(View.GONE, split.visibility)
+        assertFalse(split.hasOnClickListeners())
+    }
+
 }
