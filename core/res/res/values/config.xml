@@ -4296,6 +4296,10 @@
          and one pSIM) -->
     <integer name="config_num_physical_slots">1</integer>
 
+    <!-- Logical SIM slots holding a built-in (non-removable) data SIM whose UICC applications
+         start disabled and are never re-enabled automatically. -->
+    <integer-array name="config_builtinDataSimSlots" translatable="false" />
+
     <!--The default "usage setting" indicating that the device is either a voice-centric
     device (1) or a data-centric device (2). A voice-centric device will require that any cellular
     service that it uses provides access to voice capability, and a data-centric device will
