@@ -627,6 +627,52 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
         hideHandleMenu();
     }
 
+    private void showHandleMenu() {
+        if (mHandleMenu == null || mSplitLayout == null) return;
+        updateHandleMenu();
+        if (mHandleMenuShowing) return;
+        mHandleMenuShowing = true;
+        mSplitLayout.onDividerHandleMenuChanged(true);
+        mSetTouchRegion = true;
+        requestLayout();
+        mHandleMenu.setVisibility(View.VISIBLE);
+        mHandleMenu.setAlpha(0f);
+        mHandleMenu.animate().alpha(1f).setDuration(TOUCH_ANIMATION_DURATION).start();
+    }
+
+    private void hideHandleMenu() {
+        if (mHandleMenu == null || !mHandleMenuShowing) return;
+        mHandleMenuShowing = false;
+        mSplitLayout.onDividerHandleMenuChanged(false);
+        mHandleMenu.animate().cancel();
+        mHandleMenu.setAlpha(0f);
+        mHandleMenu.setVisibility(View.GONE);
+        mSetTouchRegion = true;
+        requestLayout();
+    }
+
+    private void updateHandleMenu() {
+        if (mHandleMenuSwapButton == null) return;
+        final boolean leftRightSplit = mSplitLayout.isLeftRightSplit();
+        final boolean rotate = mSplitLayout.canRotateThreeAppShape();
+        mHandleMenuRotateButton.setVisibility(rotate ? View.VISIBLE : View.GONE);
+        final android.view.ViewGroup.LayoutParams params = mHandleMenu.getLayoutParams();
+        params.width = mSplitLayout.getDividerHandleMenuWidth();
+        mHandleMenu.setLayoutParams(params);
+        mHandleMenuSwapButton.setImageResource(leftRightSplit
+                ? R.drawable.desktop_mode_ic_handle_menu_swap_horizontal
+                : R.drawable.desktop_mode_ic_handle_menu_swap_vertical);
+        final CharSequence description = mContext.getString(leftRightSplit
+                ? R.string.handle_menu_swap_horizontal : R.string.handle_menu_swap_vertical);
+        mHandleMenuSwapButton.setContentDescription(description);
+        mHandleMenuSwapButton.setTooltipText(description);
+    }
+
+    @VisibleForTesting
+    boolean isHandleMenuShowing() {
+        return mHandleMenuShowing;
+    }
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         if (ev.getActionMasked() == MotionEvent.ACTION_OUTSIDE) {
@@ -867,16 +913,9 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
 
     private boolean mHandleMenuShowing;
 
-    private void hideHandleMenu() {
-        if (mHandleMenu == null || !mHandleMenuShowing) return;
-        mHandleMenuShowing = false;
-        mSplitLayout.onDividerHandleMenuChanged(false);
-        mHandleMenu.animate().cancel();
-        mHandleMenu.setAlpha(0f);
-        mHandleMenu.setVisibility(View.GONE);
-        mSetTouchRegion = true;
-        requestLayout();
-    }
+    private ImageButton mHandleMenuSwapButton;
+
+    private ImageButton mHandleMenuRotateButton;
 
     private class DoubleTapListener extends GestureDetector.SimpleOnGestureListener {
 
@@ -902,36 +941,4 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
             return false;
         }
     }
-
-    private void showHandleMenu() {
-        if (mHandleMenu == null || mSplitLayout == null) return;
-        updateHandleMenu();
-        if (mHandleMenuShowing) return;
-        mHandleMenuShowing = true;
-        mSplitLayout.onDividerHandleMenuChanged(true);
-        mSetTouchRegion = true;
-        requestLayout();
-        mHandleMenu.setVisibility(View.VISIBLE);
-        mHandleMenu.setAlpha(0f);
-        mHandleMenu.animate().alpha(1f).setDuration(TOUCH_ANIMATION_DURATION).start();
-    }
-
-    private void updateHandleMenu() {
-        if (mHandleMenuSwapButton == null) return;
-        final boolean leftRightSplit = mSplitLayout.isLeftRightSplit();
-        final boolean rotate = false;
-        mHandleMenuRotateButton.setVisibility(rotate ? View.VISIBLE : View.GONE);
-        final android.view.ViewGroup.LayoutParams params = mHandleMenu.getLayoutParams();
-        params.width = mSplitLayout.getDividerHandleMenuWidth();
-        mHandleMenu.setLayoutParams(params);
-        mHandleMenuSwapButton.setImageResource(leftRightSplit
-                ? R.drawable.desktop_mode_ic_handle_menu_swap_horizontal
-                : R.drawable.desktop_mode_ic_handle_menu_swap_vertical);
-        final CharSequence description = mContext.getString(leftRightSplit
-                ? R.string.handle_menu_swap_horizontal : R.string.handle_menu_swap_vertical);
-        mHandleMenuSwapButton.setContentDescription(description);
-        mHandleMenuSwapButton.setTooltipText(description);
-    }
-    private ImageButton mHandleMenuSwapButton;
-    private ImageButton mHandleMenuRotateButton;
 }

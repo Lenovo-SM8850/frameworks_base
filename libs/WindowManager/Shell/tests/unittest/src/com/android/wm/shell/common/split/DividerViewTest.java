@@ -108,6 +108,33 @@ public class DividerViewTest extends ShellTestCase {
 
     @Test
     @UiThreadTest
+    public void rotateButtonFollowsBranchEligibilityAndDispatchesWithoutSwap() {
+        for (boolean leftRight : new boolean[]{false, true}) {
+            doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
+            for (boolean eligible : new boolean[]{false, true}) {
+                org.mockito.Mockito.when(mSplitLayoutHandler.canRotateThreeAppShape())
+                        .thenReturn(eligible);
+                long time = SystemClock.uptimeMillis();
+                mDividerView.onTouch(mDividerView,
+                        getMotionEvent(time, MotionEvent.ACTION_DOWN, 5, 5));
+                mDividerView.onTouch(mDividerView,
+                        getMotionEvent(time + 10, MotionEvent.ACTION_UP, 5, 5));
+                android.view.View rotate = mDividerView.findViewById(R.id.divider_handle_menu_rotate);
+                assertTrue(rotate.getVisibility() == (eligible ? View.VISIBLE : View.GONE));
+                if (eligible) {
+                    org.mockito.Mockito.clearInvocations(mSplitLayoutHandler);
+                    rotate.performClick();
+                    verify(mSplitLayoutHandler).onRotateThreeAppShape();
+                    verify(mSplitLayoutHandler, never()).onDoubleTappedDivider();
+                }
+                mDividerView.setInteractive(false, false, "test");
+                mDividerView.setInteractive(true, false, "test");
+            }
+        }
+    }
+
+    @Test
+    @UiThreadTest
     public void testHoverDividerView() {
         DeviceConfig.setProperty(DeviceConfig.NAMESPACE_SYSTEMUI, CURSOR_HOVER_STATES_ENABLED,
                 "true", false);
