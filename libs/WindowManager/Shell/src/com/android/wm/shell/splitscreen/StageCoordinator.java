@@ -4665,6 +4665,18 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             }
         }
 
+        if (pendingEnter.mRemoteHandler != null
+                && pendingEnter.mExtraTransitType == TRANSIT_SPLIT_SCREEN_PAIR_OPEN) {
+            // A task hidden by an unfinished Recents transition can still be visible to WM.
+            // Pair launch remotes expect both entering tasks to have opening animation modes.
+            if (mainChild != null && mainChild.getMode() == TRANSIT_CHANGE) {
+                mainChild.setMode(TRANSIT_TO_FRONT);
+            }
+            if (sideChild != null && sideChild.getMode() == TRANSIT_CHANGE) {
+                sideChild.setMode(TRANSIT_TO_FRONT);
+            }
+        }
+
         // Make some noise if things aren't totally expected. These states shouldn't effect
         // transitions locally, but remotes (like Launcher) may get confused if they were
         // depending on listener callbacks. This can happen because task-organizer callbacks
