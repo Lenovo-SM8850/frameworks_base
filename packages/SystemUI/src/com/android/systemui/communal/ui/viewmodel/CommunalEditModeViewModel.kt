@@ -262,11 +262,13 @@ constructor(
                 EXTRA_DESIRED_WIDGET_HEIGHT,
                 resources.getDimensionPixelSize(R.dimen.communal_widget_picker_desired_height),
             )
-            putExtra(
-                AppWidgetManager.EXTRA_CATEGORY_FILTER,
-                CommunalWidgetCategories.includedCategories,
-            )
-            putExtra(EXTRA_CATEGORY_EXCLUSION_FILTER, CommunalWidgetCategories.excludedCategories)
+            if (resources.getBoolean(R.bool.config_communalWidgetPickerFilterByCategory)) {
+                putExtra(
+                    AppWidgetManager.EXTRA_CATEGORY_FILTER,
+                    CommunalWidgetCategories.includedCategories,
+                )
+                putExtra(EXTRA_CATEGORY_EXCLUSION_FILTER, CommunalWidgetCategories.excludedCategories)
+            }
 
             communalSettingsInteractor.workProfileUserDisallowedByDevicePolicy.value?.let {
                 putExtra(EXTRA_USER_ID_FILTER, arrayListOf(it.id))

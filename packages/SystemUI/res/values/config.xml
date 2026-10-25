@@ -862,6 +862,9 @@
     <!-- Component names of allowed communal widgets -->
     <string-array name="config_communalWidgetAllowlist" translatable="false" />
 
+    <!-- Whether the hub picker filters widgets by home-screen and keyguard categories. -->
+    <bool name="config_communalWidgetPickerFilterByCategory">true</bool>
+
     <!-- Component name for the setup activity shown when the device is upright and charging. -->
     <string name="config_communalUprightChargingSetupActivityComponent" translatable="false" />
 
