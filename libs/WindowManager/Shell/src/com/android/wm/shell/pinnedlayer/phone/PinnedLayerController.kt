@@ -23,14 +23,14 @@ import android.content.res.Configuration
 import com.android.wm.shell.common.MultitaskingWindowLimit
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.sysui.UserChangeListener
-import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
-import android.app.WindowConfiguration.ACTIVITY_TYPE_HOME
 import android.app.ActivityManager.AppTask.WINDOWING_LAYER_PINNED
 import android.app.TaskInfo
 import android.app.TaskWindowingLayerRequestHandler.REMOTE_CALLBACK_RESULT_KEY
 import android.app.TaskWindowingLayerRequestHandler.RESULT_APPROVED
 import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
 import android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
+import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
+import android.app.WindowConfiguration.ACTIVITY_TYPE_HOME
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.IBinder
@@ -679,7 +679,15 @@ class PinnedLayerController(
                         task.floatingWindowRestoreBounds,
                     )
                 }
-            merge(getLayerPinnedWct(task.token, bounds), /* transfer= */ true)
+            transitions += ActiveTransition.Pin(task, remoteCallback)
+            minimizeOldestIfNeeded(task, this)
+            visiblePinnedTasks += task.taskId
+            minimizedTasks -= task.taskId
+            removeMinimizeHandle(task.taskId)
+            merge(getLayerPinnedWct(task.token), /* transfer= */ true)
+            bounds?.let { presentationController.applyPresentation(task, it, this,
+                appEntry?.scale ?: presentationController.entryScale(task)) }
+            setHidden(task.token, keyguardShowing || overviewShowing)
 
         }
     }
@@ -704,12 +712,14 @@ class PinnedLayerController(
             unpinStrategy,
         )
         val transitions = activeTransitions.getOrPut(transition) { mutableSetOf() }
-        transitions += ActiveTransition.Unpin(task)
+        transitions += ActiveTransition.Unpin(task, unpinStrategy == UnpinStrategy.HIDE,
+            exitFloating = unpinStrategy == UnpinStrategy.BACK)
 
         return when (unpinStrategy) {
             UnpinStrategy.HIDE,
             UnpinStrategy.CLOSE ->
                 getLayerUnpinnedWct(task.token, isMinimizing = unpinStrategy == UnpinStrategy.HIDE)
+            UnpinStrategy.BACK -> getExitToBackWct(task)
             UnpinStrategy.CLEAN -> getRemovedFromLayerWct(task.token)
                 .setBounds(task.token, task.presentationBounds)
         }
@@ -1070,7 +1080,11 @@ class PinnedLayerController(
                             it.taskInfo?.token == transition.taskInfo.token &&
                                 it.mode == TRANSIT_TO_BACK
                         }
-                    unpin(transition.taskInfo, rememberAsPinned = isMovingToBack)
+                    unpin(
+                        transition.taskInfo,
+                        rememberAsPinned = transition.minimized ||
+                            (isMovingToBack && !transition.exitFloating),
+                    )
                 }
             }
         }
@@ -1274,6 +1288,9 @@ class PinnedLayerController(
          * handler wants to decide where to put the task.
          */
         CLEAN,
+
+        /** Leaves floating mode for an app-initiated move to the background. */
+        BACK,
     }
 
     interface PinnedTasksListener {

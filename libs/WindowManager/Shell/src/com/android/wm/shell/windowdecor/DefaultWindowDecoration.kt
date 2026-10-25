@@ -856,7 +856,7 @@ constructor(
     }
 
     private fun getCornerRadius(): Int {
-        val shouldIgnoreCornerRadius = isRecentsTransitionRunning
+        val shouldIgnoreCornerRadius = isRecentsTransitionRunning && !taskInfo.isFloatingWindow
         return decorWindowContext.resources.getDimensionPixelSize(
             getCornerRadiusId(captionType, shouldIgnoreCornerRadius),
             defaultValue = 0,

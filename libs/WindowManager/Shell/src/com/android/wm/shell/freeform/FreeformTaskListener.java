@@ -105,6 +105,9 @@ public class FreeformTaskListener implements ShellTaskOrganizer.TaskListener,
         state.mTaskInfo = taskInfo;
         state.mLeash = leash;
         mTasks.put(taskInfo.taskId, state);
+        if (taskInfo.isFloatingWindow) {
+            mShellTaskOrganizer.setInterceptBackPressedOnTaskRoot(taskInfo.token, true);
+        }
 
     }
 
@@ -113,6 +116,10 @@ public class FreeformTaskListener implements ShellTaskOrganizer.TaskListener,
         ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TASK_ORG, "Freeform Task Vanished: #%d",
                 taskInfo.taskId);
         mTasks.remove(taskInfo.taskId);
+        final RunningTaskInfo remaining = mShellTaskOrganizer.getRunningTaskInfo(taskInfo.taskId);
+        if (remaining != null && !remaining.isFloatingWindow && taskInfo.isFloatingWindow) {
+            mShellTaskOrganizer.setInterceptBackPressedOnTaskRoot(remaining.token, false);
+        }
 
         // TODO: b/367268649 - This listener shouldn't need to call the transition observer directly
         // for logging once the logic in the observer is moved.
@@ -126,6 +133,10 @@ public class FreeformTaskListener implements ShellTaskOrganizer.TaskListener,
 
         ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TASK_ORG, "Freeform Task Info Changed: #%d",
                 taskInfo.taskId);
+        if (state.mTaskInfo.isFloatingWindow != taskInfo.isFloatingWindow) {
+            mShellTaskOrganizer.setInterceptBackPressedOnTaskRoot(
+                    taskInfo.token, taskInfo.isFloatingWindow);
+        }
         mWindowDecorationViewModel.onTaskInfoChanged(taskInfo);
         state.mTaskInfo = taskInfo;
         if (mDesktopState.canEnterDesktopMode()) {
@@ -133,6 +144,15 @@ public class FreeformTaskListener implements ShellTaskOrganizer.TaskListener,
             // does not propagate all task info changes.
             mTaskChangeListener.ifPresent(listener ->
                     listener.onNonTransitionTaskChanging(taskInfo));
+        }
+    }
+
+    @Override
+    public void onBackOnTaskRoot(RunningTaskInfo taskInfo, boolean isFromBackPress,
+            boolean isOptInOnBackInvoked, boolean hasOpaqueSibling) {
+        if (taskInfo.isFloatingWindow) {
+            // App callbacks run first. Root Back must release AoT before moving behind Home.
+            mWindowDecorationViewModel.onBackOnTaskRoot(taskInfo);
         }
     }
 

@@ -125,6 +125,7 @@ public class BackAnimationController implements RemoteCallable<BackAnimationCont
 
     /** Tracks if we should start the back gesture on the next motion move event */
     private boolean mShouldStartOnNextMoveEvent = false;
+    private int mFloatingBackTaskId = INVALID_TASK_ID;
     private boolean mOnBackStartDispatched = false;
     private boolean mThresholdCrossed = false;
     private boolean mPointersPilfered = false;
@@ -549,6 +550,7 @@ public class BackAnimationController implements RemoteCallable<BackAnimationCont
         }
 
         if (keyAction == MotionEvent.ACTION_DOWN) {
+            mFloatingBackTaskId = INVALID_TASK_ID;
             if (!mBackGestureStarted) {
                 if (swipeEdge == EDGE_NONE) {
                     // Simulate inject key event to system server.
@@ -577,11 +579,21 @@ public class BackAnimationController implements RemoteCallable<BackAnimationCont
                         startGestureWithNoEdge();
                     }
                 } else {
+                    mFloatingBackTaskId = getFocusedFloatingTaskId(displayId);
                     mShouldStartOnNextMoveEvent = true;
                 }
             }
         } else if (keyAction == MotionEvent.ACTION_MOVE) {
             if (!mBackGestureStarted && mShouldStartOnNextMoveEvent) {
+                if (mFloatingBackTaskId != INVALID_TASK_ID) {
+                    // An edge swipe belongs to the app focused at DOWN, even outside its bounds.
+                    try {
+                        mActivityTaskManager.setFocusedTask(mFloatingBackTaskId);
+                    } catch (RemoteException e) {
+                        Log.e(TAG, "Failed to restore floating focus for back", e);
+                    }
+                    mFloatingBackTaskId = INVALID_TASK_ID;
+                }
                 // Let the animation initialized here to make sure the onPointerDownOutsideFocus
                 // could be happened when ACTION_DOWN, it may change the current focus that we
                 // would access it when startBackNavigation.
@@ -599,6 +611,18 @@ public class BackAnimationController implements RemoteCallable<BackAnimationCont
         }
     }
 
+    private int getFocusedFloatingTaskId(int displayId) {
+        try {
+            final ActivityTaskManager.RootTaskInfo task =
+                    mActivityTaskManager.getFocusedRootTaskInfo();
+            return task != null && task.displayId == displayId && task.isFloatingWindow
+                    ? task.taskId : INVALID_TASK_ID;
+        } catch (RemoteException e) {
+            Log.e(TAG, "Failed to get focused task for back", e);
+            return INVALID_TASK_ID;
+        }
+    }
+
     private void startGestureWithNoEdge() {
         mPointersPilfered = true;
         onGestureStarted(0, 0, EDGE_NONE);
@@ -607,6 +631,7 @@ public class BackAnimationController implements RemoteCallable<BackAnimationCont
     }
 
     private void handleFinishKeyAction(int keyAction) {
+        mFloatingBackTaskId = INVALID_TASK_ID;
         ProtoLog.d(WM_SHELL_BACK_PREVIEW,
                 "Finishing gesture with event action: %d", keyAction);
         if (keyAction == MotionEvent.ACTION_CANCEL) {

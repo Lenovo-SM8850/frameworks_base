@@ -65,6 +65,9 @@ public interface WindowDecorViewModel {
      */
     void onTaskInfoChanged(ActivityManager.RunningTaskInfo taskInfo);
 
+    /** Handles root Back for a floating task after its app has exhausted navigation. */
+    default void onBackOnTaskRoot(ActivityManager.RunningTaskInfo taskInfo) {}
+
     /**
      * Notifies a task has vanished, which can mean that the task changed windowing mode or was
      * removed.
