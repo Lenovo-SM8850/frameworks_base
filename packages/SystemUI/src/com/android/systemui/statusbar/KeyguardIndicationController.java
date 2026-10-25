@@ -252,6 +252,7 @@ public class KeyguardIndicationController {
     private long mLastChargeTimeComputeMs;
     private float mChargingCurrent;
     private float mChargingVoltage;
+    private int mChargingMeasurementsGeneration;
     private BatteryStatus mBatteryStatus;
     private float mTemperature;
     private Pair<String, BiometricSourceType> mBiometricErrorMessageToShowOnScreenOn;
@@ -1601,6 +1602,7 @@ public class KeyguardIndicationController {
     }
 
     private void updateChargingMeasurements(BatteryStatus status, boolean isChargingOrFull) {
+        final int generation = ++mChargingMeasurementsGeneration;
         mChargingCurrent = status.maxChargingCurrent;
         mChargingVoltage = status.maxChargingVoltage;
         mChargingWattage = status.maxChargingWattage;
@@ -1608,20 +1610,30 @@ public class KeyguardIndicationController {
             return;
         }
 
-        final int rawCurrent = mBatteryManager.getIntProperty(
-                BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
-        if (rawCurrent == Integer.MIN_VALUE) {
-            return;
-        }
         final int voltageMillivolts = status.batteryVoltageMillivolts;
         if (voltageMillivolts <= 0) {
             return;
         }
-
-        // Normalize the device's raw current units to uA before calculating power.
-        mChargingCurrent = Math.abs((float) rawCurrent) * (1000f / mCurrentDivider);
-        mChargingVoltage = voltageMillivolts * 1000f;
-        mChargingWattage = mChargingCurrent * mChargingVoltage / 1_000_000f;
+        final int currentDivider = mCurrentDivider;
+        mBackgroundExecutor.execute(() -> {
+            final int rawCurrent = mBatteryManager.getIntProperty(
+                    BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+            if (rawCurrent == Integer.MIN_VALUE) {
+                return;
+            }
+            mExecutor.execute(() -> {
+                if (generation != mChargingMeasurementsGeneration) {
+                    return;
+                }
+                // Normalize the device's raw current units to uA before calculating power.
+                mChargingCurrent = Math.abs((float) rawCurrent) * (1000f / currentDivider);
+                mChargingVoltage = voltageMillivolts * 1000f;
+                mChargingWattage = mChargingCurrent * mChargingVoltage / 1_000_000f;
+                if (mVisible) {
+                    updateLockScreenBatteryMsg(false);
+                }
+            });
+        });
     }
 
     private final Runnable mUpdateInfo = new Runnable() {
