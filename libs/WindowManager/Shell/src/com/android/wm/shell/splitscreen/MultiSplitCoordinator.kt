@@ -1115,7 +1115,7 @@ class MultiSplitCoordinator(
         transitions.runOnIdle {
             if (isActive) {
                 val wct = WindowContainerTransaction()
-                applyTasks(wct)
+                applyTasks(wct, updateHierarchy = false)
                 syncQueue.queue(wct)
                 syncDividers()
                 syncQueue.runInSync { applySurfaceChanges(it) }
@@ -1133,7 +1133,7 @@ class MultiSplitCoordinator(
             if (showing && !owned) return 0
             imeTop = if (showing && !floating) shownTop else null
             val wct = WindowContainerTransaction()
-            applyTasks(wct)
+            applyTasks(wct, updateHierarchy = false)
             organizer.applyTransaction(wct)
             syncDividers(t)
             applySurfaceChanges(t)

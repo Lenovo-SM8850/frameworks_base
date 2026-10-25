@@ -181,6 +181,16 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(coordinator.startTask(incoming, slot)).isFalse()
     }
 
+    private fun assertGeometryOnly(wct: WindowContainerTransaction) {
+        assertThat(wct.hierarchyOps).isEmpty()
+        assertThat(wct.changes.keys).containsExactlyElementsIn(
+            coordinator.activeStages.map { it.mRootTaskInfo.token.asBinder() })
+        wct.changes.values.forEach { change ->
+            assertThat(change.configuration.windowConfiguration.bounds.isEmpty).isFalse()
+            assertThat(change.changeMask).isEqualTo(0)
+        }
+    }
+
     private fun dumpState(): String {
         val text = java.io.StringWriter()
         coordinator.dump(java.io.PrintWriter(text), "  ")
@@ -303,17 +313,5 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(coordinator.isBusy).isFalse()
         assertThat(dumpState()).contains("Launch failed: IllegalStateException")
         verify(organizer).applyTransaction(any())
-    }
-
-
-
-    private fun assertGeometryOnly(wct: WindowContainerTransaction) {
-        assertThat(wct.hierarchyOps).isEmpty()
-        assertThat(wct.changes.keys).containsExactlyElementsIn(
-            coordinator.activeStages.map { it.mRootTaskInfo.token.asBinder() })
-        wct.changes.values.forEach { change ->
-            assertThat(change.configuration.windowConfiguration.bounds.isEmpty).isFalse()
-            assertThat(change.changeMask).isEqualTo(0)
-        }
     }
 }

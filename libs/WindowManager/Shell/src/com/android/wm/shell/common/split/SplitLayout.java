@@ -759,7 +759,9 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
         mInitialized = true;
         mSplitWindowManager.init(this, mInsetsState, false /* isRestoring */, mDesktopState);
         populateTouchZones();
-        mDisplayImeController.addPositionProcessor(mImePositionProcessor);
+        if (!mIsMultiSplitDivider) {
+            mDisplayImeController.addPositionProcessor(mImePositionProcessor);
+        }
     }
 
     /** Releases the surface holding the current {@link DividerView}. */
