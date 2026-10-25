@@ -348,6 +348,25 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
                 * (canRotateThreeAppShape() ? 2 : 1);
     }
 
+    void onDividerHandleMenuChanged(boolean showing) {
+        mSplitLayoutHandler.onDividerHandleMenuChanged(showing);
+    }
+
+    /** Whether this divider belongs to a branch of a multi-app layout. */
+    public boolean isMultiSplitDivider() {
+        return mIsMultiSplitDivider;
+    }
+
+    /** Returns the branch clip in divider-window coordinates, including decorative expansion. */
+    public Rect getMultiSplitDividerCrop() {
+        final Rect window = new Rect();
+        getDividerLeashBounds(window);
+        final Rect crop = new Rect(0, 0, mRootBounds.width(), mRootBounds.height());
+        crop.offset(-window.left, -window.top);
+        if (!crop.intersect(0, 0, window.width(), window.height())) crop.setEmpty();
+        return crop;
+    }
+
     public float getFirstNonDismissRatio() {
         return (float) mDividerSnapAlgorithm.getFirstSplitTarget().position
                 / Math.max(1, (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height()) - mDividerSize);
@@ -1938,19 +1957,5 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             }
             return adjusted;
         }
-    }
-
-    void onDividerHandleMenuChanged(boolean showing) {
-        mSplitLayoutHandler.onDividerHandleMenuChanged(showing);
-    }
-
-    /** Returns the branch clip in divider-window coordinates, including decorative expansion. */
-    public Rect getMultiSplitDividerCrop() {
-        final Rect window = new Rect();
-        getDividerLeashBounds(window);
-        final Rect crop = new Rect(0, 0, mRootBounds.width(), mRootBounds.height());
-        crop.offset(-window.left, -window.top);
-        if (!crop.intersect(0, 0, window.width(), window.height())) crop.setEmpty();
-        return crop;
     }
 }

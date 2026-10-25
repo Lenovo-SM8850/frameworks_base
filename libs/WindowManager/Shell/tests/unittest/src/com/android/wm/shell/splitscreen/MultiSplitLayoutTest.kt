@@ -380,4 +380,22 @@ class MultiSplitLayoutTest {
         assertThat(bounds.leaves.getValue(MultiSplitLayout.LeafId(2)).bottom)
             .isLessThan(bounds.leaves.getValue(MultiSplitLayout.LeafId(0)).top)
     }
+
+    @Test fun gridHandlesHaveTwoRootSegmentsAndOnePerShortDividerInBothOrientations() {
+        for (orientation in Orientation.entries) {
+            val model = grid().reorient(orientation)
+            val bounds = model.calculateBounds(display, Insets.NONE, 10)!!
+            val handles = model.dividerHandles(bounds)
+            val rootHandles = handles.getValue(main)
+            assertThat(rootHandles.map { it.first to it.second })
+                .containsExactly(a.id to b.id, c.id to d.id).inOrder()
+            val length = if (orientation == Orientation.LEFT_RIGHT) display.height() else display.width()
+            val crossing = bounds.dividers.getValue(left)
+            val before = if (orientation == Orientation.LEFT_RIGHT) crossing.top else crossing.left
+            val after = if (orientation == Orientation.LEFT_RIGHT) crossing.bottom else crossing.right
+            assertThat(rootHandles.map { it.position }).containsExactly(before / 2, (after + length) / 2).inOrder()
+            assertThat(handles.getValue(left).map { it.first to it.second }).containsExactly(a.id to c.id)
+            assertThat(handles.getValue(right).map { it.first to it.second }).containsExactly(b.id to d.id)
+        }
+    }
 }
