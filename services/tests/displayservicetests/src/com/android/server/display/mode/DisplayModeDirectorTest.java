@@ -70,6 +70,7 @@ import android.os.IThermalEventListener;
 import android.os.Looper;
 import android.os.RemoteException;
 import android.os.Temperature;
+import android.os.test.TestLooper;
 import android.platform.test.annotations.EnableFlags;
 import android.platform.test.flag.junit.SetFlagsRule;
 import android.provider.DeviceConfig;
@@ -330,8 +331,296 @@ public class DisplayModeDirectorTest {
         mInjector = spy(new FakesInjector(mDisplayManagerInternalMock, mStatusBarMock,
                 mSensorManagerInternalMock));
         mHandler = new Handler(Looper.getMainLooper());
+        mContext.getOrCreateTestableResources().addOverride(
+                R.integer.config_dozeRefreshRateDelayMillis, 0);
         mInjector.setEnabledDisplays(Map.of(DISPLAY_ID, Display.TYPE_INTERNAL,
                 DISPLAY_ID_2, Display.TYPE_INTERNAL));
+    }
+
+    @Test
+    public void dozeRefreshRate_disabledByDefault() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 0);
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{30.000002f, 60f, 165f}, 1, 60f);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    @Test
+    public void dozeRefreshRate_visibleDozeUsesPhysicalTimingAndRenderCeiling() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{30.000002f, 60f, 165f}, 1, 60f);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertEquals(Vote.forVotes(List.of(Vote.forPhysicalRefreshRates(30.000002f),
+                Vote.forRenderFrameRates(0f, 30.000002f), Vote.forSize(1000, 1000),
+                new SupportedRefreshRatesVote(List.of(
+                        new SupportedRefreshRatesVote.RefreshRates(30.000002f, 30.000002f))))),
+                director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        DesiredDisplayModeSpecs specs = director.getDesiredDisplayModeSpecs(DISPLAY_ID);
+        assertEquals(1, specs.baseModeId);
+        assertEquals(30.000002f, specs.primary.physical.min, 0.001f);
+        assertEquals(30.000002f, specs.primary.physical.max, 0.001f);
+        assertEquals(30.000002f, specs.primary.render.max, 0.001f);
+    }
+
+    @Test
+    public void dozeRefreshRate_offAndWakeClearVote() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{30f, 60f, 165f}, 1, 60f);
+        int doze = DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE;
+        director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+        assertThat(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE)).isNotNull();
+        director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_OFF);
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        for (int policy : new int[]{DisplayManagerInternal.DisplayPowerRequest.POLICY_BRIGHT,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DIM}) {
+            director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+            director.onDisplayPowerStateChanged(DISPLAY_ID, policy, Display.STATE_ON);
+            assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        }
+    }
+
+    @Test
+    public void dozeRefreshRate_appliesAfterDelayWithoutRestartingOnPowerUpdates() {
+        TestLooper looper = createDelayedDozeLooper();
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{30f, 60f, 165f}, 1, 60f);
+        int doze = DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE;
+        director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+        looper.dispatchAll();
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        looper.moveTimeForward(500);
+        looper.dispatchAll();
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_DOZE);
+        looper.moveTimeForward(500);
+        looper.dispatchAll();
+        assertThat(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE)).isNotNull();
+        assertEquals(30f, director.getDesiredDisplayModeSpecs(DISPLAY_ID).primary.physical.max,
+                0.001f);
+    }
+
+    @Test
+    public void dozeRefreshRate_exitDuringDelayCancelsVote() {
+        int doze = DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE;
+        for (int policy : new int[]{doze,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_BRIGHT,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DIM}) {
+            TestLooper looper = createDelayedDozeLooper();
+            DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                    new float[]{30f, 60f, 165f}, 1, 60f);
+            director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+            director.onDisplayPowerStateChanged(DISPLAY_ID, policy,
+                    policy == doze ? Display.STATE_OFF : Display.STATE_ON);
+            looper.moveTimeForward(1000);
+            assertEquals(0, looper.dispatchAll());
+            assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+            // A new entry must wait for a fresh delay.
+            director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+            looper.dispatchAll();
+            assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+            looper.moveTimeForward(1000);
+            looper.dispatchAll();
+            assertThat(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE)).isNotNull();
+        }
+    }
+
+    @Test
+    public void dozeRefreshRate_delayedVoteReleasesImmediatelyOnOffAndWake() {
+        int doze = DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE;
+        for (int policy : new int[]{doze,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_BRIGHT,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DIM}) {
+            TestLooper looper = createDelayedDozeLooper();
+            DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                    new float[]{30f, 60f, 165f}, 1, 60f);
+            director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+            looper.moveTimeForward(1000);
+            looper.dispatchAll();
+            assertThat(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE)).isNotNull();
+            director.onDisplayPowerStateChanged(DISPLAY_ID, policy,
+                    policy == doze ? Display.STATE_OFF : Display.STATE_ON);
+            assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+            looper.moveTimeForward(1000);
+            looper.dispatchAll();
+            assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        }
+    }
+
+    @Test
+    public void dozeRefreshRate_userSwitchAndDisplayRemovalCancelPendingVote() {
+        for (boolean removeDisplay : new boolean[]{false, true}) {
+            TestLooper looper = createDelayedDozeLooper();
+            DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                    new float[]{30f, 60f, 165f}, 1, 60f);
+            director.onDisplayPowerStateChanged(DISPLAY_ID,
+                    DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+            if (removeDisplay) {
+                director.getDisplayObserver().onDisplayRemoved(DISPLAY_ID);
+            } else {
+                director.onSwitchUser();
+            }
+            // Dispatch any unrelated user/settings messages before checking the cancelled delay.
+            looper.dispatchAll();
+            looper.moveTimeForward(1000);
+            assertEquals(0, looper.dispatchAll());
+            assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        }
+    }
+
+    @Test
+    public void dozeRefreshRate_rejectionDuringDelayCancelsPendingVote() {
+        TestLooper looper = createDelayedDozeLooper();
+        Display.Mode baseMode = new Display.Mode(1, 1000, 1000, 60f);
+        Display.Mode ambientMode = new Display.Mode(2, -1, 7, 0, 1000, 1000,
+                30f, 30f, new float[0], new int[0]);
+        DisplayModeDirector director = createDirectorFromModeArray(
+                new Display.Mode[]{baseMode, ambientMode}, baseMode);
+        ArgumentCaptor<VotesStorage> storage = ArgumentCaptor.forClass(VotesStorage.class);
+        verify(mInjector).getModeChangeObserver(storage.capture(), eq(looper.getLooper()));
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        storage.getValue().updateVote(DISPLAY_ID, Vote.PRIORITY_REJECTED_MODES,
+                Vote.forRejectedModes(java.util.Set.of(7)));
+        looper.moveTimeForward(1000);
+        assertEquals(0, looper.dispatchAll());
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    @Test
+    public void dozeRefreshRate_delayedApplyReevaluatesEligibility() {
+        TestLooper looper = createDelayedDozeLooper();
+        Display.Mode baseMode = new Display.Mode(1, 1000, 1000, 60f);
+        Display.Mode ambientMode = new Display.Mode(2, -1, 7, 0, 1000, 1000,
+                30f, 30f, new float[0], new int[0]);
+        DisplayModeDirector director = createDirectorFromModeArray(
+                new Display.Mode[]{baseMode, ambientMode}, baseMode);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        // Inject without notifying the director, so only the delayed callback sees the rejection.
+        SparseArray<Vote> votes = new SparseArray<>();
+        votes.put(Vote.PRIORITY_REJECTED_MODES, Vote.forRejectedModes(java.util.Set.of(7)));
+        SparseArray<SparseArray<Vote>> votesByDisplay = new SparseArray<>();
+        votesByDisplay.put(DISPLAY_ID, votes);
+        director.injectVotesByDisplay(votesByDisplay);
+        looper.moveTimeForward(1000);
+        assertEquals(1, looper.dispatchAll());
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    private TestLooper createDelayedDozeLooper() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        mContext.getOrCreateTestableResources().addOverride(
+                R.integer.config_dozeRefreshRateDelayMillis, 1000);
+        TestLooper looper = new TestLooper();
+        mHandler = new Handler(looper.getLooper());
+        return looper;
+    }
+
+    @Test
+    public void dozeRefreshRate_noPhysical30HzModeDoesNotVote() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{60f, 120f, 165f}, 1, 60f);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    @Test
+    public void dozeRefreshRate_wrongResolutionDoesNotVote() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        Display.Mode baseMode = new Display.Mode(1, 1000, 1000, 60f);
+        DisplayModeDirector director = createDirectorFromModeArray(new Display.Mode[]{baseMode,
+                new Display.Mode(2, 500, 500, 30f)}, baseMode);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    @Test
+    public void dozeRefreshRate_userSwitchAndDisplayRemovalClearVote() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{30f, 60f, 165f}, 1, 60f);
+        int doze = DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE;
+        director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+        director.onSwitchUser();
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+        director.onDisplayPowerStateChanged(DISPLAY_ID, doze, Display.STATE_ON);
+        director.getDisplayObserver().onDisplayRemoved(DISPLAY_ID);
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    @Test
+    public void dozeRefreshRate_secondaryDisplayDoesNotVote() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{30f, 60f}, 1, 60f);
+        director.onDisplayPowerStateChanged(DISPLAY_ID_2,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertNull(director.getVote(DISPLAY_ID_2, Vote.PRIORITY_DOZE));
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    @Test
+    public void dozeRefreshRate_overridesFixedNormalPreferencesAndRestoresThemOnWake() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        DisplayModeDirector director = createDirectorFromRefreshRateArray(
+                new float[]{30f, 60f, 165f}, 1, 60f);
+        SparseArray<Vote> votes = new SparseArray<>();
+        votes.put(Vote.PRIORITY_USER_SETTING_MIN_RENDER_FRAME_RATE,
+                Vote.forRenderFrameRates(60f, Float.POSITIVE_INFINITY));
+        votes.put(Vote.PRIORITY_USER_PREFERRED, Vote.forPhysicalRefreshRates(165f));
+        votes.put(Vote.PRIORITY_MEMC, Vote.forPhysicalRefreshRates(165f));
+        SparseArray<SparseArray<Vote>> votesByDisplay = new SparseArray<>();
+        votesByDisplay.put(DISPLAY_ID, votes);
+        director.injectVotesByDisplay(votesByDisplay);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertEquals(30f, director.getDesiredDisplayModeSpecs(DISPLAY_ID).primary.physical.max,
+                0.001f);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_BRIGHT, Display.STATE_ON);
+        assertEquals(165f, director.getDesiredDisplayModeSpecs(DISPLAY_ID).primary.physical.min,
+                0.001f);
+        assertEquals(Vote.forRenderFrameRates(60f, Float.POSITIVE_INFINITY),
+                director.getVote(DISPLAY_ID, Vote.PRIORITY_USER_SETTING_MIN_RENDER_FRAME_RATE));
+    }
+
+    @Test
+    public void dozeRefreshRate_rejectedPhysicalModeDoesNotVote() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        Display.Mode baseMode = new Display.Mode(1, 1000, 1000, 60f);
+        Display.Mode ambientMode = new Display.Mode(2, -1, 7, 0, 1000, 1000,
+                30f, 30f, new float[0], new int[0]);
+        DisplayModeDirector director = createDirectorFromModeArray(
+                new Display.Mode[]{baseMode, ambientMode}, baseMode);
+        SparseArray<Vote> votes = new SparseArray<>();
+        votes.put(Vote.PRIORITY_REJECTED_MODES, Vote.forRejectedModes(java.util.Set.of(7)));
+        SparseArray<SparseArray<Vote>> votesByDisplay = new SparseArray<>();
+        votesByDisplay.put(DISPLAY_ID, votes);
+        director.injectVotesByDisplay(votesByDisplay);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
+    }
+
+    @Test
+    public void dozeRefreshRate_synthetic30HzModeDoesNotVote() {
+        mContext.getOrCreateTestableResources().addOverride(R.integer.config_dozeRefreshRate, 30);
+        Display.Mode baseMode = new Display.Mode(1, 1000, 1000, 60f);
+        Display.Mode synthetic = new Display.Mode(2, 1, 7, Display.Mode.FLAG_ARR_RENDER_RATE,
+                1000, 1000, 30f, 60f, new float[0], new int[0]);
+        DisplayModeDirector director = createDirectorFromModeArray(
+                new Display.Mode[]{baseMode, synthetic}, baseMode);
+        director.onDisplayPowerStateChanged(DISPLAY_ID,
+                DisplayManagerInternal.DisplayPowerRequest.POLICY_DOZE, Display.STATE_ON);
+        assertNull(director.getVote(DISPLAY_ID, Vote.PRIORITY_DOZE));
     }
 
     private DisplayModeDirector createDirectorFromRefreshRateArray(

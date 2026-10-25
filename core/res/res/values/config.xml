@@ -6040,6 +6040,16 @@
          config_defaultPeakRefreshRate will act as the default frame rate. -->
     <integer name="config_defaultRefreshRate">60</integer>
 
+    <!-- Minimum physical refresh rate of the default display outside ambient display.
+         Applies to app requests too; 0 leaves the supported modes unrestricted. -->
+    <integer name="config_minPhysicalRefreshRate">0</integer>
+
+    <!-- Physical refresh rate while ambient display is visible; 0 disables the vote. -->
+    <integer name="config_dozeRefreshRate">0</integer>
+
+    <!-- Delay before applying the ambient display refresh rate vote; 0 applies immediately. -->
+    <integer name="config_dozeRefreshRateDelayMillis">0</integer>
+
     <!-- The default peak refresh rate for a given device. Change this value if you want to prevent
          the framework from using higher refresh rates, even if display modes with higher refresh
          rates are available from hardware composer. Only has an effect if the value is
