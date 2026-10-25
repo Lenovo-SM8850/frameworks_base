@@ -19,6 +19,7 @@
 package com.android.systemui.notetask
 
 import android.app.ActivityManager
+import android.app.ActivityTaskManager
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.app.role.OnRoleHoldersChangedListener
@@ -34,6 +35,8 @@ import android.graphics.drawable.Icon
 import android.os.Process
 import android.os.UserHandle
 import android.os.UserManager
+import android.util.Log
+import android.view.Display
 import android.widget.Toast
 import androidx.annotation.VisibleForTesting
 import com.android.app.tracing.coroutines.launchTraced as launch
@@ -162,6 +165,9 @@ constructor(
         if (!userManager.isUserUnlocked) return
 
         val isKeyguardLocked = keyguardManager.isKeyguardLocked
+        if (entryPoint == TAIL_BUTTON && !isKeyguardLocked && isNoteAppFocused()) {
+            return
+        }
         if (isKeyguardLocked) {
             val isLockscreenNoteTakingDisabled =
                 !lockscreenNoteTakingAvailability.isLockscreenNoteTakingEnabled()
@@ -232,6 +238,38 @@ constructor(
         }
         debugLog { "onShowNoteTask - completed: $info" }
     }
+
+    private fun notePackages(userContext: Context): Set<String> =
+        try {
+            val resources =
+                userContext.createPackageContext("io.github.miner7222.pen", 0).resources
+            val id = resources.getIdentifier(
+                "config_penNotePackages", "array", "io.github.miner7222.pen"
+            )
+            if (id == 0) emptySet() else resources.getStringArray(id).toSet()
+        } catch (e: PackageManager.NameNotFoundException) {
+            emptySet()
+        }
+
+    private fun isNoteAppFocused(): Boolean =
+        try {
+            // RunningTasks puts the focused visible leaf first, including split and freeform.
+            val task = ActivityTaskManager.getInstance()
+                .getTasks(1, false, false, Display.DEFAULT_DISPLAY)
+                .firstOrNull { it.isFocused && it.isVisible }
+            val packageName = task?.topActivity?.packageName
+            if (task == null || packageName == null) {
+                false
+            } else {
+                val user = UserHandle.of(task.userId)
+                val userContext = context.createContextAsUser(user, 0)
+                packageName in notePackages(userContext) ||
+                    packageName in roleManager.getRoleHoldersAsUser(ROLE_NOTES, user)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot check focused note app", e)
+            false
+        }
 
     @VisibleForTesting
     fun showNoDefaultNotesAppToast() {
