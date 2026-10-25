@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-License-Identifier: Apache-2.0
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="2.5dp"
+    android:insetRight="2.5dp">
+    <!-- Rounded rectangle badge with two mirrored half-disc cut-outs whose curves face each other.
+         Same 24-unit tall viewport and 17dp height as the other status bar glyphs. The fill is plain
+         opaque white, which the status bar tint replaces. -->
+    <vector
+        android:width="21.25dp"
+        android:height="17dp"
+        android:viewportWidth="30"
+        android:viewportHeight="24">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M4.5,4.5 H25.5 A2,2 0 0 1 27.5,6.5 V17.5 A2,2 0 0 1 25.5,19.5 H4.5 A2,2 0 0 1 2.5,17.5 V6.5 A2,2 0 0 1 4.5,4.5 Z M4.75,6.75 H8.5 A5.25,5.25 0 0 1 8.5,17.25 H4.75 Z M25.25,6.75 H21.5 A5.25,5.25 0 0 0 21.5,17.25 H25.25 Z" />
+    </vector>
+</inset>
