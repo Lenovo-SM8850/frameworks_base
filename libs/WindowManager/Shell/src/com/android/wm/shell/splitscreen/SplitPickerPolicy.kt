@@ -80,5 +80,6 @@ data class SplitPickerSession(
         members == group && slot.occupied == destination.occupied &&
         replace == destination.occupied && slot.leafId == destination.leafId &&
         slot.layoutVersion == destination.layoutVersion && slot.splitBelow == destination.splitBelow &&
+        slot.threeColumns == destination.threeColumns &&
         slot.newTaskFirst == destination.newTaskFirst && slot.bounds == destination.bounds
 }

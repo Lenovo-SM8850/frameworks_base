@@ -75,6 +75,47 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         mContext.resources.configuration.smallestScreenWidthDp = originalSmallestWidth
     }
 
+    @Test fun pairedSideHasRotateActionInBothMirroredShapesAndRecentsKeepsColumns() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        add()
+        if (groups.get(10)!!.layout.root.first is MultiSplitLayout.Split) {
+            assertThat(coordinator.mirror()).isTrue()
+            coordinator.onTransitionFinished(token, false)
+        }
+        for (mirrored in listOf(false, true)) {
+            if (mirrored) {
+                assertThat(coordinator.mirror()).isTrue()
+                coordinator.onTransitionFinished(token, false)
+            }
+            val original = groups.get(10)!!.layout
+            val inner = dividerHandlers.last { it.canRotateThreeAppShape() }
+            inner.onRotateThreeAppShape()
+            coordinator.onTransitionFinished(token, false)
+            val saved = groups.get(10)!!
+            assertThat(saved.layout.isThreeColumns).isTrue()
+            assertThat(saved.layout.columnPairFirst).isEqualTo(original.root.first is MultiSplitLayout.Split)
+            coordinator.setDividerVisible(false, null)
+            assertThat(coordinator.restorePair(saved.firstRepresentative, saved.secondRepresentative,
+                null, null, null)).isTrue()
+            coordinator.onTransitionFinished(token, false)
+            assertThat(groups.get(10)!!.layout.isThreeColumns).isTrue()
+            assertThat(groups.get(10)!!.layout.columnPairFirst).isEqualTo(saved.layout.columnPairFirst)
+            whenever(split.rootBounds).thenReturn(Rect(0, 0, 2400, 3200))
+            whenever(split.isLeftRightSplit).thenReturn(false)
+            coordinator.onConfigurationChanged(Configuration().apply { smallestScreenWidthDp = 600 },
+                WindowContainerTransaction())
+            assertThat(groups.get(10)!!.layout.root.first is MultiSplitLayout.Split)
+                .isEqualTo(original.root.first is MultiSplitLayout.Split)
+            whenever(split.rootBounds).thenReturn(Rect(0, 0, 3200, 2400))
+            whenever(split.isLeftRightSplit).thenReturn(true)
+            coordinator.onConfigurationChanged(Configuration().apply { smallestScreenWidthDp = 600 },
+                WindowContainerTransaction())
+            assertThat(coordinator.rotateThreeAppShape()).isTrue()
+            coordinator.onTransitionFinished(token, false)
+            assertThat(groups.get(10)!!.layout.root).isEqualTo(original.normal().root)
+        }
+    }
+
     @Test fun rotateColumnsGuardsGrowthAndRestoresOnlyColumnGroups() {
         mContext.resources.configuration.smallestScreenWidthDp = 600
         add()
@@ -329,6 +370,8 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
 
     @Before fun setup() {
         originalSmallestWidth = mContext.resources.configuration.smallestScreenWidthDp
+        // Keep legacy row fixtures independent of the instrumentation device's tablet size.
+        mContext.resources.configuration.smallestScreenWidthDp = 599
         mContext.getOrCreateTestableResources().addOverride(
             com.android.internal.R.dimen.default_minimal_size_resizable_task, 100)
         whenever(host.groups()).thenReturn(groups)
@@ -366,7 +409,8 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
     }
 
     private fun add(): AppDragSlot {
-        val slot = coordinator.getSlots(0).filter { !it.occupied }
+        // Existing group fixtures exercise the row topology; column entry has its own tests.
+        val slot = coordinator.getSlots(0).filter { !it.occupied && !it.threeColumns }
             .maxBy { it.bounds.width().toLong() * it.bounds.height() }
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
         coordinator.onTransitionFinished(token, false)
