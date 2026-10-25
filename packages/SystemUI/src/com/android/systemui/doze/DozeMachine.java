@@ -407,6 +407,22 @@ public class DozeMachine {
             return State.FINISH;
         }
 
+        if (isAodTimedOut() && (requestedState.isAlwaysOn()
+                || requestedState == State.DOZE_AOD_PAUSING
+                || requestedState == State.DOZE_AOD_PAUSED)) {
+            // Re-evaluation of AOD settings must not end a held pulse or authentication.
+            switch (mState) {
+                case DOZE_REQUEST_PULSE:
+                case DOZE_PULSING:
+                case DOZE_PULSING_BRIGHT:
+                case DOZE_PULSING_WITHOUT_UI:
+                case DOZE_PULSING_AUTH_UI:
+                    return mState;
+                default:
+                    return State.DOZE;
+            }
+        }
+
         if (mDozeHost.isAlwaysOnSuppressed() && requestedState.isAlwaysOn()) {
             Log.i(TAG, "Doze is suppressed by an app. Suppressing state: " + requestedState);
             mDozeLog.traceAlwaysOnSuppressed(requestedState, "app");
@@ -430,6 +446,15 @@ public class DozeMachine {
             return mState;
         }
         return requestedState;
+    }
+
+    private boolean isAodTimedOut() {
+        for (Part part : mParts) {
+            if (part.isAodTimedOut()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void updateWakeLockState(State newState) {
@@ -456,6 +481,8 @@ public class DozeMachine {
                 } else if (state != State.INITIALIZED && (wakefulness == WAKEFULNESS_AWAKE
                         || wakefulness == WAKEFULNESS_WAKING)) {
                     nextState = State.FINISH;
+                } else if (isAodTimedOut()) {
+                    nextState = State.DOZE;
                 } else if (mDockManager.isDocked()) {
                     nextState = mDockManager.isHidden() ? State.DOZE : State.DOZE_AOD_DOCKED;
                 } else if (mAmbientDisplayConfig.alwaysOnEnabled(mUserTracker.getUserId())) {
@@ -503,6 +530,9 @@ public class DozeMachine {
          *  be accurate nor match with the new displayState.
          */
         default void onScreenState(int displayState) {}
+
+        /** Whether always-on states are exhausted for this sleep session. */
+        default boolean isAodTimedOut() { return false; }
 
         /** Sets the {@link DozeMachine} when this Part is associated with one. */
         default void setDozeMachine(DozeMachine dozeMachine) {}

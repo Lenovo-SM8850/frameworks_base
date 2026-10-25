@@ -186,6 +186,9 @@
      card. -->
     <integer name="keyguard_max_notification_count">-1</integer>
 
+    <!-- Maximum visible AOD session duration; 0 keeps always-on display unlimited. -->
+    <integer name="config_dozeAodTimeoutMillis">0</integer>
+
     <!-- Doze: does this device support STATE_DOZE?  -->
     <bool name="doze_display_state_supported">false</bool>
 

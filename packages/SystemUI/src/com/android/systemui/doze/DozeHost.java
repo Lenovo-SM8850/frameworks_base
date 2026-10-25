@@ -106,7 +106,13 @@ public interface DozeHost {
      * wake-up gestures. */
     boolean isAlwaysOnSuppressed();
 
+    /** Whether the incoming AOD scrim animation has completed. */
+    default boolean isAodScrimReady() { return false; }
+
     interface Callback {
+        /** Called after the incoming AOD scrim animation completes. */
+        default void onAodScrimReady() {}
+
         /**
          * Called when a high priority notification is added.
          * @param onPulseSuppressedListener A listener that is invoked if the pulse is being

@@ -286,6 +286,8 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
     private boolean mBlankScreen;
     private boolean mScreenBlankingCallbackCalled;
     private Callback mCallback;
+    private Runnable mAodScrimReadyListener;
+    private boolean mAodScrimReady;
     private boolean mScreenOn;
     private boolean mTransparentScrimBackground;
 
@@ -655,6 +657,7 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             throw new IllegalArgumentException("Cannot change to UNINITIALIZED.");
         }
 
+        mAodScrimReady = false;
         final ScrimState oldState = mState;
         mState = state;
         TrackTracer.instantForGroup("scrim", "state", mState.ordinal());
@@ -1555,6 +1558,15 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
         return true;
     }
 
+    /** Registers the opt-in AOD session readiness listener. */
+    public void setAodScrimReadyListener(Runnable listener) {
+        mAodScrimReadyListener = listener;
+    }
+
+    public boolean isAodScrimReady() {
+        return mAodScrimReady;
+    }
+
     /**
      * @param state that finished
      */
@@ -1588,6 +1600,13 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
 
             if (callback == mCallback) {
                 mCallback = null;
+            }
+        }
+
+        if (state == ScrimState.AOD && mState == state && !mAodScrimReady) {
+            mAodScrimReady = true;
+            if (mAodScrimReadyListener != null) {
+                mAodScrimReadyListener.run();
             }
         }
 
