@@ -40,6 +40,16 @@ class SidebarDragLayout(
     private val taskStackListener: TaskStackListenerImpl?,
     private val icons: IconProvider,
 ) : DragLayoutProvider {
+    private val preview = object : FrameLayout(context) {
+        override fun onDetachedFromWindow() {
+            finishSession()
+            super.onDetachedFromWindow()
+        }
+    }.apply {
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        isClickable = false
+        isFocusable = false
+    }
     // Floating destinations get the thin, window-radius outline used by mini previews, not split zone margins
     private val floatingView = View(context).apply {
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -48,6 +58,8 @@ class SidebarDragLayout(
     private val floatingRadius = context.resources.getDimension(
         com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius)
     private val statusBar = context.getSystemService(StatusBarManager::class.java)
+    private val zones = mutableListOf<Pair<Rect, DropZoneView>>()
+    private var zoneTasks = emptyList<Int?>()
     private var highlighted: DropZoneView? = null
     private var ordinaryView: View? = null
     private var policy: SidebarDragPolicy? = null
@@ -116,6 +128,13 @@ class SidebarDragLayout(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
+    private fun clearZones() {
+        zones.forEach { preview.removeView(it.second) }
+        zones.clear()
+        zoneTasks = emptyList()
+        highlighted = null
+    }
+
     override fun prepare(session: DragSession, loggerSessionId: InstanceId?) {
         finishSession()
         clearZones()
@@ -166,6 +185,15 @@ class SidebarDragLayout(
             }
         }
         resolvePreview()
+    }
+
+    private fun stopPreview() {
+        showing = false
+        statusBar.disable(StatusBarManager.DISABLE_NONE)
+        zones.forEach { it.second.setShowingMargin(false) }
+        floatingOutline.update(null, floatingRadius)
+        highlighted = null
+        destination = null
     }
 
     override fun hide(event: DragEvent?, hideCompleteCallback: Runnable?) {
@@ -219,26 +247,6 @@ class SidebarDragLayout(
     override fun dump(pw: PrintWriter, prefix: String?) {
         ordinary.dump(pw, prefix)
         pw.println("${prefix}sidebar=$sidebar cancelled=$cancelled destination=$destination")
-    }
-
-    private val preview = object : FrameLayout(context) {
-        override fun onDetachedFromWindow() {
-            finishSession()
-            super.onDetachedFromWindow()
-        }
-    }.apply {
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        isClickable = false
-        isFocusable = false
-    }
-
-    private val zones = mutableListOf<Pair<Rect, DropZoneView>>()
-
-    private fun clearZones() {
-        zones.forEach { preview.removeView(it.second) }
-        zones.clear()
-        zoneTasks = emptyList()
-        highlighted = null
     }
 
     private fun resolvePreview(): SidebarDragPolicy.Destination? {
@@ -306,17 +314,6 @@ class SidebarDragLayout(
         destination = next
         return next
     }
-
-    private fun stopPreview() {
-        showing = false
-        statusBar.disable(StatusBarManager.DISABLE_NONE)
-        zones.forEach { it.second.setShowingMargin(false) }
-        floatingOutline.update(null, floatingRadius)
-        highlighted = null
-        destination = null
-    }
-
-    private var zoneTasks = emptyList<Int?>()
 
     /** A persistent taskbar sends no disallowed region; dropping back onto it must cancel like the transient one. */
     private fun isOverTaskbar(): Boolean {

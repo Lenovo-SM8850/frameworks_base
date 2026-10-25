@@ -168,6 +168,54 @@ class SidebarDragPolicy(
         return Destination(bounds, entry = entry.copy(bounds = bounds))
     }
 
+    /** Reuses the taskbar drop-zone renderer with the sidebar's exact destination geometry. */
+    fun previewZones(destination: Destination): List<Pair<Rect, RunningTaskInfo?>> {
+        val state = snapshot ?: return emptyList()
+        if (destination.slot == null) return listOf(Rect(destination.bounds) to state.existing)
+        if (destination.pendingSplit) return listOf(Rect(destination.bounds) to null)
+        val selected = destination.slot
+        resultLayout(state, selected)?.let { return it }
+        // Alternatives of other layouts (three columns, splits below) overlap; drawing them all stacks margins.
+        val family = state.slots.filter {
+            it.threeColumns == selected.threeColumns && it.splitBelow == selected.splitBelow
+        }
+        val disjoint = mutableListOf<AppDragSlot>()
+        (listOf(selected) + family).forEach { slot ->
+            if (disjoint.none { it == slot || Rect.intersects(it.bounds, slot.bounds) }) disjoint += slot
+        }
+        val kept = family.filter { it in disjoint }.ifEmpty { listOf(selected) }
+        columnInsertion(state, selected, kept)?.let { return it }
+        return tile(kept.map { Rect(it.bounds) }).zip(kept).map { (tiled, slot) ->
+            val task = if (!state.activeSplit) state.front else state.running.firstOrNull {
+                it.displayId == displayId && it.isVisible && !it.isFloatingWindow &&
+                    split?.isTaskInSplitScreen(it.taskId) == true &&
+                    it.configuration.windowConfiguration.bounds.contains(
+                        slot.bounds.centerX(), slot.bounds.centerY())
+            }
+            tiled to task
+        }.distinctBy { it.first }
+    }
+
+    /**
+     * Previews a new column: the existing apps move aside in their order, so a column centre, such as
+     * the middle one over the old divider, need not lie on the app that ends up there.
+     */
+    private fun columnInsertion(
+        state: TaskSnapshot,
+        selected: AppDragSlot,
+        columns: List<AppDragSlot>,
+    ): List<Pair<Rect, RunningTaskInfo?>>? {
+        if (!state.activeSplit || selected.occupied || !selected.threeColumns) return null
+        val existing = state.running.filter {
+            it.displayId == displayId && it.isVisible && !it.isFloatingWindow &&
+                split?.isTaskInSplitScreen(it.taskId) == true
+        }.distinctBy { it.taskId }.sortedBy { it.configuration.windowConfiguration.bounds.left }
+        val ordered = tile(columns.map { Rect(it.bounds) }).zip(columns).sortedBy { it.first.left }
+        if (ordered.none { it.second == selected } || existing.size != ordered.size - 1) return null
+        val apps = existing.iterator()
+        return ordered.map { (tiled, slot) -> tiled to if (slot == selected) null else apps.next() }
+    }
+
     /**
      * Previews the layout a drop would produce when it splits one existing leaf: the new pane, the rest of
      * that leaf, and every other leaf unchanged. Column insertions and replacements keep the slot family view.
@@ -339,53 +387,5 @@ class SidebarDragPolicy(
             // Occupied leaves are replacement targets, never evidence of spare capacity.
             return valid.firstOrNull { !it.occupied && it.hitBounds.contains(x, y) }
         }
-    }
-
-    /** Reuses the taskbar drop-zone renderer with the sidebar's exact destination geometry. */
-    fun previewZones(destination: Destination): List<Pair<Rect, RunningTaskInfo?>> {
-        val state = snapshot ?: return emptyList()
-        if (destination.slot == null) return listOf(Rect(destination.bounds) to state.existing)
-        if (destination.pendingSplit) return listOf(Rect(destination.bounds) to null)
-        val selected = destination.slot
-        resultLayout(state, selected)?.let { return it }
-        // Alternatives of other layouts (three columns, splits below) overlap; drawing them all stacks margins.
-        val family = state.slots.filter {
-            it.threeColumns == selected.threeColumns && it.splitBelow == selected.splitBelow
-        }
-        val disjoint = mutableListOf<AppDragSlot>()
-        (listOf(selected) + family).forEach { slot ->
-            if (disjoint.none { it == slot || Rect.intersects(it.bounds, slot.bounds) }) disjoint += slot
-        }
-        val kept = family.filter { it in disjoint }.ifEmpty { listOf(selected) }
-        columnInsertion(state, selected, kept)?.let { return it }
-        return tile(kept.map { Rect(it.bounds) }).zip(kept).map { (tiled, slot) ->
-            val task = if (!state.activeSplit) state.front else state.running.firstOrNull {
-                it.displayId == displayId && it.isVisible && !it.isFloatingWindow &&
-                    split?.isTaskInSplitScreen(it.taskId) == true &&
-                    it.configuration.windowConfiguration.bounds.contains(
-                        slot.bounds.centerX(), slot.bounds.centerY())
-            }
-            tiled to task
-        }.distinctBy { it.first }
-    }
-
-    /**
-     * Previews a new column: the existing apps move aside in their order, so a column centre, such as
-     * the middle one over the old divider, need not lie on the app that ends up there.
-     */
-    private fun columnInsertion(
-        state: TaskSnapshot,
-        selected: AppDragSlot,
-        columns: List<AppDragSlot>,
-    ): List<Pair<Rect, RunningTaskInfo?>>? {
-        if (!state.activeSplit || selected.occupied || !selected.threeColumns) return null
-        val existing = state.running.filter {
-            it.displayId == displayId && it.isVisible && !it.isFloatingWindow &&
-                split?.isTaskInSplitScreen(it.taskId) == true
-        }.distinctBy { it.taskId }.sortedBy { it.configuration.windowConfiguration.bounds.left }
-        val ordered = tile(columns.map { Rect(it.bounds) }).zip(columns).sortedBy { it.first.left }
-        if (ordered.none { it.second == selected } || existing.size != ordered.size - 1) return null
-        val apps = existing.iterator()
-        return ordered.map { (tiled, slot) -> tiled to if (slot == selected) null else apps.next() }
     }
 }
