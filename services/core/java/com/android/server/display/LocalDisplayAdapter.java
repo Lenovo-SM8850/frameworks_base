@@ -40,6 +40,7 @@ import android.os.SystemProperties;
 import android.os.Trace;
 import android.util.DisplayUtils;
 import android.util.LongSparseArray;
+import android.util.Pair;
 import android.util.Slog;
 import android.util.SparseArray;
 import android.util.Spline;
@@ -240,12 +241,14 @@ final class LocalDisplayAdapter extends DisplayAdapter {
 
         private DisplayDeviceInfo mInfo;
         private boolean mHavePendingChanges;
-        private int mState = Display.STATE_UNKNOWN;
+        private volatile int mState = Display.STATE_UNKNOWN;
+        private volatile boolean mBuiltInDisplayBlanked;
+        private final Object mDisplayPowerModeLock = new Object();
         private int mCommittedState = Display.STATE_UNKNOWN;
 
-        // This is only set in the runnable returned from requestDisplayStateLocked.
-        private float mBrightnessState = PowerManager.BRIGHTNESS_INVALID_FLOAT;
-        private float mSdrBrightnessState = PowerManager.BRIGHTNESS_INVALID_FLOAT;
+        // Updated with the backlight under mDisplayPowerModeLock.
+        private volatile float mBrightnessState = PowerManager.BRIGHTNESS_INVALID_FLOAT;
+        private volatile float mSdrBrightnessState = PowerManager.BRIGHTNESS_INVALID_FLOAT;
         private float mCurrentHdrSdrRatio = Float.NaN;
         private int mDefaultModeId = INVALID_MODE_ID;
         private int mSystemPreferredModeId = INVALID_MODE_ID;
@@ -908,6 +911,118 @@ final class LocalDisplayAdapter extends DisplayAdapter {
             return mInfo;
         }
 
+        @Nullable
+        private Pair<Float, Float> applyDisplayBrightnessLocked(float brightnessState,
+                float sdrBrightnessState) {
+            // BrightnessState includes invalid, off and full range.
+            if (Float.isNaN(brightnessState) || Float.isNaN(sdrBrightnessState)) {
+                return null;
+            }
+
+            if (DEBUG) {
+                Slog.d(TAG, "setDisplayBrightness("
+                        + "id=" + mPhysicalDisplayId
+                        + ", brightnessState=" + brightnessState
+                        + ", sdrBrightnessState=" + sdrBrightnessState + ")");
+            }
+
+            Trace.traceBegin(Trace.TRACE_TAG_POWER, "setDisplayBrightness("
+                    + "id=" + mPhysicalDisplayId + ", brightnessState="
+                    + brightnessState + ", sdrBrightnessState=" + sdrBrightnessState
+                    + ")");
+            try {
+                final float backlight = brightnessToBacklight(brightnessState);
+                final float sdrBacklight = brightnessToBacklight(sdrBrightnessState);
+
+                final float nits = backlightToNits(backlight);
+                final float sdrNits = backlightToNits(sdrBacklight);
+
+                if (mDisplayDeviceConfig != null
+                        && mDisplayDeviceConfig.isEvenDimmerAvailable()) {
+                    applyColorMatrixBasedDimming(brightnessState);
+                }
+
+                mBacklightAdapter.setBacklight(sdrBacklight, sdrNits, backlight, nits);
+                Trace.traceCounter(Trace.TRACE_TAG_POWER,
+                        "ScreenBrightness",
+                        BrightnessSynchronizer.brightnessFloatToInt(brightnessState));
+                Trace.traceCounter(Trace.TRACE_TAG_POWER,
+                        "SdrScreenBrightness",
+                        BrightnessSynchronizer.brightnessFloatToInt(
+                                sdrBrightnessState));
+
+                return Pair.create(nits, sdrNits);
+
+            } finally {
+                Trace.traceEnd(Trace.TRACE_TAG_POWER);
+            }
+        }
+
+        private float brightnessToBacklight(float brightness) {
+            if (brightness == PowerManager.BRIGHTNESS_OFF_FLOAT) {
+                return PowerManager.BRIGHTNESS_OFF_FLOAT;
+            } else {
+                return getDisplayDeviceConfig().getBacklightFromBrightness(brightness);
+            }
+        }
+
+        private float backlightToNits(float backlight) {
+            return getDisplayDeviceConfig().getNitsFromBacklight(backlight);
+        }
+
+        private void applyColorMatrixBasedDimming(float brightnessState) {
+            if (mCdsi == null) {
+                mCdsi = LocalServices.getService(
+                        ColorDisplayService.ColorDisplayServiceInternal.class);
+            }
+            if (mCdsi == null) {
+                return;
+            }
+
+            final float minHardwareNits = backlightToNits(brightnessToBacklight(
+                    mDisplayDeviceConfig.getEvenDimmerTransitionPoint()));
+            final float backlight = brightnessToBacklight(brightnessState);
+            final float requestedNits = backlightToNits(backlight);
+            mNitsToEvenDimmerStrength = mCdsi.fetchEvenDimmerSpline(minHardwareNits);
+
+            if (mNitsToEvenDimmerStrength == null) {
+                return;
+            }
+
+            // Find required dimming strength, rounded up.
+            int strength = Math.round(mNitsToEvenDimmerStrength
+                    .interpolate(requestedNits));
+            boolean enabled = strength > 0.0f;
+            if (mEvenDimmerEnabled != enabled || (DEBUG && enabled)) {
+                Slog.i(TAG, "Setting Extra Dim; strength: " + strength
+                        + ", " + (enabled ? "enabled" : "disabled")
+                        + ", requestedNits: " + requestedNits
+                        + ", brightnessState: " + brightnessState
+                        + ", backlight: " + backlight);
+            }
+            if (mEvenDimmerStrength != strength || mEvenDimmerEnabled != enabled) {
+                mEvenDimmerEnabled = enabled;
+                mEvenDimmerStrength = strength;
+                mCdsi.applyEvenDimmerColorChanges(enabled, strength);
+            }
+        }
+
+        Runnable setBuiltInDisplayBlankedLocked(boolean blanked) {
+            mBuiltInDisplayBlanked = blanked;
+            final IBinder token = getDisplayTokenLocked();
+            return () -> {
+                synchronized (mDisplayPowerModeLock) {
+                    // Read the latest request so queued work cannot restore a stale state.
+                    final int mode = getPowerModeForState(mBuiltInDisplayBlanked
+                            ? Display.STATE_OFF : mState);
+                    mSurfaceControlProxy.setDisplayPowerMode(token, mode);
+                    if (mode == SurfaceControl.POWER_MODE_NORMAL) {
+                        applyDisplayBrightnessLocked(mBrightnessState, mSdrBrightnessState);
+                    }
+                }
+            };
+        }
+
         @Override
         public Runnable requestDisplayStateLocked(
                 final int state,
@@ -963,8 +1078,6 @@ final class LocalDisplayAdapter extends DisplayAdapter {
                         // Apply brightness changes given that we are in a non-suspended state.
                         if (brightnessChanged) {
                             setDisplayBrightness(brightnessState, sdrBrightnessState);
-                            mBrightnessState = brightnessState;
-                            mSdrBrightnessState = sdrBrightnessState;
                         }
 
                         // Enter the final desired state, possibly suspended.
@@ -987,14 +1100,17 @@ final class LocalDisplayAdapter extends DisplayAdapter {
                             displayOffloadSession.stopOffload(state);
                         }
 
-
                         final int mode = getPowerModeForState(state);
                         Trace.traceBegin(Trace.TRACE_TAG_POWER, "setDisplayState("
                                 + "id=" + physicalDisplayId
                                 + ", state=" + Display.stateToString(state) + ")");
                         try {
                             final long start = SystemClock.uptimeMillis();
-                            mSurfaceControlProxy.setDisplayPowerMode(token, mode);
+                            synchronized (mDisplayPowerModeLock) {
+                                mSurfaceControlProxy.setDisplayPowerMode(token,
+                                        mBuiltInDisplayBlanked
+                                                ? SurfaceControl.POWER_MODE_OFF : mode);
+                            }
                             final long end = SystemClock.uptimeMillis();
                             if (DEBUG) {
                                 Slog.i(TAG, "SF.setDisplayPowerMode took " + (end - start)
@@ -1023,65 +1139,19 @@ final class LocalDisplayAdapter extends DisplayAdapter {
                         }
                     }
 
-
                     private void setDisplayBrightness(float brightnessState,
                             float sdrBrightnessState) {
-                        // brightnessState includes invalid, off and full range.
-                        if (Float.isNaN(brightnessState) || Float.isNaN(sdrBrightnessState)) {
-                            return;
+                        final Pair<Float, Float> appliedNits;
+                        synchronized (mDisplayPowerModeLock) {
+                            appliedNits = applyDisplayBrightnessLocked(
+                                    brightnessState, sdrBrightnessState);
+                            mBrightnessState = brightnessState;
+                            mSdrBrightnessState = sdrBrightnessState;
                         }
-
-                        if (DEBUG) {
-                            Slog.d(TAG, "setDisplayBrightness("
-                                    + "id=" + physicalDisplayId
-                                    + ", brightnessState=" + brightnessState
-                                    + ", sdrBrightnessState=" + sdrBrightnessState + ")");
+                        if (appliedNits != null
+                                && getDisplayDeviceConfig().hasSdrToHdrRatioSpline()) {
+                            handleHdrSdrNitsChanged(appliedNits.first, appliedNits.second);
                         }
-
-                        Trace.traceBegin(Trace.TRACE_TAG_POWER, "setDisplayBrightness("
-                                + "id=" + physicalDisplayId + ", brightnessState="
-                                + brightnessState + ", sdrBrightnessState=" + sdrBrightnessState
-                                + ")");
-                        try {
-                            final float backlight = brightnessToBacklight(brightnessState);
-                            final float sdrBacklight = brightnessToBacklight(sdrBrightnessState);
-
-                            final float nits = backlightToNits(backlight);
-                            final float sdrNits = backlightToNits(sdrBacklight);
-
-                            if (mDisplayDeviceConfig != null
-                                    && mDisplayDeviceConfig.isEvenDimmerAvailable()) {
-                                applyColorMatrixBasedDimming(brightnessState);
-                            }
-
-                            mBacklightAdapter.setBacklight(sdrBacklight, sdrNits, backlight, nits);
-                            Trace.traceCounter(Trace.TRACE_TAG_POWER,
-                                    "ScreenBrightness",
-                                    BrightnessSynchronizer.brightnessFloatToInt(brightnessState));
-                            Trace.traceCounter(Trace.TRACE_TAG_POWER,
-                                    "SdrScreenBrightness",
-                                    BrightnessSynchronizer.brightnessFloatToInt(
-                                            sdrBrightnessState));
-
-                            if (getDisplayDeviceConfig().hasSdrToHdrRatioSpline()) {
-                                handleHdrSdrNitsChanged(nits, sdrNits);
-                            }
-
-                        } finally {
-                            Trace.traceEnd(Trace.TRACE_TAG_POWER);
-                        }
-                    }
-
-                    private float brightnessToBacklight(float brightness) {
-                        if (brightness == PowerManager.BRIGHTNESS_OFF_FLOAT) {
-                            return PowerManager.BRIGHTNESS_OFF_FLOAT;
-                        } else {
-                            return getDisplayDeviceConfig().getBacklightFromBrightness(brightness);
-                        }
-                    }
-
-                    private float backlightToNits(float backlight) {
-                        return getDisplayDeviceConfig().getNitsFromBacklight(backlight);
                     }
 
                     void handleHdrSdrNitsChanged(float displayNits, float sdrNits) {
@@ -1103,42 +1173,6 @@ final class LocalDisplayAdapter extends DisplayAdapter {
                         }
                     }
 
-                    private void applyColorMatrixBasedDimming(float brightnessState) {
-                        if (mCdsi == null) {
-                            mCdsi = LocalServices.getService(
-                                    ColorDisplayService.ColorDisplayServiceInternal.class);
-                        }
-                        if (mCdsi == null) {
-                            return;
-                        }
-
-                        final float minHardwareNits = backlightToNits(brightnessToBacklight(
-                                mDisplayDeviceConfig.getEvenDimmerTransitionPoint()));
-                        final float backlight = brightnessToBacklight(brightnessState);
-                        final float requestedNits = backlightToNits(backlight);
-                        mNitsToEvenDimmerStrength = mCdsi.fetchEvenDimmerSpline(minHardwareNits);
-
-                        if (mNitsToEvenDimmerStrength == null) {
-                            return;
-                        }
-
-                        // Find required dimming strength, rounded up.
-                        int strength = Math.round(mNitsToEvenDimmerStrength
-                                .interpolate(requestedNits));
-                        boolean enabled = strength > 0.0f;
-                        if (mEvenDimmerEnabled != enabled || (DEBUG && enabled)) {
-                            Slog.i(TAG, "Setting Extra Dim; strength: " + strength
-                                    + ", " + (enabled ? "enabled" : "disabled")
-                                    + ", requestedNits: " + requestedNits
-                                    + ", brightnessState: " + brightnessState
-                                    + ", backlight: " + backlight);
-                        }
-                        if (mEvenDimmerStrength != strength || mEvenDimmerEnabled != enabled) {
-                            mEvenDimmerEnabled = enabled;
-                            mEvenDimmerStrength = strength;
-                            mCdsi.applyEvenDimmerColorChanges(enabled, strength);
-                        }
-                    }
                 };
             }
             return null;
@@ -1415,6 +1449,7 @@ final class LocalDisplayAdapter extends DisplayAdapter {
             pw.println("mHasArrSupport=" + mHasArrSupport);
             pw.println("mSupportedRefreshRates=" + Arrays.toString(mSupportedRefreshRates));
             pw.println("mState=" + Display.stateToString(mState));
+            pw.println("mBuiltInDisplayBlanked=" + mBuiltInDisplayBlanked);
             pw.println("mCommittedState=" + Display.stateToString(mCommittedState));
             pw.println("mBrightnessState=" + mBrightnessState);
             pw.println("mBacklightAdapter=" + mBacklightAdapter);

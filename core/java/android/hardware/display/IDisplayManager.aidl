@@ -257,6 +257,13 @@ interface IDisplayManager {
     @EnforcePermission("MANAGE_DISPLAYS")
     boolean requestDisplayPower(int displayId, int state);
 
+    // Blanks only the physical built-in panel, preserving logical display state.
+    @EnforcePermission("DEVICE_POWER")
+    void setBuiltInDisplayBlanked(IBinder token, boolean blanked);
+
+    @EnforcePermission("DEVICE_POWER")
+    boolean isBuiltInDisplayBlanked(IBinder token);
+
     // Sets the connection preference for external display.
     @EnforcePermission("MANAGE_DISPLAYS")
     void setConnectionPreference(String uniqueId, int preference);
