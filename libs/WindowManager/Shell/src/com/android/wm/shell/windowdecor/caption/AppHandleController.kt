@@ -275,7 +275,10 @@ class AppHandleController(
                 captionLayoutResult.captionY + captionLayoutResult.captionHeight,
             )
 
-        if (
+        val leafBounds = Rect()
+        if (splitScreenController.getMultiSplitTaskBounds(taskInfo.taskId, leafBounds)) {
+            bounds.offset(leafBounds.left, leafBounds.top)
+        } else if (
             splitScreenController.getSplitPosition(taskInfo.taskId) ==
                 SPLIT_POSITION_BOTTOM_OR_RIGHT
         ) {
@@ -304,7 +307,10 @@ class AppHandleController(
     /** Gets the global coordinates of the app handle's position. */
     private fun getHandlePosition(captionLayoutResult: CaptionRelayoutResult): Point {
         val position = Point(captionLayoutResult.captionX, captionLayoutResult.captionY)
-        if (
+        val leafBounds = Rect()
+        if (splitScreenController.getMultiSplitTaskBounds(taskInfo.taskId, leafBounds)) {
+            position.offset(leafBounds.left, leafBounds.top)
+        } else if (
             splitScreenController.getSplitPosition(taskInfo.taskId) ==
                 SPLIT_POSITION_BOTTOM_OR_RIGHT
         ) {
@@ -472,8 +478,8 @@ class AppHandleController(
     private fun offsetCaptionLocation(ev: MotionEvent): PointF {
         val result = PointF(ev.x, ev.y)
         val taskInfo = taskOrganizer.getRunningTaskInfo(taskInfo.taskId) ?: return result
-        val positionInParent = taskInfo.positionInParent
-        result.offset(-positionInParent.x.toFloat(), -positionInParent.y.toFloat())
+        val taskBounds = taskInfo.presentationBounds
+        result.offset(-taskBounds.left.toFloat(), -taskBounds.top.toFloat())
         return result
     }
 

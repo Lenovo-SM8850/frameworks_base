@@ -123,4 +123,14 @@ interface WindowDecorationActions {
      * @param intent to be launched
      */
     fun onOpenIntent(taskId: Int, intent: Intent)
+
+    /** Swaps the task with its split companion. */
+    fun onSwapSplit(taskId: Int)
+
+    /** Exchanges the tasks in two multi-app leaf slots without changing their geometry. */
+    fun onSwapLeaves(firstLeafId: Int, secondLeafId: Int) {}
+
+    fun onReplaceSplitApp(taskId: Int) {}
+
+    fun onAddSplitBelow(taskId: Int) {}
 }

@@ -31,10 +31,11 @@
     <ImageButton
         android:id="@+id/fullscreen_button"
         android:contentDescription="@string/fullscreen_text"
+        android:tooltipText="@string/fullscreen_text"
         android:src="@drawable/desktop_mode_ic_handle_menu_fullscreen"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
-        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintStart_toEndOf="@id/rotate_window_button"
         app:layout_constraintEnd_toStartOf="@id/split_screen_button"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintHorizontal_chainStyle="spread"/>
@@ -42,6 +43,7 @@
     <ImageButton
         android:id="@+id/split_screen_button"
         android:contentDescription="@string/split_screen_text"
+        android:tooltipText="@string/split_screen_text"
         android:src="@drawable/desktop_mode_ic_handle_menu_splitscreen"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
@@ -53,6 +55,7 @@
     <ImageButton
         android:id="@+id/floating_button"
         android:contentDescription="@string/float_button_text"
+        android:tooltipText="@string/float_button_text"
         android:src="@drawable/desktop_mode_ic_handle_menu_floating"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
@@ -64,6 +67,7 @@
     <ImageButton
         android:id="@+id/desktop_button"
         android:contentDescription="@string/desktop_text"
+        android:tooltipText="@string/desktop_text"
         android:src="@drawable/desktop_mode_ic_handle_menu_desktop"
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"

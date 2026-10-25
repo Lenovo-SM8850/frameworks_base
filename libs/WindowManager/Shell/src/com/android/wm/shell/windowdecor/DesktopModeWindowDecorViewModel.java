@@ -620,6 +620,15 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             boolean isFocusedGlobally) {
         final WindowDecorationWrapper decor = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (decor != null) {
+            if (decor.getTaskInfo().isFloatingWindow && (mPinnedLayerController == null
+                    || !mPinnedLayerController.isMini(decor.getTaskInfo()))) {
+                // Organizer focus is authoritative for Back, including focus outside transitions.
+                final RunningTaskInfo live = mTaskOrganizer.getRunningTaskInfo(taskInfo.taskId);
+                if (live != null) decor.relayout(live, live.isFocused, decor.getExclusionRegion());
+                return;
+            }
+            if (decor.getTaskInfo().isFloatingWindow
+                    && decor.getHasGlobalFocus() == isFocusedGlobally) return;
             decor.relayout(decor.getTaskInfo(), isFocusedGlobally, decor.getExclusionRegion());
         }
     }
@@ -695,9 +704,14 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             return;
         }
 
-        if (decoration == null) {
-            createWindowDecoration(taskInfo, taskSurface, startT, finishT);
-            initializeTiling(taskInfo);
+        if (decoration == null
+                || decoration.getTaskInfo().isFloatingWindow != taskInfo.isFloatingWindow) {
+            if (decoration == null) {
+                createWindowDecoration(taskInfo, taskSurface, startT, finishT);
+            } else {
+                recreateWindowDecoration(taskInfo, taskSurface, startT, finishT);
+            }
+            if (!taskInfo.isFloatingWindow) initializeTiling(taskInfo);
         } else {
             decoration.relayout(taskInfo, startT, finishT, false /* applyStartTransactionOnDraw */,
                     false /* shouldSetTaskPositionAndCrop */,
@@ -825,6 +839,10 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             @Nullable InputMethod inputMethod) {
         final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskId);
         if (decoration == null) {
+            return;
+        }
+        if (mPinnedLayerController != null
+                && mPinnedLayerController.maximizeTask(decoration.getTaskInfo())) {
             return;
         }
         final ToggleTaskSizeInteraction interaction =
@@ -1002,6 +1020,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         if (decoration == null) {
             return;
         }
+        final RunningTaskInfo taskInfo = decoration.getTaskInfo();
+        if (taskInfo.isFloatingWindow && mSplitScreenController != null
+                && (mSplitScreenController.isSplitScreenVisible()
+                        || mSplitScreenController.hasFloatingSplitCompanion(taskInfo))) {
+            mSplitScreenController.moveFloatingTaskToSplit(taskId);
+            return;
+        }
 
         int displayId = decoration.getTaskInfo().displayId;
         final int orientation = mDisplayController.getDisplayContext(displayId).getResources()
@@ -1021,10 +1046,9 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         if (decoration == null) {
             return;
         }
-        // When the app enters float, the handle will no longer be visible, meaning
-        // we shouldn't receive input for it any longer.
-        decoration.disposeStatusBarInputLayer();
-        mDesktopTasksController.requestFloat(decoration.getTaskInfo());
+        if (mDesktopTasksController.moveToFloating(taskId)) {
+            decoration.disposeStatusBarInputLayer();
+        }
     }
 
     private void launchNewWindow(int taskId) {
@@ -1815,6 +1839,19 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                 /* isKeyguardVisAndOccluded */ false);
     }
 
+    private void recreateWindowDecoration(
+            RunningTaskInfo taskInfo,
+            SurfaceControl taskSurface,
+            SurfaceControl.Transaction startT,
+            SurfaceControl.Transaction finishT) {
+        final SurfaceControl retainedSurface = new SurfaceControl(taskSurface, TAG);
+        try {
+            createWindowDecoration(taskInfo, retainedSurface, startT, finishT);
+        } finally {
+            retainedSurface.release();
+        }
+    }
+
     private void createWindowDecoration(
             ActivityManager.RunningTaskInfo taskInfo,
             SurfaceControl taskSurface,
@@ -1822,8 +1859,12 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             SurfaceControl.Transaction finishT) {
         final WindowDecorationWrapper oldDecoration = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (oldDecoration != null) {
-            // close the old decoration if it exists to avoid two window decorations being added
+            final int oldDisplayId = oldDecoration.getTaskInfo().displayId;
+            // Close the old decoration before attaching its replacement.
             oldDecoration.close();
+            if (!DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) {
+                removeTaskFromEventReceiver(oldDisplayId);
+            }
         }
         final WindowDecorationWrapper windowDecoration;
         final Context context =
@@ -1944,6 +1985,7 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                         mAppHandleMotionEventHandler, mPinnedLayerController);
         windowDecoration.setCaptionListeners(
                 touchEventListener, touchEventListener, touchEventListener, touchEventListener);
+        windowDecoration.setFloatingHandleListener(touchEventListener);
         windowDecoration.setExclusionRegionListener(mExclusionRegionListener);
         windowDecoration.setDragPositioningCallback(taskPositioner);
         windowDecoration.addDragResizeListener(mDragEventListener);
@@ -2189,6 +2231,11 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         public void onMinimize(@NonNull RunningTaskInfo taskInfo) {
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to minimize task=%d",
                     taskInfo.taskId);
+            if (mViewModel.mPinnedLayerController != null
+                    && taskInfo.isFloatingWindow
+                    && mViewModel.mPinnedLayerController.minimizeTask(taskInfo)) {
+                return;
+            }
             mDesktopTasksController.minimizeTask(taskInfo, MinimizeReason.MINIMIZE_BUTTON);
         }
 
@@ -2246,6 +2293,34 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to enter fullscreen for task=%d",
                     taskId);
             mViewModel.moveToFullscreen(taskId);
+        }
+
+        @Override
+        public void onSwapSplit(int taskId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.swapSplitTask(taskId);
+            }
+        }
+
+        @Override
+        public void onSwapLeaves(int firstLeafId, int secondLeafId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.swapLeaves(firstLeafId, secondLeafId);
+            }
+        }
+
+        @Override
+        public void onReplaceSplitApp(int taskId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.showReplaceSplitPicker(taskId, mViewModel.mBgExecutor);
+            }
+        }
+
+        @Override
+        public void onAddSplitBelow(int taskId) {
+            if (mViewModel.mSplitScreenController != null) {
+                mViewModel.mSplitScreenController.showAddBelowPicker(taskId, mViewModel.mBgExecutor);
+            }
         }
 
         @Override
@@ -2374,8 +2449,8 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             final boolean isFluidResizeEnabledPerApp = packageName != null
                     && Flags.enableFluidResizingForListedApps()
                     && CompatChanges.isChangeEnabled(ENABLE_FLUID_RESIZING, packageName, user);
-            final boolean veiledResizing =
-                    desktopConfig.isVeiledResizeEnabled() && !isFluidResizeEnabledPerApp;
+            final boolean veiledResizing = taskInfo.isFloatingWindow
+                    || (desktopConfig.isVeiledResizeEnabled() && !isFluidResizeEnabledPerApp);
             final TaskPositioner taskPositioner = veiledResizing
                     ? new MultiDisplayVeiledResizeTaskPositioner(
                             taskOrganizer,
@@ -2409,8 +2484,8 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                             interactionJankMonitor,
                             handler);
 
-            return new FixedAspectRatioTaskPositionerDecorator(windowDecoration,
-                        taskPositioner);
+            return taskInfo.isFloatingWindow ? taskPositioner
+                    : new FixedAspectRatioTaskPositionerDecorator(windowDecoration, taskPositioner);
         }
     }
 }

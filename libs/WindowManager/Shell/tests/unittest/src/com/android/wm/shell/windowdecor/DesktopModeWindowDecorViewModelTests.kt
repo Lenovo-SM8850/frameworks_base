@@ -1852,4 +1852,13 @@ class DesktopModeWindowDecorViewModelTests : DesktopModeWindowDecorViewModelTest
         private val BOUNDS_IGNORED_ON_NON_DESKTOP = Rect(20, 20, 120, 120)
         private val BOUNDS_ON_DRAG_END_DESKTOP_ACCEPTED = Rect(50, 50, 150, 150)
     }
+
+    @Test
+    fun fullscreenCaptionMinimize_keepsDesktopAction() {
+        val task = createTask(windowingMode = WINDOWING_MODE_FULLSCREEN)
+        createDefaultWindowActions().onMinimize(task)
+        verify(mockDesktopTasksController).minimizeTask(task, MinimizeReason.MINIMIZE_BUTTON)
+        verify(mockPinnedLayerController, never()).minimizeTask(any())
+    }
+
 }

@@ -557,7 +557,7 @@
 
     <!-- The width of the handle menu in desktop mode plus the 2dp added for padding to account for
          pill elevation. -->
-    <dimen name="desktop_mode_handle_menu_width">218dp</dimen>
+    <dimen name="desktop_mode_handle_menu_width">280dp</dimen>
 
     <!-- The maximum height of the handle menu in desktop mode. Three pills at 52dp each,
          additional actions at 52dp each, plus 2dp spacing between them plus 4dp top padding.
