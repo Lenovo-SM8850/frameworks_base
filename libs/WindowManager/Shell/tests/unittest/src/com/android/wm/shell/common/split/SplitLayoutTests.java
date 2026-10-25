@@ -119,6 +119,71 @@ public class SplitLayoutTests extends ShellTestCase {
 
     @Test
     @UiThreadTest
+    public void testAdjustSurfaceLayoutForIme_suppressesDimmingDuringRecents() {
+        // force dimming to be enabled.
+        mContext.getOrCreateTestableResources().addOverride(
+                com.android.wm.shell.R.bool.config_dimNonImeAttachedSide, true);
+
+        // re-create SplitLayout with resource change
+        mSplitLayout = new SplitLayout(
+                "TestSplitLayout",
+                mContext,
+                getConfiguration(),
+                mSplitLayoutHandler,
+                mCallbacks,
+                mDisplayController,
+                mDisplayImeController,
+                mTaskOrganizer,
+                SplitLayout.PARALLAX_NONE,
+                mSplitState,
+                mHandler,
+                mStatusBarHider,
+                mDesktopState,
+                mMSDLPlayer);
+
+        // focus on bottom/right stage to trigger dimming on the other side.
+        WindowContainerToken mockToken = mock(WindowContainerToken.class);
+        when(mTaskOrganizer.getImeLayeringTarget(anyInt())).thenReturn(mockToken);
+        when(mSplitLayoutHandler.getSplitItemPosition(mockToken))
+                .thenReturn(SPLIT_POSITION_BOTTOM_OR_RIGHT);
+
+        mSplitLayout.init();
+        SplitLayout.ImePositionProcessor processor =
+                (SplitLayout.ImePositionProcessor) mSplitLayout.getImePositionProcessor();
+
+        // set up internal dimming state
+        SurfaceControl.Transaction t = mock(SurfaceControl.Transaction.class);
+        when(t.setAlpha(any(), anyFloat())).thenReturn(t);
+        when(t.setVisibility(any(), anyBoolean())).thenReturn(t);
+
+        // picking values so as to get mDimLayer1, mDimLayer2 > 0.001f
+        processor.onImeStartPositioning(mContext.getDisplayId(), 0 /* hiddenTop */,
+                100 /* shownTop */, true /* showing */, true /* isFloating */, t);
+        processor.onImePositionChanged(mContext.getDisplayId(), 100 /* imeTop */, t);
+
+        final SurfaceControl dimLayer1 = mock(SurfaceControl.class);
+        final SurfaceControl dimLayer2 = mock(SurfaceControl.class);
+
+        // recents are animating: alpha should not be set.
+        mSplitLayout.setRecentsAnimating(true);
+        boolean result = processor.adjustSurfaceLayoutForIme(t,
+                mock(SurfaceControl.class), mock(SurfaceControl.class),
+                mock(SurfaceControl.class), dimLayer1, dimLayer2);
+        assertThat(result).isFalse();
+        verify(t, never()).setAlpha(any(), anyFloat());
+
+        // recents not animating: alpha should be set.
+        mSplitLayout.setRecentsAnimating(false);
+        result = processor.adjustSurfaceLayoutForIme(t,
+                mock(SurfaceControl.class), mock(SurfaceControl.class),
+                mock(SurfaceControl.class), dimLayer1, dimLayer2);
+        assertThat(result).isTrue();
+        verify(t).setAlpha(eq(dimLayer1), anyFloat());
+        verify(t).setAlpha(eq(dimLayer2), anyFloat());
+    }
+
+    @Test
+    @UiThreadTest
     public void testUpdateConfiguration() {
         final Configuration config = getConfiguration();
 
@@ -269,6 +334,60 @@ public class SplitLayoutTests extends ShellTestCase {
 
         verify(mDisplayController, times(2)) // init * 1 + rotateTo * 1
                 .getDisplayLayout(anyInt());
+    }
+
+    @Test
+    public void testMultiSplitDivider_isClippedToItsBranchAcrossAxesAndResize() {
+        final Rect branch = new Rect(0, 0, 1080, 1000);
+        mSplitLayout.setMultiSplitDivider(branch, true, 0.5f);
+        assertThat(mSplitLayout.getDividerBounds().top).isEqualTo(branch.top);
+        assertThat(mSplitLayout.getDividerBounds().bottom).isEqualTo(branch.bottom);
+        assertThat(mSplitLayout.getMultiSplitDividerCrop().height()).isEqualTo(branch.height());
+        final Rect resized = new Rect(0, 1100, 1080, 2160);
+        mSplitLayout.setMultiSplitDivider(resized, true, 0.7f);
+        assertThat(mSplitLayout.getDividerBounds().top).isEqualTo(resized.top);
+        assertThat(mSplitLayout.getDividerBounds().bottom).isEqualTo(resized.bottom);
+        assertThat(mSplitLayout.getMultiSplitDividerCrop().height()).isEqualTo(resized.height());
+        mSplitLayout.setMultiSplitDivider(resized, false, 0.5f);
+        assertThat(mSplitLayout.getDividerBounds().left).isEqualTo(resized.left);
+        assertThat(mSplitLayout.getDividerBounds().right).isEqualTo(resized.right);
+        assertThat(mSplitLayout.getMultiSplitDividerCrop().width()).isEqualTo(resized.width());
+    }
+
+    @Test
+    @UiThreadTest
+    public void testBranchDivider_expandedWindowAndCropMatchAcrossAxes() {
+        for (boolean leftRight : new boolean[]{true, false}) {
+            // Force an odd expansion to check both edges of the leash and input crop.
+            final int inputThickness = mContext.getResources().getDimensionPixelSize(
+                    com.android.wm.shell.R.dimen.split_divider_handle_region_height);
+            final int menuThickness = mContext.getResources().getDimensionPixelSize(
+                    com.android.wm.shell.R.dimen.split_divider_handle_menu_size);
+            final int expectedThickness = Math.max(inputThickness, menuThickness);
+            final Rect branch = new Rect(0, 0, 1080, 1000);
+            mSplitLayout.setMultiSplitDivider(branch, leftRight, 0.5f);
+            final Rect divider = leftRight
+                    ? new Rect(500, 0, 500 + inputThickness - 3, branch.height())
+                    : new Rect(0, 500, branch.width(), 500 + inputThickness - 3);
+            doReturn(divider).when(mSplitLayout).getDividerBounds();
+            doAnswer(invocation -> {
+                ((Rect) invocation.getArgument(0)).set(divider);
+                return null;
+            }).when(mSplitLayout).getDividerBounds(any(Rect.class));
+            mSplitLayout.init();
+            try {
+                final Rect leash = new Rect();
+                mSplitLayout.getDividerLeashBounds(leash);
+                final Rect crop = mSplitLayout.getMultiSplitDividerCrop();
+                assertThat(leftRight ? leash.width() : leash.height())
+                        .isEqualTo(expectedThickness);
+                assertThat(crop).isEqualTo(new Rect(0, 0, leash.width(), leash.height()));
+                assertThat(leftRight ? leash.height() : leash.width())
+                        .isEqualTo(leftRight ? branch.height() : branch.width());
+            } finally {
+                mSplitLayout.release();
+            }
+        }
     }
 
     private void waitDividerFlingFinished() {
