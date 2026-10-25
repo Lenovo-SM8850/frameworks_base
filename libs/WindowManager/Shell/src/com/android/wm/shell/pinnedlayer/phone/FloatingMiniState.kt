@@ -22,6 +22,7 @@ class FloatingMiniState {
         }
     fun remove(userId: Int, taskId: Int) { entries.remove(Key(userId, taskId)) }
     fun removeUser(userId: Int) { entries.keys.removeAll { it.userId == userId } }
+    fun canRemember(userId: Int, taskId: Int) = get(userId, taskId) == null
 
     companion object {
         fun corner(bounds: Rect, stable: Rect, threshold: Int): Corner? {
