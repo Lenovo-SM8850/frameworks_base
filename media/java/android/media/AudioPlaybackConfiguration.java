@@ -365,6 +365,32 @@ public final class AudioPlaybackConfiguration implements Parcelable {
     private @NonNull FormatInfo mFormatInfo;
     @GuardedBy("mUpdateablePropLock")
     @PlayerMuteEvent private int mMutedState;
+    @GuardedBy("mUpdateablePropLock")
+    private boolean mHasStartedJocCodecForUid;
+
+    /**
+     * Whether this full Android UID has a started, allowlisted JOC audio decoder.
+     * This describes the UID, not this particular AudioTrack or confirmed Atmos output.
+     * Anonymized configurations always return false. This does not change {@link #isActive()}.
+     * @hide
+     */
+    public boolean hasStartedJocCodecForUid() {
+        synchronized (mUpdateablePropLock) {
+            return mHasStartedJocCodecForUid;
+        }
+    }
+
+    /**
+     * Update the privileged UID selection marker.
+     * @hide
+     */
+    public boolean setHasStartedJocCodecForUid(boolean started) {
+        synchronized (mUpdateablePropLock) {
+            if (mHasStartedJocCodecForUid == started) return false;
+            mHasStartedJocCodecForUid = started;
+            return true;
+        }
+    }
 
     /**
      * Never use without initializing parameters afterwards
@@ -842,7 +868,7 @@ public final class AudioPlaybackConfiguration implements Parcelable {
     public int hashCode() {
         synchronized (mUpdateablePropLock) {
             return Objects.hash(mPlayerIId, Arrays.toString(mDeviceIds), mMutedState, mPlayerType,
-                    mClientUid, mClientPid, mSessionId);
+                    mClientUid, mClientPid, mSessionId, mHasStartedJocCodecForUid);
         }
     }
 
@@ -869,6 +895,7 @@ public final class AudioPlaybackConfiguration implements Parcelable {
             dest.writeStrongInterface(ips == null ? null : ips.getIPlayer());
             dest.writeInt(mSessionId);
             mFormatInfo.writeToParcel(dest, 0);
+            dest.writeBoolean(mHasStartedJocCodecForUid);
         }
     }
 
@@ -888,6 +915,7 @@ public final class AudioPlaybackConfiguration implements Parcelable {
         mIPlayerShell = (p == null) ? null : new IPlayerShell(null, p);
         mSessionId = in.readInt();
         mFormatInfo = FormatInfo.CREATOR.createFromParcel(in);
+        mHasStartedJocCodecForUid = in.readBoolean();
     }
 
     @Override
@@ -903,7 +931,8 @@ public final class AudioPlaybackConfiguration implements Parcelable {
                 && (mPlayerType == that.mPlayerType)
                 && (mClientUid == that.mClientUid)
                 && (mClientPid == that.mClientPid))
-                && (mSessionId == that.mSessionId);
+                && (mSessionId == that.mSessionId)
+                && (hasStartedJocCodecForUid() == that.hasStartedJocCodecForUid());
     }
 
     @Override
@@ -946,7 +975,8 @@ public final class AudioPlaybackConfiguration implements Parcelable {
                     apcToString.append("opControlAudio ");
                 }
             }
-            apcToString.append(" ").append(mFormatInfo);
+            apcToString.append(" hasStartedJocCodecForUid:")
+                    .append(mHasStartedJocCodecForUid).append(" ").append(mFormatInfo);
         }
         return apcToString.toString();
     }

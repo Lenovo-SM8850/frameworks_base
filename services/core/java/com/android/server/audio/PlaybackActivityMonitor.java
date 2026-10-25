@@ -66,6 +66,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -238,6 +239,22 @@ public final class PlaybackActivityMonitor
     //  into AudioService. They trigger synchronous dispatchPlaybackChange() which updates
     //  all listeners as oneway calls.
 
+    @GuardedBy("mPlayerLock")
+    private Set<Integer> mStartedJocCodecUids = Collections.emptySet();
+
+    /** Replace the media service's complete started JOC decoder UID set. */
+    void setStartedJocCodecUids(Set<Integer> uids) {
+        boolean changed = false;
+        synchronized (mPlayerLock) {
+            mStartedJocCodecUids = new HashSet<>(uids);
+            for (AudioPlaybackConfiguration config : mPlayers.values()) {
+                changed |= config.setHasStartedJocCodecForUid(
+                        mStartedJocCodecUids.contains(config.getClientUid()));
+            }
+        }
+        if (changed) dispatchPlaybackChange(false);
+    }
+
     public int trackPlayer(PlayerBase.PlayerIdCard pic) {
         final int newPiid = AudioSystem.newAudioPlayerId();
         if (DEBUG) { Log.v(TAG, "trackPlayer() new piid=" + newPiid); }
@@ -261,6 +278,8 @@ public final class PlaybackActivityMonitor
                     packages != null && packages.length > 0 ? packages[0] : null
                 ));
         synchronized(mPlayerLock) {
+            apc.setHasStartedJocCodecForUid(
+                    mStartedJocCodecUids.contains(apc.getClientUid()));
             mPlayers.put(newPiid, apc);
             maybeMutePlayerAwaitingConnection(apc);
         }
@@ -782,9 +801,7 @@ public final class PlaybackActivityMonitor
         // are non-system playback activity listeners.
         List<AudioPlaybackConfiguration> configsPublic = null;
         synchronized (mPlayerLock) {
-            if (mPlayers.isEmpty()) {
-                return;
-            }
+            // The last player release must replace the previous snapshot with an empty one.
             configsSystem = new ArrayList<>(mPlayers.values());
         }
 
