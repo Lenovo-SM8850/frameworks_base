@@ -53,8 +53,10 @@ class DarkIconInteractor @Inject constructor(private val repository: DarkIconRep
             map { darkChange ->
                     // Note: DarkChange.darkIntensity is 0.0f when icons should be white (for dark
                     // theme) and 1.0f when icons should be black (for light theme).
+                    // Copy the areas: the dispatcher refills one list in place, so keeping it
+                    // would make every later state compare equal to the previous one.
                     DarkStateWithoutIntensity(
-                        darkChange.areas,
+                        darkChange.areas.map { Rect(it) },
                         isDarkTheme = darkChange.darkIntensity < 0.5f,
                     )
                 }

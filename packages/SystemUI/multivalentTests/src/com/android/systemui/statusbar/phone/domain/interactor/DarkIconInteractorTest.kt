@@ -23,6 +23,8 @@ import com.android.systemui.Flags
 import com.android.systemui.SysuiTestCase
 import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.kosmos.collectLastValue
+import com.android.systemui.kosmos.collectValues
+import com.android.systemui.kosmos.runCurrent
 import com.android.systemui.kosmos.runTest
 import com.android.systemui.statusbar.phone.SysuiDarkIconDispatcher.DarkChange
 import com.android.systemui.statusbar.phone.data.repository.fakeDarkIconRepository
@@ -96,6 +98,34 @@ class DarkIconInteractorTest : SysuiTestCase() {
             // The icon is not within the dark icon area, so the icon should be light,
             // which means the theme should be dark.
             assertThat(isAreaDark!!.isDarkTheme(iconBounds)).isTrue()
+        }
+
+    @Test
+    fun isAreaDark_darkIconAreasRefilledInPlace_emitsEachChange() =
+        kosmos.runTest {
+            val isAreaDark by collectValues(underTest.isAreaDark(DEFAULT_DISPLAY_ID))
+            val darkIconAreas = arrayListOf(Rect(0, 0, 100, 100))
+            val iconBounds = Rect(110, 10, 120, 20)
+
+            fakeDarkIconRepository.darkState(DEFAULT_DISPLAY_ID).value =
+                DarkChange(darkIconAreas, DARK_INTENSITY_DARK_ICONS, TINT)
+            runCurrent()
+
+            // The dispatcher reuses one list, so the areas change without a new list instance.
+            darkIconAreas.clear()
+            darkIconAreas.add(Rect(100, 0, 200, 100))
+            fakeDarkIconRepository.darkState(DEFAULT_DISPLAY_ID).value =
+                DarkChange(darkIconAreas, DARK_INTENSITY_DARK_ICONS, TINT)
+            runCurrent()
+
+            darkIconAreas.clear()
+            fakeDarkIconRepository.darkState(DEFAULT_DISPLAY_ID).value =
+                DarkChange(darkIconAreas, DARK_INTENSITY_DARK_ICONS, TINT)
+            runCurrent()
+
+            assertThat(isAreaDark.map { it.isDarkTheme(iconBounds) })
+                .containsExactly(true, false, false)
+                .inOrder()
         }
 
     companion object {
