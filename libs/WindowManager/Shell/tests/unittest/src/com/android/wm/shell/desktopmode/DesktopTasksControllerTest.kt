@@ -7017,8 +7017,11 @@ class DesktopTasksControllerTest : ShellTestCase() {
     }
 
     @Test
-    fun dragToDesktop_multipleDesks_addsPendingTransition() {
+    fun dragToFloating_multipleDesks_doesNotAddDeskTransition() {
         val transition = Binder()
+        val floatingController = mock(PinnedLayerController::class.java)
+        controller.setPinnedLayerController(floatingController)
+        whenever(floatingController.prepareFloatingTask(any(), any())).thenReturn(true)
         val spyController = spy(controller)
         whenever(dragToDesktopTransitionHandler.finishDragToDesktopTransition(any()))
             .thenReturn(transition)
@@ -7034,15 +7037,7 @@ class DesktopTasksControllerTest : ShellTestCase() {
             mockSurface,
         )
 
-        verify(desksTransitionsObserver)
-            .addPendingTransition(
-                argThat {
-                    this is DeskTransition.ActivateDeskWithTask &&
-                        this.token == transition &&
-                        this.deskId == 0 &&
-                        this.enterTaskId == task.taskId
-                }
-            )
+        verify(desksTransitionsObserver, never()).addPendingTransition(any())
     }
 
     @Test

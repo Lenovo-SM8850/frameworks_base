@@ -16,7 +16,6 @@
 
 package com.android.server.display;
 
-import com.libremobileos.freeform.ILMOFreeformDisplayCallback;
 import static android.Manifest.permission.ADD_ALWAYS_UNLOCKED_DISPLAY;
 import static android.Manifest.permission.ADD_TRUSTED_DISPLAY;
 import static android.Manifest.permission.CAPTURE_SECURE_VIDEO_OUTPUT;
