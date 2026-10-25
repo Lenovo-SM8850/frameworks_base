@@ -801,13 +801,15 @@ public abstract class WMShellModule {
     @Provides
     @DynamicOverride
     static DesksOrganizer provideDesksOrganizer(
+            Context context,
             @NonNull ShellInit shellInit,
             @NonNull ShellCommandHandler shellCommandHandler,
             @NonNull ShellTaskOrganizer shellTaskOrganizer,
             @NonNull LaunchAdjacentController launchAdjacentController,
             @NonNull RootTaskDisplayAreaOrganizer rootTaskDisplayAreaOrganizer) {
         return new RootTaskDesksOrganizer(shellInit, shellCommandHandler, shellTaskOrganizer,
-                launchAdjacentController, rootTaskDisplayAreaOrganizer);
+                launchAdjacentController, rootTaskDisplayAreaOrganizer,
+                context.getSystemService(android.os.UserManager.class));
     }
 
     @WMSingleton
@@ -2244,8 +2246,10 @@ public abstract class WMShellModule {
             @ShellMainThread ShellExecutor mainExecutor,
             DesktopState desktopState,
             BubbleFeatureConfig bubbleFeatureConfig,
-            Optional<ContainerHierarchyDependency> containerHierarchyDependency) {
-        return new DragAndDropController(
+            Optional<ContainerHierarchyDependency> containerHierarchyDependency,
+            Lazy<Optional<PinnedLayerController>> pinnedLayerController,
+            TaskStackListenerImpl taskStackListener) {
+        DragAndDropController controller = new DragAndDropController(
                 context,
                 shellInit,
                 shellController,
@@ -2260,6 +2264,9 @@ public abstract class WMShellModule {
                 mainExecutor,
                 desktopState,
                 bubbleFeatureConfig);
+        controller.setSidebarFloatingController(pinnedLayerController);
+        controller.setSidebarTaskStackListener(taskStackListener);
+        return controller;
     }
 
     @WMSingleton

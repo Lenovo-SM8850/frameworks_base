@@ -1286,6 +1286,7 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         Assert.assertEquals(.75f, task.floatingWindowScale)
         verify(mockWindowDecoration, never()).showResizeVeil(any())
         verify(mockTransitions, never()).startTransition(any(), any(), any())
+        verify(mockDesktopTasksController, never()).rememberFloatingOrientation(any(), any(), any())
     }
 
     private fun performDrag(startX: Float, startY: Float, endX: Float, endY: Float, ctrlType: Int) {

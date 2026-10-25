@@ -518,4 +518,29 @@ class FloatingMiniController(
         return FloatingMiniState.tidyBounds(bounds, bounds, stable, margin, occupied,
             nearest = true) ?: bounds
     }
+
+    fun tidy(tasks: List<TaskInfo>) {
+        val visible = tasks.filter { it.isFloatingWindow && it.isVisible }
+        val occupied = visible.mapNotNull { state.get(it.userId, it.taskId)?.bounds?.let(::Rect) }
+            .toMutableList()
+        visible.filter { state.get(it.userId, it.taskId) == null }.forEach { task ->
+            val stable = stable(task)
+            if (stable.isEmpty) return@forEach
+            val logical = task.configuration.windowConfiguration.bounds
+            val from = task.presentationBounds
+            val margin = (8 * density(task)).toInt()
+            var scale = minimum(task, stable)
+            var target: Rect? = null
+            // Fit crowded edges without moving minis that are already placed.
+            while (target == null && scale >= .001f) {
+                target = FloatingMiniState.tidyBounds(from,
+                    FloatingMiniState.sized(logical, scale, 0, 0), stable, margin, occupied)
+                if (target == null) scale *= .9f
+            }
+            val destination = target ?: return@forEach
+            occupied += destination
+            enter(task, task.floatingWindowRestoreBounds, logical, task.floatingWindowScale,
+                from, task.floatingWindowScale, destination, scale)
+        }
+    }
 }
