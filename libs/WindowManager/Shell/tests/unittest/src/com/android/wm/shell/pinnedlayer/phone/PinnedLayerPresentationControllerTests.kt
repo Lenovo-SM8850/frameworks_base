@@ -199,6 +199,26 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
+    fun getPinEntryDestinationBounds_remembersPackageAndUser() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000))
+        task.baseActivity = android.content.ComponentName("test.floating", "Main")
+        task.isFloatingWindow = true
+        task.userId = 10
+        task.floatingWindowScale = 1f
+        task.positionInParent = android.graphics.Point(100, 200)
+        task.floatingWindowPosition.set(100, 200)
+        controller.rememberBounds(task)
+
+        assertThat(controller.getPinEntryDestinationBounds(task))
+            .isEqualTo(Rect(100, 200, 700, 1000))
+        task.userId = 11
+        // Another user's launch has no existing floating presentation to restore.
+        task.isFloatingWindow = false
+        assertThat(controller.getPinEntryDestinationBounds(task))
+            .isNotEqualTo(Rect(100, 200, 700, 1000))
+    }
+
+    @Test
     fun getPinEntryDestinationBounds_landscape_usesSeparateGeometry() {
         val task = createTaskInfo(Rect(100, 200, 700, 1000))
         task.baseActivity = android.content.ComponentName("test.floating", "Main")
@@ -219,6 +239,80 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(bounds.width()).isEqualTo(777)
         assertThat(bounds.height()).isEqualTo(576)
         assertThat(bounds.centerX()).isEqualTo(960)
+    }
+
+    @Test
+    fun rememberedManualBounds_acceptSmallRoundingDifferences() {
+        val task = createTaskInfo(Rect(100, 200, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.geometry", "Main")
+            minWidth = 10
+            minHeight = 10
+        }
+        controller.setManualOrientation(task, true, Rect(200, 300, 900, 900))
+        val actual = Rect(201, 301, 901, 901)
+        task.configuration.windowConfiguration.setBounds(actual)
+        task.floatingWindowScale = 1f
+        task.positionInParent = android.graphics.Point(actual.left, actual.top)
+        task.floatingWindowPosition.set(actual.left, actual.top)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(actual)
+    }
+
+    @Test
+    fun rememberedManualBounds_mismatchedCallbackDoesNotBlockLaterGeometry() {
+        val task = createTaskInfo(Rect(100, 200, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.geometry", "Main")
+            minWidth = 10
+            minHeight = 10
+        }
+        controller.setManualOrientation(task, true, Rect(200, 300, 900, 900))
+        controller.rememberBounds(task)
+        val actual = Rect(200, 400, 800, 1400)
+        task.configuration.windowConfiguration.setBounds(actual)
+        task.floatingWindowScale = 1f
+        task.positionInParent = android.graphics.Point(actual.left, actual.top)
+        task.floatingWindowPosition.set(actual.left, actual.top)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(actual)
+    }
+
+    @Test
+    fun entry_ignoresSavedManualRotationAndUsesCurrentFullscreenAspect() {
+        val task = createTaskInfo(Rect(0, 0, 1000, 600)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.entry", "Main")
+            minWidth = 1
+            minHeight = 1
+        }
+        controller.setManualOrientation(task, true, Rect(100, 200, 1000, 800))
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 600, 1000))
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(.6f)
+        assertThat(controller.getManualRotationBounds(task)).isNull()
+    }
+
+    @Test
+    fun entry_afterRestartUsesCurrentDesktopAspectInsteadOfSavedRotation() {
+        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() })
+        val first = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        val task = createTaskInfo(Rect(0, 0, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.entry", "Main")
+            minWidth = 1
+            minHeight = 1
+        }
+        first.setManualOrientation(task, false, Rect(100, 200, 700, 1200))
+        val restarted = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_FREEFORM)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1000, 600))
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val bounds = requireNotNull(restarted.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(1000f / 600)
     }
 
     @Test
