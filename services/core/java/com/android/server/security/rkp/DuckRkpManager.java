@@ -61,6 +61,7 @@ public final class DuckRkpManager {
     private final Runnable mReschedule = this::scheduleAutomatic;
     private final AlarmManager.OnAlarmListener mAutomatic = this::scheduleAutomatic;
     private final Runnable mOnChanged;
+    private final int mMasterDefault;
     private final AtomicFile mFile = new AtomicFile(
             new File(Environment.getDataSystemDirectory(), "duck_rkp.xml"));
     private final ExecutorService mWorker = Executors.newSingleThreadExecutor(
@@ -89,6 +90,8 @@ public final class DuckRkpManager {
         mAlarms = context.getSystemService(AlarmManager.class);
         mConnectivity = context.getSystemService(ConnectivityManager.class);
         mOnChanged = onChanged;
+        mMasterDefault = context.getResources().getBoolean(
+                com.android.internal.R.bool.config_defaultTrickyStoreEnabled) ? 1 : 0;
         mConnectivity.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
             @Override
             public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
@@ -502,7 +505,8 @@ public final class DuckRkpManager {
     }
 
     private boolean masterEnabled() {
-        return Settings.System.getIntForUser(mResolver, MASTER_KEY, 1, UserHandle.USER_SYSTEM) != 0;
+        return Settings.System.getIntForUser(mResolver, MASTER_KEY, mMasterDefault,
+                UserHandle.USER_SYSTEM) != 0;
     }
 
     private void putEnabled(boolean enabled) {
