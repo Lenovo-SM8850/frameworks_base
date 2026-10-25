@@ -333,6 +333,10 @@ public class DragLayout extends LinearLayout
         return mHasDropped;
     }
 
+    boolean isOverBubblesDropZone() {
+        return mIsOverBubblesDropZone;
+    }
+
     /**
      * Called when a new drag is started.
      */
@@ -710,7 +714,7 @@ public class DragLayout extends LinearLayout
         }
     }
 
-    private void hideDragSurface(@NonNull SurfaceControl dragSurface) {
+    static void hideDragSurface(@NonNull SurfaceControl dragSurface) {
         final SurfaceControl.Transaction tx = new SurfaceControl.Transaction();
         final ValueAnimator dragSurfaceAnimator = ValueAnimator.ofFloat(0f, 1f);
         // Currently the splash icon animation runs with the default ValueAnimator duration of
