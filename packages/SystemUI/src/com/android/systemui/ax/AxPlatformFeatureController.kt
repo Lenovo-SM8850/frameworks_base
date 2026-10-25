@@ -23,6 +23,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.hardware.SensorPrivacyManager
 import android.hardware.display.ColorDisplayManager
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.WindowManager
@@ -30,7 +31,6 @@ import com.android.internal.util.ScreenshotHelper
 import android.media.projection.StopReason
 import android.net.TetheringManager
 import android.nfc.NfcAdapter
-import android.os.PowerManager
 import android.os.RemoteException
 import android.os.ServiceManager
 import android.os.UserHandle
@@ -44,6 +44,7 @@ import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.statusbar.connectivity.AccessPointController
 import com.android.systemui.statusbar.connectivity.NetworkController
 import com.android.systemui.statusbar.phone.ManagedProfileController
+import com.android.systemui.statusbar.policy.CaffeineController
 import com.android.systemui.statusbar.policy.BatteryController
 import com.android.systemui.statusbar.policy.BluetoothController
 import com.android.systemui.statusbar.policy.CastController
@@ -82,11 +83,9 @@ class AxPlatformFeatureController @Inject constructor(
     private val securityController: SecurityController,
     private val castController: CastController,
     private val screenRecordUxController: ScreenRecordUxController,
-    powerManager: PowerManager
+    internal val caffeineController: CaffeineController
 ) {
 
-    internal val wakeLock: PowerManager.WakeLock =
-        powerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK, "AxPlatform:Caffeine")
     private val profileManager: ProfileManager? = try {
         ProfileManager.getInstance(context)
     } catch (e: Exception) { null }
@@ -136,6 +135,15 @@ class AxPlatformFeatureController @Inject constructor(
             add(AxPlatformClient.FEATURE_SCREEN_RECORD)
             add(AxPlatformClient.FEATURE_SCREENSHOT)
         }.toTypedArray()
+    }
+
+    fun getLiveState(feature: String): Bundle? = when (feature) {
+        AxPlatformClient.FEATURE_CAFFEINE -> Bundle().apply {
+            val enabled = caffeineController.isEnabled
+            putBoolean("enabled", enabled)
+            putBoolean("active", enabled)
+        }
+        else -> null
     }
 
     fun toggle(feature: String) {
@@ -241,14 +249,8 @@ class AxPlatformFeatureController @Inject constructor(
             }
             AxPlatformClient.FEATURE_POWER_SHARE ->
                 batteryController.setReverseState(!batteryController.isReverseOn)
-            AxPlatformClient.FEATURE_CAFFEINE -> {
-                if (wakeLock.isHeld) {
-                    wakeLock.release()
-                } else {
-                    wakeLock.acquire(CAFFEINE_DURATION_MS)
-                }
-                stateManager.broadcastBool(feature, wakeLock.isHeld)
-            }
+            AxPlatformClient.FEATURE_CAFFEINE ->
+                caffeineController.setEnabled(!caffeineController.isEnabled)
             AxPlatformClient.FEATURE_VPN -> {
                 if (securityController.isVpnEnabled) {
                     securityController.disconnectPrimaryVpn()
@@ -364,14 +366,7 @@ class AxPlatformFeatureController @Inject constructor(
             }
             AxPlatformClient.FEATURE_POWER_SHARE ->
                 batteryController.setReverseState(enabled)
-            AxPlatformClient.FEATURE_CAFFEINE -> {
-                if (enabled && !wakeLock.isHeld) {
-                    wakeLock.acquire(CAFFEINE_DURATION_MS)
-                } else if (!enabled && wakeLock.isHeld) {
-                    wakeLock.release()
-                }
-                stateManager.broadcastBool(feature, wakeLock.isHeld)
-            }
+            AxPlatformClient.FEATURE_CAFFEINE -> caffeineController.setEnabled(enabled)
             AxPlatformClient.FEATURE_VPN -> {
                 if (!enabled && securityController.isVpnEnabled) {
                     securityController.disconnectPrimaryVpn()
@@ -446,7 +441,6 @@ class AxPlatformFeatureController @Inject constructor(
 
     companion object {
         private const val TAG = "AxPlatformFeatureCtrl"
-        private const val CAFFEINE_DURATION_MS = 5L * 60 * 1000
         private const val SCREENSHOT_DELAY_MS = 500L
         const val SETTING_NIGHT_DISPLAY = "night_display_activated"
         const val SETTING_REDUCE_BRIGHT = "reduce_bright_colors_activated"

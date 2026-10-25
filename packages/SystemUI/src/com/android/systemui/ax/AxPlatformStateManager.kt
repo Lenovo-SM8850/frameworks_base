@@ -52,17 +52,22 @@ class AxPlatformStateManager @Inject constructor(
     var supportedFeatures: Array<String> = emptyArray()
         internal set
 
-    fun getState(feature: String): Bundle = stateCache[feature] ?: Bundle.EMPTY
+    var liveStateProvider: ((String) -> Bundle?)? = null
+        internal set
+
+    fun getState(feature: String): Bundle =
+        liveStateProvider?.invoke(feature)?.also { enrichBundle(feature, it) }
+            ?: stateCache[feature] ?: Bundle.EMPTY
 
     fun getAllStates(): Bundle = Bundle().also { result ->
-        stateCache.forEach { (key, bundle) -> result.putBundle(key, bundle) }
+        stateCache.keys.forEach { key -> result.putBundle(key, getState(key)) }
     }
 
     fun registerCallback(callback: IAxPlatformCallback) {
         callbacks.register(callback)
-        stateCache.forEach { (key, bundle) ->
+        stateCache.keys.forEach { key ->
             try {
-                callback.onStateChanged(key, bundle)
+                callback.onStateChanged(key, getState(key))
             } catch (e: RemoteException) {
                 Log.w(TAG, "Failed to send initial state for key=$key", e)
             }
