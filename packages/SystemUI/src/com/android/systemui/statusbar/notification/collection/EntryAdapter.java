@@ -207,6 +207,12 @@ public interface EntryAdapter {
 
     void onEntryClicked(ExpandableNotificationRow row);
 
+    /** Opens the notification in a floating window when backed by a notification entry. */
+    default void onEntryFloatingWindowClicked(ExpandableNotificationRow row) {}
+
+    /** Opens the notification in split screen when backed by a notification entry. */
+    default void onEntrySplitScreenClicked(ExpandableNotificationRow row) {}
+
     @Nullable RemoteInputEntryAdapter getRemoteInputEntryAdapter();
 
     /** Add a listener to be notified when the entry's sensitivity changes. */

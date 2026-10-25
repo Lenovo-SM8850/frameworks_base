@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<Button xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notification_open_split_screen"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="@*android:dimen/notification_2025_margin"
+    android:minHeight="@dimen/notification_2025_min_tap_target_size"
+    android:text="@string/notification_open_split_screen"
+    android:visibility="gone"
+    android:theme="@style/Theme.SystemUI.Dialog"
+    style="@style/Widget.Dialog.Button.BorderButton" />

@@ -20,6 +20,8 @@ import android.annotation.IntDef;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.app.ActivityManager;
+import android.app.PendingIntent;
+import android.content.Intent;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.window.RemoteTransition;
@@ -106,6 +108,10 @@ public interface SplitScreen {
             @Nullable Bundle options2, @SplitPosition int splitPosition,
             @PersistentSnapPosition int snapPosition, @Nullable RemoteTransition remoteTransition,
             InstanceId instanceId);
+
+    /** Launches a notification beside the foreground app, or replaces the unfocused split side. */
+    void startPendingIntent(PendingIntent intent, int userId, @Nullable Intent fillInIntent,
+            @Nullable Bundle options);
 
     /** Registers listener that gets split screen callback. */
     void registerSplitScreenListener(@NonNull SplitScreenListener listener,
