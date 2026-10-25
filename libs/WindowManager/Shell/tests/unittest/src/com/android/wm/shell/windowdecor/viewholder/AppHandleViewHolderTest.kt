@@ -308,4 +308,78 @@ class AppHandleViewHolderTest : ShellTestCase() {
             }
         }
     }
+
+    @Test
+    fun handleSample_regionOrTaskGeometryChangeClearsCachedLuminance() {
+        val colors = mutableListOf<Boolean>()
+        val sampler = com.android.wm.shell.windowdecor.common.HandleRegionSampler(mockImageButton) {
+            colors += it
+        }
+        val sampled = sampler.javaClass.getDeclaredField("sampledLight").apply { isAccessible = true }
+        val bounds = android.graphics.Rect(0, 0, 100, 20)
+        val task = RunningTaskInfo()
+        sampler.updateTask(task)
+        sampler.update(bounds, true, true)
+        sampled.set(sampler, false)
+        sampler.update(android.graphics.Rect(10, 0, 110, 20), true, true)
+        assertThat(sampler.sampledLight).isNull()
+        assertThat(colors.last()).isTrue()
+        for (change in listOf<() -> Unit>(
+                { task.taskId++ }, { task.userId++ }, { task.displayId++ },
+                { task.configuration.windowConfiguration.rotation = android.view.Surface.ROTATION_90 })) {
+            sampled.set(sampler, false)
+            change()
+            sampler.updateTask(task)
+            assertThat(sampler.sampledLight).isNull()
+        }
+        sampler.close()
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_WINDOW_DECORATION_REFACTOR)
+    fun zeroAppearance_statusBarHandleUsesLightForeground() {
+        val appHandle = createAppHandleViewHolder()
+        appHandle.regionSampler.close()
+        val sampler = mock<com.android.wm.shell.windowdecor.common.HandleRegionSampler>()
+        appHandle.regionSampler = sampler
+        val task = RunningTaskInfo().apply {
+            taskDescription = android.app.ActivityManager.TaskDescription()
+            configuration.windowConfiguration.setBounds(android.graphics.Rect(0, 0, 1080, 1920))
+        }
+
+        appHandle.bindData(AppHandleViewHolder.HandleData(task, DEFAULT_CAPTION_POSITION,
+            DEFAULT_CAPTION_WIDTH, DEFAULT_CAPTION_HEIGHT, false, true))
+
+        org.mockito.kotlin.verify(sampler).updateTask(task)
+        org.mockito.kotlin.verify(sampler).update(org.mockito.kotlin.any(),
+            org.mockito.kotlin.eq(true), org.mockito.kotlin.eq(true))
+        appHandle.close()
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_WINDOW_DECORATION_REFACTOR)
+    fun menuHiddenHandle_rebindDoesNotRestartSampling() {
+        val appHandle = createAppHandleViewHolder()
+        appHandle.regionSampler.close()
+        val sampler = mock<com.android.wm.shell.windowdecor.common.HandleRegionSampler>()
+        appHandle.regionSampler = sampler
+        val task = RunningTaskInfo()
+        val data = AppHandleViewHolder.HandleData(task, DEFAULT_CAPTION_POSITION,
+            DEFAULT_CAPTION_WIDTH, DEFAULT_CAPTION_HEIGHT, false, true)
+        appHandle.bindData(data)
+        appHandle.onHandleMenuOpened()
+        org.mockito.kotlin.clearInvocations(sampler)
+        appHandle.bindData(data)
+        org.mockito.kotlin.verify(sampler).update(org.mockito.kotlin.any(),
+            org.mockito.kotlin.eq(false), org.mockito.kotlin.any())
+        appHandle.onHandleMenuClosed()
+        org.mockito.kotlin.verify(sampler).setVisible(true)
+        appHandle.onHandleMenuOpened()
+        appHandle.bindData(data.copy(isCaptionVisible = false))
+        org.mockito.kotlin.clearInvocations(sampler)
+        appHandle.onHandleMenuClosed()
+        org.mockito.kotlin.verify(sampler).setVisible(false)
+        appHandle.close()
+    }
+
 }
