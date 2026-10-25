@@ -657,6 +657,31 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(leftTop.vertical).isEqualTo(0)
     }
 
+    @Test fun pairLaunchRestoresAllMembersFromAnInactiveSnapshotInOneTransaction() {
+        add()
+        add()
+        val group = groups.get(10)!!
+        val before = group.layout.root
+        coordinator.exit(-1, WindowContainerTransaction())
+        assertThat(coordinator.isActive).isFalse()
+        val remote = mock<IRemoteTransition>()
+        assertThat(coordinator.restorePair(group.secondRepresentative, group.firstRepresentative,
+            null, null, RemoteTransition(remote))).isTrue()
+        assertThat(coordinator.activeStages).hasSize(4)
+        val wcts = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions, times(3)).startTransition(any(), wcts.capture(), any())
+        val restore = wcts.lastValue
+        val reparented = restore.hierarchyOps.filter {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REPARENT
+        }.map { it.container }
+        listOf(10, 20, 30, 40).forEach {
+            assertThat(reparented).contains(organizer.getRunningTaskInfo(it)!!.token.asBinder())
+        }
+        assertThat(groups.get(10)!!.layout.root).isEqualTo(before)
+        coordinator.onTransitionConsumed(token, false, null)
+        verify(remote).onTransitionConsumed(token, false)
+    }
+
     @Test fun pairCardLaunchRestoresButPlainTaskRequestDoesNot() {
         add()
         val group = groups.get(10)!!
