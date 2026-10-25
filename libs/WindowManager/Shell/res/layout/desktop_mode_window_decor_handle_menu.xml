@@ -110,7 +110,7 @@
             android:id="@+id/split_add_button"
             android:contentDescription="@string/split_picker_add_below"
             android:text="@string/split_picker_add_below"
-            android:src="@drawable/desktop_mode_ic_handle_menu_splitscreen"
+            android:src="@drawable/desktop_mode_ic_handle_menu_split_add"
             android:visibility="gone"
             style="@style/DesktopModeHandleMenuActionButton"/>
 
@@ -118,7 +118,7 @@
             android:id="@+id/split_replace_button"
             android:contentDescription="@string/handle_menu_replace_app"
             android:text="@string/handle_menu_replace_app"
-            android:src="@drawable/desktop_mode_ic_handle_menu_splitscreen"
+            android:src="@drawable/desktop_mode_ic_handle_menu_replace_app"
             style="@style/DesktopModeHandleMenuActionButton"/>
 
         <com.android.wm.shell.windowdecor.HandleMenuActionButton
