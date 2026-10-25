@@ -51,6 +51,12 @@ private constructor(
     private val defaultWindowDecor: DefaultWindowDecoration? = null,
     private val captionWindowDecoration: CaptionWindowDecoration? = null,
 ) {
+    fun performFloatingTargetHapticFeedback() {
+        val view = floatingTopHandle?.getTargetFeedbackView()
+            ?: floatingBottomHandle?.getTargetFeedbackView()
+        view?.performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
+    }
+
     private fun requireDefaultWindowDecor(): DefaultWindowDecoration =
         checkNotNull(defaultWindowDecor) { "expected non-null default window decor" }
 
@@ -747,4 +753,72 @@ private constructor(
                 captionWindowDecoration = captionWindowDecoration,
             )
     }
+
+    fun cancelFloatingWindowPreview(t: SurfaceControl.Transaction) {
+        val original = taskInfo
+        val scale = original.floatingWindowScale
+        floatingBottomHandle?.update(original, taskSurface, t)
+        floatingTopHandle?.update(original, taskSurface, t)
+        updateFloatingWindowChildScale(t, scale)
+        if (taskSurface.isValid) {
+            val bounds = original.presentationBounds
+            val logical = original.configuration.windowConfiguration.bounds
+            t.setMatrix(taskSurface, scale, 0f, 0f, scale)
+                .setPosition(taskSurface, bounds.left.toFloat(), bounds.top.toFloat())
+                .setWindowCrop(taskSurface, logical.width(), logical.height())
+        }
+        finishFloatingWindowPreview()
+    }
+
+    fun finishFloatingWindowPreview() {
+        floatingPreviewBounds = null
+        floatingPreviewInfo = null
+        defaultWindowDecor?.floatingWindowPreview = false
+        desktopWindowDecor?.mFloatingWindowPreview = false
+    }
+
+    var floatingMiniPreviewCancellation: (() -> Unit)? = null
+
+    var floatingWindowTransitionListener: (() -> Unit)? = null
+
+    fun updateFloatingWindowChildScale(t: SurfaceControl.Transaction, scale: Float) {
+        defaultWindowDecor?.updateFloatingWindowChildScale(t, scale)
+        desktopWindowDecor?.updateFloatingWindowChildScale(t, scale)
+    }
+
+    fun updateFloatingWindowPreview(bounds: Rect, scale: Float, t: SurfaceControl.Transaction) {
+        val original = taskInfo
+        floatingPreviewRect.set(bounds)
+        floatingPreviewBounds = floatingPreviewRect
+        floatingPreviewScale = scale
+        defaultWindowDecor?.floatingWindowPreview = true
+        desktopWindowDecor?.mFloatingWindowPreview = true
+        relayout(original, t, t, false, false, hasGlobalFocus, exclusionRegion, false, null)
+        updateFloatingWindowChildScale(t, scale)
+        val logical = decorTaskInfo.configuration.windowConfiguration.bounds
+        t.setMatrix(taskSurface, scale, 0f, 0f, scale)
+            .setPosition(taskSurface, bounds.left.toFloat(), bounds.top.toFloat())
+            .setWindowCrop(taskSurface, logical.width(), logical.height())
+    }
+
+    private var floatingPreviewBounds: Rect? = null
+
+    private var floatingPreviewScale = 1f
+
+    private val floatingPreviewRect = Rect()
+
+    private var floatingPreviewInfo: RunningTaskInfo? = null
+
+    private val decorTaskInfo: RunningTaskInfo
+        get() =
+            when {
+                defaultWindowDecor != null -> requireDefaultWindowDecor().taskInfo
+                desktopWindowDecor != null -> requireDesktopWindowDecor().mTaskInfo
+                captionWindowDecoration != null -> requireCaptionWindowDecor().mTaskInfo
+                else -> error("Expected Non-null window decoration")
+            }
+
+    private var floatingBottomHandle: FloatingBottomHandle? = null
+
+    private var floatingTopHandle: FloatingBottomHandle? = null
 }

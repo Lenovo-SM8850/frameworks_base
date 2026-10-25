@@ -2107,4 +2107,15 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
             mUsed = true;
         }
     }
+
+    /**
+     * Fade the resize veil out.
+     */
+    void updateFloatingWindowChildScale(SurfaceControl.Transaction t, float scale) {
+        final float inverse = 1f / scale;
+        if (mDecorationContainerSurface != null) {
+            t.setMatrix(mDecorationContainerSurface, inverse, 0, 0, inverse);
+        }
+        if (mResizeVeil != null) mResizeVeil.updateParentScale(t, scale);
+    }
 }

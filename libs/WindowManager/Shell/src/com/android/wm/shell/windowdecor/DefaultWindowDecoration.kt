@@ -1192,4 +1192,11 @@ constructor(
 
             CaptionController.CaptionType.NO_CAPTION -> null
         }
+
+    /** Fade the resize veil out. */
+    fun updateFloatingWindowChildScale(t: SurfaceControl.Transaction, scale: Float) {
+        val inverse = 1f / scale
+        decorationContainerSurface?.let { t.setMatrix(it, inverse, 0f, 0f, inverse) }
+        resizeVeil?.updateParentScale(t, scale)
+    }
 }

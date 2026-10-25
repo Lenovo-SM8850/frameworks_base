@@ -547,6 +547,7 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
 
     private void updateTaskSurface(RelayoutParams params, SurfaceControl.Transaction startT,
             SurfaceControl.Transaction finishT, RelayoutResult<T> outResult) {
+        if (!mTaskSurface.isValid()) return;
         if (params.mSetTaskVisibilityPositionAndCrop) {
             final Point taskPosition = mTaskInfo.positionInParent;
             startT.setWindowCrop(mTaskSurface, outResult.mWidth, outResult.mHeight);

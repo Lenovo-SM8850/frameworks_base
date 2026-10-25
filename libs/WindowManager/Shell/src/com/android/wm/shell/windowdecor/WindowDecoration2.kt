@@ -94,6 +94,8 @@ abstract class WindowDecoration2<T>(
     },
 ) : AutoCloseable where T : View, T : TaskFocusStateConsumer {
 
+    var floatingWindowPreview = false
+
     @VisibleForTesting var captionController: CaptionController<T>? = null
     /** Returns the display associated with the task. */
     var display: Display? = displayController.getDisplay(taskInfo.displayId)

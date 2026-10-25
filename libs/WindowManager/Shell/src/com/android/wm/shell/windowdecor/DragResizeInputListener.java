@@ -27,6 +27,7 @@ import static com.android.wm.shell.windowdecor.DragPositioningCallback.CTRL_TYPE
 import static com.android.wm.shell.windowdecor.DragPositioningCallback.CTRL_TYPE_LEFT;
 import static com.android.wm.shell.windowdecor.DragPositioningCallback.CTRL_TYPE_RIGHT;
 import static com.android.wm.shell.windowdecor.DragPositioningCallback.CTRL_TYPE_TOP;
+import static com.android.wm.shell.windowdecor.DragPositioningCallback.CTRL_TYPE_UNDEFINED;
 import static com.android.wm.shell.windowdecor.DragPositioningCallbackUtility.getInputMethodFromMotionEvent;
 import static com.android.wm.shell.windowdecor.DragResizeWindowGeometry.isEdgeResizePermitted;
 import static com.android.wm.shell.windowdecor.DragResizeWindowGeometry.isEventFromTouchscreen;
@@ -649,6 +650,9 @@ class DragResizeInputListener implements AutoCloseable {
                                     TAG, e.getActionMasked());
                             break;
                         }
+                        if (e.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                            mCallback.onDragPositioningCancel();
+                        }
                         final Rect taskBounds = mCallback.onDragPositioningEnd(e.getDisplayId(),
                                 e.getRawX(dragPointerIndex), e.getRawY(dragPointerIndex));
                         // If taskBounds has changed, setGeometry will be called and update the
@@ -714,6 +718,7 @@ class DragResizeInputListener implements AutoCloseable {
                     mDragResizeWindowGeometry.calculateCtrlType(/* isTouchscreen= */ false,
                             /* isEdgeResizePermitted= */ true, x, y);
 
+            if (mDragResizeWindowGeometry.isEdgeMove(ctrlType)) ctrlType = CTRL_TYPE_UNDEFINED;
             int cursorType = PointerIcon.TYPE_DEFAULT;
             switch (ctrlType) {
                 case CTRL_TYPE_LEFT:
