@@ -424,6 +424,7 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
                 break;
             case ACTION_DRAG_ENTERED:
                 pd.dragLayout.show();
+                pd.dragLayout.update(event);
                 break;
             case ACTION_DRAG_LOCATION:
                 pd.dragLayout.update(event);
