@@ -46,7 +46,7 @@ class PinnedLayerPermissionObserver(
     }
 
     override fun onPinnedTasksAdded(taskInfo: TaskInfo) {
-        if (appOpsListeners.contains(taskInfo.taskId)) {
+        if (taskInfo.isFloatingWindow || appOpsListeners.contains(taskInfo.taskId)) {
             return
         }
         val appOpsCallback =

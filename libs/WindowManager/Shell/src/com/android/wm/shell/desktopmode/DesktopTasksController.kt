@@ -16,13 +16,12 @@
 
 package com.android.wm.shell.desktopmode
 
-import android.app.ActivityTaskManager
-import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import android.annotation.UserIdInt
 import android.app.ActivityManager
 import android.app.ActivityManager.RecentTaskInfo
 import android.app.ActivityManager.RunningTaskInfo
 import android.app.ActivityOptions
+import android.app.ActivityTaskManager
 import android.app.ActivityTaskManager.INVALID_TASK_ID
 import android.app.AppOpsManager
 import android.app.KeyguardManager
@@ -157,6 +156,7 @@ import com.android.wm.shell.desktopmode.multidesks.OnDeskRemovedListener
 import com.android.wm.shell.desktopmode.multidesks.PreserveDisplayRequestHandler
 import com.android.wm.shell.draganddrop.DragAndDropController
 import com.android.wm.shell.freeform.FreeformTaskTransitionStarter
+import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import com.android.wm.shell.pip2.phone.PipScheduler
 import com.android.wm.shell.pip2.phone.PipTransitionState
 import com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_DESKTOP_MODE
@@ -296,6 +296,36 @@ class DesktopTasksController(
                 it.width().toFloat() / it.height().coerceAtLeast(1)
             }
 
+    fun rememberFloatingOrientation(task: TaskInfo, landscape: Boolean, bounds: Rect) {
+        pinnedLayerController?.rememberManualOrientation(task, landscape, bounds)
+    }
+
+    fun setPinnedLayerController(controller: PinnedLayerController) {
+        pinnedLayerController = controller
+    }
+
+    /** Starts an activity PendingIntent directly in the floating layer. */
+    fun startFloatingIntent(pendingIntent: PendingIntent) {
+        if (!pendingIntent.isActivity || lockTaskChangeListener.isTaskLocked ||
+            keyguardManager.isKeyguardLocked) return
+        val options = ActivityOptions.makeBasic()
+        options.setLaunchFloatingWindow(true)
+        options.setPendingIntentBackgroundActivityStartMode(
+            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
+        )
+        val task = RunningTaskInfo()
+        task.displayId = DEFAULT_DISPLAY
+        task.userId = pendingIntent.creatorUserHandle.identifier
+        task.baseIntent = pendingIntent.intent
+        task.baseActivity = task.baseIntent?.component
+        pinnedLayerController?.getFloatingLaunchBounds(task)?.let { options.setLaunchBounds(it) }
+        try {
+            // WM resolves task reuse before requesting pinned-layer preparation and split exit.
+            pendingIntent.send(context, 0, null, null, handler, null, options.toBundle())
+        } catch (e: PendingIntent.CanceledException) {
+            logE("Failed to start floating PendingIntent: %s", e)
+        }
+    }
 
     private var visualIndicator: DesktopModeVisualIndicator? = null
 
@@ -412,6 +442,7 @@ class DesktopTasksController(
 
     private fun onInit() {
         logD("onInit")
+        registerFloatingReceiver()
         // TODO(b/467367552): Remove when refactoring is completed.
         desksController.setBackDependency(this)
         if (Flags.enableRememberedBounds()) {
@@ -2181,6 +2212,7 @@ class DesktopTasksController(
                     null
                 }
         taskInfo?.let { task ->
+            if (pinnedLayerController?.maximizeTask(task) == true) return
             snapController.removeTaskIfTiled(task.displayId, taskId)
             moveToFullscreenWithAnimation(
                 task,
@@ -3854,6 +3886,8 @@ class DesktopTasksController(
             logV("skipping handleRequest reason=triggerTask is null")
             return null
         }
+        if (triggerTask.isFloatingWindow ||
+            pinnedLayerController?.isPinned(triggerTask.taskId) == true) return null
         val windowingLayerChange = request.windowingLayerChange
         val recentsAnimationRunning =
             RecentsTransitionStateListener.isAnimating(recentsTransitionState)
@@ -4307,6 +4341,7 @@ class DesktopTasksController(
         transition: IBinder,
         @WindowManager.TransitionType requestType: Int,
     ): WindowContainerTransaction? {
+        if (task.isFloatingWindow || pinnedLayerController?.isPinned(task.taskId) == true) return null
         logV("handleFreeformTaskLaunch taskId=%d displayId=%d", task.taskId, task.displayId)
         if (keyguardManager.isKeyguardLocked) {
             // Do NOT handle freeform task launch when locked.
@@ -5811,7 +5846,10 @@ class DesktopTasksController(
             // TODO: b/404595635 - consider moving this block into [DesksOrganizer].
             val task = shellTaskOrganizer.getRunningTaskInfo(it)
             if (task != null) {
-                wct.removeTask(task.token)
+                if (!task.isFloatingWindow &&
+                    pinnedLayerController?.isPinned(task.taskId) != true) {
+                    wct.removeTask(task.token)
+                }
             } else {
                 recentTasksController?.removeBackgroundTask(it)
             }
@@ -7116,6 +7154,8 @@ class DesktopTasksController(
     }
 
     companion object {
+        const val ACTION_LAUNCH_FLOATING_WINDOW =
+            "com.android.wm.shell.action.LAUNCH_FLOATING_WINDOW"
         // Timeout used for CUJ_DESKTOP_MODE_ENTER_APP_HANDLE_DRAG_HOLD/RELEASE, this is longer than
         // the default timeout to avoid timing out in the middle of a drag action.
         private val APP_HANDLE_DRAG_CUJ_TIMEOUT_MS: Long = TimeUnit.SECONDS.toMillis(10L)
@@ -7233,6 +7273,125 @@ class DesktopTasksController(
     }
 
     private var pinnedLayerController: PinnedLayerController? = null
+
+    private fun registerFloatingReceiver() {
+        context.registerReceiverAsUser(
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (intent.action != ACTION_LAUNCH_FLOATING_WINDOW) return
+                    val taskId = intent.getIntExtra("task_id", -1)
+                    if (taskId >= 0) {
+                        val task = shellTaskOrganizer.getRunningTaskInfo(taskId)
+                            ?: recentTasksController?.findTaskInBackground(taskId)
+                        if (task?.userId == sendingUserId) moveToFloating(taskId)
+                    } else {
+                        intent.getParcelableExtra("pending_intent", PendingIntent::class.java)
+                            ?.let { startFloatingIntent(it) }
+                    }
+                }
+            },
+            UserHandle.ALL,
+            IntentFilter(ACTION_LAUNCH_FLOATING_WINDOW),
+            android.Manifest.permission.STATUS_BAR_SERVICE,
+            handler,
+            Context.RECEIVER_EXPORTED,
+        )
+    }
+
+    fun canMoveDeskToFloating(task: TaskInfo): Boolean {
+        if (task.displayId != DEFAULT_DISPLAY || task.isFloatingWindow ||
+            task.windowingMode != WINDOWING_MODE_FREEFORM ||
+            task.activityType != ACTIVITY_TYPE_STANDARD || pinnedLayerController == null) return false
+        val repository = userRepositories.getProfile(task.userId)
+        val deskId = repository.getActiveDeskId(task.displayId) ?: return false
+        return repository.isActiveTaskInDesk(task.taskId, deskId)
+    }
+
+    /** Converts an existing task without creating a replacement activity or a desk. */
+    fun moveToFloating(taskId: Int): Boolean {
+        if (lockTaskChangeListener.isTaskLocked || keyguardManager.isKeyguardLocked) return false
+        val task = shellTaskOrganizer.getRunningTaskInfo(taskId)
+        val controller = pinnedLayerController ?: return false
+        if (task == null) {
+            val recentTask = recentTasksController?.findTaskInBackground(taskId) ?: return false
+            if (!recentTask.isResizeable ||
+                recentTask.activityType != ACTIVITY_TYPE_STANDARD ||
+                desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(recentTask)) return false
+            recentTask.displayId = DEFAULT_DISPLAY
+            val options = ActivityOptions.makeBasic()
+            options.setLaunchFloatingWindow(true)
+            controller.getFloatingLaunchBounds(recentTask)?.let { options.setLaunchBounds(it) }
+            return try {
+                // Let WM request the transition so pinned-layer preparation also runs on restore.
+                ActivityTaskManager.getService().startActivityFromRecents(taskId, options.toBundle())
+                true
+            } catch (e: RemoteException) {
+                logE("Failed to start floating task=%d: %s", taskId, e)
+                false
+            }
+        }
+        if (canMoveDeskToFloating(task)) return moveDeskToFloating(task)
+        if (desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(task)) return false
+        val wct = WindowContainerTransaction()
+        if (!controller.prepareFloatingTask(task, wct)) return false
+        if (splitScreenController.isTaskInSplitScreen(taskId)) {
+            val exitWct = WindowContainerTransaction()
+            addExitSplitForFloating(exitWct, task)
+            // Reparenting out of split precedes floating bounds and always-on-top changes.
+            exitWct.merge(wct, true)
+            transitions.startTransition(TRANSIT_CHANGE, exitWct, null)
+        } else {
+            transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        }
+        return true
+    }
+
+    private fun moveDeskToFloating(selected: RunningTaskInfo): Boolean {
+        val controller = pinnedLayerController ?: return false
+        val repository = userRepositories.getProfile(selected.userId)
+        val deskId = repository.getActiveDeskId(selected.displayId) ?: return false
+        val tda = rootTaskDisplayAreaOrganizer.getDisplayAreaInfo(selected.displayId) ?: return false
+        val ordered = repository.getFreeformTasksIdsInDeskInZOrder(deskId)
+            .mapNotNull(shellTaskOrganizer::getRunningTaskInfo)
+        val eligible = ordered.filter { task -> task.isResizeable &&
+            task.activityType == ACTIVITY_TYPE_STANDARD &&
+            !desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(task) }
+        val live = eligible.filterNot { repository.isMinimizedTask(it.taskId) }
+            .take(PinnedLayerController.MAX_VISIBLE_FLOATING_TASKS).map { it.taskId }.toSet()
+        val wct = WindowContainerTransaction()
+        val cleanup = performDesktopExitCleanUp(wct, deskId, selected.displayId, selected.userId,
+            willExitDesktop = true, removingLastTaskId = null,
+            exitReason = ExitReason.TASK_MOVED_FROM_DESK)
+        ordered.asReversed().forEach { task ->
+            addMoveToFullscreenChanges(wct, task, willExitDesktop = false,
+                skipSetWindowingMode = true)
+            val minimized = repository.isMinimizedTask(task.taskId)
+            val float = task in eligible && (minimized || task.taskId in live) &&
+                controller.prepareFloatingTask(task, wct,
+                    Rect(task.configuration.windowConfiguration.bounds), minimized)
+            if (!float) {
+                addMoveToFullscreenChanges(wct, task, willExitDesktop = false)
+                wct.setHidden(task.token, false).reparent(task.token, tda.token, false)
+            }
+        }
+        val transition = transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        cleanup?.invoke(transition)
+        ordered.forEach { repository.removeTaskFromDesk(deskId, it.taskId) }
+        return true
+    }
+
+    /** Collapses a multi-app leaf, or dissolves an ordinary pair with its companion on top. */
+    fun addExitSplitForFloating(wct: WindowContainerTransaction, task: TaskInfo) {
+        if (!splitScreenController.isTaskInSplitScreen(task.taskId)) return
+        if (splitScreenController.prepareSplitLeafToFloating(task.taskId, wct)) return
+        val other = splitScreenController.allTaskInfos.firstOrNull { it.taskId != task.taskId }
+        splitScreenController.prepareExitSplitScreen(
+            wct,
+            other?.let { splitScreenController.getStageOfTask(it.taskId) }
+                ?: splitScreenController.getStageOfTask(task.taskId),
+            EXIT_REASON_DESKTOP_MODE,
+        )
+    }
 
     fun createFloatingMiniPreview(task: RunningTaskInfo,
         taskSurface: SurfaceControl): VisualIndicatorViewContainer? {

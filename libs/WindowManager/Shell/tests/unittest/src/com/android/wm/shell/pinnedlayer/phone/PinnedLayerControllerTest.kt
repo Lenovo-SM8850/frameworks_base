@@ -141,6 +141,65 @@ class PinnedLayerControllerTest : ShellTestCase() {
             )
     }
 
+    private fun initController() {
+        val init = argumentCaptor<Runnable>()
+        verify(shellInit).addInitCallback(init.capture(), eq(pinnedLayerController))
+        init.firstValue.run()
+    }
+
+    @Test
+    fun vanishedDesktopTask_doesNotNotifyFloatingListeners() {
+        val init = argumentCaptor<Runnable>()
+        verify(shellInit).addInitCallback(init.capture(), eq(pinnedLayerController))
+        init.firstValue.run()
+        val vanished = argumentCaptor<ShellTaskOrganizer.TaskVanishedListener>()
+        verify(shellTaskOrganizer).addTaskVanishedListener(vanished.capture())
+        val listener = mock<PinnedLayerController.PinnedTasksListener>()
+        pinnedLayerController.addPinnedTasksListener(listener)
+        vanished.firstValue.onTaskVanished(android.app.ActivityManager.RunningTaskInfo().apply {
+            taskId = 77
+            isFloatingWindow = false
+        })
+        verifyNoInteractions(listener)
+    }
+
+    @Test
+    fun floatingDragEnded_preservesPreImeBasePosition() {
+        val task = setupTask(bounds = Rect(100, 100, 900, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            floatingWindowPosition.set(100, 300)
+            positionInParent = android.graphics.Point(100, 120)
+        }
+        pinTask(task)
+        org.mockito.Mockito.clearInvocations(shellTaskOrganizer, transitions)
+        val start = task.presentationBounds
+        val end = Rect(start).apply { offset(60, 80) }
+        assertTrue(pinnedLayerController.onDragEnded(leash, task, start, end))
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(wct.capture())
+        val change = wct.firstValue.changes[task.token.asBinder()]!!
+        assertEquals(android.graphics.Point(160, 380), change.floatingWindowPosition)
+        assertEquals(.75f, change.floatingWindowScale)
+        assertEquals(0, change.windowSetMask and WindowConfiguration.WINDOW_CONFIG_BOUNDS)
+    }
+
+    @Test
+    fun floatingDragEnded_withoutMovementDoesNotCommitImeOffset() {
+        val task = setupTask(bounds = Rect(100, 100, 900, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            floatingWindowPosition.set(100, 300)
+            positionInParent = android.graphics.Point(100, 120)
+        }
+        pinTask(task)
+        org.mockito.Mockito.clearInvocations(shellTaskOrganizer, transitions)
+        val bounds = task.presentationBounds
+        assertTrue(pinnedLayerController.onDragEnded(leash, task, bounds, Rect(bounds)))
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
+        verify(transitions, never()).startTransition(any(), any(), anyOrNull())
+    }
+
     @Test
     fun dragEnded_notPinnedTask_doNothing() {
         val task = setupTask()
@@ -303,45 +362,13 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
-    fun moveToDisplay_policiesAreValid_startTransition() {
+    fun moveToDisplay_nonDefaultDisplay_rejected() {
         val task = setupTask()
         pinTask(task)
         setupDisplay(DISPLAY_1, isDesktopModeSupported = true)
 
-        val result = pinnedLayerController.moveToDisplay(task, DISPLAY_1, DEFAULT_TASK_BOUNDS)
-        assertTrue(result)
-    }
-
-    @Test
-    fun moveToDisplay_taskHasInvalidBounds_clampBoundsAndMove() {
-        val task = setupTask()
-        pinTask(task)
-        setupDisplay(DISPLAY_1)
-
-        val displayLayout = requireNotNull(displayController.getDisplayLayout(DISPLAY_1))
-        val newBounds = Rect(DEFAULT_TASK_BOUNDS)
-        // The window was moved behind the right edge.
-        newBounds.offset(displayLayout.width(), 0)
-
-        // Assert transition was started.
-        val result = pinnedLayerController.moveToDisplay(task, DISPLAY_1, newBounds)
-        assertTrue(result)
-
-        // Assert bounds change.
-        val wctCaptor = argumentCaptor<WindowContainerTransaction>()
-        verify(transitions).startTransition(any(), wctCaptor.capture(), anyOrNull())
-
-        val wct = wctCaptor.firstValue
-        val changeBounds = wct.findBoundsChange(task)
-        val expectedBounds =
-            Rect(
-                DISPLAY_STABLE_BOUNDS.right - MIN_WINDOW_SIZE,
-                newBounds.top,
-                DISPLAY_STABLE_BOUNDS.right,
-                newBounds.bottom,
-            )
-
-        assertEquals(expectedBounds, changeBounds)
+        assertFalse(pinnedLayerController.moveToDisplay(task, DISPLAY_1, DEFAULT_TASK_BOUNDS))
+        verify(transitions, never()).startTransition(any(), any(), anyOrNull())
     }
 
     @Test
@@ -376,15 +403,12 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
-    fun onDisplayDisconnect_taskOnRemovedDisplay_returnsWct() {
+    fun pinTask_nonDefaultDisplay_rejected() {
         setupDisplay(displayId = DISPLAY_1, isDesktopModeSupported = true)
         val task = setupTask(displayId = DISPLAY_1)
 
-        pinTask(task)
-
-        val wct =
-            pinnedLayerController.getDisplayDisconnectChanges(mock(), DISPLAY_1, DEFAULT_DISPLAY)
-        assertNotNull(wct, "wct should not be null if task is on disconnected display")
+        assertTrue(pinnedLayerController.pinTask(mock(), task, null) == null)
+        assertFalse(pinnedLayerController.isPinned(task.taskId))
     }
 
     @Test
@@ -400,7 +424,7 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
-    fun checkFullscreenTaskOpened_closesPinnedTask() {
+    fun checkFullscreenTaskOpened_keepsPinnedTask() {
         val pinnedTask = setupTask(displayId = DEFAULT_DISPLAY)
         pinTask(pinnedTask)
 
@@ -416,11 +440,12 @@ class PinnedLayerControllerTest : ShellTestCase() {
 
         pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
 
-        verify(transitions).startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull())
+        verify(transitions, never()).startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull())
+        assertTrue(pinnedLayerController.isPinned(pinnedTask.taskId))
     }
 
     @Test
-    fun checkFullscreenTaskToFront_closesPinnedTask() {
+    fun checkFullscreenTaskToFront_keepsPinnedTask() {
         val pinnedTask = setupTask(displayId = DEFAULT_DISPLAY)
         pinTask(pinnedTask)
 
@@ -436,11 +461,12 @@ class PinnedLayerControllerTest : ShellTestCase() {
 
         pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
 
-        verify(transitions).startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull())
+        verify(transitions, never()).startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull())
+        assertTrue(pinnedLayerController.isPinned(pinnedTask.taskId))
     }
 
     @Test
-    fun checkFullscreenTaskChanged_closesPinnedTask() {
+    fun checkFullscreenTaskChanged_keepsPinnedTask() {
         val pinnedTask = setupTask(displayId = DEFAULT_DISPLAY)
         pinTask(pinnedTask)
 
@@ -456,7 +482,8 @@ class PinnedLayerControllerTest : ShellTestCase() {
 
         pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
 
-        verify(transitions).startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull())
+        verify(transitions, never()).startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull())
+        assertTrue(pinnedLayerController.isPinned(pinnedTask.taskId))
     }
 
     @Test
@@ -518,6 +545,122 @@ class PinnedLayerControllerTest : ShellTestCase() {
         pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
 
         verify(transitions, never()).startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull())
+    }
+
+    @Test
+    fun expandedFloatingEligibility_excludesMiniStashMinimizedAndOtherDisplays() {
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        val task = setupTask(taskId = 201).apply { isVisible = true }
+        pinTask(task)
+        task.isFloatingWindow = true
+        assertTrue(pinnedLayerController.hasExpandedFloatingWindows())
+        val entry = presentationController.miniState.enter(task.userId, task.taskId,
+            FloatingMiniState.Restore(Rect(DEFAULT_TASK_BOUNDS), Rect(DEFAULT_TASK_BOUNDS), 1f),
+            Rect(0, 0, 100, 100), .3f)
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        entry.edge = FloatingMiniState.Edge.LEFT
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        presentationController.miniState.remove(task.userId, task.taskId)
+        task.isVisible = false
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        task.isVisible = true
+        task.displayId = 1
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+        task.displayId = DEFAULT_DISPLAY
+        pinnedLayerController.minimizeTask(task)
+        assertFalse(pinnedLayerController.hasExpandedFloatingWindows())
+    }
+
+    @Test
+    fun pinTask_secondWindow_doesNotRemoveFirst() {
+        val first = setupTask(taskId = 201)
+        pinTask(first)
+        val second = setupTask(taskId = 202)
+
+        val wct = requireNotNull(pinnedLayerController.pinTask(mock(), second, null))
+
+        assertTrue(pinnedLayerController.isPinned(first.taskId))
+        assertFalse(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
+        })
+    }
+
+    @Test
+    fun pinTask_sixthWindow_minimizesOldestWithoutClosing() {
+        val tasks = (201..206).map { setupTask(taskId = it) }
+        tasks.take(5).forEach { pinTask(it) }
+
+        val wct = requireNotNull(pinnedLayerController.pinTask(mock(), tasks.last(), null))
+
+        assertTrue(wct.changes[tasks.first().token.asBinder()]?.hidden == true)
+        assertTrue(wct.hierarchyOps.any {
+            it.container == tasks.first().token.asBinder() &&
+                it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REORDER &&
+                !it.toTop
+        })
+        assertFalse(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
+        })
+        assertTrue(pinnedLayerController.isPinned(tasks.first().taskId))
+    }
+
+    @Test
+    fun maximizeTask_clearsFloatingAndKeepsTask() {
+        val task = setupTask(taskId = 201)
+        pinTask(task)
+
+        assertTrue(pinnedLayerController.maximizeTask(task))
+
+        val captor = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions).startTransition(eq(TRANSIT_CHANGE), captor.capture(), anyOrNull())
+        val wct = captor.firstValue
+        assertEquals(WINDOWING_MODE_FULLSCREEN,
+            wct.changes[task.token.asBinder()]?.windowingMode)
+        val change = requireNotNull(wct.changes[task.token.asBinder()])
+        assertTrue(change.changeMask and
+            WindowContainerTransaction.Change.CHANGE_FLOATING_WINDOW != 0)
+        assertFalse(change.floatingWindow)
+        assertTrue(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ALWAYS_ON_TOP &&
+                it.container == task.token.asBinder() && !it.isAlwaysOnTop
+        })
+        assertFalse(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
+        })
+    }
+
+    @Test
+    fun pinRequest_restoresMinimizedFloatingTaskAndAppliesCapacity() {
+        val tasks = (401..406).map { setupTask(taskId = it) }
+        tasks.forEach { pinTask(it) }
+
+        val wct = requireNotNull(pinnedLayerController.pinTask(mock(), tasks.first(), null))
+
+        assertFalse(requireNotNull(wct.changes[tasks.first().token.asBinder()]).hidden)
+        assertTrue(requireNotNull(wct.changes[tasks[1].token.asBinder()]).hidden)
+        assertTrue(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REPARENT &&
+                it.container == tasks.first().token.asBinder() && it.toTop
+        })
+    }
+
+    @Test
+    fun overviewVisibility_hidesAndRestoresFloatingTask() {
+        val task = setupTask(taskId = 201)
+        pinTask(task)
+        whenever(shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)).thenReturn(arrayListOf(task))
+        val shellController = mock<ShellController>()
+        pinnedLayerController.configureVisibility(shellController, mock<RecentsTransitionHandler>())
+        val listener = argumentCaptor<OverviewVisibilityChangeListener>()
+        verify(shellController).addOverviewVisibilityChangeListener(listener.capture())
+
+        listener.firstValue.onOverviewShown(DEFAULT_DISPLAY)
+        listener.firstValue.onOverviewHidden(DEFAULT_DISPLAY)
+
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer, org.mockito.kotlin.times(2)).applyTransaction(wct.capture())
+        assertTrue(wct.firstValue.changes[task.token.asBinder()]!!.hidden)
+        assertFalse(wct.lastValue.changes[task.token.asBinder()]!!.hidden)
     }
 
     private fun setupTask(
@@ -614,5 +757,48 @@ class PinnedLayerControllerTest : ShellTestCase() {
                 DISPLAY_WIDTH - DISPLAY_STABLE_INSETS.right,
                 DISPLAY_HEIGHT - DISPLAY_STABLE_INSETS.bottom,
             )
+    }private fun assertHomeVisibility(count: Int, overview: Boolean) {
+        val tasks = (0 until count).map { setupTask(taskId = 201 + it).also(::pinTask) }
+        val shellController = mock<ShellController>()
+        val recents = mock<RecentsTransitionHandler>()
+        pinnedLayerController.configureVisibility(shellController, recents)
+        val listener = argumentCaptor<com.android.wm.shell.recents.RecentsTransitionStateListener>()
+        verify(recents).addTransitionStateListener(listener.capture())
+        whenever(shellController.isOverviewVisible(DEFAULT_DISPLAY)).thenReturn(overview)
+        org.mockito.kotlin.doAnswer { invocation ->
+            invocation.getArgument<Runnable>(0).run()
+            null
+        }.whenever(transitions).runOnIdle(any())
+        listener.firstValue.onTransitionStateChanged(3, DEFAULT_DISPLAY)
+        listener.firstValue.onTransitionStateChanged(1, DEFAULT_DISPLAY)
+        whenever(shellController.isOverviewVisible(DEFAULT_DISPLAY)).thenReturn(false)
+        listener.firstValue.onTransitionFinishedToHome(DEFAULT_DISPLAY)
+        val transactions = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer, org.mockito.kotlin.atLeastOnce())
+            .applyTransaction(transactions.capture())
+        transactions.allValues.forEach { transaction ->
+            assertTrue(transaction.hierarchyOps.isEmpty())
+            if (!overview) {
+                tasks.forEach { assertFalse(transaction.changes[it.token.asBinder()]!!.hidden) }
+            }
+        }
+        tasks.forEach {
+            assertFalse(transactions.lastValue.changes[it.token.asBinder()]!!.hidden)
+            assertTrue(pinnedLayerController.isPinned(it.taskId))
+        }
     }
+
+
+    @Test
+    fun deskMinimizedEntry_retainsFloatingIdentityAndEdgeRestoreGeometry() {
+        val task = setupTask(bounds = Rect(100, 100, 700, 900))
+        val wct = WindowContainerTransaction()
+        assertTrue(pinnedLayerController.prepareFloatingTask(task, wct,
+            task.configuration.windowConfiguration.bounds, true))
+        assertTrue(pinnedLayerController.isPinned(task.taskId))
+        assertTrue(wct.changes[task.token.asBinder()]!!.hidden)
+        assertEquals(Rect(100, 100, 700, 900), task.configuration.windowConfiguration.bounds)
+        assertTrue(wct.hierarchyOps.any { !it.toTop })
+    }
+
 }

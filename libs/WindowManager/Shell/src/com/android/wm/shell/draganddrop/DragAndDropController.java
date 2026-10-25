@@ -649,4 +649,20 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
             dragLayout.dump(pw, innerPrefix);
         }
     }
+
+    public void setSidebarFloatingController(
+            Lazy<java.util.Optional<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>>
+                    controller) {
+        mSidebarFloatingController = controller;
+    }
+
+    public void setSidebarTaskStackListener(
+            com.android.wm.shell.common.TaskStackListenerImpl listener) {
+        mSidebarTaskStackListener = listener;
+    }
+
+    private Lazy<java.util.Optional<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>>
+            mSidebarFloatingController;
+
+    private com.android.wm.shell.common.TaskStackListenerImpl mSidebarTaskStackListener;
 }
