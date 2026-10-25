@@ -29,7 +29,7 @@ import static android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_M
 import static android.view.WindowManager.LayoutParams.PRIVATE_FLAG_INTERCEPT_GLOBAL_DRAG_AND_DROP;
 import static android.view.WindowManager.LayoutParams.PRIVATE_FLAG_NO_MOVE_ANIMATION;
 import static android.view.WindowManager.LayoutParams.SYSTEM_FLAG_SHOW_FOR_ALL_USERS;
-import static android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+import static android.view.WindowManager.LayoutParams.TYPE_DRAG;
 
 import android.annotation.UserIdInt;
 import android.app.ActivityManager;
@@ -261,11 +261,11 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
         }
 
         final Context context = mDisplayController.getDisplayContext(displayId)
-                .createWindowContext(TYPE_APPLICATION_OVERLAY, null);
+                .createWindowContext(TYPE_DRAG, null);
         final WindowManager wm = context.getSystemService(WindowManager.class);
         final WindowManager.LayoutParams layoutParams = new WindowManager.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-                TYPE_APPLICATION_OVERLAY,
+                TYPE_DRAG,
                 FLAG_NOT_FOCUSABLE | FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT);
         layoutParams.privateFlags |= SYSTEM_FLAG_SHOW_FOR_ALL_USERS
