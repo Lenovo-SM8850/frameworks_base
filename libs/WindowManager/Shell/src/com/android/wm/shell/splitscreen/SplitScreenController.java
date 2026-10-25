@@ -535,6 +535,58 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         return mStageCoordinator.getPendingSidebarSplitSlot(displayId);
     }
 
+    public boolean launchSidebarIntoPendingSplit(ComponentName component, UserHandle user, int displayId) {
+        if (mSplitPicker != null && mSplitPicker.launchSidebarApp(component, user, displayId)) return true;
+        final AppDragSlot slot = getPendingSidebarSplitSlot(displayId);
+        final ActivityManager.RunningTaskInfo selected = mStageCoordinator.getPendingSidebarSplitSelect();
+        if (slot == null || selected == null || !canStartSidebarSplit(component, user.getIdentifier(), selected)) {
+            return false;
+        }
+        final PendingIntent pending = PendingIntent.getActivityAsUser(mContext, 0,
+                Intent.makeMainActivity(component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT, null, user);
+        mStageCoordinator.clearPendingSidebarSplitSelect();
+        startIntentAndTask(pending, user.getIdentifier(), ActivityOptions.makeBasic().toBundle(),
+                selected.taskId, null, slot.position, com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_50_50, null, null);
+        return true;
+    }
+
+    /** Starts a sidebar drop against its coordinator-owned preview, revalidating on Shell main. */
+    public boolean startSidebarIntent(PendingIntent intent, int userId, @Nullable Intent fillIn,
+            Bundle options, AppDragSlot slot) {
+        if (slot.leafId < 0) {
+            startIntent(intent, userId, fillIn, slot.position, options, null, slot.index);
+            return true;
+        }
+        final ComponentName component = intent.getIntent().getComponent();
+        final Intent launch = fillIn == null ? new Intent() : new Intent(fillIn);
+        if (intent.isImmutable()) {
+            launch.removeFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        } else {
+            launch.addFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        }
+        for (ActivityManager.RunningTaskInfo task : mTaskOrganizer.getRunningTasks()) {
+            if (task.userId == userId && isTaskInSplitScreen(task.taskId)
+                    && task.baseActivity != null && component != null
+                    && task.baseActivity.getPackageName().equals(component.getPackageName())) {
+                if (!mMultiInstanceHelpher.supportsMultiInstanceSplit(component, userId)) return false;
+                launch.addFlags(FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
+            }
+        }
+        return mStageCoordinator.startSidebarIntent(intent, launch,
+                pendingIntentLaunchOptions(options, launch.getFlags()), slot);
+    }
+
+    /** Checks same-app multi-instance support before promising a split destination. */
+    public boolean canStartSidebarSplit(ComponentName component, int userId,
+            @Nullable ActivityManager.RunningTaskInfo companion) {
+        // An existing split can switch positions through the normal intent starter.
+        return isSplitScreenVisible() || companion == null || companion.userId != userId
+                || companion.baseActivity == null
+                || !component.getPackageName().equals(companion.baseActivity.getPackageName())
+                || mMultiInstanceHelpher.supportsMultiInstanceSplit(component, userId);
+    }
+
     public boolean isSplitScreenFocused() {
         return mStageCoordinator.isSplitScreenFocused();
     }

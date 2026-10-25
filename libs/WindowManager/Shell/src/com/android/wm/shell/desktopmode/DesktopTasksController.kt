@@ -176,6 +176,7 @@ import com.android.wm.shell.shared.bubbles.logging.BubbleLog
 import com.android.wm.shell.shared.desktopmode.DesktopConfig
 import com.android.wm.shell.shared.desktopmode.DesktopModeTransitionSource
 import com.android.wm.shell.shared.desktopmode.DesktopTaskToFrontReason
+import com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_50_50
 import com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_INDEX_UNDEFINED
 import com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_POSITION_BOTTOM_OR_RIGHT
 import com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_POSITION_TOP_OR_LEFT
@@ -290,6 +291,63 @@ class DesktopTasksController(
     RemoteCallable<DesktopTasksController>,
     DragAndDropController.DragAndDropListener,
     UserChangeListener {
+
+    private var pinnedLayerController: PinnedLayerController? = null
+
+    // Launcher owns split select. Remember only selections requested by this controller.
+    private data class PendingSplitSelect(
+        val taskId: Int,
+        val displayId: Int,
+        val userId: Int,
+        val splitPosition: Int,
+        var recentsStarted: Boolean = false,
+        var recentsFinished: Boolean = false,
+        var secondTaskId: Int = INVALID_TASK_ID,
+    )
+
+    private var pendingSplitSelect: PendingSplitSelect? = null
+    private var pendingSplitSelectTimeout: Runnable? = null
+
+    private fun clearPendingSplitSelect() {
+        pendingSplitSelectTimeout?.let(handler::removeCallbacks)
+        pendingSplitSelectTimeout = null
+        pendingSplitSelect = null
+    }
+
+    private fun trackPendingSplitSelect(task: RunningTaskInfo, splitPosition: Int) {
+        clearPendingSplitSelect()
+        val pending = PendingSplitSelect(task.taskId, task.displayId, task.userId, splitPosition)
+        pendingSplitSelect = pending
+        // Older launchers don't report every split-select cancellation to Shell.
+        val timeout = Runnable {
+            if (pendingSplitSelect === pending) clearPendingSplitSelect()
+        }
+        pendingSplitSelectTimeout = timeout
+        handler.postDelayed(timeout, TimeUnit.MINUTES.toMillis(2))
+    }
+
+    private fun onSplitSelectTaskChanged(task: RunningTaskInfo) {
+        val pending = pendingSplitSelect ?: return
+        if (pending.secondTaskId != INVALID_TASK_ID) {
+            if (task.taskId == pending.taskId || task.taskId == pending.secondTaskId) {
+                val first = shellTaskOrganizer.getRunningTaskInfo(pending.taskId)
+                val second = shellTaskOrganizer.getRunningTaskInfo(pending.secondTaskId)
+                if (first?.windowingMode == WINDOWING_MODE_MULTI_WINDOW &&
+                    second?.windowingMode == WINDOWING_MODE_MULTI_WINDOW) {
+                    clearPendingSplitSelect()
+                }
+            }
+            return
+        }
+        if (task.taskId == pending.taskId &&
+            (task.displayId != pending.displayId || task.userId != pending.userId ||
+                task.windowingMode == WINDOWING_MODE_MULTI_WINDOW ||
+                (pending.recentsFinished &&
+                    (task.isFloatingWindow || (task.isFocused && task.isVisible))))) {
+            clearPendingSplitSelect()
+        }
+    }
+
     fun originalFloatingAspect(task: TaskInfo): Float =
         pinnedLayerController?.originalFloatingAspect(task)
             ?: task.configuration.windowConfiguration.bounds.let {
@@ -591,6 +649,45 @@ class DesktopTasksController(
                         RecentsTransitionStateListener.stateToString(state),
                     )
                     recentsTransitionState = state
+                    val pending = pendingSplitSelect
+                    if (pending != null && pending.displayId == displayId) {
+                        if (RecentsTransitionStateListener.isRunning(state)) {
+                            if (pending.recentsFinished) clearPendingSplitSelect()
+                            else pending.recentsStarted = true
+                        } else if (pending.recentsStarted) {
+                            pending.recentsFinished = true
+                        }
+                    }
+                }
+
+                override fun onHomeGestureFinished(displayId: Int) {
+                    if (pendingSplitSelect?.displayId == displayId) clearPendingSplitSelect()
+                }
+            }
+        )
+        shellTaskOrganizer.addTaskVanishedListener(object : ShellTaskOrganizer.TaskVanishedListener {
+            override fun onTaskVanished(taskInfo: RunningTaskInfo) {
+                if (pendingSplitSelect?.taskId == taskInfo.taskId ||
+                    pendingSplitSelect?.secondTaskId == taskInfo.taskId ||
+                    taskInfo.activityType == ACTIVITY_TYPE_HOME) {
+                    clearPendingSplitSelect()
+                }
+            }
+        })
+        shellTaskOrganizer.addTaskInfoChangedListener(
+            object : ShellTaskOrganizer.TaskInfoChangedListener {
+                override fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+                    onSplitSelectTaskChanged(taskInfo)
+                }
+            }
+        )
+        shellController.addOverviewVisibilityChangeListener(
+            object : OverviewVisibilityChangeListener {
+                override fun onOverviewHidden(displayId: Int) {
+                    if (pendingSplitSelect?.let {
+                            it.displayId == displayId && it.recentsFinished &&
+                                it.secondTaskId == INVALID_TASK_ID
+                        } == true) clearPendingSplitSelect()
                 }
             }
         )
@@ -1934,9 +2031,21 @@ class DesktopTasksController(
      *
      * @param taskInfo task entering split that requires a bounds update
      */
-    fun onDesktopSplitSelectChoice(taskInfo: RunningTaskInfo) {
+    fun onDesktopSplitSelectChoice(taskInfo: RunningTaskInfo?) {
+        if (taskInfo == null) {
+            clearPendingSplitSelect()
+            return
+        }
+        if (pendingSplitSelect?.taskId == taskInfo.taskId) {
+            // A late placeholder callback must not reset bounds during our pair transition.
+            if (pendingSplitSelect?.secondTaskId != INVALID_TASK_ID) return
+            clearPendingSplitSelect()
+        }
+        // Launcher can send a cached task after it was closed or replaced during selection.
+        val task = shellTaskOrganizer.getRunningTaskInfo(taskInfo.taskId) ?: return
+        val token = task.token ?: return
         val wct = WindowContainerTransaction()
-        wct.setBounds(taskInfo.token, Rect())
+        wct.setBounds(token, Rect())
         shellTaskOrganizer.applyTransaction(wct)
     }
 
@@ -6247,12 +6356,46 @@ class DesktopTasksController(
      */
     @JvmOverloads
     fun requestSplit(taskInfo: RunningTaskInfo, leftOrTop: Boolean = false) {
+        val pending = pendingSplitSelect
+        if (pending != null) {
+            if (pending.secondTaskId != INVALID_TASK_ID) return
+            val task = shellTaskOrganizer.getRunningTaskInfo(taskInfo.taskId) ?: return
+            if (task.token == null) return
+            val firstTask = shellTaskOrganizer.getRunningTaskInfo(pending.taskId)
+            if (firstTask == null || firstTask.token == null ||
+                firstTask.displayId != pending.displayId || firstTask.userId != pending.userId) {
+                clearPendingSplitSelect()
+                // Don't replace an unknown Launcher selection with another one on this tap.
+                return
+            }
+            if (task.taskId == pending.taskId) return
+            if (task.isFloatingWindow && task.displayId == pending.displayId &&
+                task.userId == pending.userId) {
+                pending.secondTaskId = task.taskId
+                // The pair transition covers Launcher just as an Overview pair launch does.
+                // StageCoordinator clears floating properties in that same transaction.
+                splitScreenController.startTasks(
+                    firstTask.taskId, null, task.taskId, null, pending.splitPosition,
+                    SNAP_TO_2_50_50,
+                    null, null,
+                )
+            }
+            // Never send a nested enterSplitSelect to Launcher for a Shell-owned selection.
+            return
+        }
+        requestNewSplitSelect(taskInfo, leftOrTop)
+    }
+
+    private fun requestNewSplitSelect(taskInfo: RunningTaskInfo, leftOrTop: Boolean) {
         val repository = userRepositories.getProfile(taskInfo.userId)
         // If a drag to desktop is in progress, we want to enter split select
         // even if the requesting task is already in split.
         val isDragging = dragToDesktopTransitionHandler.inProgress
         val shouldRequestSplit = taskInfo.isFullscreen || taskInfo.isFreeform || isDragging
         if (shouldRequestSplit) {
+            val splitPosition =
+                if (leftOrTop) SPLIT_POSITION_TOP_OR_LEFT else SPLIT_POSITION_BOTTOM_OR_RIGHT
+            trackPendingSplitSelect(taskInfo, splitPosition)
             if (isDragging) {
                 releaseVisualIndicator()
                 val cancelState =
@@ -6267,20 +6410,30 @@ class DesktopTasksController(
                 logV("Split requested for task=%d in desk=%d", taskInfo.taskId, deskId)
                 val wct = WindowContainerTransaction()
                 addMoveToSplitChanges(wct, taskInfo)
-                splitScreenController.requestEnterSplitSelect(
-                    taskInfo,
-                    if (leftOrTop) SPLIT_POSITION_TOP_OR_LEFT else SPLIT_POSITION_BOTTOM_OR_RIGHT,
-                    taskInfo.configuration.windowConfiguration.bounds,
-                    /* startRecents = */ true,
-                    /* withRecentsWct = */ wct,
-                )
+                if (!splitScreenController.requestEnterSplitSelect(
+                        taskInfo,
+                        splitPosition,
+                        taskInfo.presentationBounds,
+                        /* startRecents = */ true,
+                        /* withRecentsWct = */ wct,
+                    )) {
+                    clearPendingSplitSelect()
+                }
             }
         }
     }
 
     /** Requests a task be transitioned from whatever mode it's in to a bubble. */
     @JvmOverloads
-    fun requestFloat(taskInfo: RunningTaskInfo, left: Boolean? = null) {
+    fun requestFloat(taskInfo: RunningTaskInfo?, left: Boolean? = null) {
+        // Recents/Launcher callbacks can outlive the task they describe. Resolve it again
+        // before conversion code dereferences its token, including inside the bubble callback.
+        val task = taskInfo?.let { shellTaskOrganizer.getRunningTaskInfo(it.taskId) } ?: return
+        if (task.token == null) return
+        requestFloatForRunningTask(task, left)
+    }
+
+    private fun requestFloatForRunningTask(taskInfo: RunningTaskInfo, left: Boolean?) {
         val isDragging = dragToDesktopTransitionHandler.inProgress
         val shouldRequestFloat =
             taskInfo.isFullscreen || taskInfo.isFreeform || isDragging || taskInfo.isMultiWindow
@@ -6924,6 +7077,7 @@ class DesktopTasksController(
 
     // TODO(b/366397912): Support full multi-user mode in Windowing.
     override fun onUserChanged(newUserId: Int, userContext: Context) {
+        clearPendingSplitSelect()
         logV(
             "onUserChanged previousUserId=%d, newUserId=%d",
             shellController.currentUserId,
@@ -6962,6 +7116,7 @@ class DesktopTasksController(
     private fun dump(pw: PrintWriter, prefix: String) {
         val innerPrefix = "$prefix  "
         pw.println("${prefix}DesktopTasksController")
+        pw.println("${innerPrefix}pendingSplitSelect=$pendingSplitSelect")
         desktopConfig.dump(pw, innerPrefix)
         userRepositories.dump(pw, innerPrefix)
         if (Flags.showDesktopExperienceDevOption()) {
@@ -7154,7 +7309,7 @@ class DesktopTasksController(
             )
         }
 
-        override fun onDesktopSplitSelectChoice(taskInfo: RunningTaskInfo) {
+        override fun onDesktopSplitSelectChoice(taskInfo: RunningTaskInfo?) {
             executeRemoteCallWithTaskPermission(controller, "onDesktopSplitSelectChoice") { c ->
                 c.onDesktopSplitSelectChoice(taskInfo)
             }

@@ -177,6 +177,7 @@ import com.android.wm.shell.desktopmode.DesktopUserRepositories;
 import com.android.wm.shell.desktopmode.data.DesktopRepository;
 import com.android.wm.shell.packageupdate.PackageUpdateController;
 import com.android.wm.shell.protolog.ShellProtoLogGroup;
+import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils;
 import com.android.wm.shell.recents.RecentTasksController;
 import com.android.wm.shell.shared.TransactionPool;
 import com.android.wm.shell.shared.TransitionUtil;
@@ -1448,6 +1449,10 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             final int taskId = taskIds[i];
             RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(taskId);
             if (task != null) {
+                if (task.isFloatingWindow) {
+                    wct.merge(PinnedLayerUtils.INSTANCE
+                            .getRemovedFromLayerWct(task.getToken()), true /* transfer */);
+                }
                 wct.setWindowingMode(task.getToken(), WINDOWING_MODE_UNDEFINED)
                         .setBounds(task.getToken(), null /* bounds */);
             } else {
@@ -2632,6 +2637,69 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     int getPendingSidebarSplitPosition() { return mPendingSidebarSplitPosition; }
+
+    void clearPendingSidebarSplitSelect() { mPendingSidebarSplitSelect = null; }
+
+    /** Returns final slot geometry without moving the divider or changing stage state. */
+    java.util.List<SplitScreenController.AppDragSlot> getAppDragSlots(int displayId) {
+        if (mMultiSplit != null && isSplitScreenVisible()
+                && (isMultiSplitActive() || SplitCapacityPolicy.getSplitCapacity(
+                        mDisplayController, displayId) > 2)) return mMultiSplit.getSlots(displayId);
+        return getPairAppDragSlots(displayId);
+    }
+
+    SplitScreenController.AppDragSlot getPendingSidebarSplitSlot(int displayId) {
+        final RunningTaskInfo selected = getPendingSidebarSplitSelect();
+        if (selected == null || selected.displayId != displayId) return null;
+        final int position = mPendingSidebarSplitPosition == SPLIT_POSITION_TOP_OR_LEFT
+                ? SPLIT_POSITION_BOTTOM_OR_RIGHT : SPLIT_POSITION_TOP_OR_LEFT;
+        return getPairAppDragSlots(displayId).stream().filter(slot -> slot.position == position)
+                .findFirst().orElse(null);
+    }
+
+    private java.util.List<SplitScreenController.AppDragSlot> getPairAppDragSlots(int displayId) {
+        if (mSplitLayout == null || mSplitRootTaskInfo == null
+                || mSplitRootTaskInfo.displayId != displayId) return java.util.Collections.emptyList();
+        final Rect first = new Rect(mSplitLayout.getTopLeftBounds());
+        final Rect second = new Rect(mSplitLayout.getBottomRightBounds());
+        final Rect root = mSplitLayout.getRootBounds();
+        if (!isSplitScreenVisible()) {
+            // Entry resets to the middle snap target; query that target without resetting layout.
+            final int length = isLeftRightSplit() ? root.width() : root.height();
+            final int position = mSplitLayout.findSnapTarget(length / 2, 0,
+                    false /* Hard dismiss */).position;
+            if (isLeftRightSplit()) {
+                final int divider = second.left - first.right;
+                first.set(root);
+                second.set(root);
+                first.right = root.left + position;
+                second.left = first.right + divider;
+            } else {
+                final int divider = second.top - first.bottom;
+                first.set(root);
+                second.set(root);
+                first.bottom = root.top + position;
+                second.top = first.bottom + divider;
+            }
+        }
+        if (first.isEmpty() || second.isEmpty()) return java.util.Collections.emptyList();
+        final Rect firstHit = new Rect(root);
+        final Rect secondHit = new Rect(root);
+        if (isLeftRightSplit()) {
+            firstHit.right = secondHit.left = (first.right + second.left) / 2;
+        } else {
+            firstHit.bottom = secondHit.top = (first.bottom + second.top) / 2;
+        }
+        return java.util.Arrays.asList(
+                new SplitScreenController.AppDragSlot(SPLIT_POSITION_TOP_OR_LEFT,
+                        enableFlexibleSplit() ? SPLIT_INDEX_0 : SPLIT_INDEX_UNDEFINED,
+                        first, firstHit, isSplitScreenVisible()
+                                && isOccupiedAppDragSlot(SPLIT_POSITION_TOP_OR_LEFT, displayId)),
+                new SplitScreenController.AppDragSlot(SPLIT_POSITION_BOTTOM_OR_RIGHT,
+                        enableFlexibleSplit() ? SPLIT_INDEX_1 : SPLIT_INDEX_UNDEFINED,
+                        second, secondHit, isSplitScreenVisible()
+                                && isOccupiedAppDragSlot(SPLIT_POSITION_BOTTOM_OR_RIGHT, displayId)));
+    }
 
     void getStageBounds(Rect outTopOrLeftBounds, Rect outBottomOrRightBounds) {
         if (isMultiSplitActive()) {
