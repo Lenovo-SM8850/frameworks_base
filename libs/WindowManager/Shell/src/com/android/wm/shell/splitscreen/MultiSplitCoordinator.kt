@@ -798,6 +798,19 @@ class MultiSplitCoordinator(
         }
     }
 
+    fun occupied(displayId: Int): Int = if (host.rootInfo()?.displayId == displayId && isVisible) {
+        stages.values.count { stage -> stage.mChildrenTaskInfo.let { children ->
+            (0 until children.size()).any { children.valueAt(it).let { task ->
+                task.isVisible && task.isVisibleRequested && !task.isFloatingWindow &&
+                    task.activityType == android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD
+            } }
+        } }
+    } else 0
+
+    /** Revalidates the preview revision and capacity at DROP, then launches in a single WCT. */
+    fun startIntent(intent: PendingIntent, fillIn: Intent?, options: Bundle?, slot: AppDragSlot): Boolean =
+        insert(slot, options, true) { wct, opts, _ -> wct.sendPendingIntent(intent, fillIn, opts.toBundle()) }
+
     fun startTask(task: android.app.TaskInfo, slot: AppDragSlot): Boolean {
         val model = layout
         val existing = model?.getLeaves()?.firstOrNull { it.taskId == task.taskId }
@@ -888,8 +901,9 @@ class MultiSplitCoordinator(
         // Cold tasks must be born into an adjacent, foreground stage before WM resumes them.
         applyTasks(wct)
         launch(wct, opts, target)
-        val waiting = if (awaitTask && inserting) {
-            PendingInsertion(LeafId(nextLeaf - 1), target, model, beforeStages, previousTasks).also {
+        val waiting = if (awaitTask) {
+            PendingInsertion(if (inserting) LeafId(nextLeaf - 1) else targetId,
+                target, model, beforeStages, previousTasks).also {
                 insertion = it
                 it.timeout = Runnable {
                     if (insertion === it) {
@@ -1100,9 +1114,12 @@ class MultiSplitCoordinator(
         it.mRootTaskInfo?.taskId == task.parentTaskId
     }
 
-    private fun leafOfTask(taskId: Int): LeafId? = stages.entries.firstOrNull {
-        it.value.containsTask(taskId)
-    }?.key
+    private fun leafOfTask(taskId: Int): LeafId? {
+        val parentId = organizer.getRunningTaskInfo(taskId)?.parentTaskId
+        return stages.entries.firstOrNull {
+            it.value.containsTask(taskId) || it.value.mRootTaskInfo.taskId == parentId
+        }?.key
+    }
 
     fun positionOfTask(taskId: Int): Int = leafOfTask(taskId)?.let { position(it) }
         ?: SPLIT_POSITION_UNDEFINED
@@ -1176,6 +1193,16 @@ class MultiSplitCoordinator(
         return model.getLeaves().size == 3 && model.root.orientation == Orientation.LEFT_RIGHT &&
             configuration.smallestScreenWidthDp >= 600 && host.capacity() > 2 &&
             displayBounds().width() > displayBounds().height()
+    }
+
+    fun updateTaskBounds(wct: WindowContainerTransaction): Boolean {
+        val calculated = bounds(layout ?: return false) ?: return false
+        if (stages.all { (id, stage) ->
+                stage.mRootTaskInfo.configuration.windowConfiguration.bounds ==
+                    calculated.leaves.getValue(id)
+            }) return false
+        applyTasks(wct, updateHierarchy = false)
+        return true
     }
 
     /** Copies the owning leaf's screen bounds, independently of the root split axis. */
@@ -2038,15 +2065,6 @@ class MultiSplitCoordinator(
 
     val isActive: Boolean get() = layout != null
 
-    fun occupied(displayId: Int): Int = if (host.rootInfo()?.displayId == displayId && isVisible) {
-        stages.values.count { stage -> stage.mChildrenTaskInfo.let { children ->
-            (0 until children.size()).any { children.valueAt(it).let { task ->
-                task.isVisible && task.isVisibleRequested && !task.isFloatingWindow &&
-                    task.activityType == android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD
-            } }
-        } }
-    } else 0
-
     val isBusy: Boolean get() = keyguard || insertion != null || pending != null ||
         runningTransitions.isNotEmpty() || interacting ||
         dividers.values.any { it.isCurrentlyDividerFlinging } ||
@@ -2067,10 +2085,6 @@ class MultiSplitCoordinator(
         return AppDragSlot(position(leaf.id, model), leaf.id.value, rect, calculated.visibleLeaves.getValue(leaf.id), true,
             leaf.id.value, false, revision)
     }
-
-    /** Revalidates the preview revision and capacity at DROP, then launches in a single WCT. */
-    fun startIntent(intent: PendingIntent, fillIn: Intent?, options: Bundle?, slot: AppDragSlot): Boolean =
-        insert(slot, options, true) { wct, opts, _ -> wct.sendPendingIntent(intent, fillIn, opts.toBundle()) }
 
     fun dump(pw: PrintWriter, prefix: String) {
         pw.println("${prefix}MultiSplitCoordinator: active=$isActive capacity=${host.capacity()} " +
