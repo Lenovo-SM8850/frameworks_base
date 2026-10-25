@@ -16,7 +16,6 @@
 
 package com.android.wm.shell.common.split;
 
-import android.view.GestureDetector;
 import static android.view.PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW;
 import static android.view.PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW;
 
