@@ -111,6 +111,7 @@ android_test {
         "mockito-target-extended-minus-junit4",
         "platform-compat-test-rules",
         "platform-test-annotations",
+        "org.lineageos.platform.internal",
         "service-permission.stubs.system_server",
         "service-sdksandbox.impl",
         "services.core",
