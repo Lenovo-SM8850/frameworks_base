@@ -997,6 +997,46 @@ public class AudioService extends IAudioService.Stub
             new AudioServiceUserRestrictionsListener();
     private int mCurrentUserId = UserHandle.USER_SYSTEM;
 
+    // Accessed only on mAudioHandler, including Binder owner death callbacks.
+    private IBinder mStartedJocCodecOwner;
+    private IBinder.DeathRecipient mStartedJocCodecOwnerDeath;
+    private long mStartedJocCodecRevision;
+    private static final int MAX_STARTED_JOC_UIDS = 4096;
+
+    private void clearStartedJocCodecOwner(IBinder owner) {
+        if (mStartedJocCodecOwner != owner) return;
+        owner.unlinkToDeath(mStartedJocCodecOwnerDeath, 0);
+        mStartedJocCodecOwner = null;
+        mStartedJocCodecOwnerDeath = null;
+        mStartedJocCodecRevision = 0;
+        mPlaybackMonitor.setStartedJocCodecUids(Collections.emptySet());
+    }
+
+    private void applyStartedJocCodecUids(IBinder owner, long revision, int[] uids) {
+        if (!owner.isBinderAlive()) return;
+        if (mStartedJocCodecOwner != owner) {
+            if (mStartedJocCodecOwner != null) {
+                // A live incarnation cannot be replaced by another owner token.
+                if (mStartedJocCodecOwner.isBinderAlive()) return;
+                clearStartedJocCodecOwner(mStartedJocCodecOwner);
+            }
+            IBinder.DeathRecipient death = () -> mAudioHandler.post(
+                    () -> clearStartedJocCodecOwner(owner));
+            try {
+                owner.linkToDeath(death, 0);
+            } catch (RemoteException e) {
+                return;
+            }
+            mStartedJocCodecOwner = owner;
+            mStartedJocCodecOwnerDeath = death;
+        }
+        if (revision <= mStartedJocCodecRevision || !owner.isBinderAlive()) return;
+        mStartedJocCodecRevision = revision;
+        Set<Integer> membership = new HashSet<>();
+        for (int uid : uids) membership.add(uid);
+        mPlaybackMonitor.setStartedJocCodecUids(membership);
+    }
+
     private final IAudioManagerNative mNativeShim = new IAudioManagerNative.Stub() {
         static final String METRIC_COUNTERS_PLAYBACK_PARTIAL =
                 "media_audio.value_audio_playback_hardening_partial_restriction";
@@ -1047,6 +1087,20 @@ public class AudioService extends IAudioService.Stub
         @Override
         public void portMuteEvent(int portId, int event) {
             mPlaybackMonitor.portMuteEvent(portId, event, Binder.getCallingUid());
+        }
+
+        @Override
+        public void setStartedJocCodecUids(IBinder owner, long revision, int[] uids) {
+            // Check the actual caller before handing off work or clearing Binder identity.
+            if (Binder.getCallingUid() != Process.MEDIA_UID || owner == null
+                    || !owner.isBinderAlive() || revision <= 0 || uids == null
+                    || uids.length > MAX_STARTED_JOC_UIDS) return;
+            final int[] snapshot = uids.clone();
+            Set<Integer> unique = new HashSet<>();
+            for (int uid : snapshot) {
+                if (uid < 0 || !unique.add(uid)) return;
+            }
+            mAudioHandler.post(() -> applyStartedJocCodecUids(owner, revision, snapshot));
         }
     };
 
