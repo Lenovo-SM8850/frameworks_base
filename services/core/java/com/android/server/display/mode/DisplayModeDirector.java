@@ -139,6 +139,7 @@ public class DisplayModeDirector {
     private static final int MSG_USER_PREFERRED_HDR_MODE = 10;
 
     private final Object mLock = new Object();
+    private final int mMinPhysicalRefreshRate;
     private final int mDozeRefreshRate;
     private final int mDozeRefreshRateDelayMillis;
     @GuardedBy("mLock")
@@ -227,6 +228,8 @@ public class DisplayModeDirector {
         mDisplayManagerFlags = displayManagerFlags;
         mDisplayDeviceConfigProvider = displayDeviceConfigProvider;
         mContext = context;
+        mMinPhysicalRefreshRate = context.getResources().getInteger(
+                R.integer.config_minPhysicalRefreshRate);
         mDozeRefreshRate = context.getResources().getInteger(R.integer.config_dozeRefreshRate);
         mDozeRefreshRateDelayMillis = context.getResources().getInteger(
                 R.integer.config_dozeRefreshRateDelayMillis);
@@ -332,6 +335,23 @@ public class DisplayModeDirector {
                 return new DesiredDisplayModeSpecs();
             }
 
+            final float minPhysicalRefreshRate = displayId == Display.DEFAULT_DISPLAY
+                    && mDozeMode == null ? mMinPhysicalRefreshRate : 0f;
+            if (minPhysicalRefreshRate > 0f) {
+                modes = Arrays.stream(modes).filter(mode -> mode.getRefreshRate()
+                        >= minPhysicalRefreshRate
+                                - SurfaceControl.RefreshRateRange.FLOAT_TOLERANCE)
+                        .toArray(Display.Mode[]::new);
+                if (modes.length == 0) {
+                    Slog.e(TAG, "No display mode satisfies the physical refresh rate floor");
+                    return new DesiredDisplayModeSpecs();
+                }
+                if (defaultMode.getRefreshRate() < minPhysicalRefreshRate
+                        - SurfaceControl.RefreshRateRange.FLOAT_TOLERANCE) {
+                    defaultMode = modes[0];
+                }
+            }
+
             List<Display.Mode> availableModes = new ArrayList<>();
             availableModes.add(defaultMode);
             VoteSummary primarySummary =
@@ -354,6 +374,9 @@ public class DisplayModeDirector {
                 primarySummary.applyVotes(
                         votes, lowestConsideredPriority, highestConsideredPriority);
 
+                // The panel floor cannot be dropped with lower-priority votes.
+                primarySummary.minPhysicalRefreshRate = Math.max(
+                        primarySummary.minPhysicalRefreshRate, minPhysicalRefreshRate);
                 primarySummary.adjustSize(defaultMode, modes);
 
                 availableModes = primarySummary.filterModes(modes);
@@ -390,6 +413,8 @@ public class DisplayModeDirector {
                     Vote.MAX_PRIORITY);
 
             appRequestSummary.limitRefreshRanges(primarySummary);
+            appRequestSummary.minPhysicalRefreshRate = Math.max(
+                    appRequestSummary.minPhysicalRefreshRate, minPhysicalRefreshRate);
 
             Display.Mode baseMode = primarySummary.selectBaseMode(availableModes, defaultMode);
             if (mVotesStatsReporter != null) {
@@ -653,6 +678,7 @@ public class DisplayModeDirector {
             }
             pw.println("  mModeSwitchingType: " + switchingTypeToString(mModeSwitchingType));
             pw.println("  mAlwaysRespectAppRequest: " + mAlwaysRespectAppRequest);
+            pw.println("  mMinPhysicalRefreshRate: " + mMinPhysicalRefreshRate);
             pw.println("  Doze refresh rate: configured=" + mDozeRefreshRate
                     + " policy=" + DisplayPowerRequest.policyToString(mDozePowerPolicy)
                     + " state=" + Display.stateToString(mDozeDisplayState)
@@ -1387,6 +1413,11 @@ public class DisplayModeDirector {
             if (Float.isInfinite(minRefreshRate)) {
                 // Infinity means that we want the highest possible refresh rate
                 minRefreshRate = highestRefreshRate;
+            }
+
+            if (displayId == Display.DEFAULT_DISPLAY) {
+                // Clamp legacy settings without rewriting another user's preference.
+                minRefreshRate = Math.max(minRefreshRate, mMinPhysicalRefreshRate);
             }
 
             float peakRefreshRate = Settings.System.getFloatForUser(cr,
