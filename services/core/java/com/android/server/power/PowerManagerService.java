@@ -2461,9 +2461,9 @@ public final class PowerManagerService extends SystemService
 
         Trace.traceBegin(Trace.TRACE_TAG_POWER, "userActivity");
         try {
+            // SurfaceFlinger raises the refresh rate on touch from this hint
             if (eventTime > mLastInteractivePowerHintTime &&
-                    event != PowerManager.USER_ACTIVITY_EVENT_OTHER &&
-                    event != PowerManager.USER_ACTIVITY_EVENT_TOUCH) {
+                    event != PowerManager.USER_ACTIVITY_EVENT_OTHER) {
                 setPowerBoostInternal(Boost.INTERACTION, 0);
                 mLastInteractivePowerHintTime = eventTime;
             }
