@@ -788,6 +788,531 @@ class MultiSplitCoordinator(
         return null
     }
 
+    fun swapTask(taskId: Int): Boolean {
+        val id = leafOfTask(taskId) ?: return false
+        val other = swapNeighbour(id, isLeftRightSplit) ?: return false
+        return swapLeaves(id.value, other.value)
+    }
+
+    /** Follows the nearest divider in the requested axis, preserving grid rows and columns. */
+    private fun swapNeighbour(id: LeafId, horizontal: Boolean): LeafId? {
+        val model = layout ?: return null
+        val all = bounds(model)?.leaves ?: return null
+        val source = all[id] ?: return null
+        val axis = if (horizontal) Orientation.LEFT_RIGHT else Orientation.TOP_BOTTOM
+        fun contains(node: Node): Boolean = when (node) {
+            is Leaf -> node.id == id
+            is Split -> contains(node.first) || contains(node.second)
+        }
+        fun leaves(node: Node): List<LeafId> = when (node) {
+            is Leaf -> listOf(node.id)
+            is Split -> leaves(node.first) + leaves(node.second)
+        }
+        fun find(node: Node): LeafId? {
+            if (node !is Split) return null
+            val first = contains(node.first)
+            val own = if (first) node.first else node.second
+            find(own)?.let { return it }
+            if (node.orientation != axis) return null
+            var other = if (first) node.second else node.first
+            // Independent branch ratios must not change the corresponding row or column.
+            if (own is Split && other is Split && own.orientation == other.orientation) {
+                other = if (contains(own.first)) other.first else other.second
+            }
+            return leaves(other).minByOrNull { leaf ->
+                val rect = all.getValue(leaf)
+                val dx = rect.centerX().toLong() - source.centerX()
+                val dy = rect.centerY().toLong() - source.centerY()
+                dx * dx + dy * dy
+            }
+        }
+        return find(model.root)
+    }
+
+    val isLeftRightSplit: Boolean get() = layout?.root?.orientation == Orientation.LEFT_RIGHT
+
+    /** Splits the longer axis, with the new app below or on the layout's end side. */
+    fun getBelowSlot(taskId: Int, canMutate: Boolean = true): AppDragSlot? =
+        belowSlot(taskId, canMutate, true)
+
+    /** Session identity is independent of a transient unrelated transition. */
+    fun getBelowSlotForValidation(taskId: Int): AppDragSlot? = belowSlot(taskId, true, false)
+
+    /** Replacement addresses a whole existing leaf, including an unsplit half. */
+    fun getReplacementSlot(taskId: Int): AppDragSlot? {
+        if (isBusy || !isVisible || imeTop != null) return null
+        val model = layout ?: return null
+        val leaf = model.getLeaves().firstOrNull { it.taskId == taskId } ?: return null
+        val calculated = bounds(model) ?: return null
+        val rect = calculated.leaves[leaf.id] ?: return null
+        return AppDragSlot(position(leaf.id, model), leaf.id.value, rect, calculated.visibleLeaves.getValue(leaf.id), true,
+            leaf.id.value, false, revision)
+    }
+
+    /** Revalidates the preview revision and capacity at DROP, then launches in a single WCT. */
+    fun startIntent(intent: PendingIntent, fillIn: Intent?, options: Bundle?, slot: AppDragSlot): Boolean =
+        insert(slot, options, true) { wct, opts, _ -> wct.sendPendingIntent(intent, fillIn, opts.toBundle()) }
+
+    fun startTask(task: android.app.TaskInfo, slot: AppDragSlot): Boolean {
+        val model = layout
+        val existing = model?.getLeaves()?.firstOrNull { it.taskId == task.taskId }
+        if (model != null && existing != null && slot.occupied) {
+            val target = LeafId(slot.leafId)
+            if (isBusy || !isVisible || imeTop != null || slot.layoutVersion != revision ||
+                bounds(model)?.leaves?.get(target) != slot.bounds || existing.id == target ||
+                task.displayId != host.rootInfo()?.displayId || !task.supportsMultiWindow) return false
+            return swapLeaves(target.value, existing.id.value)
+        }
+        if (!task.supportsMultiWindow || task.displayId != host.rootInfo()?.displayId ||
+            task.minWidth > slot.bounds.width() || task.minHeight > slot.bounds.height() ||
+            (layout ?: pairModel())?.getLeaves()?.any { it.taskId == task.taskId } == true) {
+            return rejectInsertion("Task ${task.taskId} unavailable, visible or incompatible with ${slot.bounds}")
+        }
+        return insert(slot, null, true) { wct, opts, target ->
+            task.token?.let { token ->
+                if (task.isFloatingWindow) wct.merge(
+                    com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils
+                        .getRemovedFromLayerWct(token), true)
+                wct.setWindowingMode(token, android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED)
+                    .setBounds(token, Rect())
+                    .reparent(token, target.mRootTaskInfo.token, true)
+            }
+            wct.startTask(task.taskId, opts.toBundle())
+        }
+    }
+
+    /** Seeds from actual pair bounds, retaining the current divider ratio. */
+    private fun pairModel(): MultiSplitLayout? {
+        val pair = host.pairStages()
+        if (pair.size != 2 || pair.any { it.topChildTaskId < 0 }) return null
+        val split = host.pairLayout()
+        val first = split.topLeftBounds
+        val root = split.rootBounds
+        val leftRight = split.isLeftRightSplit
+        val available = (if (leftRight) root.width() else root.height()) - split.dividerSize
+        val before = if (leftRight) first.width() else first.height()
+        if (available <= 0) return null
+        val measured = split.dividerPositionAsFraction
+        val fraction = if (measured > 0f && measured < 1f) measured
+            else (before.toFloat() / available).coerceIn(0.01f, 0.99f)
+        val ratio = if (fraction < 0.2f || fraction > 0.8f) fraction
+            else (before.toFloat() / available).coerceIn(0.01f, 0.99f)
+        val strip = if (com.android.wm.shell.Flags.enableFlexibleTwoAppSplit()) {
+            when { ratio < 0.2f -> LeafId(0); ratio > 0.8f -> LeafId(1); else -> null }
+        } else null
+        return MultiSplitLayout(Split(DividerId(0),
+            if (leftRight) Orientation.LEFT_RIGHT else Orientation.TOP_BOTTOM,
+            ratio, Leaf(LeafId(0), pair[0].topChildTaskId),
+            Leaf(LeafId(1), pair[1].topChildTaskId)), strip)
+    }
+
+    private fun belowSlot(taskId: Int, canMutate: Boolean, requireReady: Boolean): AppDragSlot? {
+        fun reject(reason: String): AppDragSlot? {
+            lastBelowRejection = "task=$taskId $reason"
+            return null
+        }
+        if (host.capacity() < 4) return reject("Capacity")
+        if (keyguard || (requireReady && isBusy)) return reject("Busy")
+        if (imeTop != null) return reject("IME")
+        if (requireReady && (!canMutate || (!isActive && !host.canEnter()))) {
+            return reject("Pair unavailable or busy")
+        }
+        if (!requireReady && (host.rootInfo()?.isVisible != true ||
+                host.pairStages().none { it.mRootTaskInfo?.isVisible == true })) {
+            return reject("Pair unavailable")
+        }
+        val model = layout ?: pairModel() ?: return reject("Pair model unavailable")
+        val leaf = model.getLeaves().firstOrNull { it.taskId == taskId }
+            ?: return reject("Task is not a leaf")
+        if (model.getLeaves().size >= host.capacity()) return reject("At capacity")
+        val source = bounds(model)?.leaves?.get(leaf.id) ?: return reject("Source bounds")
+        val below = model.insertionAxis(leaf.id)?.let { it == Orientation.TOP_BOTTOM }
+            ?: return reject("At capacity")
+        val first = !below && displays.getDisplayContext(host.rootInfo()!!.displayId)
+            ?.resources?.configuration?.layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val proposed = candidate(model, leaf.id, first) ?: return reject("Minimum leaf size")
+        existingTaskRejection(proposed)?.let { return reject(it) }
+        val rect = bounds(proposed)?.leaves?.get(LeafId(nextLeaf)) ?: return reject("Target bounds")
+        // Root creation is asynchronous; preview eligibility must not depend on its callbacks.
+        ensureSpares()
+        lastBelowRejection = "task=$taskId None"
+        return AppDragSlot(position(leaf.id, model), nextLeaf, rect, rect, false,
+            leaf.id.value, first, revision, below)
+    }
+
+    private fun rejectInsertion(reason: String): Boolean {
+        lastInsertRejection = reason
+        return false
+    }
+
+    fun position(id: LeafId, model: MultiSplitLayout? = layout): Int {
+        fun contains(node: Node): Boolean = when (node) {
+            is Leaf -> node.id == id
+            is Split -> contains(node.first) || contains(node.second)
+        }
+        return if (model != null && contains(model.root.first)) SPLIT_POSITION_TOP_OR_LEFT
+            else SPLIT_POSITION_BOTTOM_OR_RIGHT
+    }
+
+    private fun insert(slot: AppDragSlot, options: Bundle?, awaitTask: Boolean = false,
+        launch: (WindowContainerTransaction, ActivityOptions, StageTaskListener) -> Unit): Boolean {
+        if (isBusy) return rejectInsertion("Busy")
+        if (imeTop != null) return rejectInsertion("IME")
+        if (slot.layoutVersion != revision) return rejectInsertion("Stale revision ${slot.layoutVersion}")
+        if (!isActive && !host.canEnter()) return rejectInsertion("Pair unavailable or busy")
+        val model = layout ?: pairModel() ?: return rejectInsertion("Pair model unavailable")
+        val targetId = LeafId(slot.leafId)
+        if (model.getLeaves().none { it.id == targetId }) return rejectInsertion("Unknown leaf $targetId")
+        val inserting = !slot.occupied
+        if (inserting && host.capacity() < 4) return rejectInsertion("Capacity")
+        if (inserting && model.getLeaves().size >= host.capacity()) return rejectInsertion("At capacity")
+        if (inserting && !ensureSpares()) return rejectInsertion("Spare roots not ready")
+        val proposed = if (inserting) candidate(model, targetId, slot.newTaskFirst)
+            ?: return rejectInsertion("Minimum leaf size") else model
+        val expected = bounds(proposed)?.leaves?.get(if (inserting) LeafId(nextLeaf) else targetId)
+        if (expected != slot.bounds) return rejectInsertion("Stale bounds expected=$expected slot=${slot.bounds}")
+        existingTaskRejection(proposed)?.let { return rejectInsertion(it) }
+        val wct = WindowContainerTransaction()
+        if (!isActive) {
+            projectedRepresentatives = host.pairStages().map { it.topChildTaskId }
+            pool.clear()
+            pool.addAll(host.pairStages())
+            pool.addAll(spare)
+            host.pairStages().forEachIndexed { i, stage -> stages[LeafId(i)] = stage }
+            layout = model
+            host.pairStages().forEach { stage ->
+                stage.evictOtherChildren(wct, setOf(stage.topChildTaskId))
+            }
+            host.started()
+            listening = true
+            insets.addInsetsChangedListener(host.rootInfo()!!.displayId, this)
+            ime.addPositionProcessor(imeProcessor)
+        }
+        val beforeStages = stages.toMap()
+        val target = if (inserting) {
+            val stage = pool.firstOrNull { it !in stages.values && it.mHasRootTask && reusable(it) }
+                ?: return rejectInsertion("No free stage root")
+            stages[LeafId(nextLeaf)] = stage
+            nextLeaf++
+            nextDivider++
+            stage
+        } else stages.getValue(targetId)
+        // Stage history must not resurface after the leaf's new app closes.
+        val previousTasks = ((0 until target.mChildrenTaskInfo.size())
+            .map { target.mChildrenTaskInfo.keyAt(it) } + childTasks(target).map { it.taskId }).toSet()
+        target.evictAllChildren(wct)
+        // Evict unreported history too, before a new cold launch can enter this stage.
+        wct.reparentTasks(target.mRootTaskInfo.token, null, null, null, false)
+        val opts = ActivityOptions.fromBundle(options ?: ActivityOptions.makeBasic().toBundle())
+        opts.setLaunchRootTask(target.mRootTaskInfo.token)
+        opts.setLaunchDisplayId(host.rootInfo()!!.displayId)
+        opts.setDisallowEnterPictureInPictureWhileLaunching(true)
+        opts.setPendingIntentBackgroundActivityStartMode(
+            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS)
+        // A nested stage is a parent, not the outer root used by WM's launch-bounds path.
+        opts.launchBounds = null
+        layout = proposed
+        revision++
+        // Cold tasks must be born into an adjacent, foreground stage before WM resumes them.
+        applyTasks(wct)
+        launch(wct, opts, target)
+        val waiting = if (awaitTask && inserting) {
+            PendingInsertion(LeafId(nextLeaf - 1), target, model, beforeStages, previousTasks).also {
+                insertion = it
+                it.timeout = Runnable {
+                    if (insertion === it) {
+                        if (it.taskId != null && !it.finished) requestInsertionRollback("Transition timed out")
+                        else if (!probeInsertion()) requestInsertionRollback("No task arrived")
+                    }
+                }
+                it.probe = Runnable {
+                    if (insertion === it && it.failure == null && !probeInsertion()) {
+                        executor.executeDelayed(it.probe, INSERTION_PROBE_MS)
+                    }
+                }
+            }
+        } else null
+        try {
+            pending = transitions.startTransition(TRANSIT_OPEN, wct, this)
+        } catch (e: RuntimeException) {
+            if (waiting != null) {
+                val rollback = WindowContainerTransaction()
+                rollbackInsertion(waiting, "Launch failed: ${e.javaClass.simpleName}", rollback)
+                organizer.applyTransaction(rollback)
+                syncDividers()
+                syncQueue.runInSync { applySurfaceChanges(it) }
+                publishGroup()
+                host.changed()
+            }
+            return rejectInsertion("Launch failed: ${e.javaClass.simpleName}")
+        }
+        waiting?.let {
+            it.transition = pending
+            armInsertionTimeout(it, INSERTION_TRANSITION_TIMEOUT_MS)
+            executor.executeDelayed(it.probe, INSERTION_PROBE_MS)
+        }
+        setInteractive(false)
+        lastInsertRejection = if (waiting == null) "None"
+            else "Awaiting task in stage=${target.mRootTaskInfo.taskId}"
+        return true
+    }
+
+    private fun ensureSpares(): Boolean {
+        if (host.capacity() <= 2) return false
+        if (spare.isEmpty()) spare.addAll(host.spareStages(spareCallbacks))
+        attachSpares()
+        return spare.size >= 2 && spare.all { it.mHasRootTask && it in attached }
+    }
+
+    private fun childTasks(stage: StageTaskListener): List<RunningTaskInfo> =
+        if (!stage.mHasRootTask) emptyList() else try {
+            organizer.getChildTasks(stage.mRootTaskInfo.token, intArrayOf(
+                android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD,
+                android.app.WindowConfiguration.ACTIVITY_TYPE_UNDEFINED)).orEmpty()
+        } catch (e: RuntimeException) {
+            Log.w("MultiSplitCoordinator", "Unable to query prepared stage", e)
+            emptyList()
+        }
+
+    private fun reusable(stage: StageTaskListener): Boolean {
+        if (stage !in retiredStages) return true
+        if (childTasks(stage).isNotEmpty()) return false
+        retiredStages.remove(stage)
+        return true
+    }
+
+    private fun armInsertionTimeout(waiting: PendingInsertion, delay: Long) {
+        executor.removeCallbacks(waiting.timeout)
+        waiting.deadline = SystemClock.uptimeMillis() + delay
+        executor.executeDelayed(waiting.timeout, delay)
+    }
+
+    /** Resolves membership by the reserved parent, without requiring an opaque/visible activity. */
+    private fun probeInsertion(info: TransitionInfo? = null, incoming: RunningTaskInfo? = null): Boolean {
+        val waiting = insertion ?: return false
+        if (waiting.failure != null || probingInsertion) return false
+        if (waiting.taskId != null) {
+            if (waiting.finished) clearInsertion(waiting)
+            return true
+        }
+        probingInsertion = true
+        try {
+            val stage = waiting.stage
+            if (!stage.mHasRootTask || stages[waiting.leaf] !== stage) return false
+            val known = stage.topChildTaskId.takeIf { stage.childCount > 0 && stage.containsTask(it) }
+                ?.let { organizer.getRunningTaskInfo(it) ?: stage.mChildrenTaskInfo[it] }
+            val task = known?.takeIf { it.taskId !in waiting.previousTasks }
+                ?: incoming?.takeIf {
+                    it.parentTaskId == stage.mRootTaskInfo.taskId &&
+                        it.taskId !in waiting.previousTasks && it.taskId != stage.mRootTaskInfo.taskId
+                } ?: info?.changes?.mapNotNull { it.taskInfo }?.firstOrNull {
+                    it.parentTaskId == stage.mRootTaskInfo.taskId &&
+                        it.taskId !in waiting.previousTasks && it.taskId != stage.mRootTaskInfo.taskId
+                } ?: childTasks(stage).firstOrNull {
+                    it.parentTaskId == stage.mRootTaskInfo.taskId && it.taskId !in waiting.previousTasks &&
+                        (it.topActivityInfo != null || it.numActivities > 0)
+                } ?: return false
+            val rect = bounds(layout ?: return false)?.leaves?.get(waiting.leaf) ?: return false
+            if (task.displayId != host.rootInfo()?.displayId ||
+                task.minWidth > rect.width() || task.minHeight > rect.height()) {
+                requestInsertionRollback("Arriving task does not fit")
+                return false
+            }
+            layout = layout?.assign(waiting.leaf, task.taskId) ?: return false
+            // Organizer appearance may still be deferred until the translucent app becomes visible.
+            val reported = stage.containsTask(task.taskId)
+            if (!reported) {
+                stage.mChildrenTaskInfo.put(task.taskId, task)
+                unreportedTasks.getOrPut(stage) { mutableSetOf() }.add(task.taskId)
+            }
+            waiting.taskId = task.taskId
+            executor.removeCallbacks(waiting.probe)
+            lastInsertRejection = "None"
+            if (!reported || waiting.finished) {
+                val wct = WindowContainerTransaction()
+                applyTasks(wct)
+                wct.setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED).setBounds(task.token, Rect())
+                    .reorder(task.token, true)
+                val options = ActivityOptions.makeBasic().apply {
+                    setLaunchRootTask(stage.mRootTaskInfo.token)
+                    setLaunchDisplayId(task.displayId)
+                    setDisallowEnterPictureInPictureWhileLaunching(true)
+                }
+                // Resume the resolved task by ID, including a paused translucent first activity.
+                wct.startTask(task.taskId, options.toBundle())
+                if (visible && !keyguard) host.rootInfo()?.let { wct.reorder(it.token, true) }
+                organizer.applyTransaction(wct)
+                syncQueue.runInSync { applySurfaceChanges(it) }
+            }
+            if (waiting.finished) clearInsertion(waiting)
+            publishGroup()
+            host.changed()
+            return true
+        } finally {
+            probingInsertion = false
+        }
+    }
+
+    private fun requestInsertionRollback(reason: String) {
+        val waiting = insertion ?: return
+        if (waiting.failure != null) return
+        waiting.failure = reason
+        executor.removeCallbacks(waiting.timeout)
+        executor.removeCallbacks(waiting.probe)
+        transitions.runOnIdle {
+            if (insertion !== waiting) return@runOnIdle
+            val wct = WindowContainerTransaction()
+            rollbackInsertion(waiting, reason, wct)
+            organizer.applyTransaction(wct)
+            syncDividers()
+            syncQueue.runInSync { applySurfaceChanges(it) }
+            setInteractive(!isBusy)
+            publishGroup()
+            scheduleReconcile()
+            host.changed()
+        }
+    }
+
+    private fun attachSpares() {
+        val root = host.rootInfo() ?: return
+        val wct = WindowContainerTransaction()
+        spare.filter { it.mHasRootTask && it !in attached }.forEach { stage ->
+            val token = stage.mRootTaskInfo.token
+            wct.reparent(token, root.token, false)
+                .setDisallowOverrideBoundsForChildren(token, true)
+                .setDisallowOverrideWindowingModeForChildren(token, true)
+            attached.add(stage)
+        }
+        if (!wct.isEmpty) syncQueue.queue(wct)
+    }
+
+    private fun scheduleReconcile() {
+        if (reconcileScheduled) return
+        reconcileScheduled = true
+        executor.execute {
+            transitions.runOnIdle {
+                reconcileScheduled = false
+                if (isActive) {
+                    val empty = stages.entries.filter {
+                        it.value.childCount == 0 && it.key != insertion?.leaf
+                    }.map { it.key }
+                    if (empty.isNotEmpty()) {
+                        val wct = WindowContainerTransaction()
+                        empty.forEach { removeLeaf(it, wct) }
+                        if (!wct.isEmpty) pending = transitions.startTransition(TRANSIT_CHANGE, wct, this)
+                    }
+                }
+            }
+        }
+    }
+
+    private val spareCallbacks = object : StageTaskListener.StageListenerCallbacks {
+        override fun onRootTaskAppeared() { executor.execute { attachSpares() } }
+        override fun onRootTaskVanished() {
+            executor.execute {
+                if (isActive) {
+                    stages.entries.removeAll { !it.value.mHasRootTask }
+                    val wct = WindowContainerTransaction()
+                    exit(-1, wct)
+                    organizer.applyTransaction(wct)
+                }
+                attached.removeAll { !it.mHasRootTask }
+            }
+        }
+        override fun onStageVisibilityChanged(stage: StageTaskListener) { onStageChanged() }
+        override fun onRootTaskInfoChanged(stage: StageTaskListener) { onStageChanged() }
+        override fun onChildTaskStatusChanged(stage: StageTaskListener, taskId: Int,
+            present: Boolean, visible: Boolean) { onTaskChanged(stage, taskId, present) }
+        override fun onChildTaskMovedToBubble(stage: StageTaskListener, taskId: Int) {
+            onTaskChanged(stage, taskId, false)
+        }
+        override fun onNoLongerSupportMultiWindow(stage: StageTaskListener, task: RunningTaskInfo) {
+            moveToFullscreen(task.taskId)
+        }
+    }
+
+    fun moveToFullscreen(taskId: Int) {
+        if (!isActive || isBusy) return
+        val wct = WindowContainerTransaction()
+        exit(taskId, wct)
+        groups.remove(taskId)
+        pending = transitions.startTransition(TRANSIT_CHANGE, wct, this)
+    }
+
+    /** Removes dead leaves after organizer callbacks settle, including aborted launches. */
+    fun onTaskChanged(stage: StageTaskListener, taskId: Int, present: Boolean) {
+        unreportedTasks[stage]?.remove(taskId)
+        if (stage in retiredStages && stage !in stages.values) {
+            if (present) {
+                val wct = WindowContainerTransaction()
+                resetPreparedStage(stage, wct)
+                organizer.applyTransaction(wct)
+            }
+            return
+        }
+        if (!isActive || stage !in stages.values) return
+        if (!present && insertion != null && insertion?.stage !== stage) {
+            requestInsertionRollback("Group member vanished")
+        }
+        insertion?.takeIf { it.stage === stage }?.let {
+            if (!present && taskId !in it.previousTasks) requestInsertionRollback("Task vanished")
+            else if (present) probeInsertion()
+        }
+        if (!present) groups.remove(taskId)
+        if (present) {
+            val id = stages.entries.first { it.value == stage }.key
+            layout = layout?.assign(id, stage.topChildTaskId.takeIf { it >= 0 } ?: taskId) ?: layout
+        }
+        if (present) host.changed()
+        scheduleReconcile()
+    }
+
+    fun onStageChanged() {
+        unreportedTasks.toMap().forEach { (stage, ids) ->
+            val current = childTasks(stage).associateBy { it.taskId }
+            ids.toList().forEach { id ->
+                val task = current[id]
+                if (task == null) {
+                    stage.mChildrenTaskInfo.remove(id)
+                    ids.remove(id)
+                    groups.remove(id)
+                    if (insertion?.stage === stage) requestInsertionRollback("Unreported task vanished")
+                    else scheduleReconcile()
+                } else stage.mChildrenTaskInfo.put(id, task)
+            }
+            if (ids.isEmpty()) unreportedTasks.remove(stage)
+        }
+        retiredStages.filter { it.mHasRootTask && it !in stages.values }.forEach {
+            if (childTasks(it).isNotEmpty()) {
+                val wct = WindowContainerTransaction()
+                resetPreparedStage(it, wct)
+                organizer.applyTransaction(wct)
+            }
+        }
+        probeInsertion()
+        if (!isActive) return
+        val active = stages.values.toList()
+        if (active.all { it.mRootTaskInfo?.isVisible == true }) visible = true
+        if (active.all { it.mRootTaskInfo?.isVisible != true } &&
+            (insertion == null || host.rootInfo()?.isVisible != true)) {
+            visible = false
+            if (!keyguard) requestInsertionRollback("Group hidden")
+        }
+        setDividerVisible(visible, null)
+        host.changed()
+    }
+
+    fun setDividerVisible(show: Boolean, transaction: SurfaceControl.Transaction?) {
+        visible = show
+        if (recentsAnimating) return
+        val t = transaction ?: SurfaceControl.Transaction()
+        dividers.values.forEach { split -> split.dividerLeash?.takeIf { it.isValid }?.let {
+            if (show && !keyguard) t.show(it).setAlpha(it, 1f) else t.hide(it)
+        } }
+        if (transaction == null) { t.apply(); t.close() }
+        syncStripZone()
+    }
+
     private fun candidate(model: MultiSplitLayout, leaf: LeafId, first: Boolean,
         columns: Boolean = false): MultiSplitLayout? {
         if (columns && !canInsertColumn(model)) return null
@@ -984,15 +1509,6 @@ class MultiSplitCoordinator(
             if (first) selected else pair, if (first) pair else selected))
     }
 
-    fun position(id: LeafId, model: MultiSplitLayout? = layout): Int {
-        fun contains(node: Node): Boolean = when (node) {
-            is Leaf -> node.id == id
-            is Split -> contains(node.first) || contains(node.second)
-        }
-        return if (model != null && contains(model.root.first)) SPLIT_POSITION_TOP_OR_LEFT
-            else SPLIT_POSITION_BOTTOM_OR_RIGHT
-    }
-
     private fun canRotateThreeAppShape(): Boolean {
         val model = layout ?: return false
         val configuration = displays.getDisplayContext(host.rootInfo()!!.displayId)
@@ -1002,5 +1518,76 @@ class MultiSplitCoordinator(
             displayBounds().width() > displayBounds().height()
     }
 
+    /** Copies the owning leaf's screen bounds, independently of the root split axis. */
+    fun getTaskBounds(taskId: Int, outBounds: Rect): Boolean {
+        val model = layout ?: return false
+        val id = leafOfTask(taskId) ?: return false
+        val rect = bounds(model)?.leaves?.get(id) ?: return false
+        outBounds.set(rect)
+        return true
+    }
+
     val activeStages: List<StageTaskListener> get() = stages.values.toList()
+
+    fun forgetGroup(taskId: Int) { groups.remove(taskId) }
+
+    /** Each preview is the exact new leaf rectangle of its proposed immutable layout. */
+    fun getSlots(displayId: Int): List<AppDragSlot> {
+        if (host.rootInfo()?.displayId != displayId || isBusy || imeTop != null || keyguard) {
+            return emptyList()
+        }
+        if (!isActive && !host.canEnter()) return emptyList()
+        if (!isActive && !ensureSpares()) return emptyList()
+        val model = layout ?: pairModel() ?: return emptyList()
+        val calculated = bounds(model) ?: return emptyList()
+        if (model.getLeaves().size >= host.capacity()) {
+            return model.getLeaves().map { leaf ->
+                val rect = calculated.leaves.getValue(leaf.id)
+                AppDragSlot(position(leaf.id, model), leaf.id.value, rect, rect, true,
+                    leaf.id.value, false, revision)
+            }
+        }
+        if (!hasInsertionBudget(model)) return emptyList()
+        return model.getLeaves().flatMap { leaf ->
+            val source = calculated.visibleLeaves.getValue(leaf.id)
+            val axis = model.insertionAxis(leaf.id)
+            if (axis == null) return@flatMap listOf(AppDragSlot(position(leaf.id, model),
+                leaf.id.value, source, source, true, leaf.id.value, false, revision))
+            val columns = if (canInsertColumn(model)) listOf(true, false).mapNotNull { first ->
+                val added = candidate(model, leaf.id, first, true) ?: return@mapNotNull null
+                if (!fitsExistingTasks(added)) return@mapNotNull null
+                val preview = bounds(added)?.leaves?.get(LeafId(nextLeaf)) ?: return@mapNotNull null
+                val hit = Rect(source)
+                if (first) hit.right = source.left + source.width() / 4
+                else hit.left = source.right - source.width() / 4
+                AppDragSlot(position(leaf.id, model), nextLeaf, preview, hit, false,
+                    leaf.id.value, first, revision, false, true)
+            } else emptyList()
+            val rows = listOf(true, false).mapNotNull { first ->
+                val added = candidate(model, leaf.id, first) ?: return@mapNotNull null
+                if (!fitsExistingTasks(added)) return@mapNotNull null
+                val preview = bounds(added)?.leaves?.get(LeafId(nextLeaf)) ?: return@mapNotNull null
+                val hit = Rect(source)
+                if (columns.any { it.newTaskFirst }) hit.left += source.width() / 4
+                if (columns.any { !it.newTaskFirst }) hit.right -= source.width() / 4
+                if (axis == Orientation.LEFT_RIGHT) {
+                    if (first) hit.right = source.centerX() else hit.left = source.centerX()
+                } else {
+                    if (first) hit.bottom = source.centerY() else hit.top = source.centerY()
+                }
+                AppDragSlot(position(leaf.id, model), nextLeaf, preview, hit, false,
+                    leaf.id.value, first, revision)
+            }
+            columns + rows
+        }
+    }
+
+    private fun hasInsertionBudget(model: MultiSplitLayout): Boolean {
+        val tasks = organizer.getRunningTasks(host.rootInfo()!!.displayId).orEmpty()
+        val split = com.android.wm.shell.common.MultitaskingWindowLimit.splitLeaves(tasks)
+        val floating = tasks.filter { it.isFloatingWindow && (it.isVisible || it.isVisibleRequested) }
+            .map { it.taskId }
+        return (model.getLeaves().map { it.taskId } + split + floating).distinct().size <
+            com.android.wm.shell.common.MultitaskingWindowLimit.MAX_WINDOWS
+    }
 }

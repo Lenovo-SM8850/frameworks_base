@@ -16,6 +16,9 @@
 
 package com.android.wm.shell.splitscreen;
 
+import static com.android.wm.shell.shared.split.SplitScreenConstants.CONTROLLED_ACTIVITY_TYPES;
+import static com.android.wm.shell.shared.split.SplitScreenConstants.CONTROLLED_WINDOWING_MODES_WHEN_ACTIVE;
+import com.android.internal.util.ArrayUtils;
 import static android.app.ActivityManager.START_SUCCESS;
 import static android.app.ActivityManager.START_TASK_TO_FRONT;
 import static android.app.ActivityTaskManager.INVALID_TASK_ID;
@@ -1546,5 +1549,230 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
             this.hitBounds = new Rect(hitBounds);
             this.occupied = occupied;
         }
+    }
+
+    /** Whether a floating task can be placed directly beside a visible fullscreen task. */
+    public boolean hasFloatingSplitCompanion(@NonNull ActivityManager.RunningTaskInfo taskInfo) {
+        return getFloatingSplitCompanion(taskInfo) != null;
+    }
+
+    public void showAddBelowPicker(int taskId, Executor backgroundExecutor) {
+        showSplitPicker(taskId, backgroundExecutor, false);
+    }
+
+    public void showReplaceSplitPicker(int taskId, Executor backgroundExecutor) {
+        showSplitPicker(taskId, backgroundExecutor, true);
+    }
+
+    /** Exchanges task assignments between stable leaf IDs without changing the geometry tree. */
+    public void swapLeaves(int firstLeafId, int secondLeafId) {
+        mMainExecutor.execute(() -> mStageCoordinator.swapLeaves(firstLeafId, secondLeafId));
+    }
+
+    /** Swaps a task with its split companion, rechecking eligibility on the Shell main thread. */
+    public void swapSplitTask(int taskId) {
+        mMainExecutor.execute(() -> {
+            if (!canMutateSplitTask(taskId)) return;
+            if (mStageCoordinator.isMultiSplitActive()) mStageCoordinator.swapSplitTask(taskId);
+            else mStageCoordinator.switchSplitPosition("handle menu");
+        });
+    }
+
+    @Nullable
+    private ActivityManager.RunningTaskInfo getFloatingSplitCompanion(
+            ActivityManager.RunningTaskInfo task) {
+        try {
+            final java.util.List<ActivityManager.RunningTaskInfo> tasks =
+                    mActivityTaskManager.getTasks(100, false, false, task.displayId);
+            if (tasks == null) return null;
+            return tasks.stream().filter(other -> other.taskId != task.taskId
+                    && other.displayId == task.displayId && other.isVisible
+                    && !other.isFloatingWindow && other.getWindowingMode() == WINDOWING_MODE_FULLSCREEN
+                    && other.getActivityType()
+                            == android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD
+                    && other.supportsMultiWindow).findFirst().orElse(null);
+        } catch (RemoteException e) {
+            Log.w(TAG, "Unable to find fullscreen split companion", e);
+            return null;
+        }
+    }
+
+    /** Whether this task still belongs to a visible split that can accept a menu action. */
+    public boolean canMutateSplitTask(int taskId) {
+        return isTaskInSplitScreenForeground(taskId) && mStageCoordinator.canMutateSplit();
+    }
+
+    private void showSplitPicker(int taskId, Executor backgroundExecutor, boolean replace) {
+        mMainExecutor.execute(() -> {
+            if (mSplitPicker == null) {
+                mSplitPicker = new SplitPickerController(mContext, this, mTaskOrganizer,
+                        mDisplayController, mTransitions, mMainExecutor, mMainHandler,
+                        backgroundExecutor);
+            }
+            mSplitPicker.show(taskId, replace);
+        });
+    }
+
+    private SplitPickerController mSplitPicker;
+
+    /** Avoids promising a new instance when a visible package cannot support it. */
+    public boolean canLaunchPickerApp(ComponentName component, int userId) {
+        for (int taskId : getSplitLeafTaskIds()) {
+            final ActivityManager.RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(taskId);
+            if (task != null && task.userId == userId
+                    && task.baseActivity != null
+                    && component.getPackageName().equals(task.baseActivity.getPackageName())
+                    && !mMultiInstanceHelpher.supportsMultiInstanceSplit(component, userId)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @Nullable
+    public AppDragSlot getAddBelowSlot(int taskId) {
+        return mStageCoordinator.getAddBelowSlot(taskId);
+    }
+
+    public AppDragSlot getAddBelowSlotForValidation(int taskId) {
+        return mStageCoordinator.getAddBelowSlotForValidation(taskId);
+    }
+
+    @Nullable
+    public AppDragSlot getReplaceSplitSlot(int taskId) {
+        return canMutateSplitTask(taskId) ? mStageCoordinator.getReplaceSplitSlot(taskId) : null;
+    }
+
+    /** Revalidates the exact occupied destination before reusing a recent or floating task. */
+    public boolean replaceSplitTask(TaskInfo task, AppDragSlot slot, int sourceTaskId) {
+        final AppDragSlot fresh = getReplaceSplitSlot(sourceTaskId);
+        if (fresh == null || !fresh.occupied || !slot.occupied || fresh.leafId != slot.leafId
+                || fresh.layoutVersion != slot.layoutVersion || !fresh.bounds.equals(slot.bounds)
+                || !task.supportsMultiWindow || task.displayId != android.view.Display.DEFAULT_DISPLAY
+                || task.minWidth > slot.bounds.width() || task.minHeight > slot.bounds.height()) {
+            return false;
+        }
+        if (slot.leafId >= 0) return startTaskInSplitSlot(task, slot);
+        if (getSplitLeafTaskIds().contains(task.taskId)) {
+            if (task.taskId == sourceTaskId) return false;
+            final AppDragSlot other = getReplaceSplitSlot(task.taskId);
+            final TaskInfo source = mTaskOrganizer.getRunningTaskInfo(sourceTaskId);
+            if (other == null || source == null || source.minWidth > other.bounds.width()
+                    || source.minHeight > other.bounds.height()) return false;
+            mStageCoordinator.swapSplitTask(sourceTaskId);
+            return true;
+        }
+        mStageCoordinator.replacePairTask(task, slot);
+        return true;
+    }
+
+    /** Starts a sidebar drop against its coordinator-owned preview, revalidating on Shell main. */
+    public boolean startSidebarIntent(PendingIntent intent, int userId, @Nullable Intent fillIn,
+            Bundle options, AppDragSlot slot) {
+        if (slot.leafId < 0) {
+            startIntent(intent, userId, fillIn, slot.position, options, null, slot.index);
+            return true;
+        }
+        final ComponentName component = intent.getIntent().getComponent();
+        final Intent launch = fillIn == null ? new Intent() : new Intent(fillIn);
+        if (intent.isImmutable()) {
+            launch.removeFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        } else {
+            launch.addFlags(FLAG_ACTIVITY_NO_USER_ACTION);
+        }
+        for (ActivityManager.RunningTaskInfo task : mTaskOrganizer.getRunningTasks()) {
+            if (task.userId == userId && isTaskInSplitScreen(task.taskId)
+                    && task.baseActivity != null && component != null
+                    && task.baseActivity.getPackageName().equals(component.getPackageName())) {
+                if (!mMultiInstanceHelpher.supportsMultiInstanceSplit(component, userId)) return false;
+                launch.addFlags(FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
+            }
+        }
+        return mStageCoordinator.startSidebarIntent(intent, launch,
+                pendingIntentLaunchOptions(options, launch.getFlags()), slot);
+    }
+
+    /** Shares the leaf insertion transaction with sidebar launches. */
+    public boolean startTaskInSplitSlot(TaskInfo task, AppDragSlot slot) {
+        return mStageCoordinator.startTaskInSplitSlot(task, slot);
+    }
+
+    public java.util.List<Integer> getSplitLeafTaskIds() {
+        return mStageCoordinator.getSplitLeafTaskIds();
+    }
+
+    /** Immutable tokens receive launch flags through options, independently of their fill-in. */
+    private static Bundle pendingIntentLaunchOptions(@Nullable Bundle options, int flags) {
+        ActivityOptions launch = ActivityOptions.fromBundle(options);
+        if (launch == null) launch = ActivityOptions.makeBasic();
+        final int launchFlags = flags & (FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
+        launch.setPendingIntentLaunchFlags(launch.getPendingIntentLaunchFlags() | launchFlags);
+        launch.setDisallowEnterPictureInPictureWhileLaunching(true);
+        return launch.toBundle();
+    }
+
+    /** Copies the owning multi-app leaf's screen bounds; returns false for a legacy pair. */
+    public boolean getMultiSplitTaskBounds(int taskId, @NonNull Rect outBounds) {
+        return mStageCoordinator.getMultiSplitTaskBounds(taskId, outBounds);
+    }
+
+    public void moveFloatingTaskToSplit(int taskId) {
+        mMainExecutor.execute(() -> {
+            final ActivityManager.RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(taskId);
+            if (task == null) return;
+            final ActivityManager.RunningTaskInfo companion = isSplitScreenVisible()
+                    ? null : getFloatingSplitCompanion(task);
+            final AppDragSlot slot = getFloatingSplitSlot(task, companion);
+            if (slot == null) return;
+            if (isSplitScreenVisible()) {
+                startTaskInSplitSlot(task, slot);
+            } else {
+                if (companion == null || !mStageCoordinator.canStartSplitEntry()) return;
+                mStageCoordinator.startFloatingPair(taskId, companion.taskId, slot.position);
+            }
+        });
+    }
+
+    @Nullable
+    private AppDragSlot getFloatingSplitSlot(ActivityManager.RunningTaskInfo task,
+            @Nullable ActivityManager.RunningTaskInfo companion) {
+        if (!task.isFloatingWindow || !supportsSplitScreen(task)
+                || task.displayId != DEFAULT_DISPLAY
+                || getOccupiedSplitSlots(task.displayId) >= getSplitCapacity(task.displayId)) {
+            return null;
+        }
+        if (isSplitScreenVisible() && getSplitCapacity(task.displayId) <= 2) return null;
+        if (!isSplitScreenVisible() && !mStageCoordinator.canStartSplitEntry()) return null;
+        if (isSplitScreenVisible() && !mStageCoordinator.canMutateSplit()) return null;
+        java.util.List<AppDragSlot> slots = getAppDragSlots(task.displayId);
+        if (!isSplitScreenVisible() && companion != null) {
+            final java.util.List<AppDragSlot> all = slots;
+            slots = slots.stream().filter(slot -> all.stream().anyMatch(other ->
+                    other.position != slot.position && other.bounds.width() >= companion.minWidth
+                            && other.bounds.height() >= companion.minHeight)).toList();
+        }
+        return SplitPickerPolicy.chooseFloatingSlot(slots,
+                task.getPresentationBounds(), task.minWidth, task.minHeight);
+    }
+
+    /** Maximum visible split apps implemented by the current layout backend. */
+    public int getSplitCapacity(int displayId) {
+        return displayId == DEFAULT_DISPLAY
+                ? SplitCapacityPolicy.getSplitCapacity(mDisplayController, displayId) : 0;
+    }
+
+    public java.util.List<AppDragSlot> getAppDragSlots(int displayId) {
+        return mStageCoordinator.getAppDragSlots(displayId);
+    }
+
+    /**
+     * Whether the platform allows this task in split, regardless of its current windowing mode.
+     * Both the fullscreen and floating caption handle menus share this app-capability check.
+     */
+    public static boolean supportsSplitScreen(@NonNull ActivityManager.RunningTaskInfo taskInfo) {
+        return taskInfo.supportsMultiWindowWithoutConstraints
+                && ArrayUtils.contains(CONTROLLED_ACTIVITY_TYPES, taskInfo.getActivityType())
+                && ArrayUtils.contains(CONTROLLED_WINDOWING_MODES_WHEN_ACTIVE,
+                        taskInfo.getWindowingMode());
     }
 }
