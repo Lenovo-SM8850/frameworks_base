@@ -24,4 +24,7 @@ public interface DisplayBlanker {
      * Requests the specified display state and brightness levels for the specified displayId.
      */
     void requestDisplayState(int displayId, int state, float brightness, float sdrBrightness);
+
+    /** Reports power policy together with the applied screen state, including ON ambient UI. */
+    default void onDisplayPowerStateChanged(int displayId, int policy, int state) {}
 }

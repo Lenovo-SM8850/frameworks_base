@@ -432,6 +432,11 @@ public final class DisplayManagerService extends SystemService {
 
     /** {@link DisplayBlanker} used by all {@link DisplayPowerController}s. */
     private final DisplayBlanker mDisplayBlanker = new DisplayBlanker() {
+        @Override
+        public void onDisplayPowerStateChanged(int displayId, int policy, int state) {
+            mDisplayModeDirector.onDisplayPowerStateChanged(displayId, policy, state);
+        }
+
         // Synchronized to avoid race conditions when updating multiple display states.
         @Override
         public synchronized void requestDisplayState(int displayId, int state, float brightness,
