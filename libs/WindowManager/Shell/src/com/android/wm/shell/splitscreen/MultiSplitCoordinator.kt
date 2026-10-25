@@ -92,6 +92,9 @@ class MultiSplitCoordinator(
     private val readyInfos = mutableMapOf<IBinder, TransitionInfo>()
     private var restoring = false
     private var recentsAnimating = false
+    private val animationBranches = mutableListOf<SurfaceControl>()
+    private val animationChanges = mutableListOf<TransitionInfo.Change>()
+    private val animationParents = linkedMapOf<SurfaceControl, Pair<SurfaceControl, Rect>>()
     private var projectedRepresentatives = emptyList<Int>()
     private val spare = mutableListOf<StageTaskListener>()
     private val attached = mutableSetOf<StageTaskListener>()
@@ -232,6 +235,137 @@ class MultiSplitCoordinator(
             change.setFlags(FLAG_IS_DIVIDER_BAR)
             info.addChange(change)
         }
+    }
+
+    /** Keeps nested leaves inside the two branch targets understood by launcher animations. */
+    fun projectAnimationBranches(info: TransitionInfo, t: SurfaceControl.Transaction) {
+        val group = publishGroup() ?: return
+        val model = layout ?: return
+        val calculated = bounds(model) ?: return
+        val root = host.rootInfo() ?: return
+        val rootLeash = host.rootLeash() ?: return
+        val representatives = listOf(group.firstRepresentative, group.secondRepresentative)
+        val tasks = representatives.map { organizer.getRunningTaskInfo(it) ?: return }
+        val taskIds = model.getLeaves().map { it.taskId }.toSet()
+        val stageIds = stages.values.map { it.mRootTaskInfo.taskId }.toSet()
+        if (info.changes.none { it.taskInfo?.taskId in taskIds + stageIds }) return
+        restoreAnimationBranches(t)
+        val original = info.changes.toList()
+        val parentLeash = original.firstOrNull { it.taskInfo?.taskId == root.taskId }?.leash
+            ?: rootLeash
+        val display = displayBounds()
+        if (original.none { it.taskInfo?.taskId == root.taskId }) {
+            info.addChange(TransitionInfo.Change(root.token,
+                SurfaceControl(rootLeash, "MultiSplitAnimationRoot")).apply {
+                setTaskInfo(RunningTaskInfo(root))
+                setMode(if (restoring) TRANSIT_OPEN else TRANSIT_TO_BACK)
+                setStartAbsBounds(display)
+                setEndAbsBounds(display)
+                setDisplayId(root.displayId, root.displayId)
+            })
+        }
+        val branches = mutableListOf<TransitionInfo.Change>()
+        val removed = original.filter { it.taskInfo?.taskId in taskIds + stageIds }.toMutableList()
+        tasks.forEach { task ->
+            val id = model.getLeaves().first { it.taskId == task.taskId }.id
+            val branchPosition = position(id)
+            val branchStages = stages.filterKeys { position(it) == branchPosition }
+            val rect = Rect().apply { branchStages.keys.forEach { union(calculated.leaves.getValue(it)) } }
+            val representativeStage = stages.getValue(id).mRootTaskInfo
+            val source = original.firstOrNull { it.taskInfo?.taskId == task.taskId }
+                ?: original.firstOrNull { it.taskInfo?.taskId == representativeStage.taskId }
+            val mode = source?.mode ?: if (restoring) TRANSIT_OPEN else TRANSIT_TO_BACK
+            val branch = SurfaceControl.Builder().setName("MultiSplitAnimationBranch")
+                .setContainerLayer().setHidden(false).setParent(parentLeash).build()
+            val content = SurfaceControl.Builder().setName("MultiSplitAnimationContent")
+                .setContainerLayer().setHidden(false).setParent(branch).build()
+            animationBranches.addAll(listOf(branch, content))
+            t.setPosition(branch, (rect.left - display.left).toFloat(),
+                (rect.top - display.top).toFloat()).setWindowCrop(branch, rect.width(), rect.height())
+                .setPosition(content, 0f, 0f).setWindowCrop(content, rect.width(), rect.height())
+            fun change(taskInfo: RunningTaskInfo, leash: SurfaceControl,
+                parent: WindowContainerToken, left: Int, top: Int): TransitionInfo.Change {
+                val copy = RunningTaskInfo(taskInfo)
+                copy.configuration.windowConfiguration.setBounds(rect)
+                return TransitionInfo.Change(copy.token, SurfaceControl(leash, "MultiSplitAnimation"))
+                    .apply {
+                        setTaskInfo(copy)
+                        setParent(parent)
+                        setMode(mode)
+                        setFlags(source?.flags ?: 0)
+                        setDisplayId(root.displayId, root.displayId)
+                        setStartAbsBounds(rect)
+                        setEndAbsBounds(rect)
+                        setEndRelOffset(left, top)
+                        if (source != null) setRotation(source.startRotation, source.endRotation)
+                    }
+            }
+            val stageChange = change(representativeStage, branch, root.token,
+                rect.left - display.left, rect.top - display.top)
+            stageChange.taskInfo!!.parentTaskId = root.taskId
+            val leafChange = change(task, content, representativeStage.token, 0, 0)
+            leafChange.taskInfo!!.parentTaskId = representativeStage.taskId
+            branches.add(leafChange)
+            branches.add(stageChange)
+            branchStages.forEach stageLoop@ { (leaf, stage) ->
+                val leafRect = calculated.leaves.getValue(leaf)
+                val nativeStage = stage.mRootLeash ?: return@stageLoop
+                val stageLeash = original.firstOrNull {
+                    it.taskInfo?.taskId == stage.mRootTaskInfo.taskId
+                }?.leash ?: nativeStage
+                animationParents[stageLeash] = rootLeash to Rect(leafRect).apply {
+                    offset(-display.left, -display.top)
+                }
+                t.reparent(stageLeash, content)
+                    .setPosition(stageLeash, (leafRect.left - rect.left).toFloat(),
+                        (leafRect.top - rect.top).toFloat())
+                    .setMatrix(stageLeash, 1f, 0f, 0f, 1f)
+                    .setWindowCrop(stageLeash, leafRect.width(), leafRect.height())
+                    .show(stageLeash).setAlpha(stageLeash, 1f)
+                original.filter { it.taskInfo?.parentTaskId == stage.mRootTaskInfo.taskId }
+                    .forEach { child ->
+                        animationParents[child.leash] = nativeStage to Rect(0, 0,
+                            leafRect.width(), leafRect.height())
+                        t.reparent(child.leash, stageLeash).setPosition(child.leash, 0f, 0f)
+                            .setMatrix(child.leash, 1f, 0f, 0f, 1f)
+                            .setWindowCrop(child.leash, leafRect.width(), leafRect.height())
+                            .show(child.leash).setAlpha(child.leash, 1f)
+                    }
+            }
+            original.filter { TransitionUtil.isDividerBar(it) && rect.contains(it.startAbsBounds) }
+                .forEach { divider ->
+                    removed.add(divider)
+                    t.reparent(divider.leash, content).setPosition(divider.leash,
+                        (divider.startAbsBounds.left - rect.left).toFloat(),
+                        (divider.startAbsBounds.top - rect.top).toFloat())
+                }
+        }
+        val first = original.indexOfFirst { it in removed }.coerceAtLeast(0)
+        animationChanges.addAll(removed)
+        info.changes.removeAll(removed.toSet())
+        info.changes.addAll(first.coerceAtMost(info.changes.size), branches)
+    }
+
+    fun restoreAnimationBranches(t: SurfaceControl.Transaction) {
+        if (animationBranches.isEmpty()) return
+        animationParents.forEach { (leash, destination) ->
+            if (leash.isValid && destination.first.isValid) {
+                val rect = destination.second
+                t.reparent(leash, destination.first).setPosition(leash,
+                    rect.left.toFloat(), rect.top.toFloat()).setMatrix(leash, 1f, 0f, 0f, 1f)
+                    .setWindowCrop(leash, rect.width(), rect.height()).setAlpha(leash, 1f)
+            }
+        }
+        animationParents.clear()
+        reparentDividers(t)
+        stages.values.forEach { it.restoreChildSurfaces(t) }
+        animationBranches.asReversed().forEach { leash ->
+            if (leash.isValid) t.remove(leash)
+            leash.release()
+        }
+        animationBranches.clear()
+        animationChanges.forEach { it.leash.release(); it.snapshot?.release() }
+        animationChanges.clear()
     }
 
     private fun setRecentsAnimating(animating: Boolean) {
@@ -1836,30 +1970,6 @@ class MultiSplitCoordinator(
         } }
     } else 0
 
-    private val animationBranches = mutableListOf<SurfaceControl>()
-
-    fun restoreAnimationBranches(t: SurfaceControl.Transaction) {
-        if (animationBranches.isEmpty()) return
-        animationParents.forEach { (leash, destination) ->
-            if (leash.isValid && destination.first.isValid) {
-                val rect = destination.second
-                t.reparent(leash, destination.first).setPosition(leash,
-                    rect.left.toFloat(), rect.top.toFloat()).setMatrix(leash, 1f, 0f, 0f, 1f)
-                    .setWindowCrop(leash, rect.width(), rect.height()).setAlpha(leash, 1f)
-            }
-        }
-        animationParents.clear()
-        reparentDividers(t)
-        stages.values.forEach { it.restoreChildSurfaces(t) }
-        animationBranches.asReversed().forEach { leash ->
-            if (leash.isValid) t.remove(leash)
-            leash.release()
-        }
-        animationBranches.clear()
-        animationChanges.forEach { it.leash.release(); it.snapshot?.release() }
-        animationChanges.clear()
-    }
-
     private fun syncDividers(t: SurfaceControl.Transaction? = null) {
         val model = layout ?: return
         val calculated = bounds(model) ?: return
@@ -1940,10 +2050,6 @@ class MultiSplitCoordinator(
     val isVisible: Boolean get() = isActive && visible &&
         stages.values.any { it.mRootTaskInfo?.isVisible == true }
 
-    private val animationChanges = mutableListOf<TransitionInfo.Change>()
-
-    private val animationParents = linkedMapOf<SurfaceControl, Pair<SurfaceControl, Rect>>()
-
     val isLeftRightSplit: Boolean get() = layout?.root?.orientation == Orientation.LEFT_RIGHT
 
     /** Replacement addresses a whole existing leaf, including an unsplit half. */
@@ -1985,113 +2091,4 @@ class MultiSplitCoordinator(
     }
 
     val activeStages: List<StageTaskListener> get() = stages.values.toList()
-
-    /** Keeps nested leaves inside the two branch targets understood by launcher animations. */
-    fun projectAnimationBranches(info: TransitionInfo, t: SurfaceControl.Transaction) {
-        val group = publishGroup() ?: return
-        val model = layout ?: return
-        val calculated = bounds(model) ?: return
-        val root = host.rootInfo() ?: return
-        val rootLeash = host.rootLeash() ?: return
-        val representatives = listOf(group.firstRepresentative, group.secondRepresentative)
-        val tasks = representatives.map { organizer.getRunningTaskInfo(it) ?: return }
-        val taskIds = model.getLeaves().map { it.taskId }.toSet()
-        val stageIds = stages.values.map { it.mRootTaskInfo.taskId }.toSet()
-        if (info.changes.none { it.taskInfo?.taskId in taskIds + stageIds }) return
-        restoreAnimationBranches(t)
-        val original = info.changes.toList()
-        val parentLeash = original.firstOrNull { it.taskInfo?.taskId == root.taskId }?.leash
-            ?: rootLeash
-        val display = displayBounds()
-        if (original.none { it.taskInfo?.taskId == root.taskId }) {
-            info.addChange(TransitionInfo.Change(root.token,
-                SurfaceControl(rootLeash, "MultiSplitAnimationRoot")).apply {
-                setTaskInfo(RunningTaskInfo(root))
-                setMode(if (restoring) TRANSIT_OPEN else TRANSIT_TO_BACK)
-                setStartAbsBounds(display)
-                setEndAbsBounds(display)
-                setDisplayId(root.displayId, root.displayId)
-            })
-        }
-        val branches = mutableListOf<TransitionInfo.Change>()
-        val removed = original.filter { it.taskInfo?.taskId in taskIds + stageIds }.toMutableList()
-        tasks.forEach { task ->
-            val id = model.getLeaves().first { it.taskId == task.taskId }.id
-            val branchPosition = position(id)
-            val branchStages = stages.filterKeys { position(it) == branchPosition }
-            val rect = Rect().apply { branchStages.keys.forEach { union(calculated.leaves.getValue(it)) } }
-            val representativeStage = stages.getValue(id).mRootTaskInfo
-            val source = original.firstOrNull { it.taskInfo?.taskId == task.taskId }
-                ?: original.firstOrNull { it.taskInfo?.taskId == representativeStage.taskId }
-            val mode = source?.mode ?: if (restoring) TRANSIT_OPEN else TRANSIT_TO_BACK
-            val branch = SurfaceControl.Builder().setName("MultiSplitAnimationBranch")
-                .setContainerLayer().setHidden(false).setParent(parentLeash).build()
-            val content = SurfaceControl.Builder().setName("MultiSplitAnimationContent")
-                .setContainerLayer().setHidden(false).setParent(branch).build()
-            animationBranches.addAll(listOf(branch, content))
-            t.setPosition(branch, (rect.left - display.left).toFloat(),
-                (rect.top - display.top).toFloat()).setWindowCrop(branch, rect.width(), rect.height())
-                .setPosition(content, 0f, 0f).setWindowCrop(content, rect.width(), rect.height())
-            fun change(taskInfo: RunningTaskInfo, leash: SurfaceControl,
-                parent: WindowContainerToken, left: Int, top: Int): TransitionInfo.Change {
-                val copy = RunningTaskInfo(taskInfo)
-                copy.configuration.windowConfiguration.setBounds(rect)
-                return TransitionInfo.Change(copy.token, SurfaceControl(leash, "MultiSplitAnimation"))
-                    .apply {
-                        setTaskInfo(copy)
-                        setParent(parent)
-                        setMode(mode)
-                        setFlags(source?.flags ?: 0)
-                        setDisplayId(root.displayId, root.displayId)
-                        setStartAbsBounds(rect)
-                        setEndAbsBounds(rect)
-                        setEndRelOffset(left, top)
-                        if (source != null) setRotation(source.startRotation, source.endRotation)
-                    }
-            }
-            val stageChange = change(representativeStage, branch, root.token,
-                rect.left - display.left, rect.top - display.top)
-            stageChange.taskInfo!!.parentTaskId = root.taskId
-            val leafChange = change(task, content, representativeStage.token, 0, 0)
-            leafChange.taskInfo!!.parentTaskId = representativeStage.taskId
-            branches.add(leafChange)
-            branches.add(stageChange)
-            branchStages.forEach stageLoop@ { (leaf, stage) ->
-                val leafRect = calculated.leaves.getValue(leaf)
-                val nativeStage = stage.mRootLeash ?: return@stageLoop
-                val stageLeash = original.firstOrNull {
-                    it.taskInfo?.taskId == stage.mRootTaskInfo.taskId
-                }?.leash ?: nativeStage
-                animationParents[stageLeash] = rootLeash to Rect(leafRect).apply {
-                    offset(-display.left, -display.top)
-                }
-                t.reparent(stageLeash, content)
-                    .setPosition(stageLeash, (leafRect.left - rect.left).toFloat(),
-                        (leafRect.top - rect.top).toFloat())
-                    .setMatrix(stageLeash, 1f, 0f, 0f, 1f)
-                    .setWindowCrop(stageLeash, leafRect.width(), leafRect.height())
-                    .show(stageLeash).setAlpha(stageLeash, 1f)
-                original.filter { it.taskInfo?.parentTaskId == stage.mRootTaskInfo.taskId }
-                    .forEach { child ->
-                        animationParents[child.leash] = nativeStage to Rect(0, 0,
-                            leafRect.width(), leafRect.height())
-                        t.reparent(child.leash, stageLeash).setPosition(child.leash, 0f, 0f)
-                            .setMatrix(child.leash, 1f, 0f, 0f, 1f)
-                            .setWindowCrop(child.leash, leafRect.width(), leafRect.height())
-                            .show(child.leash).setAlpha(child.leash, 1f)
-                    }
-            }
-            original.filter { TransitionUtil.isDividerBar(it) && rect.contains(it.startAbsBounds) }
-                .forEach { divider ->
-                    removed.add(divider)
-                    t.reparent(divider.leash, content).setPosition(divider.leash,
-                        (divider.startAbsBounds.left - rect.left).toFloat(),
-                        (divider.startAbsBounds.top - rect.top).toFloat())
-                }
-        }
-        val first = original.indexOfFirst { it in removed }.coerceAtLeast(0)
-        animationChanges.addAll(removed)
-        info.changes.removeAll(removed.toSet())
-        info.changes.addAll(first.coerceAtMost(info.changes.size), branches)
-    }
 }
