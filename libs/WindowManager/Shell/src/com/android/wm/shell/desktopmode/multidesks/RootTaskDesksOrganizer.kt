@@ -29,7 +29,10 @@ import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
 import android.app.WindowConfiguration.windowingModeToString
 import android.content.res.Configuration
 import android.os.Trace
+import android.os.UserHandle
+import android.os.UserManager
 import android.util.SparseArray
+import android.view.Display.DEFAULT_DISPLAY
 import android.view.SurfaceControl
 import android.view.WindowManager.TRANSIT_TO_FRONT
 import android.window.DesktopExperienceFlags
@@ -49,6 +52,7 @@ import com.android.wm.shell.common.LaunchAdjacentController
 import com.android.wm.shell.desktopmode.createActivityOptionsForStartTask
 import com.android.wm.shell.desktopmode.desktopfirst.isDisplayDesktopFirst
 import com.android.wm.shell.desktopmode.multidesks.DesksOrganizer.OnCreateCallback
+import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils
 import com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_DESKTOP_MODE
 import com.android.wm.shell.sysui.ShellCommandHandler
 import com.android.wm.shell.sysui.ShellInit
@@ -67,6 +71,7 @@ class RootTaskDesksOrganizer(
     private val shellTaskOrganizer: ShellTaskOrganizer,
     private val launchAdjacentController: LaunchAdjacentController,
     private val rootTaskDisplayAreaOrganizer: RootTaskDisplayAreaOrganizer,
+    private val userManager: UserManager? = null,
 ) : DesksOrganizer, ShellTaskOrganizer.TaskListener {
 
     private val createDeskRootRequests = mutableListOf<CreateDeskRequest>()

@@ -19,6 +19,8 @@ import android.app.ActivityManager
 import android.app.ActivityOptions
 import android.app.FullscreenRequestHandler.REQUEST_ALLOW_MODE_ENTER
 import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
+import android.os.UserHandle
+import android.os.UserManager
 import android.platform.test.annotations.EnableFlags
 import android.testing.AndroidTestingRunner
 import android.view.Display.DEFAULT_DISPLAY
@@ -89,6 +91,7 @@ class RootTaskDesksOrganizerTest : ShellTestCase() {
     private val mockShellCommandHandler = mock<ShellCommandHandler>()
     private val mockShellTaskOrganizer = mock<ShellTaskOrganizer>()
     private val mockTDAOrganizer = mock<RootTaskDisplayAreaOrganizer>()
+    private val userManager = mock<UserManager>()
 
     private val launchAdjacentController = LaunchAdjacentController(mock())
     private val taskInfoChangedListener = mock<(ActivityManager.RunningTaskInfo) -> Unit>()
@@ -105,6 +108,7 @@ class RootTaskDesksOrganizerTest : ShellTestCase() {
                 mockShellTaskOrganizer,
                 launchAdjacentController,
                 mockTDAOrganizer,
+                userManager,
             )
         organizer.addOnDesktopTaskInfoChangedListener(taskInfoChangedListener)
         organizer.addOnDesktopTaskVanishedListener(taskVanishedListener)
