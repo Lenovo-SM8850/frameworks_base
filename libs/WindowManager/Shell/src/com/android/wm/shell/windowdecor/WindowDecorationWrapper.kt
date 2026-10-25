@@ -634,6 +634,13 @@ private constructor(
             else -> error("Expected Non-null default or desktop window decoration")
         }
 
+    /** Creates a separate resize veil owned by a transition. */
+    fun createTransitionResizeVeil(parent: SurfaceControl): ResizeVeil? = when {
+        defaultWindowDecor != null -> requireDefaultWindowDecor().createTransitionResizeVeil(parent)
+        desktopWindowDecor != null -> requireDesktopWindowDecor().createTransitionResizeVeil(parent)
+        else -> null
+    }
+
     /** Show the resize veil. */
     fun showResizeVeil(t: SurfaceControl.Transaction, bounds: Rect) =
         when {

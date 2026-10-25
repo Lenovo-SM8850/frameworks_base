@@ -122,6 +122,26 @@ class ResizeVeilTest : ShellTestCase() {
     }
 
     @Test
+    fun transitionFrame_updatesOpaqueBoundsAndIconWithoutApplyingTransaction() = runTest {
+        val veil = createResizeVeil()
+        whenever(mockResizeVeilSurface.isValid).thenReturn(true)
+        whenever(mockBackgroundSurface.isValid).thenReturn(true)
+        whenever(mockIconSurface.isValid).thenReturn(true)
+        veil.updateTransactionWithShowVeil(mockTransaction, mock(), Rect(0, 0, 100, 100),
+            taskInfo, false)
+        clearInvocations(mockTransaction)
+        veil.updateTransitionFrame(mockTransaction, Rect(20, 30, 220, 330), 1f, .5f)
+        verify(mockTransaction).setWindowCrop(mockResizeVeilSurface, 200, 300)
+        verify(mockTransaction).setAlpha(mockBackgroundSurface, 1f)
+        verify(mockTransaction).setAlpha(mockIconSurface, .5f)
+        verify(mockTransaction, never()).apply()
+        whenever(mockResizeVeilSurface.isValid).thenReturn(false)
+        clearInvocations(mockTransaction)
+        veil.updateTransitionFrame(mockTransaction, Rect(0, 0, 100, 100), 1f, 1f)
+        verifyNoMoreInteractions(mockTransaction)
+    }
+
+    @Test
     fun init_displayAvailable_viewHostCreated() = runTest {
         createResizeVeil(withDisplayAvailable = true)
 

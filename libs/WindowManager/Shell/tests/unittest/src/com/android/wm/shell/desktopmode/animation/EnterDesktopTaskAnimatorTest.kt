@@ -26,4 +26,46 @@ import org.mockito.kotlin.whenever
 class EnterDesktopTaskAnimatorTest : ShellTestCase() {
     @JvmField @Rule val animatorRule = AnimatorTestRule(this)
 
+    @Test fun floatingHandoff_veilCropRemainsLogicalThroughFirstAndLastFrame() {
+        val leash = mock<SurfaceControl>()
+        val t = mock<SurfaceControl.Transaction>()
+        whenever(t.setPosition(any(), any(), any())).thenReturn(t)
+        whenever(t.setWindowCrop(any(), any<Int>(), any<Int>())).thenReturn(t)
+        whenever(t.setMatrix(any(), any(), any(), any(), any())).thenReturn(t)
+        var crop = 0
+        var scale = 1f
+        whenever(t.setWindowCrop(any(), any<Int>(), any<Int>())).thenAnswer {
+            crop = it.getArgument(1); t
+        }
+        whenever(t.setMatrix(any(), any(), any(), any(), any())).thenAnswer {
+            scale = it.getArgument(1); t
+        }
+        val visibleWidths = mutableListOf<Float>()
+        val listener = object : OnTaskResizeAnimationListener {
+            fun relayout(bounds: Rect): Boolean {
+                t.setWindowCrop(leash, bounds.width(), bounds.height())
+                visibleWidths += crop * scale
+                t.apply()
+                return true
+            }
+            override fun onAnimationStart(taskId: Int, t: SurfaceControl.Transaction, bounds: Rect) =
+                relayout(bounds)
+            override fun onBoundsChange(taskId: Int, t: SurfaceControl.Transaction, bounds: Rect) =
+                relayout(bounds)
+            override fun onAnimationEnd(taskId: Int) {}
+        }
+        val task = TestRunningTaskInfoBuilder().setTaskId(42).build()
+        val change = TransitionInfo.Change(task.token, leash).apply {
+            taskInfo = task
+            mode = TRANSIT_CHANGE
+            setStartAbsBounds(Rect(0, 0, 800, 1200))
+            setStartFloatingWindowBounds(Rect(100, 200, 700, 1100))
+            setEndAbsBounds(Rect(0, 0, 800, 1200))
+        }
+        EnterDesktopTaskAnimator(context, { t }, listener).animate(change, t, t, mock())
+        animatorRule.advanceTimeBy(300)
+        assertThat(visibleWidths.first()).isEqualTo(600f)
+        assertThat(visibleWidths.last()).isEqualTo(800f)
+        assertThat(crop * scale).isEqualTo(800f)
+    }
 }

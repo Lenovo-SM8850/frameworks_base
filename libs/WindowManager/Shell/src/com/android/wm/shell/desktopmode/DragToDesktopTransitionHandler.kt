@@ -901,13 +901,21 @@ sealed class DragToDesktopTransitionHandler(
     ) {
         val state = requireTransitionState()
         val freeformTaskChanges = mutableListOf<Change>()
+        val enteringFloating = info.changes.any {
+            it.taskInfo?.taskId == state.draggedTaskId && it.taskInfo?.isFloatingWindow == true
+        }
         info.changes.forEachIndexed { i, change ->
             when {
                 state is TransitionState.FromSplit &&
                     change.taskInfo?.taskId == state.otherSplitTask -> {
-                    // If we're exiting split, hide the remaining split task.
-                    startTransaction.hide(change.leash)
-                    finishTransaction.hide(change.leash)
+                    if (enteringFloating) {
+                        startTransaction.show(change.leash)
+                        finishTransaction.show(change.leash)
+                    } else {
+                        // Desktop entry hides the remaining split task.
+                        startTransaction.hide(change.leash)
+                        finishTransaction.hide(change.leash)
+                    }
                 }
                 change.mode == TRANSIT_CLOSE -> {
                     startTransaction.hide(change.leash)
@@ -917,10 +925,20 @@ sealed class DragToDesktopTransitionHandler(
                     startTransaction.show(change.leash)
                     finishTransaction.show(change.leash)
                     state.draggedTaskChange = change
+                    if (change.taskInfo?.isFloatingWindow == true) {
+                        Transitions.applyFloatingWindowTransform(change, finishTransaction)
+                        state.startTransitionFinishTransaction?.let {
+                            Transitions.applyFloatingWindowTransform(change, it)
+                        }
+                    }
                     // Restoring the dragged leash layer as it gets reset in the merge transition
                     state.surfaceLayers?.let {
                         startTransaction.setLayer(change.leash, it.dragLayer)
                     }
+                }
+                change.taskInfo?.isFloatingWindow == true -> {
+                    Transitions.applyFloatingWindowTransform(change, startTransaction)
+                    Transitions.applyFloatingWindowTransform(change, finishTransaction)
                 }
                 // Other desktop tasks that are being restored go behind the dragged task.
                 change.taskInfo?.windowingMode == WINDOWING_MODE_FREEFORM

@@ -572,6 +572,18 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
 
     @OptIn(markerClass = ExperimentalCoroutinesApi.class)
     private void onInit() {
+        mTransitions.setFloatingRotationVeilProvider(new Transitions.FloatingRotationVeilProvider() {
+            @Override
+            public ResizeVeil createVeil(int taskId, SurfaceControl parent) {
+                final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskId);
+                return decoration == null ? null : decoration.createTransitionResizeVeil(parent);
+            }
+
+            @Override
+            public boolean isContentReady(int taskId) {
+                return !mTaskOrganizer.hasStartingWindow(taskId);
+            }
+        });
         mShellController.addKeyguardChangeListener(mDesktopModeKeyguardChangeListener);
         mShellCommandHandler.addDumpCallback(this::dump, this);
         mDisplayInsetsController.addGlobalInsetsChangedListener(
