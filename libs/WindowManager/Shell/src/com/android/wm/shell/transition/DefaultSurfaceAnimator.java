@@ -125,6 +125,9 @@ public class DefaultSurfaceAnimator implements Runnable {
             @Nullable TransitionAnimationHelper.RoundedContentPerDisplay roundedBounds) {
         final DefaultAnimationAdapter adapter = new DefaultAnimationAdapter(anim, leash,
                 position, clipRect, cornerRadius, roundedBounds);
+        if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow) {
+            adapter.mPresentationScale = change.getTaskInfo().floatingWindowScale;
+        }
         return buildWindowAnimation(anim, change, adapter, finishCallback, pool, mainExecutor,
                 cornerRadius);
     }
@@ -197,6 +200,7 @@ public class DefaultSurfaceAnimator implements Runnable {
         @Nullable final Rect mClipRect;
         @Nullable private final Rect mAnimClipRect;
         final float mCornerRadius;
+        private float mPresentationScale = 1f;
         final int mWindowBottom;
 
         /**
@@ -227,6 +231,9 @@ public class DefaultSurfaceAnimator implements Runnable {
             final SurfaceControl leash = mLeash;
             transformation.clear();
             mAnim.getTransformation(currentPlayTime, transformation);
+            if (mPresentationScale != 1f) {
+                transformation.getMatrix().postScale(mPresentationScale, mPresentationScale);
+            }
             if (mPosition != null) {
                 transformation.getMatrix().postTranslate(mPosition.x, mPosition.y);
             }
@@ -253,7 +260,7 @@ public class DefaultSurfaceAnimator implements Runnable {
                 }
                 if (mCornerRadius > 0 && mAnim.hasRoundedCorners()) {
                     // Rounded corner can only be applied if a crop is set.
-                    t.setCornerRadius(leash, mCornerRadius);
+                    t.setCornerRadius(leash, mCornerRadius / mPresentationScale);
                     needCrop = true;
                 }
                 if (needCrop) {

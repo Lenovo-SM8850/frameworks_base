@@ -213,8 +213,10 @@ class DefaultMixedTransition extends DefaultMixedHandler.MixedTransition {
                 mInFlightSubAnimations++;
                 final TransitionInfo pinnedLayerInfo = removePinnedLayerTaskChangesFrom(info,
                         mTransition);
-                mPinnedLayerHandler.startAnimation(mTransition, pinnedLayerInfo,
-                        startTransaction, finishTransaction, finishCB);
+                if (!mPinnedLayerHandler.startAnimation(mTransition, pinnedLayerInfo,
+                        startTransaction, finishTransaction, finishCB)) {
+                    finishCB.onTransitionFinished(null);
+                }
             }
         }
 
@@ -310,8 +312,10 @@ class DefaultMixedTransition extends DefaultMixedHandler.MixedTransition {
             if (additionalPinnedLayerAnimation) {
                 final TransitionInfo pinnedLayerInfo = removePinnedLayerTaskChangesFrom(info,
                         mTransition);
-                mPinnedLayerHandler.startAnimation(mTransition, pinnedLayerInfo,
-                        startTransaction, finishTransaction, finishCB);
+                if (!mPinnedLayerHandler.startAnimation(mTransition, pinnedLayerInfo,
+                        startTransaction, finishTransaction, finishCB)) {
+                    finishCB.onTransitionFinished(null);
+                }
             }
             if (leftoverAnimation) {
                 return mLeftoversHandler.startAnimation(
@@ -332,12 +336,14 @@ class DefaultMixedTransition extends DefaultMixedHandler.MixedTransition {
                     mInFlightSubAnimations++;
                     final TransitionInfo pinnedLayerInfo = removePinnedLayerTaskChangesFrom(info,
                             mTransition);
-                    mPinnedLayerHandler.startAnimation(
+                    if (!mPinnedLayerHandler.startAnimation(
                             mTransition,
                             pinnedLayerInfo,
                             startTransaction,
                             finishTransaction,
-                            finishCB);
+                            finishCB)) {
+                        finishCB.onTransitionFinished(null);
+                    }
                 }
                 if (!mPipHandler.startAnimation(mTransition, pipInfo, startTransaction,
                         finishTransaction, finishCB)) {
@@ -715,8 +721,10 @@ class DefaultMixedTransition extends DefaultMixedHandler.MixedTransition {
 
         final TransitionInfo pinnedLayerInfo = removePinnedLayerTaskChangesFrom(info, transition);
         mPipHandler.startAnimation(transition, info, startTransaction, finishTransaction, finishCB);
-        mPinnedLayerHandler.startAnimation(transition, pinnedLayerInfo, startTransaction,
-                finishTransaction, finishCB);
+        if (!mPinnedLayerHandler.startAnimation(transition, pinnedLayerInfo, startTransaction,
+                finishTransaction, finishCB)) {
+            finishCB.onTransitionFinished(null);
+        }
 
         return true;
     }
