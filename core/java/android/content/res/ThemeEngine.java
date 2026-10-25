@@ -52,6 +52,10 @@ public class ThemeEngine {
     public static final String EXTRA_THEME_CATEGORY = "theme_category";
 
     public static final String CATEGORY_ICON_PACK = "icon_pack";
+
+    /** System-owned revision checked locally before reading presentation icon caches. */
+    public static final String APP_ICON_CACHE_KEY =
+            android.app.PropertyInvalidatedCache.createSystemCacheKey("appIconAppearance");
     public static final String CATEGORY_STATUSBAR_WIFI = "statusbar_wifi";
     public static final String CATEGORY_STATUSBAR_SIGNAL = "statusbar_signal";
     public static final String CATEGORY_ANDROID = "android";
@@ -110,12 +114,46 @@ public class ThemeEngine {
                     synchronized (ThemeEngine.this) {
                         mService = null;
                     }
+                    for (ThemeChangeListener listener : mListeners) {
+                        listener.onThemeChanged(null);
+                    }
                 }, 0);
+                if (mServiceCallback != null) mService.registerCallback(mServiceCallback);
             } catch (RemoteException e) {
                 mService = null;
             }
         }
         return mService;
+    }
+
+    /**
+     * Resource-only app icon recipe for the shared resolver.
+     * @hide
+     */
+    @Nullable
+    public android.os.Bundle getAppIconAppearance(@Nullable ComponentName component, int userId) {
+        IThemeEngineManager service = getService();
+        if (service == null) return null;
+        try {
+            return service.getAppIconAppearance(component, userId);
+        } catch (RemoteException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Manifest-only icon index for a visible package/profile.
+     * @hide
+     */
+    @Nullable
+    public android.os.Bundle getAppIconResources(@NonNull String packageName, int userId) {
+        IThemeEngineManager service = getService();
+        if (service == null) return null;
+        try {
+            return service.getAppIconResources(packageName, userId);
+        } catch (RemoteException e) {
+            return null;
+        }
     }
 
     // Icon pack methods
@@ -125,9 +163,9 @@ public class ThemeEngine {
         IThemeEngineManager service = getService();
         if (service == null) return null;
         try {
-            Bitmap bitmap = service.getIconPackIcon(componentName, density);
-            return bitmap != null ? new BitmapDrawable(mContext.getResources(), bitmap) : null;
-        } catch (RemoteException e) {
+            return com.android.internal.appearance.AppIconResolver.resolvePack(
+                    mContext, componentName, density);
+        } catch (RuntimeException e) {
             Log.w(TAG, "getIconPackDrawable failed", e);
             return null;
         }
@@ -156,6 +194,39 @@ public class ThemeEngine {
             return service.getIconPackPackage();
         } catch (RemoteException e) {
             return null;
+        }
+    }
+
+    /**
+     * Select a global app icon pack, or clear it with null/empty, preserving other theme data.
+     * @hide
+     */
+    @android.annotation.RequiresPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS)
+    public boolean setIconPack(@Nullable String packageName) {
+        try {
+            String json = android.provider.Settings.Secure.getString(
+                    mContext.getContentResolver(), SETTINGS_THEME_ENGINE_DATA);
+            org.json.JSONObject config = json == null || json.isEmpty()
+                    ? new org.json.JSONObject() : new org.json.JSONObject(json);
+            org.json.JSONObject themes = config.has("themes")
+                    ? config.getJSONObject("themes") : new org.json.JSONObject();
+            if (packageName == null || packageName.isEmpty()) {
+                themes.remove(CATEGORY_ICON_PACK);
+            } else {
+                org.json.JSONObject pack = themes.optJSONObject(CATEGORY_ICON_PACK);
+                if (pack == null) pack = new org.json.JSONObject();
+                pack.put("enabled", true);
+                pack.put("packageName", packageName);
+                themes.put(CATEGORY_ICON_PACK, pack);
+            }
+            config.put("themes", themes);
+            if (!android.provider.Settings.Secure.putString(mContext.getContentResolver(),
+                    SETTINGS_THEME_ENGINE_DATA, config.toString())) return false;
+            notifyThemeChanged(CATEGORY_ICON_PACK);
+            return true;
+        } catch (org.json.JSONException e) {
+            Log.w(TAG, "Failed to update app icon pack", e);
+            return false;
         }
     }
 
@@ -355,6 +426,8 @@ public class ThemeEngine {
         mServiceCallback = new IThemeEngineCallback.Stub() {
             @Override
             public void onThemeChanged(String category) {
+                // Drop shared icon states before presentation listeners schedule their reloads.
+                com.android.internal.appearance.AppIconResolver.invalidate();
                 for (ThemeChangeListener listener : mListeners) {
                     try {
                         listener.onThemeChanged(category);

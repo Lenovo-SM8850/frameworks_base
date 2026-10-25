@@ -107,6 +107,7 @@ class android.app.ActivityManager
 
 class android.app.ApplicationPackageManager throw
     method getDefaultActivityIcon exp
+    method registerSpoofSettingsObserver ignore # No device settings observers on the host.
 
 class android.content.Context exp
 class android.content.ContentResolver exp
@@ -188,3 +189,11 @@ class com.android.internal.dev.perfetto.sdk.PerfettoTrace.Category keepclass
     method native_unregister ignore
     method native_is_enabled ignore
     method isEnabled ignore # return false
+
+# Shared icon policy has bounded, host-testable graphics helpers.
+class com.android.internal.appearance.AppIconResolver keepclass
+class com.android.internal.appearance.AppIconResolver$IconIndex keepclass
+class com.android.internal.appearance.AppIconResolver$ResourceOwner keepclass
+
+# Application startup invokes this service before the test application is ready.
+class android.security.gameprops.GamePropsSpoofService keepclass
