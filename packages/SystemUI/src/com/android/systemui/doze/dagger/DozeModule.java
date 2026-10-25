@@ -17,6 +17,7 @@
 package com.android.systemui.doze.dagger;
 
 import com.android.systemui.Flags;
+import com.android.systemui.doze.DozeAodTimeout;
 import com.android.systemui.doze.DozeAuthRemover;
 import com.android.systemui.doze.DozeBrightnessHostForwarder;
 import com.android.systemui.doze.DozeDockHandler;
@@ -69,7 +70,8 @@ public abstract class DozeModule {
     }
 
     @Provides
-    static DozeMachine.Part[] providesDozeMachineParts(DozePauser dozePauser,
+    static DozeMachine.Part[] providesDozeMachineParts(DozeAodTimeout dozeAodTimeout,
+            DozePauser dozePauser,
             DozeFalsingManagerAdapter dozeFalsingManagerAdapter, DozeTriggers dozeTriggers,
             DozeUi dozeUi, DozeScreenState dozeScreenState,
             DozeScreenBrightness dozeScreenBrightness, DozeWallpaperState dozeWallpaperState,
@@ -77,6 +79,7 @@ public abstract class DozeModule {
             DozeAuthRemover dozeAuthRemover,
             DozeSuppressor dozeSuppressor, DozeTransitionListener dozeTransitionListener) {
         List<DozeMachine.Part> parts = new ArrayList<>();
+        parts.add(dozeAodTimeout);
         parts.add(dozePauser);
         parts.add(dozeFalsingManagerAdapter);
         parts.add(dozeTriggers);

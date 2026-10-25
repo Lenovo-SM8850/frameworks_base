@@ -20,6 +20,8 @@ import static com.android.systemui.doze.DozeMachine.State.DOZE_AOD;
 import static com.android.systemui.doze.DozeMachine.State.INITIALIZED;
 import static com.android.systemui.doze.DozeMachine.State.UNINITIALIZED;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyFloat;
@@ -35,6 +37,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.StatusBarManager;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.hardware.Sensor;
 import android.hardware.display.AmbientDisplayConfiguration;
 import android.platform.test.annotations.EnableFlags;
@@ -52,6 +57,7 @@ import com.android.systemui.broadcast.BroadcastDispatcher;
 import com.android.systemui.dock.DockManager;
 import com.android.systemui.doze.DozeTriggers.DozingUpdateUiEvent;
 import com.android.systemui.log.SessionTracker;
+import com.android.systemui.res.R;
 import com.android.systemui.settings.UserTracker;
 import com.android.systemui.statusbar.phone.DozeParameters;
 import com.android.systemui.statusbar.policy.DevicePostureController;
@@ -114,6 +120,9 @@ public class DozeTriggersTest extends SysuiTestCase {
     @Captor
     private ArgumentCaptor<DozeHost.Callback> mHostCallbackCaptor;
 
+    @Mock
+    private DozeAodTimeout mAodTimeout;
+
     private DozeTriggers mTriggers;
     private FakeSensorManager mSensors;
     private Sensor mTapSensor;
@@ -153,9 +162,63 @@ public class DozeTriggersTest extends SysuiTestCase {
                 asyncSensorManager, wakeLock, mDockManager, mProximitySensor,
                 mProximityCheck, mDozeLog, mBroadcastDispatcher, new FakeSettings(),
                 mAuthController, mUiEventLogger, mSessionTracker, mKeyguardStateController,
-                mDevicePostureController, mUserTracker, mSelectedUserInteractor);
+                mDevicePostureController, mUserTracker, mSelectedUserInteractor, mAodTimeout);
         mTriggers.setDozeMachine(mMachine);
         waitForSensorManager();
+    }
+
+    private BroadcastReceiver initializePowerReceiver(int timeoutMillis) {
+        mContext.getOrCreateTestableResources().addOverride(
+                R.integer.config_dozeAodTimeoutMillis, timeoutMillis);
+        mTriggers.transitionTo(UNINITIALIZED, INITIALIZED);
+        when(mMachine.getState()).thenReturn(DozeMachine.State.DOZE);
+        ArgumentCaptor<BroadcastReceiver> receiver =
+                ArgumentCaptor.forClass(BroadcastReceiver.class);
+        ArgumentCaptor<IntentFilter> filter = ArgumentCaptor.forClass(IntentFilter.class);
+        verify(mBroadcastDispatcher).registerReceiver(receiver.capture(), filter.capture());
+        assertEquals(timeoutMillis > 0,
+                filter.getValue().hasAction(Intent.ACTION_POWER_CONNECTED));
+        assertFalse(filter.getValue().hasAction(Intent.ACTION_POWER_DISCONNECTED));
+        return receiver.getValue();
+    }
+
+    @Test
+    public void powerConnectedAfterAodTimeout_requestsNotificationPulse() {
+        BroadcastReceiver receiver = initializePowerReceiver(6000);
+        when(mAodTimeout.startChargingPulse()).thenReturn(true);
+        mProximitySensor.setLastEvent(new ThresholdSensorEvent(false, 1));
+        receiver.onReceive(mContext, new Intent(Intent.ACTION_POWER_CONNECTED));
+        verify(mMachine).requestPulse(DozeLog.PULSE_REASON_NOTIFICATION);
+    }
+
+    @Test
+    public void powerConnectedWithoutExpiredAodSession_doesNotPulse() {
+        BroadcastReceiver receiver = initializePowerReceiver(6000);
+        receiver.onReceive(mContext, new Intent(Intent.ACTION_POWER_CONNECTED));
+        verify(mMachine, never()).requestPulse(anyInt());
+    }
+
+    @Test
+    public void powerDisconnected_doesNotPulse() {
+        BroadcastReceiver receiver = initializePowerReceiver(6000);
+        receiver.onReceive(mContext, new Intent(Intent.ACTION_POWER_DISCONNECTED));
+        verify(mAodTimeout, never()).startChargingPulse();
+        verify(mMachine, never()).requestPulse(anyInt());
+    }
+
+    @Test
+    public void powerPulseSuppressedByProximity_releasesChargingSession() {
+        BroadcastReceiver receiver = initializePowerReceiver(6000);
+        when(mAodTimeout.startChargingPulse()).thenReturn(true);
+        mProximitySensor.setLastEvent(new ThresholdSensorEvent(true, 1));
+        receiver.onReceive(mContext, new Intent(Intent.ACTION_POWER_CONNECTED));
+        verify(mMachine, never()).requestPulse(anyInt());
+        verify(mAodTimeout).cancelChargingPulse();
+    }
+
+    @Test
+    public void timeoutDisabled_doesNotRegisterPowerReceiver() {
+        initializePowerReceiver(0);
     }
 
     @Test
@@ -220,6 +283,7 @@ public class DozeTriggersTest extends SysuiTestCase {
         verify(mHost, never()).setPulsePending(anyBoolean());
         // AND the notification is suppressed
         verify(pulseSuppressListener).run();
+        verify(mAodTimeout, never()).cancelChargingPulse();
     }
 
     @Test
@@ -236,6 +300,7 @@ public class DozeTriggersTest extends SysuiTestCase {
 
         // THEN entering to pulse
         verify(mHost, never()).setPulsePending(anyBoolean());
+        verify(mAodTimeout).cancelChargingPulse();
         // AND suppress listeners are NOT notified
         verify(pulseSuppressListener, never()).run();
     }
