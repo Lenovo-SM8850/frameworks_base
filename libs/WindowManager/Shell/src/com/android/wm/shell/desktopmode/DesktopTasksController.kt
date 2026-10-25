@@ -6915,7 +6915,7 @@ class DesktopTasksController(
      * @param listener the listener to remove.
      */
     fun removeDeskChangeListener(listener: DeskChangeListener) {
-        userRepositories.current.removeDeskChangeListener(listener)
+        userRepositories.forAllRepositories { it.removeDeskChangeListener(listener) }
     }
 
     /**
