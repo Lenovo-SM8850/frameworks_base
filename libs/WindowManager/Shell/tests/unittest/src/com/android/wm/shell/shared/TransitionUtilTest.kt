@@ -59,6 +59,26 @@ import org.mockito.kotlin.verify
 class TransitionUtilTest {
 
     @Test
+    fun calculateAnimLayer_floatingWindowStaysAboveOpeningFullscreenTask() {
+        val floating = TransitionInfo.Change(mock<WindowContainerToken>(), mock<SurfaceControl>())
+        floating.mode = TRANSIT_CHANGE
+        floating.taskInfo = android.app.ActivityManager.RunningTaskInfo().apply {
+            isFloatingWindow = true
+            configuration.windowConfiguration.setAlwaysOnTop(true)
+        }
+        val fullscreen = TransitionInfo.Change(mock<WindowContainerToken>(), mock<SurfaceControl>())
+        fullscreen.mode = TRANSIT_OPEN
+
+        for (type in listOf(TRANSIT_OPEN, TRANSIT_CLOSE, TRANSIT_CHANGE)) {
+            assertTrue(TransitionUtil.calculateAnimLayer(floating, 0, 2, type) >
+                TransitionUtil.calculateAnimLayer(fullscreen, 1, 2, type))
+        }
+        floating.mode = android.view.WindowManager.TRANSIT_TO_BACK
+        assertTrue(TransitionUtil.calculateAnimLayer(floating, 0, 2, TRANSIT_OPEN) <
+            TransitionUtil.calculateAnimLayer(fullscreen, 1, 2, TRANSIT_OPEN))
+    }
+
+    @Test
     fun testCalculateAnimLayer() {
         val change = TransitionInfo.Change(mock<WindowContainerToken>(), mock<SurfaceControl>())
 

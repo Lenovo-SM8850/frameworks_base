@@ -914,6 +914,18 @@ constructor(
         captionController?.onAnimatingTaskRepositioningOrResize(animatingTaskResizeOrReposition)
     }
 
+    /** Creates a separate resize veil owned by a transition. */
+    fun createTransitionResizeVeil(parent: SurfaceControl): ResizeVeil = ResizeVeil(
+        context = decorWindowContext,
+        displayController = displayController,
+        taskResourceLoader = taskResourceLoader,
+        mainDispatcher = mainDispatcher,
+        mainImmediateScope = mainImmediateScope,
+        parentSurface = parent,
+        surfaceControlTransactionSupplier = surfaceControlTransactionSupplier,
+        taskInfo = taskInfo,
+    )
+
     /**
      * Create the resize veil for this task. Note the veil's visibility is View.GONE by default
      * until a resize event calls showResizeVeil below.

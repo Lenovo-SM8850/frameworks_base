@@ -1062,6 +1062,71 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         verify(changeMock).endRelOffset
     }
 
+    @Test
+    fun floatingHandle_focusChangeAfterDownDoesNotCancelLiveDrag() = runOnUiThread {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.isVisible = true
+        task.floatingWindowScale = .75f
+        task.positionInParent = Point(100, 100)
+        task.floatingWindowPosition.set(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_UNDEFINED, DISPLAY_ID_0,
+            400f, 120f, INPUT_METHOD_TYPE_UNKNOWN)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 550f, 220f)
+        val focused = ActivityManager.RunningTaskInfo(task).apply { isFocused = true }
+        val change = TransitionInfo.Change(taskToken, mockSurfaceControl).apply {
+            taskInfo = focused
+            mode = android.view.WindowManager.TRANSIT_TO_FRONT
+            setDisplayId(DISPLAY_ID_0, DISPLAY_ID_0)
+            setStartAbsBounds(Rect(100, 100, 900, 1300))
+            setEndAbsBounds(Rect(100, 100, 900, 1300))
+        }
+        val info = TransitionInfo(TRANSIT_CHANGE, 0).apply { addChange(change) }
+        val finish = mock<SurfaceControl.Transaction>()
+        taskPositioner.onTransitionReady(mock(), info, mockTransaction, finish)
+        Assert.assertFalse(taskPositioner.isDragPositioningCancelled())
+        Assert.assertEquals(Rect(350, 250, 950, 1150),
+            taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 650f, 270f))
+        verify(mockWindowDecoration, never()).finishFloatingWindowPreview()
+        verify(finish).addTransactionCommittedListener(any(), any())
+    }
+
+    @Test
+    fun floatingHandleMove_appliesSurfaceOnEachFrameBeforeRelease() {
+        runOnUiThread {
+            val task = mockWindowDecoration.taskInfo
+            task.isFloatingWindow = true
+            task.floatingWindowScale = .75f
+            task.floatingWindowPosition.set(100, 100)
+            task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+            taskPositioner.onDragPositioningStart(CTRL_TYPE_UNDEFINED, DISPLAY_ID_0,
+                400f, 120f, INPUT_METHOD_TYPE_UNKNOWN)
+        }
+        fun moveAndAwaitFrame(x: Float, y: Float) {
+            val frame = java.util.concurrent.CountDownLatch(1)
+            runOnUiThread {
+                taskPositioner.onDragPositioningMove(DISPLAY_ID_0, x, y)
+                android.view.Choreographer.getInstance().postFrameCallback { frame.countDown() }
+            }
+            Assert.assertTrue("Floating move frame did not run",
+                frame.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        moveAndAwaitFrame(550f, 220f)
+        verify(mockTransaction).setPosition(mockSurfaceControl, 250f, 200f)
+        moveAndAwaitFrame(650f, 270f)
+        verify(mockTransaction).setPosition(mockSurfaceControl, 350f, 250f)
+        verify(mockTransaction, times(2)).apply()
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        runOnUiThread {
+            val settled = taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 650f, 270f)
+            Assert.assertEquals(Rect(350, 250, 950, 1150), settled)
+            // Committing the same release coordinates must not reset the visible leash.
+            verify(mockTransaction, never()).setPosition(mockSurfaceControl, 100f, 100f)
+        }
+    }
+
     private fun beginFloatingCorner() {
         val task = mockWindowDecoration.taskInfo
         task.isFloatingWindow = true

@@ -335,6 +335,11 @@ class DesksTransitionObserver(
             logD("Desk changes in a recents transition, ignoring")
             return
         }
+        val initiallyInactiveDisplays =
+            deskChanges.map { it.endDisplayId }.filter { displayId ->
+                desktopUserRepositories.getProfile(shellController.currentUserId)
+                    .getActiveDeskId(displayId) == null
+            }.toMutableSet()
         val wct = WindowContainerTransaction()
         var hasSeenDesk = false
 
@@ -344,6 +349,7 @@ class DesksTransitionObserver(
         // capturing user ids of showing tasks (such as Home) to detect user switches.
         for (change in info.taskChanges()) {
             val taskInfo = checkNotNull(change.taskInfo) { "Expected non-null task info" }
+            if (taskInfo.isFloatingWindow) continue
             val taskId = taskInfo.taskId
             logD("Handle change for taskId=%d:", taskId)
             if (change in deskChanges) {
@@ -547,6 +553,9 @@ class DesksTransitionObserver(
                         deskId,
                         userId,
                     )
+                    if (initiallyInactiveDisplays.remove(displayId)) {
+                        desksOrganizer.prepareFloatingTasksForDesk(wct, deskId, userId)
+                    }
                     desksOrganizer.activateDesk(wct, deskId, skipReorder = true)
                     repository.setActiveDesk(displayId, deskId)
                     desktopModeEventLogger.logSessionEnter(deskId, EnterReason.UNKNOWN_ENTER)

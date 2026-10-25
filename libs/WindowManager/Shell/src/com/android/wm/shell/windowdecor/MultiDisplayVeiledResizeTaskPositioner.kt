@@ -1024,6 +1024,23 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
     }
 
+    private fun isFloatingFocusOnlyChange(info: TransitionInfo,
+        change: TransitionInfo.Change): Boolean {
+        val task = change.taskInfo ?: return false
+        return !isResizing && info.type == WindowManager.TRANSIT_CHANGE &&
+            (change.mode == WindowManager.TRANSIT_CHANGE ||
+                change.mode == WindowManager.TRANSIT_TO_FRONT) &&
+            task.isFloatingWindow && task.isVisible && task.isFocused &&
+            task.displayId == startDisplayId &&
+            change.startDisplayId == startDisplayId && change.endDisplayId == startDisplayId &&
+            change.startAbsBounds == change.endAbsBounds &&
+            task.configuration.windowConfiguration.bounds == floatingLogicalBounds &&
+            task.configuration.windowConfiguration.displayRotation == rotation &&
+            task.presentationBounds == taskBoundsAtDragStart &&
+            task.floatingWindowScale == floatingStartScale &&
+            info.changes.none { it.hasFlags(TransitionInfo.FLAG_IS_DISPLAY) }
+    }
+
     override fun onTransitionConsumed(transition: IBinder, aborted: Boolean,
         finishTransaction: SurfaceControl.Transaction?) {
         if (transition != pendingFloatingTransition) return

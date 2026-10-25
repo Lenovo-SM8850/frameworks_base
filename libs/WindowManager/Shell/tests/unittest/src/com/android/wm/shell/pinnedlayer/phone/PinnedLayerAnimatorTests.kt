@@ -174,6 +174,25 @@ class PinnedLayerAnimatorTests : ShellTestCase() {
         verify(intermediateTransaction, atLeastOnce()).apply()
     }
 
+    @Test
+    fun createPinAnimator_floatingEndsAtPresentationPositionAndScale() {
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.positionInParent = android.graphics.Point(200, 300)
+        whenever(change.startAbsBounds).thenReturn(Rect(0, 0, 1200, 1920))
+        whenever(change.endAbsBounds).thenReturn(Rect(100, 100, 900, 1300))
+        val animator = PinnedLayerAnimator.createPinAnimator(change, startTransaction,
+            finishTransaction, finishCallback, sctFactory = { intermediateTransaction })
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            animator.start()
+            animator.end()
+        }
+        verify(finishTransaction).setMatrix(testLeash, .75f, 0f, 0f, .75f)
+        verify(finishTransaction).setPosition(testLeash, 200f, 300f)
+        verify(finishTransaction).setWindowCrop(testLeash, 800, 1200)
+        verify(finishCallback).onTransitionFinished(null)
+    }
+
     private fun createTask(taskId: Int): RunningTaskInfo {
         return RunningTaskInfo().apply { this.taskId = taskId }
     }

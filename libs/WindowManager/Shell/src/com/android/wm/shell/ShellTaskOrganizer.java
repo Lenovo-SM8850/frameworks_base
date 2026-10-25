@@ -333,6 +333,11 @@ public class ShellTaskOrganizer extends TaskOrganizer {
     private final Object mLock = new Object();
     private StartingWindowController mStartingWindow;
 
+    /** Whether a starting window still covers the app's first drawn frame. Safe on animation threads. */
+    public boolean hasStartingWindow(int taskId) {
+        return mStartingWindow != null && mStartingWindow.hasStartingWindow(taskId);
+    }
+
     /** Overlay surface for home root task */
     private final SurfaceControl mHomeTaskOverlayContainer = new SurfaceControl.Builder()
             .setName("home_task_overlay_container")

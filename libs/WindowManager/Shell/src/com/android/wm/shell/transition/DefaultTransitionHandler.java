@@ -149,6 +149,11 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
     private final CounterRotatorHelper mRotator = new CounterRotatorHelper();
     private final Rect mInsets = new Rect(0, 0, 0, 0);
     private float mTransitionAnimationScaleSetting = 1.0f;
+    private Transitions.FloatingRotationVeilProvider mFloatingRotationVeilProvider;
+
+    void setFloatingRotationVeilProvider(Transitions.FloatingRotationVeilProvider provider) {
+        mFloatingRotationVeilProvider = provider;
+    }
 
     private final RootTaskDisplayAreaOrganizer mRootTDAOrganizer;
     private final int mCurrentUserId;
@@ -405,6 +410,40 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 continue;
             }
             final boolean isTask = change.getTaskInfo() != null;
+            if (isFloatingEntry(change)) {
+                animations.add(startFloatingEntryAnimation(info, change, startTransaction,
+                        finishTransaction, onAnimFinish));
+                continue;
+            }
+            if (isFloatingExit(change) || isFloatingMinimize(info, change)) {
+                animations.add(startFloatingExitAnimation(info, change, startTransaction,
+                        finishTransaction, onAnimFinish));
+                continue;
+            }
+            if (change.getMode() == TRANSIT_CHANGE && isTask
+                    && change.getStartAbsBounds().width() != change.getEndAbsBounds().width()) {
+                ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
+                        "Floating rotation candidate task=%d floating=%b start=%s rotations=%d->%d"
+                                + " independent=%b animate=%b",
+                        change.getTaskInfo().taskId, change.getTaskInfo().isFloatingWindow,
+                        change.getStartFloatingWindowBounds(), change.getStartRotation(),
+                        change.getEndRotation(), TransitionInfo.isIndependent(change, info),
+                        isFloatingRotation(change) && TransitionInfo.isIndependent(change, info));
+            }
+            if (isFloatingRotation(change) && TransitionInfo.isIndependent(change, info)) {
+                final WindowAnimation rotation = startFloatingRotationAnimation(info, change,
+                        startTransaction, finishTransaction, onAnimFinish);
+                if (rotation != null) {
+                    animations.add(rotation);
+                    continue;
+                }
+            }
+            if (isTask && change.getTaskInfo().isFloatingWindow
+                    && change.getMode() == TRANSIT_CHANGE) {
+                Transitions.applyFloatingWindowTransform(change, startTransaction);
+                Transitions.applyFloatingWindowTransform(change, finishTransaction);
+                continue;
+            }
             final boolean isFreeform = isTask && change.getTaskInfo().isFreeform();
             final int mode = change.getMode();
             boolean isSeamlessDisplayChange = false;
@@ -612,6 +651,10 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                         boundsForOffset.left - animRoot.getOffset().x,
                         boundsForOffset.top - animRoot.getOffset().y);
 
+                if (isTask && change.getTaskInfo().isFloatingWindow) {
+                    animRelOffset.set(change.getTaskInfo().positionInParent.x - animRoot.getOffset().x,
+                            change.getTaskInfo().positionInParent.y - animRoot.getOffset().y);
+                }
                 final boolean isActivity = change.getActivityComponent() != null;
                 if (isActivity) {
                     // For appcompat letterbox: we intentionally report the task-bounds so that we
@@ -832,9 +875,31 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
             @NonNull Transitions.TransitionFinishCallback finishCallback) {
         ArrayList<WindowAnimation> animations = mTransitionAnimators.get(mergeTarget);
         if (animations == null) return;
+        if (shouldDeferEmptyFloatingRotationChange(info, animations)) {
+            // Bookkeeping must not end the visible morph before its first animation frame.
+            ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
+                    "Deferring empty CHANGE during floating rotation");
+            return;
+        }
+        boolean hasFloating = false;
+        for (int i = 0; i < info.getChanges().size(); ++i) {
+            if (isFloatingChange(info.getChanges().get(i))) {
+                hasFloating = true;
+                break;
+            }
+        }
+        if (!hasFloating) {
+            for (int i = 0; i < animations.size(); ++i) {
+                if (isFloatingChange(animations.get(i).mChange)) {
+                    hasFloating = true;
+                    break;
+                }
+            }
+        }
         if (!Flags.enableMergeAnimations() || !MergeTransitionHelper.canCreateMergeAnimation(
                 info)) {
-            endAllAnimations(animations);
+            if (hasFloating) endFloatingAnimations(animations);
+            else endAllAnimations(animations);
             return;
         }
 
@@ -846,6 +911,20 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
 
         var conflictingWindowAnimationsMap = MergeTransitionHelper.getMergeConflicts(animations,
                 info);
+
+        if (hasFloating) {
+            for (int i = 0; i < conflictingWindowAnimationsMap.size(); ++i) {
+                if (isFloatingChange(conflictingWindowAnimationsMap.keyAt(i).mChange)
+                        || isFloatingChange(conflictingWindowAnimationsMap.valueAt(i))) {
+                    endFloatingAnimations(animations);
+                    return;
+                }
+            }
+            if (conflictingWindowAnimationsMap.isEmpty()) {
+                endFloatingAnimations(animations);
+                return;
+            }
+        }
 
         Consumer<WindowAnimation> onAnimFinish = (wa) -> {
             animations.remove(wa);
@@ -916,12 +995,58 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
         }
     }
 
+    static boolean shouldDeferEmptyFloatingRotationChange(TransitionInfo info,
+            List<WindowAnimation> animations) {
+        if (info.getType() != TRANSIT_CHANGE || !info.getChanges().isEmpty()) return false;
+        for (int i = 0; i < animations.size(); i++) {
+            if (animations.get(i).getAnimation() instanceof FloatingResizeAnimation) return true;
+        }
+        return false;
+    }
+
+    private boolean isFloatingEntry(TransitionInfo.Change change) {
+        if (change.getTaskInfo() == null || !change.getTaskInfo().isFloatingWindow) return false;
+        // Opening tasks animate even when they retain an earlier floating placement.
+        if (TransitionUtil.isOpeningType(change.getMode())) return true;
+        if (change.getMode() != TRANSIT_CHANGE
+                || !change.getStartFloatingWindowBounds().isEmpty()) return false;
+        if (!change.getStartAbsBounds().equals(change.getEndAbsBounds())) return true;
+        // A stationary floating restore only needs its canonical presentation transform.
+        final com.android.wm.shell.common.DisplayLayout layout =
+                mDisplayController.getDisplayLayout(change.getStartDisplayId());
+        return layout != null && change.getStartAbsBounds().width() == layout.width()
+                && change.getStartAbsBounds().height() == layout.height();
+    }
+
     private static boolean isFloatingMinimize(TransitionInfo info, TransitionInfo.Change change) {
         // Home/overview policy visibility changes must not animate a minimize.
         return info.getType() == android.view.WindowManager.TRANSIT_TO_BACK
                 && change.getMode() == android.view.WindowManager.TRANSIT_TO_BACK
                 && change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow
                 && !change.getStartFloatingWindowBounds().isEmpty();
+    }
+
+    static boolean isFloatingRotation(TransitionInfo.Change change) {
+        return change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow
+                && change.getMode() == TRANSIT_CHANGE
+                && !change.getStartFloatingWindowBounds().isEmpty()
+                && !change.getStartAbsBounds().isEmpty() && !change.getEndAbsBounds().isEmpty()
+                && change.getStartDisplayId() == change.getEndDisplayId()
+                && change.getStartRotation() == change.getEndRotation()
+                && ((change.getStartAbsBounds().width() > change.getStartAbsBounds().height())
+                != (change.getEndAbsBounds().width() > change.getEndAbsBounds().height()));
+    }
+
+    private static boolean isFloatingChange(TransitionInfo.Change change) {
+        return !change.getStartFloatingWindowBounds().isEmpty()
+                || (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow);
+    }
+
+    private void endFloatingAnimations(List<WindowAnimation> animations) {
+        for (int i = animations.size() - 1; i >= 0; --i) {
+            final WindowAnimation animation = animations.get(i);
+            if (isFloatingChange(animation.mChange)) mAnimExecutor.execute(animation::end);
+        }
     }
 
     private void endAllAnimations(List<WindowAnimation> animations) {
@@ -971,6 +1096,262 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 mDisplayController);
         return displayMoveAnimation.startAnimation(startT, change, info, finishCallback,
             mainExecutor);
+    }
+
+    private WindowAnimation startFloatingEntryAnimation(TransitionInfo info,
+            TransitionInfo.Change change, SurfaceControl.Transaction startT,
+            SurfaceControl.Transaction finishT, Consumer<WindowAnimation> onFinish) {
+        final boolean opening = TransitionUtil.isOpeningType(change.getMode());
+        final Rect end = new Rect(change.getTaskInfo().getPresentationBounds());
+        final Rect start = opening ? new Rect(end) : new Rect(change.getStartAbsBounds());
+        if (opening || start.isEmpty()) {
+            start.set(end);
+            start.inset(Math.round(end.width() * .04f), Math.round(end.height() * .04f));
+        }
+        final Rect content = change.getEndAbsBounds();
+        final int width = Math.max(1, content.width());
+        final int height = Math.max(1, content.height());
+        final Point rootOffset = TransitionInfo.isIndependent(change, info)
+                ? TransitionUtil.getRootFor(change, info).getOffset()
+                : new Point(change.getEndAbsBounds().left - change.getEndRelOffset().x,
+                        change.getEndAbsBounds().top - change.getEndRelOffset().y);
+        final Context displayContext = mDisplayController.getDisplayContext(change.getEndDisplayId());
+        final float radius = (displayContext != null ? displayContext : mContext).getResources()
+                .getDimension(com.android.wm.shell.shared.R.dimen
+                        .desktop_windowing_freeform_rounded_corner_radius);
+        final Animation animation = new Animation() {
+            @Override
+            protected void applyTransformation(float progress,
+                    android.view.animation.Transformation transformation) {
+                final float w = start.width() + (end.width() - start.width()) * progress;
+                final float h = start.height() + (end.height() - start.height()) * progress;
+                transformation.getMatrix().setScale(w / width, h / height);
+                transformation.getMatrix().postTranslate(
+                        start.left + (end.left - start.left) * progress - rootOffset.x,
+                        start.top + (end.top - start.top) * progress - rootOffset.y);
+                transformation.setAlpha(opening ? progress : 1f);
+            }
+        };
+        final long duration = (long) (300 * mTransitionAnimationScaleSetting);
+        animation.setDuration(duration);
+        animation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN);
+        animation.setStartTime(0);
+        final SurfaceControl leash = change.getLeash();
+        final android.view.animation.Transformation transformation =
+                new android.view.animation.Transformation();
+        final float[] matrix = new float[9];
+        final ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
+        animator.setDuration(duration);
+        animator.setInterpolator(Interpolators.LINEAR);
+        final java.util.function.BiConsumer<SurfaceControl.Transaction, Long> applyFrame =
+                (t, time) -> {
+            transformation.clear();
+            animation.getTransformation(time, transformation);
+            transformation.getMatrix().getValues(matrix);
+            final float progress = duration == 0 ? 1f : animation.getInterpolator()
+                    .getInterpolation(Math.min(1f, (float) time / duration));
+            final float visibleRadius = radius * progress;
+            t.setMatrix(leash, transformation.getMatrix(), matrix)
+                    .setPosition(leash, matrix[android.graphics.Matrix.MTRANS_X],
+                            matrix[android.graphics.Matrix.MTRANS_Y])
+                    .setWindowCrop(leash, width, height)
+                    .setCornerRadius(leash, visibleRadius / Math.max(.001f,
+                            Math.min(matrix[android.graphics.Matrix.MSCALE_X],
+                                    matrix[android.graphics.Matrix.MSCALE_Y])))
+                    .setAlpha(leash, transformation.getAlpha());
+        };
+        applyFrame.accept(startT, 0L);
+        startT.show(leash);
+        Transitions.applyFloatingWindowTransform(change, finishT);
+        finishT.setAlpha(leash, 1f).setCornerRadius(leash,
+                radius / change.getTaskInfo().floatingWindowScale);
+        animator.addUpdateListener(value -> {
+            final SurfaceControl.Transaction t = mTransactionPool.acquire();
+            applyFrame.accept(t, value.getCurrentPlayTime());
+            t.setFrameTimeline(android.view.Choreographer.getInstance().getVsyncId()).apply();
+            mTransactionPool.release(t);
+        });
+        final WindowAnimation windowAnimation =
+                new WindowAnimation(change, radius, animation, animator);
+        windowAnimation.addFinishCallback(onFinish, mMainExecutor);
+        return windowAnimation;
+    }
+
+    private WindowAnimation startFloatingRotationAnimation(TransitionInfo info,
+            TransitionInfo.Change change, SurfaceControl.Transaction startT,
+            SurfaceControl.Transaction finishT, Consumer<WindowAnimation> onFinish) {
+        final Transitions.FloatingRotationVeilProvider provider = mFloatingRotationVeilProvider;
+        if (provider == null) return null;
+        final TransitionInfo.Root root = TransitionUtil.getRootFor(change, info);
+        final SurfaceControl leash = change.getLeash();
+        final SurfaceControl frame = new SurfaceControl.Builder()
+                .setName("Floating rotation frame").setContainerLayer()
+                .setParent(root.getLeash()).build();
+        final com.android.wm.shell.windowdecor.ResizeVeil veil =
+                provider.createVeil(change.getTaskInfo().taskId, frame);
+        if (veil == null) {
+            startT.remove(frame);
+            startT.addTransactionCommittedListener(mMainExecutor, frame::release);
+            return null;
+        }
+        final Context displayContext = mDisplayController.getDisplayContext(change.getEndDisplayId());
+        final Context context = displayContext != null ? displayContext : mContext;
+        final float radius = context.getResources().getDimensionPixelSize(com.android.wm.shell.shared.R.dimen
+                .desktop_windowing_freeform_rounded_corner_radius);
+        final float shadow = context.getResources().getDimension(change.getTaskInfo().isFocused
+                ? com.android.wm.shell.R.dimen.floating_decor_shadow_focused_radius
+                : com.android.wm.shell.R.dimen.floating_decor_shadow_unfocused_radius);
+        final Rect initial = new Rect(change.getStartFloatingWindowBounds());
+        initial.offset(-root.getOffset().x, -root.getOffset().y);
+        veil.updateTransactionWithShowVeil(startT, frame, initial, change.getTaskInfo(), false);
+        startT.setRelativeLayer(frame, leash, 2).show(frame).show(leash);
+        final SurfaceControl snapshot = change.getSnapshot();
+        if (snapshot != null && snapshot.isValid()) {
+            // Retain old content only under the initial veil fade, never during the morph.
+            startT.reparent(snapshot, root.getLeash()).setRelativeLayer(snapshot, leash, 1)
+                    .show(snapshot);
+            finishT.hide(snapshot);
+        }
+        final FloatingResizeAnimation animation = new FloatingResizeAnimation(change,
+                root.getOffset(), radius, shadow, frame, veil);
+        final long duration = (long) (animation.getDuration() * mTransitionAnimationScaleSetting);
+        animation.setDuration(duration);
+        animation.setStartTime(0);
+        animation.applyAtTime(startT, 0L, provider.isContentReady(change.getTaskInfo().taskId));
+        Transitions.applyFloatingWindowTransform(change, finishT);
+        // Decoration relayout already restored its scale-compensated outline after Core's reset.
+        finishT.setAlpha(leash, 1f);
+        finishFloatingRotation(finishT, frame, veil, mMainExecutor);
+        final ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
+        animator.setDuration(duration);
+        animator.setInterpolator(Interpolators.LINEAR);
+        final int[] frames = {0};
+        final long[] playTime = {0};
+        final boolean[] ending = {false};
+        animator.addUpdateListener(value -> {
+            final SurfaceControl.Transaction t = mTransactionPool.acquire();
+            animation.applyAtTime(t, value.getCurrentPlayTime(),
+                    provider.isContentReady(change.getTaskInfo().taskId));
+            t.setFrameTimeline(android.view.Choreographer.getInstance().getVsyncId()).apply();
+            mTransactionPool.release(t);
+            frames[0]++;
+            if (!ending[0]) playTime[0] = value.getCurrentPlayTime();
+            if (animation.isFinished() && !ending[0]) {
+                ending[0] = true;
+                animator.end();
+            }
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator ignored) {
+                ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
+                        "Floating rotation task=%d frames=%d elapsed=%d limit=%d start=%s end=%s",
+                        change.getTaskInfo().taskId, frames[0], playTime[0], duration,
+                        change.getStartFloatingWindowBounds(),
+                        change.getTaskInfo().getPresentationBounds());
+            }
+        });
+        final WindowAnimation windowAnimation =
+                new WindowAnimation(change, radius, animation, animator);
+        windowAnimation.addFinishCallback(onFinish, mMainExecutor);
+        return windowAnimation;
+    }
+
+    /** Detaches at finish without invalidating the animation's live frame handle. */
+    static void finishFloatingRotation(SurfaceControl.Transaction finishT, SurfaceControl frame,
+            com.android.wm.shell.windowdecor.ResizeVeil veil, java.util.concurrent.Executor executor) {
+        // Transaction.remove releases immediately, before this deferred transaction is applied.
+        finishT.reparent(frame, null);
+        finishT.addTransactionCommittedListener(executor, () -> {
+            veil.dispose();
+            frame.release();
+        });
+    }
+
+    private WindowAnimation startFloatingExitAnimation(TransitionInfo info,
+            TransitionInfo.Change change, SurfaceControl.Transaction startT,
+            SurfaceControl.Transaction finishT, Consumer<WindowAnimation> onFinish) {
+        final boolean closing = TransitionUtil.isClosingType(change.getMode());
+        final Rect start = new Rect(change.getStartFloatingWindowBounds());
+        final Rect end = closing ? new Rect(start) : new Rect(change.getEndAbsBounds());
+        if (closing) {
+            end.inset(Math.round(start.width() * .04f), Math.round(start.height() * .04f));
+        }
+        final Rect content = closing ? change.getStartAbsBounds() : change.getEndAbsBounds();
+        final int width = Math.max(1, content.width());
+        final int height = Math.max(1, content.height());
+        final Point rootOffset = TransitionInfo.isIndependent(change, info)
+                ? TransitionUtil.getRootFor(change, info).getOffset()
+                : new Point(change.getEndAbsBounds().left - change.getEndRelOffset().x,
+                        change.getEndAbsBounds().top - change.getEndRelOffset().y);
+        final Context displayContext = mDisplayController.getDisplayContext(change.getEndDisplayId());
+        final float radius = (displayContext != null ? displayContext : mContext).getResources()
+                .getDimension(com.android.wm.shell.shared.R.dimen
+                        .desktop_windowing_freeform_rounded_corner_radius);
+        final boolean endRounded = !closing && change.getTaskInfo().isFreeform();
+        final Animation animation = new Animation() {
+            @Override
+            protected void applyTransformation(float progress,
+                    android.view.animation.Transformation transformation) {
+                final float w = start.width() + (end.width() - start.width()) * progress;
+                final float h = start.height() + (end.height() - start.height()) * progress;
+                transformation.getMatrix().setScale(w / width, h / height);
+                transformation.getMatrix().postTranslate(
+                        start.left + (end.left - start.left) * progress - rootOffset.x,
+                        start.top + (end.top - start.top) * progress - rootOffset.y);
+                transformation.setAlpha(closing ? 1f - progress : 1f);
+            }
+        };
+        final long duration = (long) ((closing ? 200 : 300) * mTransitionAnimationScaleSetting);
+        animation.setDuration(duration);
+        animation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN);
+        animation.setStartTime(0);
+        final SurfaceControl leash = change.getLeash();
+        final android.view.animation.Transformation transformation =
+                new android.view.animation.Transformation();
+        final float[] matrix = new float[9];
+        final ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
+        animator.setDuration(duration);
+        animator.setInterpolator(Interpolators.LINEAR);
+        final java.util.function.BiConsumer<SurfaceControl.Transaction, Long> applyFrame =
+                (t, time) -> {
+            transformation.clear();
+            animation.getTransformation(time, transformation);
+            transformation.getMatrix().getValues(matrix);
+            final float progress = duration == 0 ? 1f : animation.getInterpolator()
+                    .getInterpolation(Math.min(1f, (float) time / duration));
+            final float visibleRadius = closing || endRounded ? radius : radius * (1f - progress);
+            t.setMatrix(leash, transformation.getMatrix(), matrix)
+                    .setPosition(leash, matrix[android.graphics.Matrix.MTRANS_X],
+                            matrix[android.graphics.Matrix.MTRANS_Y])
+                    .setWindowCrop(leash, width, height)
+                    .setCornerRadius(leash, visibleRadius / Math.max(.001f,
+                            Math.min(matrix[android.graphics.Matrix.MSCALE_X],
+                                    matrix[android.graphics.Matrix.MSCALE_Y])))
+                    .setAlpha(leash, transformation.getAlpha());
+        };
+        applyFrame.accept(startT, 0L);
+        startT.show(leash);
+        if (closing) {
+            finishT.hide(leash);
+            if (!change.getTaskInfo().isFloatingWindow) {
+                finishT.setMatrix(leash, 1f, 0f, 0f, 1f)
+                        .setCornerRadius(leash, 0f).setShadowRadius(leash, 0f);
+            }
+        } else {
+            finishT.setMatrix(leash, 1f, 0f, 0f, 1f).setAlpha(leash, 1f)
+                    .setCornerRadius(leash, endRounded ? radius : 0f);
+        }
+        animator.addUpdateListener(value -> {
+            final SurfaceControl.Transaction t = mTransactionPool.acquire();
+            applyFrame.accept(t, value.getCurrentPlayTime());
+            t.setFrameTimeline(android.view.Choreographer.getInstance().getVsyncId()).apply();
+            mTransactionPool.release(t);
+        });
+        final WindowAnimation windowAnimation =
+                new WindowAnimation(change, radius, animation, animator);
+        windowAnimation.addFinishCallback(onFinish, mMainExecutor);
+        return windowAnimation;
     }
 
     private Optional<WindowAnimation> startBoundsChangeAnimation(

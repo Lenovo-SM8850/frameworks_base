@@ -260,7 +260,11 @@ class PinnedLayerHandler(
         finishCallback: Transitions.TransitionFinishCallback,
     ): Boolean {
         // TODO(b/449681882): Do not rely on transitions, introduce separate animations state.
-        val transitions = pinnedLayerController.getActiveTransitions(transition)
+        val transitions = pinnedLayerController.getActiveTransitions(transition).filter { active ->
+            !isFloatingTransition(active) &&
+                info.changes.any { it.taskInfo?.taskId == active.taskInfo.taskId }
+        }
+        if (transitions.isEmpty()) return false
 
         val pinChange =
             transitions
@@ -322,7 +326,7 @@ class PinnedLayerHandler(
 
     /** @return `true` if there is a task that is currently pinned and visible. */
     fun hasActivePinnedTask(): Boolean {
-        return pinnedLayerController.getCurrentPinnedTask() != null
+        return pinnedLayerController.getCurrentPinnedTask()?.isFloatingWindow == false
     }
 
     /**
@@ -332,7 +336,7 @@ class PinnedLayerHandler(
      * @return `true` if the transition is active within the controller, `false` otherwise.
      */
     fun observes(transition: IBinder): Boolean {
-        return pinnedLayerController.getActiveTransitions(transition).isNotEmpty()
+        return pinnedLayerController.getActiveTransitions(transition).any { !isFloatingTransition(it) }
     }
 
     /**
@@ -346,13 +350,20 @@ class PinnedLayerHandler(
      */
     fun awaitsChangesFor(taskInfo: TaskInfo?, transition: IBinder): Boolean {
         val taskId = taskInfo?.taskId ?: return false
+        if (taskInfo.isFloatingWindow) return false
         val activeTransitions = pinnedLayerController.getActiveTransitions(transition)
-        return activeTransitions.any { it.taskInfo.taskId == taskId }
+        return activeTransitions.any { it.taskInfo.taskId == taskId && !isFloatingTransition(it) }
     }
 
+    private fun isFloatingTransition(active: ActiveTransition): Boolean =
+        active.taskInfo.isFloatingWindow || pinnedLayerController.getPinnedTasks().any {
+            it.taskId == active.taskInfo.taskId && it.isFloatingWindow
+        }
+
     fun isPinningRequest(request: TransitionRequestInfo): Boolean =
-        request.windowingLayerChange?.isLayerPinningRequest() ?: false ||
-            request.isOpeningPinnedRequest()
+        request.triggerTask?.isFloatingWindow != true &&
+            (request.windowingLayerChange?.isLayerPinningRequest() ?: false ||
+                request.isOpeningPinnedRequest())
 
     private fun WindowingLayerChange?.isLayerPinningRequest(): Boolean {
         return this != null && windowingLayer == WINDOWING_LAYER_PINNED

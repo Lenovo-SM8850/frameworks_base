@@ -804,6 +804,9 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             for (int i = 0; i < info.getChanges().size(); ++i) {
                 final TransitionInfo.Change change = info.getChanges().get(i);
                 if (TransitionUtil.isWallpaper(change)) continue;
+                if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow) {
+                    continue;
+                }
                 if (TransitionUtil.isClosingType(change.getMode())) {
                     hasPausingTasks = true;
                     continue;
@@ -1592,6 +1595,10 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
         private void mergeActivityOnly(TransitionInfo info, SurfaceControl.Transaction t) {
             for (int i = 0; i < info.getChanges().size(); ++i) {
                 final TransitionInfo.Change change = info.getChanges().get(i);
+                if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow) {
+                    t.hide(change.getLeash());
+                    continue;
+                }
                 if (TransitionUtil.isOpeningType(change.getMode())) {
                     t.show(change.getLeash());
                     t.setAlpha(change.getLeash(), 1.f);
@@ -1673,7 +1680,14 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          */
         private void finishInner(boolean toHome, boolean sendUserLeaveHint,
                 IResultReceiver runnerFinishCb, String reason) {
+            final boolean syntheticHomeGesture =
+                    isSyntheticTransition() && toHome && sendUserLeaveHint;
             if (finishSyntheticTransition(runnerFinishCb, reason)) {
+                if (syntheticHomeGesture) {
+                    for (int i = 0; i < mStateListeners.size(); ++i) {
+                        mStateListeners.get(i).onHomeGestureFinished(mDisplayId);
+                    }
+                }
                 return;
             }
 

@@ -1417,9 +1417,13 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 mSurfaceControlTransactionSupplier, mTaskInfo);
     }
 
-    /**
-     * Show the resize veil.
-     */
+    /** Creates a separate resize veil owned by a transition. */
+    public ResizeVeil createTransitionResizeVeil(SurfaceControl parent) {
+        return new ResizeVeil(mContext, mDisplayController, mTaskResourceLoader,
+                mMainDispatcher, mMainScope, parent, mSurfaceControlTransactionSupplier, mTaskInfo);
+    }
+
+    /** Show the resize veil. */
     public void showResizeVeil(Rect taskBounds) {
         createResizeVeilIfNeeded();
         mResizeVeil.showVeil(getLeash(), taskBounds, mTaskInfo);

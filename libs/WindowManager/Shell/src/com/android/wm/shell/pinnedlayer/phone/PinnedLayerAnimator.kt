@@ -77,6 +77,14 @@ class PinnedLayerAnimator {
 
             val startBounds = Rect(change.startAbsBounds)
             val endBounds = Rect(change.endAbsBounds)
+            val endScale = if (task.isFloatingWindow) task.floatingWindowScale else 1f
+            val startScale = if (task.isFloatingWindow && startBounds.width() == endBounds.width()
+                && startBounds.height() == endBounds.height()) endScale else 1f
+            if (task.isFloatingWindow) {
+                endBounds.offsetTo(task.positionInParent.x, task.positionInParent.y)
+                if (startScale == endScale) startBounds.offsetTo(endBounds.left, endBounds.top)
+            }
+            var presentationScale = startScale
 
             fun addTxWithBounds(
                 tx: SurfaceControl.Transaction,
@@ -85,6 +93,7 @@ class PinnedLayerAnimator {
                 width: Int,
                 height: Int,
             ) {
+                tx.setMatrix(change.leash, presentationScale, 0f, 0f, presentationScale)
                 tx.setPosition(change.leash, left, top)
                 tx.setWindowCrop(change.leash, width, height)
             }
@@ -112,6 +121,7 @@ class PinnedLayerAnimator {
 
                     override fun onAnimationEnd(animation: Animator) {
                         super.onAnimationEnd(animation)
+                        presentationScale = endScale
                         addTxWithBounds(finishTransaction, endBounds)
                         onAnimationEnd(task.taskId)
                         finishCallback.onTransitionFinished(null)
@@ -124,6 +134,7 @@ class PinnedLayerAnimator {
             animator.addUpdateListener { animation ->
                 val transaction = sctFactory.invoke()
                 val progress = animation.animatedFraction
+                presentationScale = startScale + (endScale - startScale) * progress
                 val s = startBounds
                 val e = endBounds
                 val left = s.left + (e.left - s.left) * progress

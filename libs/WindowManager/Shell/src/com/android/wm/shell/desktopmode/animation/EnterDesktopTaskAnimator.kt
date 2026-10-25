@@ -49,18 +49,32 @@ class EnterDesktopTaskAnimator(
     ) {
         val taskId = change.taskInfo?.taskId ?: error("Expected non-null taskId")
         val leash = change.leash
-        val startBounds = change.startAbsBounds
+        val floatingStart = change.startFloatingWindowBounds.takeUnless { it.isEmpty }
+        val startBounds = floatingStart ?: change.startAbsBounds
         val endBounds = change.endAbsBounds
         val endOffset = change.endRelOffset
+        val veilBounds = Rect()
+        fun listenerBounds(visible: Rect): Rect {
+            if (floatingStart == null) return visible
+            // The veil writes the parent crop, so keep it in unscaled task coordinates.
+            veilBounds.set(visible.left, visible.top,
+                visible.left + endBounds.width(), visible.top + endBounds.height())
+            return veilBounds
+        }
 
         startTransaction
             .setPosition(leash, startBounds.left.toFloat(), startBounds.top.toFloat())
             .setWindowCrop(leash, startBounds.width(), startBounds.height())
+        if (floatingStart != null) {
+            startTransaction.setMatrix(leash, startBounds.width().toFloat() / endBounds.width(),
+                0f, 0f, startBounds.height().toFloat() / endBounds.height())
+                .setWindowCrop(leash, endBounds.width(), endBounds.height())
+        }
         val startTransactionApplied =
             onTaskResizeAnimationListener?.onAnimationStart(
                 taskId = taskId,
                 t = startTransaction,
-                bounds = startBounds,
+                bounds = listenerBounds(startBounds),
             ) ?: false
         if (!startTransactionApplied) {
             startTransaction.apply()
@@ -69,8 +83,15 @@ class EnterDesktopTaskAnimator(
         val updateTransaction = transactionSupplier()
         ValueAnimator.ofObject(rectEvaluator, startBounds, endBounds).apply {
             duration = animationDuration.toLong()
+            if (floatingStart != null) {
+                duration = 300
+                interpolator = com.android.wm.shell.shared.animation.Interpolators.FAST_OUT_SLOW_IN
+            }
             addListener(
                 onEnd = {
+                    if (floatingStart != null) {
+                        finishTransaction.setMatrix(leash, 1f, 0f, 0f, 1f)
+                    }
                     finishTransaction
                         .setPosition(leash, endOffset.x.toFloat(), endOffset.y.toFloat())
                         .setWindowCrop(leash, endBounds.width(), endBounds.height())
@@ -85,11 +106,16 @@ class EnterDesktopTaskAnimator(
                 updateTransaction
                     .setPosition(leash, rect.left.toFloat(), rect.top.toFloat())
                     .setWindowCrop(leash, rect.width(), rect.height())
+                if (floatingStart != null) {
+                    updateTransaction.setMatrix(leash, rect.width().toFloat() / endBounds.width(),
+                        0f, 0f, rect.height().toFloat() / endBounds.height())
+                        .setWindowCrop(leash, endBounds.width(), endBounds.height())
+                }
                 val updateTransactionApplied =
                     onTaskResizeAnimationListener?.onBoundsChange(
                         taskId = taskId,
                         t = updateTransaction,
-                        bounds = rect,
+                        bounds = listenerBounds(rect),
                     ) ?: false
                 if (!updateTransactionApplied) {
                     updateTransaction.apply()
