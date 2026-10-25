@@ -209,11 +209,11 @@ public class SplitScreenUtils {
     }
 
     /**
-     * Returns whether we should allow split ratios to go offscreen or not. If the device is a phone
-     * or a foldable (either screen), we allow it.
+     * Returns whether offscreen split ratios are allowed. They are allowed whenever the flexible
+     * split flag is enabled, including on large screens.
      */
     public static boolean allowOffscreenRatios(Resources res) {
-        return Flags.enableFlexibleTwoAppSplit() && (!isLargeScreen(res) || isFoldable(res));
+        return Flags.enableFlexibleTwoAppSplit();
     }
 
     /**

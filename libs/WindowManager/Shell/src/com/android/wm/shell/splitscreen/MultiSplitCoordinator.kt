@@ -143,6 +143,46 @@ class MultiSplitCoordinator(
         const val INSERTION_PROBE_MS = 100L
     }
 
+    private fun fitsExistingTasks(model: MultiSplitLayout): Boolean =
+        existingTaskRejection(model) == null
+
+    /** Each preview is the exact new leaf rectangle of its proposed immutable layout. */
+    fun getSlots(displayId: Int): List<AppDragSlot> {
+        if (host.rootInfo()?.displayId != displayId || isBusy || imeTop != null || keyguard) {
+            return emptyList()
+        }
+        if (!isActive && !host.canEnter()) return emptyList()
+        if (!isActive && !ensureSpares()) return emptyList()
+        val model = layout ?: pairModel() ?: return emptyList()
+        val calculated = bounds(model) ?: return emptyList()
+        if (model.getLeaves().size >= host.capacity()) {
+            return model.getLeaves().map { leaf ->
+                val rect = calculated.leaves.getValue(leaf.id)
+                AppDragSlot(position(leaf.id, model), leaf.id.value, rect, rect, true,
+                    leaf.id.value, false, revision)
+            }
+        }
+        return model.getLeaves().flatMap { leaf ->
+            val source = calculated.visibleLeaves.getValue(leaf.id)
+            val axis = model.insertionAxis(leaf.id)
+            if (axis == null) return@flatMap listOf(AppDragSlot(position(leaf.id, model),
+                leaf.id.value, source, source, true, leaf.id.value, false, revision))
+            listOf(true, false).mapNotNull { first ->
+                val added = candidate(model, leaf.id, first) ?: return@mapNotNull null
+                if (!fitsExistingTasks(added)) return@mapNotNull null
+                val preview = bounds(added)?.leaves?.get(LeafId(nextLeaf)) ?: return@mapNotNull null
+                val hit = Rect(source)
+                if (axis == Orientation.LEFT_RIGHT) {
+                    if (first) hit.right = source.centerX() else hit.left = source.centerX()
+                } else {
+                    if (first) hit.bottom = source.centerY() else hit.top = source.centerY()
+                }
+                AppDragSlot(position(leaf.id, model), nextLeaf, preview, hit, false,
+                    leaf.id.value, first, revision)
+            }
+        }
+    }
+
     private fun taskMinimumsFit(model: MultiSplitLayout): Boolean {
         val rectangles = bounds(model)?.leaves ?: return false
         return model.getLeaves().all { leaf ->

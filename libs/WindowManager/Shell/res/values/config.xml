@@ -146,6 +146,10 @@
          Currently, this maps to Gravity.BOTTOM | Gravity.RIGHT -->
     <integer name="config_defaultPictureInPictureGravity">0x55</integer>
 
+    <!-- Multi-app split capability. Enable only after the multi-app backend is complete.
+         The display must also support split screen and have a smallest width of at least 600dp. -->
+    <bool name="config_enableMultiAppSplit">false</bool>
+
     <!-- Whether to dim a split-screen task when the other is the IME target -->
     <bool name="config_dimNonImeAttachedSide">true</bool>
 

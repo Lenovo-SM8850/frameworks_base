@@ -36,6 +36,86 @@ class MultiSplitLayoutTest {
     private val left = DividerId(11)
     private val right = DividerId(12)
 
+    @Test fun threeColumnsEqualPortraitBoundsAndRotationRoundTrip() {
+        val three = MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f, a,
+            Split(right, Orientation.TOP_BOTTOM, 0.5f, b, c)))
+        val columns = three.rotateThreeAppShape()!!
+        val bounds = columns.calculateBounds(Rect(0, 0, 2560, 1600), Insets.NONE, 14)!!
+        val widths = bounds.leaves.values.map { it.width() }
+        assertTrue(widths.max() - widths.min() <= 1)
+        assertTrue(bounds.leaves.values.all { it.width() < it.height() })
+        assertEquals(listOf(a, b, c), columns.getLeaves())
+        assertEquals(2, columns.dividerHandles(bounds).size)
+        columns.dividerHandles(bounds).values.forEach { assertEquals(800, it.single().position) }
+        val portrait = columns.reorient(Orientation.TOP_BOTTOM)
+        assertFalse(portrait.isThreeColumns)
+        assertTrue(portrait.threeColumnGroup)
+        assertEquals(a, portrait.root.first)
+        assertEquals(listOf(b, c), portrait.getLeaves().drop(1))
+        assertEquals(columns.root, portrait.reorient(Orientation.LEFT_RIGHT).root)
+        assertTrue(portrait.reorient(Orientation.LEFT_RIGHT).isThreeColumns)
+        val ordinary = three.reorient(Orientation.TOP_BOTTOM).reorient(Orientation.LEFT_RIGHT)
+        assertFalse(ordinary.threeColumnGroup)
+        assertEquals(three.root, ordinary.root)
+        assertFalse(columns.rotateThreeAppShape()!!.threeColumnGroup)
+    }
+
+    @Test fun mirrorMovesWholeSidesAndKeepsPairOrderAcrossBothAxes() {
+        for (axis in Orientation.entries) {
+            val inner = if (axis == Orientation.LEFT_RIGHT) Orientation.TOP_BOTTOM else Orientation.LEFT_RIGHT
+            val three = MultiSplitLayout(Split(main, axis, 0.3f, a,
+                Split(right, inner, 0.4f, b, c)), a.id)
+            val mirrored = three.mirror()!!
+            assertEquals(three.root.second, mirrored.root.first)
+            assertEquals(a, mirrored.root.second)
+            assertEquals(three.root.ratio, mirrored.mirror()!!.root.ratio, 0.00001f)
+            assertEquals(a.id, mirrored.strip)
+            assertEquals(listOf(b, c, a), mirrored.getLeaves())
+        }
+        assertNull(pair().mirror())
+        assertNull(grid().mirror())
+    }
+
+    @Test
+    fun twoLeaves_sideBySide() {
+        val bounds = pair().calculateBounds(display, Insets.NONE, 10)!!
+        assertEquals(Rect(0, 0, 500, 810), bounds.leaves[a.id])
+        assertEquals(Rect(510, 0, 1010, 810), bounds.leaves[b.id])
+        assertEquals(Rect(500, 0, 510, 810), bounds.dividers[main])
+        assertTiling(bounds, display)
+    }
+
+    @Test
+    fun twoLeaves_stacked() {
+        val bounds = pair(Orientation.TOP_BOTTOM).calculateBounds(display, Insets.NONE, 10)!!
+        assertEquals(Rect(0, 0, 1010, 400), bounds.leaves[a.id])
+        assertEquals(Rect(0, 410, 1010, 810), bounds.leaves[b.id])
+        assertEquals(Rect(0, 400, 1010, 410), bounds.dividers[main])
+        assertTiling(bounds, display)
+    }
+
+    @Test
+    fun bounds_applyAsymmetricInsetsAndOriginOnce() {
+        val frame = Rect(100, 200, 1140, 1060)
+        val bounds = grid().calculateBounds(frame, Insets.of(10, 20, 20, 30), 10)!!
+        assertEquals(Rect(110, 220, 610, 620), bounds.leaves[a.id])
+        assertEquals(Rect(620, 630, 1120, 1030), bounds.leaves[d.id])
+        assertTiling(bounds, Rect(110, 220, 1120, 1030))
+        assertEquals(Rect(100, 200, 1140, 1060), frame)
+    }
+
+    @Test
+    fun bounds_ratiosAndOddPixelsAreDeterministic() {
+        val layout = pair(ratio = 0.3f)
+        val frame = Rect(11, 17, 1023, 830)
+        val bounds = layout.calculateBounds(frame, Insets.NONE, 9)!!
+        assertEquals(Rect(11, 17, 312, 830), bounds.leaves[a.id])
+        assertEquals(Rect(312, 17, 321, 830), bounds.dividers[main])
+        assertEquals(Rect(321, 17, 1023, 830), bounds.leaves[b.id])
+        assertEquals(bounds, layout.calculateBounds(frame, Insets.NONE, 9))
+        assertTiling(bounds, frame)
+    }
+
     @Test
     fun bounds_threeAndFourLeavesTileInBothOrientations() {
         for (orientation in Orientation.entries) {
@@ -57,11 +137,284 @@ class MultiSplitLayoutTest {
     }
 
     @Test
+    fun insertBelow_keepsChosenAppAboveNewApp() {
+        val original = pair()
+        val three = below(original, a.id, c, left)!!
+        val bounds = three.calculateBounds(display, Insets.NONE, 10)!!
+        assertEquals(Rect(0, 0, 500, 400), bounds.leaves[a.id])
+        assertEquals(Rect(0, 410, 500, 810), bounds.leaves[c.id])
+        assertEquals(Rect(510, 0, 1010, 810), bounds.leaves[b.id])
+        assertEquals(2, original.calculateBounds(display, Insets.NONE, 10)!!.leaves.size)
+    }
+
+    @Test
+    fun insert_rejectsNestedParallelAndFifthLeavesInBothOrientations() {
+        for (orientation in Orientation.entries) {
+            val pair = pair(orientation)
+            val axis = pair.insertionAxis(a.id)!!
+            val three = pair.insert(a.id, c, left, axis, 0.5f, display, Insets.NONE, 10, 0)!!
+            assertNull(three.insert(c.id, d, right, axis, 0.5f, display, Insets.NONE, 10, 0))
+            assertNull(three.insert(a.id, d, right, orientation, 0.5f, display, Insets.NONE, 10, 0))
+            assertNull(pair.insert(a.id, c, left, orientation, 0.5f, display, Insets.NONE, 10, 0))
+            val four = three.insert(b.id, d, right, axis, 0.5f, display, Insets.NONE, 10, 0)!!
+            assertTiling(four.calculateBounds(display, Insets.NONE, 10)!!, display)
+            for (leaf in four.getLeaves()) assertNull(four.insertionAxis(leaf.id))
+            val rotated = four.reorient(if (orientation == Orientation.LEFT_RIGHT)
+                Orientation.TOP_BOTTOM else Orientation.LEFT_RIGHT)
+            assertEquals(four.root.first.let { (it as Split).first },
+                (rotated.root.first as Split).first)
+            assertEquals(four.root, rotated.reorient(orientation).root)
+        }
+    }
+
+    @Test
+    fun policyEnumeratesEveryBinaryShapeAndAxisThroughFiveApps() {
+        fun trees(count: Int, offset: Int = 0): List<MultiSplitLayout.Node> {
+            if (count == 1) return listOf(Leaf(LeafId(offset), 100 + offset))
+            return (1 until count).flatMap { leftCount ->
+                trees(leftCount, offset).flatMap { first ->
+                    trees(count - leftCount, offset + leftCount).flatMap { second ->
+                        Orientation.entries.map { axis ->
+                            Split(DividerId(offset * 10 + count), axis, 0.5f, first, second)
+                        }
+                    }
+                }
+            }
+        }
+        for (count in 2..5) for (tree in trees(count)) {
+            val root = tree as Split
+            fun half(node: MultiSplitLayout.Node): Boolean = when (node) {
+                is Leaf -> true
+                is Split -> node.orientation != root.orientation &&
+                    node.first is Leaf && node.second is Leaf
+            }
+            assertEquals(count <= 4 && half(root.first) && half(root.second),
+                MultiSplitLayout.isAllowed(root))
+        }
+    }
+
+    @Test
+    fun stripGrowthAndCollapseKeepOnlyValidSingleHalfStrips() {
+        for (axis in Orientation.entries) {
+            val original = pair(axis).withRootRatio(0.1f, a.id)
+            val direction = original.insertionAxis(b.id)!!
+            val expandedHalf = original.insert(b.id, c, left, direction, 0.5f,
+                display, Insets.NONE, 10, 0)!!
+            assertEquals(a.id, expandedHalf.strip)
+            val bounds = expandedHalf.calculateBounds(display, Insets.NONE, 10)!!
+            assertEquals(true, bounds.leaves.getValue(a.id) != bounds.visibleLeaves.getValue(a.id))
+            assertEquals(a.id, expandedHalf.remove(c.id)!!.strip)
+            val four = expandedHalf.insert(a.id, d, right, direction, 0.5f,
+                display, Insets.NONE, 10, 0)!!
+            assertNull(four.strip)
+            assertEquals(0.5f, four.root.ratio)
+            val stripHalf = original.insert(a.id, c, left, direction, 0.5f,
+                display, Insets.NONE, 10, 0)!!
+            assertNull(stripHalf.strip)
+            assertEquals(0.5f, stripHalf.root.ratio)
+        }
+    }
+
+    @Test
+    fun insert_rejectsUnknownLeafAndReusedIdentities() {
+        assertNull(below(pair(), LeafId(99), c, left))
+        assertNull(below(pair(), a.id, a.copy(taskId = 103), left))
+        assertNull(below(pair(), a.id, c.copy(taskId = 101), left))
+        assertNull(below(pair(), a.id, c, main))
+    }
+
+    @Test
+    fun insert_minimumBoundaryAndFailedInsertPreserveOriginal() {
+        val original = pair()
+        val before = original.calculateBounds(display, Insets.NONE, 10)
+        assertNotNull(below(original, a.id, c, left, minimum = 400))
+        assertNull(below(original, a.id, c, left, minimum = 401))
+        assertEquals(before, original.calculateBounds(display, Insets.NONE, 10))
+    }
+
+    @Test
     fun insert_checksInsetsAndEveryExistingLeaf() {
         assertNull(pair().insertBelow(
             a.id, c, left, 0.5f, display, Insets.of(0, 20, 0, 20), 10, 400
         ))
         assertNull(below(pair(ratio = 0.9f), a.id, c, left, minimum = 200))
+    }
+
+    @Test
+    fun insert_rejectsInvalidRatios() {
+        for (ratio in listOf(0f, 1f, -0.5f, Float.NaN, Float.POSITIVE_INFINITY)) {
+            assertNull(pair().insertBelow(a.id, c, left, ratio, display, Insets.NONE, 10, 100))
+        }
+    }
+
+    @Test
+    fun bounds_rejectsInsufficientSpaceAndInvalidDimensions() {
+        assertNull(pair().calculateBounds(Rect(0, 0, 10, 100), Insets.NONE, 10))
+        assertNull(pair().calculateBounds(display, Insets.of(1000, 0, 1000, 0), 10))
+        assertNull(pair().calculateBounds(Rect(), Insets.NONE, 0))
+        assertThrows(IllegalArgumentException::class.java) {
+            pair().calculateBounds(display, Insets.NONE, -1)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            pair().calculateBounds(display, Insets.of(-1, 0, 0, 0), 10)
+        }
+    }
+
+    @Test
+    fun remove_collapsesFourToThreeToTwoAndKeepsSurvivingIdsAndRatios() {
+        val four = grid()
+        val three = four.remove(c.id)!!
+        val two = three.remove(d.id)!!
+        assertEquals(
+            setOf(main, right), three.calculateBounds(display, Insets.NONE, 10)!!.dividers.keys
+        )
+        assertEquals(pair().root, two.root)
+        assertNull(two.remove(a.id))
+        assertNull(four.remove(LeafId(99)))
+        assertEquals(4, four.calculateBounds(display, Insets.NONE, 10)!!.leaves.size)
+    }
+
+    @Test
+    fun remove_allFourLeavesCanBeRemovedAndSingleSidePromotesToRoot() {
+        for (leaf in listOf(a, b, c, d)) {
+            val three = grid().remove(leaf.id)!!
+            assertEquals(3, three.calculateBounds(display, Insets.NONE, 10)!!.leaves.size)
+            assertTiling(three.calculateBounds(display, Insets.NONE, 10)!!, display)
+        }
+        val three = below(pair(), a.id, c, left)!!
+        val promoted = three.remove(b.id)!!
+        assertEquals(left, promoted.root.id)
+        assertEquals(Orientation.LEFT_RIGHT, promoted.root.orientation)
+        assertEquals(
+            setOf(a.id, c.id), promoted.calculateBounds(display, Insets.NONE, 10)!!.leaves.keys
+        )
+    }
+
+    @Test
+    fun swap_exchangesTaskAssignmentsAndPreservesGeometryAndTree() {
+        val layout = grid()
+        val swapped = layout.swap(a.id, d.id)!!
+        assertEquals(layout.calculateBounds(display, Insets.NONE, 10),
+            swapped.calculateBounds(display, Insets.NONE, 10))
+        assertEquals(104, ((swapped.root.first as Split).first as Leaf).taskId)
+        assertEquals(101, ((swapped.root.second as Split).second as Leaf).taskId)
+        assertEquals(layout.root, swapped.swap(a.id, d.id)!!.root)
+        assertEquals(layout.root, layout.swap(a.id, a.id)!!.root)
+        assertNull(layout.swap(a.id, LeafId(99)))
+    }
+
+    @Test
+    fun topology_rejectsInvalidRatiosDuplicateIdsAndExcessLeaves() {
+        for (ratio in listOf(0f, 1f, -1f, Float.NaN, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { pair(ratio = ratio) }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f, a, a))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f, a, b.copy(taskId = 101)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
+                Split(main, Orientation.TOP_BOTTOM, 0.5f, a, c), b))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
+                Split(left, Orientation.TOP_BOTTOM, 0.5f, a,
+                    Split(right, Orientation.LEFT_RIGHT, 0.5f, c,
+                        Split(DividerId(13), Orientation.TOP_BOTTOM, 0.5f,
+                            d, Leaf(LeafId(5), 105)))), b))
+        }
+    }
+
+    @Test
+    fun policy_reusesExistingMinimumResourceAndChecksBothAxes() {
+        val resources = mock(Resources::class.java)
+        `when`(resources.getDimensionPixelSize(
+            com.android.internal.R.dimen.default_minimal_size_resizable_task
+        )).thenReturn(400)
+        val policy = LayoutPolicy()
+        assertEquals(400, policy.getMinimumLeafSize(resources))
+        val bounds = grid().calculateBounds(display, Insets.NONE, 10)!!
+        assertTrue(policy.isFeasible(bounds, policy.getMinimumLeafSize(resources)))
+        assertFalse(policy.isFeasible(bounds, 401))
+        assertThrows(IllegalArgumentException::class.java) { policy.isFeasible(bounds, -1) }
+    }
+
+    private fun pair(
+        orientation: Orientation = Orientation.LEFT_RIGHT,
+        ratio: Float = 0.5f,
+    ) = MultiSplitLayout(Split(main, orientation, ratio, a, b))
+
+    private fun grid(): MultiSplitLayout = below(below(pair(), a.id, c, left)!!, b.id, d, right)!!
+
+    private fun below(
+        layout: MultiSplitLayout,
+        chosen: LeafId,
+        leaf: Leaf,
+        divider: DividerId,
+        minimum: Int = 100,
+    ) = layout.insertBelow(chosen, leaf, divider, 0.5f, display, Insets.NONE, 10, minimum)
+
+    private fun assertTiling(bounds: MultiSplitLayout.Bounds, content: Rect) {
+        val rectangles = bounds.leaves.values + bounds.dividers.values
+        var area = 0L
+        rectangles.forEachIndexed { index, rect ->
+            assertTrue(content.contains(rect))
+            area += rect.width().toLong() * rect.height()
+            rectangles.drop(index + 1).forEach { assertFalse(Rect.intersects(rect, it)) }
+        }
+        assertEquals(content.width().toLong() * content.height(), area)
+        assertEquals(bounds.leaves.size - 1, bounds.dividers.size)
+    }
+    @Test fun insertionCanPutNewTaskInFirstHalf() {
+        val initial = MultiSplitLayout(MultiSplitLayout.Split(
+            MultiSplitLayout.DividerId(0), MultiSplitLayout.Orientation.LEFT_RIGHT, 0.5f,
+            MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(0), 10),
+            MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(1), 20)))
+        val model = initial.insert(MultiSplitLayout.LeafId(0),
+            MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(2), 30), MultiSplitLayout.DividerId(1),
+            MultiSplitLayout.Orientation.TOP_BOTTOM, 0.5f, Rect(0, 0, 1200, 900),
+            Insets.NONE, 8, 100, true)!!
+        val bounds = model.calculateBounds(Rect(0, 0, 1200, 900), Insets.NONE, 8)!!
+        assertThat(bounds.leaves.getValue(MultiSplitLayout.LeafId(2)).bottom)
+            .isLessThan(bounds.leaves.getValue(MultiSplitLayout.LeafId(0)).top)
+    }
+
+    @Test fun resizingOneBranchPreservesTheOtherBranchRatio() {
+        val model = MultiSplitLayout(MultiSplitLayout.Split(
+            MultiSplitLayout.DividerId(0), MultiSplitLayout.Orientation.LEFT_RIGHT, 0.5f,
+            MultiSplitLayout.Split(MultiSplitLayout.DividerId(1),
+                MultiSplitLayout.Orientation.TOP_BOTTOM, 0.4f,
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(0), 10),
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(2), 30)),
+            MultiSplitLayout.Split(MultiSplitLayout.DividerId(2),
+                MultiSplitLayout.Orientation.TOP_BOTTOM, 0.6f,
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(1), 20),
+                MultiSplitLayout.Leaf(MultiSplitLayout.LeafId(3), 40))))
+        val resized = model.resize(MultiSplitLayout.DividerId(1), 0.7f)!!
+        assertThat((resized.root.first as MultiSplitLayout.Split).ratio).isEqualTo(0.7f)
+        assertThat((resized.root.second as MultiSplitLayout.Split).ratio).isEqualTo(0.6f)
+        assertThat(resized.root.ratio).isEqualTo(0.5f)
+        assertThat(model.resize(MultiSplitLayout.DividerId(1), Float.NaN)).isNull()
+    }
+
+    @Test fun pairHasOneCenteredHandleAndThreeAppsKeepOneHandleClearOfCrossing() {
+        for (orientation in Orientation.entries) {
+            val pair = pair().reorient(orientation)
+            val pairBounds = pair.calculateBounds(display, Insets.NONE, 10)!!
+            val length = if (orientation == Orientation.LEFT_RIGHT) display.height() else display.width()
+            assertThat(pair.dividerHandles(pairBounds).getValue(main).single().position).isEqualTo(length / 2)
+            for (ratio in listOf(0.3f, 0.7f)) {
+                val three = below(pair(), a.id, c, left)!!.resize(left, ratio)!!.reorient(orientation)
+                val bounds = three.calculateBounds(display, Insets.NONE, 10)!!
+                val crossing = bounds.dividers.getValue(left)
+                val before = if (orientation == Orientation.LEFT_RIGHT) crossing.top else crossing.left
+                val after = if (orientation == Orientation.LEFT_RIGHT) crossing.bottom else crossing.right
+                val handle = three.dividerHandles(bounds).getValue(main).single()
+                assertThat(handle.position).isEqualTo(if (before >= length - after) before / 2 else (after + length) / 2)
+            }
+        }
     }
 
 }
