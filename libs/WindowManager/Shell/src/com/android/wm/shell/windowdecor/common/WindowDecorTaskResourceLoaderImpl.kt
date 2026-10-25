@@ -198,7 +198,9 @@ class WindowDecorTaskResourceLoaderImpl(
                 val pm = userProfilesContexts.getOrCreate(taskInfo.userId).packageManager
                 val activityInfo = getActivityInfo(taskInfo, pm)
                 val appName = pm.getApplicationLabel(activityInfo.applicationInfo)
-                val appIconDrawable = iconProvider.getIcon(activityInfo)
+                // Shape the app icon before adding a profile badge, so the badge stays unmasked.
+                val appIconDrawable =
+                    headerIconFactory.wrapToAdaptiveIcon(iconProvider.getIcon(activityInfo))
                 val badgedAppIconDrawable =
                     pm.getUserBadgedIcon(appIconDrawable, taskInfo.userHandle())
                 val appIcon =
@@ -213,7 +215,8 @@ class WindowDecorTaskResourceLoaderImpl(
             } catch (e: NameNotFoundException) {
                 Slog.e(TAG, "Failed to get app resources")
                 val pm = userProfilesContexts.getOrCreate(taskInfo.userId).packageManager
-                val defaultIconDrawable = pm.getDefaultActivityIcon()
+                val defaultIconDrawable =
+                    headerIconFactory.wrapToAdaptiveIcon(pm.getDefaultActivityIcon())
                 val appIcon =
                     headerIconFactory.createIconBitmap(defaultIconDrawable, /* scale= */ 1f)
                 val veilIcon = veilIconFactory.createScaledBitmap(defaultIconDrawable, MODE_DEFAULT)
