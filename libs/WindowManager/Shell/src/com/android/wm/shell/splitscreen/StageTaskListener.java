@@ -93,6 +93,9 @@ public class StageTaskListener implements ShellTaskOrganizer.TaskListener {
 
         void onStageVisibilityChanged(StageTaskListener stageTaskListener);
 
+        /** A cold child may change the root info before its own appeared callback is ready. */
+        default void onRootTaskInfoChanged(StageTaskListener stageTaskListener) {}
+
         void onChildTaskStatusChanged(StageTaskListener stage, int taskId, boolean present,
                 boolean visible);
 
@@ -652,5 +655,15 @@ public class StageTaskListener implements ShellTaskOrganizer.TaskListener {
         pw.println(prefix + "mHasRootTask=" + mHasRootTask);
         pw.println(prefix + "mVisible=" + mVisible);
         pw.println(prefix + "mHasChildren=" + mHasChildren);
+    }
+
+    /** Clears overview transforms when returning to a multi-app group. */
+    void restoreChildSurfaces(SurfaceControl.Transaction t) {
+        for (int i = 0; i < mChildrenLeashes.size(); i++) {
+            final SurfaceControl leash = mChildrenLeashes.valueAt(i);
+            if (!leash.isValid()) continue;
+            t.setPosition(leash, 0, 0).setMatrix(leash, 1, 0, 0, 1)
+                    .setWindowCrop(leash, null).show(leash).setAlpha(leash, 1);
+        }
     }
 }

@@ -16,6 +16,8 @@
 
 package com.android.wm.shell.common.split;
 
+import java.util.ArrayList;
+import java.util.List;
 import static android.view.PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW;
 import static android.view.PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW;
 
@@ -400,6 +402,7 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
         mHideHandle = false;
         setOnTouchListener(this);
         mHandle.setAccessibilityDelegate(mHandleDelegate);
+        mHandles.add(mHandle);
         setWillNotDraw(false);
         mPaint.setColor(getResources().getColor(R.color.split_divider_background, null));
         mPaint.setAntiAlias(true);
@@ -409,6 +412,7 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         super.onLayout(changed, left, top, right, bottom);
+        if (mSplitLayout != null) layoutHandles();
         if (mResizeMenu != null && mResizeMenu.isShowing()) {
             mResizeMenu.updateButtons();
         }
@@ -820,4 +824,55 @@ public class DividerView extends FrameLayout implements View.OnTouchListener {
             return false;
         }
     }
+
+    void updateHandlePositions() {
+        if (mSplitLayout == null) return;
+        final int[] positions = mSplitLayout.getDividerHandlePositions();
+        final int count = positions == null ? 1 : positions.length;
+        while (mHandles.size() > count) {
+            mDividerBar.removeView(mHandles.remove(mHandles.size() - 1));
+        }
+        while (mHandles.size() < count) {
+            final DividerHandleView handle = new DividerHandleView(mContext, null);
+            handle.setContentDescription(mHandle.getContentDescription());
+            handle.setAccessibilityDelegate(mHandleDelegate);
+            handle.setIsLeftRightSplit(mSplitLayout.isLeftRightSplit());
+            handle.setVisibility(mHandle.getVisibility());
+            mDividerBar.addView(handle, new FrameLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+            mHandles.add(handle);
+        }
+        if (mResizeMenu != null) mResizeMenu.hide();
+        mActiveHandle = 0;
+        mSetTouchRegion = true;
+        requestLayout();
+    }
+
+    private void layoutHandles() {
+        final int[] positions = mSplitLayout.getDividerHandlePositions();
+        if (positions == null) return;
+        final boolean leftRight = mSplitLayout.isLeftRightSplit();
+        mSplitLayout.getRefDividerBounds(mTempRect);
+        final int origin = leftRight ? mTempRect.top : mTempRect.left;
+        for (int i = 0; i < mHandles.size(); i++) {
+            final int x = leftRight ? mDividerBar.getWidth() / 2 : positions[i] - origin;
+            final int y = leftRight ? positions[i] - origin : mDividerBar.getHeight() / 2;
+            mHandles.get(i).layout(x - mHandleRegionWidth / 2, y - mHandleRegionHeight / 2,
+                    x + mHandleRegionWidth / 2, y + mHandleRegionHeight / 2);
+        }
+        if (mHandleMenu != null) {
+            final View handle = mHandles.get(Math.min(mActiveHandle, mHandles.size() - 1));
+            final int x = (handle.getLeft() + handle.getRight()) / 2;
+            final int y = (handle.getTop() + handle.getBottom()) / 2;
+            final int halfWidth = mHandleMenu.getMeasuredWidth() / 2;
+            final int halfHeight = mHandleMenu.getMeasuredHeight() / 2;
+            mHandleMenu.layout(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight);
+        }
+    }
+
+    private final List<DividerHandleView> mHandles = new ArrayList<>();
+
+    private int mActiveHandle;
+
+    private View mHandleMenu;
 }

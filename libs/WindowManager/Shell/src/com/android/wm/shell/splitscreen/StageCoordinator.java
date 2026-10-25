@@ -16,6 +16,8 @@
 
 package com.android.wm.shell.splitscreen;
 
+import static android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD;
+import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
 import static android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS;
 import static android.app.ActivityTaskManager.INVALID_TASK_ID;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_HOME;
@@ -4972,5 +4974,32 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 !toMainStage ? getSideStagePosition() : SPLIT_POSITION_UNDEFINED,
                 !toMainStage ? mSideStage.getTopChildTaskUid() : 0 /* sideStageUid */,
                 isLeftRightSplit());
+    }
+
+    boolean prepareSplitLeafToFloating(int taskId, WindowContainerTransaction wct) {
+        return isMultiSplitActive() && mMultiSplit.prepareLeafToFloating(taskId, wct);
+    }
+
+    private MultiSplitCoordinator mMultiSplit;
+
+    boolean isMultiSplitActive() {
+        return mMultiSplit != null && mMultiSplit.isActive();
+    }
+
+    int getOccupiedSplitSlots(int displayId) {
+        if (isMultiSplitActive()) return mMultiSplit.occupied(displayId);
+        if (!isSplitScreenVisible() || mSplitRootTaskInfo == null
+                || mSplitRootTaskInfo.displayId != displayId) return 0;
+        int occupied = 0;
+        if (isOccupiedAppDragSlot(SPLIT_POSITION_TOP_OR_LEFT, displayId)) occupied++;
+        if (isOccupiedAppDragSlot(SPLIT_POSITION_BOTTOM_OR_RIGHT, displayId)) occupied++;
+        return occupied;
+    }
+
+    private boolean isOccupiedAppDragSlot(int position, int displayId) {
+        final RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(getTaskId(position));
+        return task != null && task.displayId == displayId && task.isVisible
+                && task.isVisibleRequested && task.getActivityType() == ACTIVITY_TYPE_STANDARD
+                && !task.isFloatingWindow && task.getWindowingMode() != WINDOWING_MODE_PINNED;
     }
 }

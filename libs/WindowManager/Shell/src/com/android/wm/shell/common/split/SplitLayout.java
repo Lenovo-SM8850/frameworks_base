@@ -1517,6 +1517,9 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     /** Handles layout change event. */
     public interface SplitLayoutHandler {
 
+        /** Reports direct divider interaction before movement starts or after release. */
+        default void onDividerInteractionChanged(boolean interacting) {}
+
         /** Calls when dismissing split. */
         void onSnappedToDismiss(boolean snappedToEnd, int reason, WindowContainerTransaction wct);
 
@@ -1560,6 +1563,11 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
         void setLayoutOffsetTarget(int offsetX, int offsetY, SplitLayout layout);
 
         /** Calls when user double tapped on the divider bar. */
+        default void onDividerHandleTapped(int index) { onDoubleTappedDivider(); }
+        default void onDividerHandleMenuChanged(boolean showing) {}
+        default boolean canRotateThreeAppShape() { return false; }
+        default void onRotateThreeAppShape() {}
+
         default void onDoubleTappedDivider() {
         }
 
@@ -1812,5 +1820,101 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             }
             return adjusted;
         }
+    }
+
+    /**
+     * Configures a divider for a geometry branch. Its parent remains the split root surface.
+     * Multi-app IME adjustment is owned by the session, rather than by each branch's pair helper.
+     */
+    public void setMultiSplitDivider(Rect branchBounds, boolean leftRight, float ratio) {
+        setMultiSplitDivider(branchBounds, leftRight, ratio, -1);
+    }
+
+    /** Only the root's single-app half may have a peek endpoint. */
+    public void setMultiSplitDivider(Rect branchBounds, boolean leftRight, float ratio,
+            int flexibleSide) {
+        mFlexibleBranchSide = flexibleSide;
+        final boolean branchChanged = !mIsMultiSplitDivider || !mRootBounds.equals(branchBounds);
+        mIsMultiSplitDivider = true;
+        mRootBounds.set(branchBounds);
+        mIsLeftRightSplit = leftRight;
+        if (branchChanged) {
+            final Configuration configuration = new Configuration(mContext.getResources()
+                    .getConfiguration());
+            configuration.windowConfiguration.setBounds(branchBounds);
+            configuration.windowConfiguration.setAppBounds(null);
+            mSplitWindowManager.setConfiguration(configuration);
+        }
+        updateLayouts();
+        final int length = leftRight ? branchBounds.width() : branchBounds.height();
+        mDividerPosition = Math.round((length - mDividerSize) * ratio);
+        updateBounds(mDividerPosition);
+    }
+
+    /** Returns the visible divider thickness used by geometry and drag previews. */
+    public int getDividerSize() {
+        return mDividerSize;
+    }
+
+    /** Returns the fraction of usable branch space before this divider. */
+    public float getBranchRatio() {
+        final int length = mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height();
+        final int before = mIsLeftRightSplit ? getTopLeftBounds().width()
+                : getTopLeftBounds().height();
+        return (float) before / Math.max(1, length - mDividerSize);
+    }
+
+    /** Returns the branch clip in divider-window coordinates, including decorative expansion. */
+    public Rect getMultiSplitDividerCrop() {
+        final Rect window = new Rect();
+        getDividerLeashBounds(window);
+        final Rect crop = new Rect(0, 0, mRootBounds.width(), mRootBounds.height());
+        crop.offset(-window.left, -window.top);
+        if (!crop.intersect(0, 0, window.width(), window.height())) crop.setEmpty();
+        return crop;
+    }
+
+    public float getFirstNonDismissRatio() {
+        return (float) mDividerSnapAlgorithm.getFirstSplitTarget().position
+                / Math.max(1, (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height()) - mDividerSize);
+    }
+
+    public float getLastNonDismissRatio() {
+        return (float) mDividerSnapAlgorithm.getLastSplitTarget().position
+                / Math.max(1, (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height()) - mDividerSize);
+    }
+
+    /** Sets handle centers along the divider, relative to the branch content bounds. */
+    public void setDividerHandlePositions(int[] positions) {
+        if (java.util.Arrays.equals(mDividerHandlePositions, positions)) return;
+        mDividerHandlePositions = positions.clone();
+        final DividerView view = mSplitWindowManager.getDividerView();
+        if (view != null) view.updateHandlePositions();
+    }
+
+    private boolean mIsMultiSplitDivider;
+
+    private int[] mDividerHandlePositions;
+
+    private int mFlexibleBranchSide = -1;
+
+    void onDividerHandleTapped(int index) {
+        if (!isCurrentlySwapping()) mSplitLayoutHandler.onDividerHandleTapped(index);
+    }
+
+    boolean canRotateThreeAppShape() {
+        return mSplitLayoutHandler.canRotateThreeAppShape();
+    }
+
+    void onRotateThreeAppShape() {
+        if (!isCurrentlySwapping()) mSplitLayoutHandler.onRotateThreeAppShape();
+    }
+
+    void onDividerHandleMenuChanged(boolean showing) {
+        mSplitLayoutHandler.onDividerHandleMenuChanged(showing);
+    }
+
+    int[] getDividerHandlePositions() {
+        return mDividerHandlePositions;
     }
 }
