@@ -1395,6 +1395,46 @@ class PinnedLayerControllerTest : ShellTestCase() {
                 DISPLAY_HEIGHT - DISPLAY_STABLE_INSETS.bottom,
             )
     }
+    @Test
+    fun homeGesture_oneFloatingWindow_doesNotReorderPreviousApp() {
+        assertHomeVisibility(1, false)
+    }
+
+    @Test
+    fun homeGesture_twoFloatingWindows_doesNotReorderPreviousApp() {
+        assertHomeVisibility(2, false)
+    }
+
+    private fun assertHomeVisibility(count: Int, overview: Boolean) {
+        val tasks = (0 until count).map { setupTask(taskId = 201 + it).also(::pinTask) }
+        val shellController = mock<ShellController>()
+        val recents = mock<RecentsTransitionHandler>()
+        pinnedLayerController.configureVisibility(shellController, recents)
+        val listener = argumentCaptor<com.android.wm.shell.recents.RecentsTransitionStateListener>()
+        verify(recents).addTransitionStateListener(listener.capture())
+        whenever(shellController.isOverviewVisible(DEFAULT_DISPLAY)).thenReturn(overview)
+        org.mockito.kotlin.doAnswer { invocation ->
+            invocation.getArgument<Runnable>(0).run()
+            null
+        }.whenever(transitions).runOnIdle(any())
+        listener.firstValue.onTransitionStateChanged(3, DEFAULT_DISPLAY)
+        listener.firstValue.onTransitionStateChanged(1, DEFAULT_DISPLAY)
+        whenever(shellController.isOverviewVisible(DEFAULT_DISPLAY)).thenReturn(false)
+        listener.firstValue.onTransitionFinishedToHome(DEFAULT_DISPLAY)
+        val transactions = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer, org.mockito.kotlin.atLeastOnce())
+            .applyTransaction(transactions.capture())
+        transactions.allValues.forEach { transaction ->
+            assertTrue(transaction.hierarchyOps.isEmpty())
+            if (!overview) {
+                tasks.forEach { assertFalse(transaction.changes[it.token.asBinder()]!!.hidden) }
+            }
+        }
+        tasks.forEach {
+            assertFalse(transactions.lastValue.changes[it.token.asBinder()]!!.hidden)
+            assertTrue(pinnedLayerController.isPinned(it.taskId))
+        }
+    }
 
 
     @Test
