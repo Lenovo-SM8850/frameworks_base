@@ -119,6 +119,39 @@ public class StartingWindowControllerTests extends ShellTestCase {
     }
 
     @Test
+    public void declinedStartingWindowDoesNotHoldRotationReadiness() {
+        final android.window.StartingWindowInfo info = new android.window.StartingWindowInfo();
+        info.taskInfo = new android.app.ActivityManager.RunningTaskInfo();
+        info.taskInfo.taskId = 27;
+        doReturn(android.window.StartingWindowInfo.STARTING_WINDOW_TYPE_NONE)
+                .when(mTypeAlgorithm).getSuggestedWindowType(info);
+        clearInvocations(mSplashScreenExecutor);
+        mController.addStartingWindow(info);
+        assertTrue(mController.hasStartingWindow(27));
+        final ArgumentCaptor<Runnable> work = ArgumentCaptor.forClass(Runnable.class);
+        verify(mSplashScreenExecutor).execute(work.capture());
+        work.getValue().run();
+        assertFalse(mController.hasStartingWindow(27));
+    }
+
+    @Test
+    public void firstDrawReadinessDoesNotWaitForStartingWindowRemovalTransition() {
+        final android.window.StartingWindowInfo info = new android.window.StartingWindowInfo();
+        info.taskInfo = new android.app.ActivityManager.RunningTaskInfo();
+        info.taskInfo.taskId = 27;
+        mController.addStartingWindow(info);
+        assertTrue(mController.hasStartingWindow(27));
+        final StartingWindowRemovalInfo removal = new StartingWindowRemovalInfo();
+        removal.taskId = 27;
+        mController.removeStartingWindow(removal);
+        assertFalse(mController.hasStartingWindow(27));
+        mController.addStartingWindow(info);
+        assertTrue(mController.hasStartingWindow(27));
+        mController.clearAllWindows();
+        assertFalse(mController.hasStartingWindow(27));
+    }
+
+    @Test
     public void instantiateController_addInitCallback() {
         verify(mShellInit, times(1)).addInitCallback(any(), isA(StartingWindowController.class));
     }

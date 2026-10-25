@@ -161,6 +161,18 @@ public class ShellTaskOrganizerTests extends ShellTestCase {
     }
 
     @Test
+    public void startingWindowReadinessComesFromActualSurfaceController() {
+        assertFalse(mOrganizer.hasStartingWindow(27));
+        final com.android.wm.shell.startingsurface.StartingWindowController controller =
+                mock(com.android.wm.shell.startingsurface.StartingWindowController.class);
+        mOrganizer.initStartingWindow(controller);
+        doReturn(true).when(controller).hasStartingWindow(27);
+        assertTrue(mOrganizer.hasStartingWindow(27));
+        doReturn(false).when(controller).hasStartingWindow(27);
+        assertFalse(mOrganizer.hasStartingWindow(27));
+    }
+
+    @Test
     public void instantiate_addInitCallback() {
         verify(mShellInit, times(1)).addInitCallback(any(), any());
     }

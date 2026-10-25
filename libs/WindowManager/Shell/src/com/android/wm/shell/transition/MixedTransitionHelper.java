@@ -166,8 +166,10 @@ public class MixedTransitionHelper {
                     mixed.mInFlightSubAnimations++;
                     final TransitionInfo pinnedLayerInfo = removePinnedLayerTaskChangesFrom(
                             pinnedLayerHandler, info, mixed.mTransition);
-                    pinnedLayerHandler.startAnimation(mixed.mTransition, pinnedLayerInfo,
-                            startTransaction, finishTransaction, finishCB);
+                    if (!pinnedLayerHandler.startAnimation(mixed.mTransition, pinnedLayerInfo,
+                            startTransaction, finishTransaction, finishCB)) {
+                        finishCB.onTransitionFinished(null);
+                    }
                 }
                 pipHandler.startAnimation(mixed.mTransition, pipInfo, startTransaction,
                         finishTransaction, finishCB);
@@ -190,8 +192,10 @@ public class MixedTransitionHelper {
                     && pinnedLayerHandler.observes(mixed.mTransition)) {
                 // launching pip has additional side effects on pinned layer
                 mixed.mInFlightSubAnimations++;
-                pinnedLayerHandler.startAnimation(mixed.mTransition, info,
-                        startTransaction, finishTransaction, finishCB);
+                if (!pinnedLayerHandler.startAnimation(mixed.mTransition, info,
+                        startTransaction, finishTransaction, finishCB)) {
+                    finishCB.onTransitionFinished(null);
+                }
             }
             pipHandler.startAnimation(
                     mixed.mTransition, info, startTransaction, finishTransaction, finishCB);

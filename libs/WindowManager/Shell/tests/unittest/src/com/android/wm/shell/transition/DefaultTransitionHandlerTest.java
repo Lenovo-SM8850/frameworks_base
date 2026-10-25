@@ -587,4 +587,69 @@ public class DefaultTransitionHandlerTest extends ShellTestCase {
         taskInfo.token = mock(WindowContainerToken.class);
         return taskInfo;
     }
+    @Test
+    public void testFloatingEntryStartsAtFullscreenBounds() {
+        final com.android.wm.shell.common.DisplayLayout layout =
+                mock(com.android.wm.shell.common.DisplayLayout.class);
+        when(mDisplayController.getDisplayLayout(anyInt())).thenReturn(layout);
+        when(layout.width()).thenReturn(2400);
+        when(layout.height()).thenReturn(1600);
+        final RunningTaskInfo task = createTaskInfo(101);
+        task.isFloatingWindow = true;
+        task.floatingWindowScale = .75f;
+        task.floatingWindowPosition.set(120, 180);
+        task.positionInParent = new Point(120, 180);
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
+        task.configuration.windowConfiguration.setBounds(new android.graphics.Rect(0, 0, 800, 1200));
+        final TransitionInfo.Change change = new ChangeBuilder(task, TRANSIT_CHANGE).build();
+        change.setStartAbsBounds(new android.graphics.Rect(0, 0, 2400, 1600));
+        change.setEndAbsBounds(new android.graphics.Rect(0, 0, 800, 1200));
+        final IBinder token = new Binder();
+        final TransitionInfo info = new TransitionInfoBuilder(TRANSIT_CHANGE).addChange(change)
+                .build();
+        final SurfaceControl.Transaction startT = MockTransactionPool.create();
+        final SurfaceControl.Transaction finishT = MockTransactionPool.create();
+        mTransitionHandler.startAnimation(token, info, startT, finishT,
+                mock(Transitions.TransitionFinishCallback.class));
+        final org.mockito.ArgumentCaptor<android.graphics.Matrix> matrix =
+                org.mockito.ArgumentCaptor.forClass(android.graphics.Matrix.class);
+        verify(startT).setMatrix(eq(change.getLeash()), matrix.capture(), any());
+        final float[] bottomRight = {800f, 1200f};
+        matrix.getValue().mapPoints(bottomRight);
+        assertEquals(2400f, bottomRight[0], .01f);
+        assertEquals(1600f, bottomRight[1], .01f);
+        verify(startT).setWindowCrop(change.getLeash(), 800, 1200);
+        verify(startT).setCornerRadius(change.getLeash(), 0f);
+        verify(finishT).setMatrix(change.getLeash(), .75f, 0f, 0f, .75f);
+        mergeSync(mTransitionHandler, token);
+        flushHandlers();
+    }
+
+    @Test
+    public void testFloatingRestoreKeepsPresentationWithoutFullscreenEntryAnimation() {
+        final com.android.wm.shell.common.DisplayLayout layout =
+                mock(com.android.wm.shell.common.DisplayLayout.class);
+        when(mDisplayController.getDisplayLayout(anyInt())).thenReturn(layout);
+        when(layout.width()).thenReturn(2400);
+        when(layout.height()).thenReturn(1600);
+        final RunningTaskInfo task = createTaskInfo(102);
+        task.isFloatingWindow = true;
+        task.floatingWindowScale = .75f;
+        task.positionInParent = new Point(120, 180);
+        task.configuration.windowConfiguration.setWindowingMode(WINDOWING_MODE_FREEFORM);
+        task.configuration.windowConfiguration.setBounds(new android.graphics.Rect(0, 0, 800, 1200));
+        final TransitionInfo.Change change = new ChangeBuilder(task, TRANSIT_CHANGE).build();
+        change.setStartAbsBounds(new android.graphics.Rect(0, 0, 800, 1200));
+        change.setEndAbsBounds(new android.graphics.Rect(0, 0, 800, 1200));
+        final TransitionInfo info = new TransitionInfoBuilder(TRANSIT_CHANGE).addChange(change)
+                .build();
+        final SurfaceControl.Transaction startT = MockTransactionPool.create();
+        mTransitionHandler.startAnimation(new Binder(), info, startT, MockTransactionPool.create(),
+                mock(Transitions.TransitionFinishCallback.class));
+        verify(startT).setMatrix(change.getLeash(), .75f, 0f, 0f, .75f);
+        verify(startT, never()).setMatrix(eq(change.getLeash()),
+                any(android.graphics.Matrix.class), any());
+        flushHandlers();
+    }
+
 }
