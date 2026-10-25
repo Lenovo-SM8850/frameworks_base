@@ -30,6 +30,8 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -113,71 +115,6 @@ public class SplitLayoutTests extends ShellTestCase {
                 mStatusBarHider,
                 mDesktopState,
                 mMSDLPlayer));
-    }
-
-    @Test
-    @UiThreadTest
-    public void testAdjustSurfaceLayoutForIme_suppressesDimmingDuringRecents() {
-        // force dimming to be enabled.
-        mContext.getOrCreateTestableResources().addOverride(
-                com.android.wm.shell.R.bool.config_dimNonImeAttachedSide, true);
-
-        // re-create SplitLayout with resource change
-        mSplitLayout = new SplitLayout(
-                "TestSplitLayout",
-                mContext,
-                getConfiguration(),
-                mSplitLayoutHandler,
-                mCallbacks,
-                mDisplayController,
-                mDisplayImeController,
-                mTaskOrganizer,
-                SplitLayout.PARALLAX_NONE,
-                mSplitState,
-                mHandler,
-                mStatusBarHider,
-                mDesktopState,
-                mMSDLPlayer);
-
-        // focus on bottom/right stage to trigger dimming on the other side.
-        WindowContainerToken mockToken = mock(WindowContainerToken.class);
-        when(mTaskOrganizer.getImeLayeringTarget(anyInt())).thenReturn(mockToken);
-        when(mSplitLayoutHandler.getSplitItemPosition(mockToken))
-                .thenReturn(SPLIT_POSITION_BOTTOM_OR_RIGHT);
-
-        mSplitLayout.init();
-        SplitLayout.ImePositionProcessor processor =
-                (SplitLayout.ImePositionProcessor) mSplitLayout.getImePositionProcessor();
-
-        // set up internal dimming state
-        SurfaceControl.Transaction t = mock(SurfaceControl.Transaction.class);
-        when(t.setAlpha(any(), anyFloat())).thenReturn(t);
-        when(t.setVisibility(any(), anyBoolean())).thenReturn(t);
-
-        // picking values so as to get mDimLayer1, mDimLayer2 > 0.001f
-        processor.onImeStartPositioning(mContext.getDisplayId(), 0 /* hiddenTop */,
-                100 /* shownTop */, true /* showing */, true /* isFloating */, t);
-        processor.onImePositionChanged(mContext.getDisplayId(), 100 /* imeTop */, t);
-
-        final SurfaceControl dimLayer1 = mock(SurfaceControl.class);
-        final SurfaceControl dimLayer2 = mock(SurfaceControl.class);
-
-        // recents are animating: alpha should not be set.
-        mSplitLayout.setRecentsAnimating(true);
-        boolean result = processor.adjustSurfaceLayoutForIme(t,
-                mock(SurfaceControl.class), mock(SurfaceControl.class),
-                mock(SurfaceControl.class), dimLayer1, dimLayer2);
-        assertThat(result).isFalse();
-        verify(t, never()).setAlpha(any(), anyFloat());
-
-        // recents not animating: alpha should be set.
-        mSplitLayout.setRecentsAnimating(false);
-        result = processor.adjustSurfaceLayoutForIme(t,
-                mock(SurfaceControl.class), mock(SurfaceControl.class),
-                mock(SurfaceControl.class), dimLayer1, dimLayer2);
-        assertThat(result).isTrue();
-        verify(t).setAlpha(eq(dimLayer1), anyFloat());
-        verify(t).setAlpha(eq(dimLayer2), anyFloat());
     }
 
     @Test

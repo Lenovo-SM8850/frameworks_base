@@ -86,8 +86,15 @@ public final class SplitWindowManager extends WindowlessWindowManager {
 
     void setTouchRegion(@NonNull Rect region) {
         if (mViewHost != null) {
-            setTouchRegion(mViewHost.getWindowToken().asBinder(), new Region(region));
+            setTouchRegion(new Region(region));
         }
+    }
+
+    void setTouchRegion(@NonNull Region region) {
+        if (mViewHost == null) return;
+        final Region touch = new Region(region);
+        if (mMultiSplitTouchBounds != null) touch.op(mMultiSplitTouchBounds, Region.Op.INTERSECT);
+        setTouchRegion(mViewHost.getWindowToken().asBinder(), touch);
     }
 
     @Override
@@ -252,4 +259,5 @@ public final class SplitWindowManager extends WindowlessWindowManager {
             mDividerView.onInsetsChanged(insetsState, true /* animate */);
         }
     }
+    private Rect mMultiSplitTouchBounds;
 }

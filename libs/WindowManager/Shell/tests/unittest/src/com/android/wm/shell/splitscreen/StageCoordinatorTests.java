@@ -287,6 +287,59 @@ public class StageCoordinatorTests extends ShellTestCase {
     }
 
     @Test
+    public void canMutateSplit_requiresVisibleActiveSplit() {
+        assertFalse(mStageCoordinator.canMutateSplit());
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        assertFalse(mStageCoordinator.canMutateSplit());
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        assertTrue(mStageCoordinator.canMutateSplit());
+    }
+
+    @Test
+    public void canMutateSplit_rejectsDividerDragFlingAndSwap() {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        mStageCoordinator.onDividerInteractionChanged(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        mStageCoordinator.onDividerInteractionChanged(false);
+        assertTrue(mStageCoordinator.canMutateSplit());
+        when(mSplitLayout.isCurrentlyDividerFlinging()).thenReturn(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        when(mSplitLayout.isCurrentlyDividerFlinging()).thenReturn(false);
+        when(mSplitLayout.isCurrentlySwapping()).thenReturn(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        when(mSplitLayout.isCurrentlySwapping()).thenReturn(false);
+        assertTrue(mStageCoordinator.canMutateSplit());
+    }
+
+    @Test
+    public void canMutateSplit_tracksAnimationWithoutReplacingListener() {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        SplitScreen.SplitInvocationListener listener = mock(SplitScreen.SplitInvocationListener.class);
+        mStageCoordinator.registerSplitAnimationListener(listener, Runnable::run);
+        mStageCoordinator.notifySplitAnimationStatus(true);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        verify(listener).onSplitAnimationInvoked(true);
+        mStageCoordinator.notifySplitAnimationStatus(false);
+        assertTrue(mStageCoordinator.canMutateSplit());
+        verify(listener).onSplitAnimationInvoked(false);
+    }
+
+    @Test
+    public void canMutateSplit_rejectsPendingResizeAndDismiss() {
+        doReturn(true).when(mStageCoordinator).isSplitActive();
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        mSplitScreenTransitions.mPendingResize = mock(SplitScreenTransitions.TransitSession.class);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        mSplitScreenTransitions.mPendingResize = null;
+        mSplitScreenTransitions.mPendingDismiss = mock(SplitScreenTransitions.DismissSession.class);
+        assertFalse(mStageCoordinator.canMutateSplit());
+        mSplitScreenTransitions.mPendingDismiss = null;
+        assertTrue(mStageCoordinator.canMutateSplit());
+    }
+
+    @Test
     public void testMoveToStage_splitActiveBackground() {
         when(mStageCoordinator.isSplitActive()).thenReturn(true);
 
@@ -1490,6 +1543,26 @@ public class StageCoordinatorTests extends ShellTestCase {
                 @Nullable WindowContainerTransaction withRecentsWct) {
             return mAlwaysEnter;
         }
+    }
+    @Test
+    public void floatingPair_bypassesRecentsRestoreAndExitsBackgroundGroupInSameWct() throws Exception {
+        MultiSplitCoordinator multi = installMultiSplitForRestoreTest();
+        doReturn(true).when(mStageCoordinator).canStartSplitEntry();
+        doReturn(false).when(mStageCoordinator).isSplitScreenVisible();
+        doAnswer(invocation -> {
+            when(multi.isActive()).thenReturn(false);
+            return null;
+        }).when(multi).exit(eq(-1), any());
+        assertTrue(mStageCoordinator.startFloatingPair(1, 2, SPLIT_POSITION_TOP_OR_LEFT));
+        ArgumentCaptor<WindowContainerTransaction> exiting =
+                ArgumentCaptor.forClass(WindowContainerTransaction.class);
+        verify(multi).exit(eq(-1), exiting.capture());
+        verify(multi).forgetGroup(1);
+        verify(multi).forgetGroup(2);
+        verify(multi, never()).restorePair(anyInt(), anyInt(), any(), any(), any());
+        assertEquals(2, exiting.getValue().getHierarchyOps().stream().filter(op ->
+                op.getType() == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK)
+                .count());
     }
 
     private MultiSplitCoordinator installMultiForLaunchTest() throws Exception {

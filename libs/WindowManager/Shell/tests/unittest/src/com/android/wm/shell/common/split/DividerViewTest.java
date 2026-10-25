@@ -19,7 +19,9 @@ import static android.content.res.Configuration.ORIENTATION_LANDSCAPE;
 
 import static com.android.internal.config.sysui.SystemUiDeviceConfigFlags.CURSOR_HOVER_STATES_ENABLED;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -39,7 +41,10 @@ import android.provider.DeviceConfig;
 import android.view.InputDevice;
 import android.view.InsetsState;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
+import android.widget.ImageButton;
 
 import androidx.test.annotation.UiThreadTest;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -79,6 +84,7 @@ public class DividerViewTest extends ShellTestCase {
     private @Mock SnapTarget mSnapTarget;
     private FakeDesktopState mDesktopState;
     private SplitLayout mSplitLayout;
+    private DividerView mRealDividerView;
     private DividerView mDividerView;
 
     @Before
@@ -95,7 +101,8 @@ public class DividerViewTest extends ShellTestCase {
                 mContext, configuration, mCallbacks);
         splitWindowManager.init(mSplitLayout, new InsetsState(), false /* isRestoring */,
                 mDesktopState);
-        mDividerView = spy(splitWindowManager.getDividerView());
+        mRealDividerView = splitWindowManager.getDividerView();
+        mDividerView = spy(mRealDividerView);
         doReturn(mSnapTarget).when(mSplitLayout).findSnapTarget(anyInt(), anyFloat(), anyBoolean());
     }
 
@@ -239,4 +246,43 @@ public class DividerViewTest extends ShellTestCase {
         configuration.windowConfiguration.setBounds(new Rect(0, 0, 1080, 2160));
         return configuration;
     }
+    @Test
+    @UiThreadTest
+    public void segmentHandles_renderAtConfiguredPositionsAndUseTheirOwnMenuAction() {
+        for (boolean leftRight : new boolean[]{true, false}) {
+            doReturn(leftRight).when(mSplitLayout).isLeftRightSplit();
+            mSplitLayout.setDividerHandlePositions(new int[]{200, 600});
+            mRealDividerView.updateHandlePositions();
+            final int width = leftRight ? 100 : 800;
+            final int height = leftRight ? 800 : 100;
+            mRealDividerView.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+            mRealDividerView.layout(0, 0, width, height);
+            final ViewGroup bar = mRealDividerView.findViewById(R.id.divider_bar);
+            int count = 0;
+            for (int i = 0; i < bar.getChildCount(); i++) {
+                final View child = bar.getChildAt(i);
+                if (!(child instanceof DividerHandleView)) continue;
+                final Rect divider = mSplitLayout.getRefDividerBounds();
+                final int position = leftRight ? (child.getTop() + child.getBottom()) / 2 + divider.top
+                        : (child.getLeft() + child.getRight()) / 2 + divider.left;
+                assertEquals(count++ == 0 ? 200 : 600, position);
+            }
+            assertEquals(2, count);
+            final View second = bar.getChildAt(bar.getChildCount() - 1);
+            final int x = (second.getLeft() + second.getRight()) / 2;
+            final int y = (second.getTop() + second.getBottom()) / 2;
+            final long now = SystemClock.uptimeMillis();
+            final MotionEvent down = getMotionEvent(now, MotionEvent.ACTION_DOWN, x + 500, y + 700);
+            final MotionEvent up = getMotionEvent(now, now + 10, MotionEvent.ACTION_UP, x + 500, y + 700);
+            down.offsetLocation(-500, -700);
+            up.offsetLocation(-500, -700);
+            mRealDividerView.onTouch(mRealDividerView, down);
+            mRealDividerView.onTouch(mRealDividerView, up);
+            mRealDividerView.layout(0, 0, width, height);
+            mRealDividerView.findViewById(R.id.divider_handle_menu_swap).performClick();
+            verify(mSplitLayout, times(leftRight ? 1 : 2)).onDividerHandleTapped(1);
+        }
+    }
+
 }

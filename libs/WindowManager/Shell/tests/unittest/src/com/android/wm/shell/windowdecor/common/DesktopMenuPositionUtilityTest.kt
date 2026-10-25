@@ -48,6 +48,19 @@ class DesktopMenuPositionUtilityTest : ShellTestCase() {
     @Mock private val mockSplitScreenController = mock<SplitScreenController>()
 
     @Test
+    fun testMultiSplitBottomRightUsesBothOwningLeafOffsets() {
+        val task = setupTaskInfo(WINDOWING_MODE_MULTI_WINDOW)
+        whenever(mockSplitScreenController.getMultiSplitTaskBounds(anyInt(), any())).thenAnswer {
+            (it.arguments[1] as Rect).set(1204, 1604, 2400, 3200)
+            true
+        }
+        val result = calculateMenuPosition(mockSplitScreenController, task, MARGIN_TOP,
+            CAPTION_X, CAPTION_Y, CAPTION_WIDTH, MENU_WIDTH, false)
+        assertEquals(1204 + CAPTION_X + CAPTION_WIDTH / 2 - MENU_WIDTH / 2, result.x)
+        assertEquals(1604 + CAPTION_Y + MARGIN_TOP, result.y)
+    }
+
+    @Test
     fun testFullscreenPositionCalculation() {
         val task = setupTaskInfo(WINDOWING_MODE_FULLSCREEN)
         val result =

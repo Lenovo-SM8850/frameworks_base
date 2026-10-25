@@ -166,7 +166,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         this.onPillItemClicked = onPillItemClicked
         this.showFloatingButton = showFloatingButton
 
-        listOf(fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
+        listOf(rotateBtn, fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
             it.setOnClickListener(this)
         }
 

@@ -1361,6 +1361,66 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         }
     }
 
+    public void moveFloatingTaskToSplit(int taskId) {
+        mMainExecutor.execute(() -> {
+            final ActivityManager.RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(taskId);
+            if (task == null) return;
+            final ActivityManager.RunningTaskInfo companion = isSplitScreenVisible()
+                    ? null : getFloatingSplitCompanion(task);
+            final AppDragSlot slot = getFloatingSplitSlot(task, companion);
+            if (slot == null) return;
+            if (isSplitScreenVisible()) {
+                startTaskInSplitSlot(task, slot);
+            } else {
+                if (companion == null || !mStageCoordinator.canStartSplitEntry()) return;
+                mStageCoordinator.startFloatingPair(taskId, companion.taskId, slot.position);
+            }
+        });
+    }
+
+    /** Whether this task still belongs to a visible split that can accept a menu action. */
+    public boolean canMutateSplitTask(int taskId) {
+        return isTaskInSplitScreenForeground(taskId) && mStageCoordinator.canMutateSplit();
+    }
+
+    /** Swaps a task with its split companion, rechecking eligibility on the Shell main thread. */
+    public void swapSplitTask(int taskId) {
+        mMainExecutor.execute(() -> {
+            if (!canMutateSplitTask(taskId)) return;
+            if (mStageCoordinator.isMultiSplitActive()) mStageCoordinator.swapSplitTask(taskId);
+            else mStageCoordinator.switchSplitPosition("handle menu");
+        });
+    }
+
+    /** Copies the owning multi-app leaf's screen bounds; returns false for a legacy pair. */
+    public boolean getMultiSplitTaskBounds(int taskId, @NonNull Rect outBounds) {
+        return mStageCoordinator.getMultiSplitTaskBounds(taskId, outBounds);
+    }
+
+    /** Stable leaf IDs for the menu's directional swaps; a missing neighbour is -1. */
+    public static final class SplitSwapTargets {
+        public final int source;
+        public final int horizontal;
+        public final int vertical;
+
+        public SplitSwapTargets(int source, int horizontal, int vertical) {
+            this.source = source;
+            this.horizontal = horizontal;
+            this.vertical = vertical;
+        }
+    }
+
+    /** Returns directional neighbours for a task in a three- or four-app split. */
+    @Nullable
+    public SplitSwapTargets getMultiSplitSwapTargets(int taskId) {
+        return mStageCoordinator.getMultiSplitSwapTargets(taskId);
+    }
+
+    /** Exchanges task assignments between stable leaf IDs without changing the geometry tree. */
+    public void swapLeaves(int firstLeafId, int secondLeafId) {
+        mMainExecutor.execute(() -> mStageCoordinator.swapLeaves(firstLeafId, secondLeafId));
+    }
+
     void switchSplitPosition(String reason) {
         if (isSplitScreenVisible()) {
             mStageCoordinator.switchSplitPosition(reason);
@@ -1758,25 +1818,6 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         showSplitPicker(taskId, backgroundExecutor, true);
     }
 
-    /** Exchanges task assignments between stable leaf IDs without changing the geometry tree. */
-    public void swapLeaves(int firstLeafId, int secondLeafId) {
-        mMainExecutor.execute(() -> mStageCoordinator.swapLeaves(firstLeafId, secondLeafId));
-    }
-
-    /** Swaps a task with its split companion, rechecking eligibility on the Shell main thread. */
-    public void swapSplitTask(int taskId) {
-        mMainExecutor.execute(() -> {
-            if (!canMutateSplitTask(taskId)) return;
-            if (mStageCoordinator.isMultiSplitActive()) mStageCoordinator.swapSplitTask(taskId);
-            else mStageCoordinator.switchSplitPosition("handle menu");
-        });
-    }
-
-    /** Whether this task still belongs to a visible split that can accept a menu action. */
-    public boolean canMutateSplitTask(int taskId) {
-        return isTaskInSplitScreenForeground(taskId) && mStageCoordinator.canMutateSplit();
-    }
-
     private void showSplitPicker(int taskId, Executor backgroundExecutor, boolean replace) {
         mMainExecutor.execute(() -> {
             if (mSplitPicker == null) {
@@ -1814,24 +1855,6 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
                 pendingIntentLaunchOptions(options, launch.getFlags()), slot);
     }
 
-    /** Copies the owning multi-app leaf's screen bounds; returns false for a legacy pair. */
-    public boolean getMultiSplitTaskBounds(int taskId, @NonNull Rect outBounds) {
-        return mStageCoordinator.getMultiSplitTaskBounds(taskId, outBounds);
-    }
-
-    /** Stable leaf IDs for the menu's directional swaps; a missing neighbour is -1. */
-    public static final class SplitSwapTargets {
-        public final int source;
-        public final int horizontal;
-        public final int vertical;
-
-        public SplitSwapTargets(int source, int horizontal, int vertical) {
-            this.source = source;
-            this.horizontal = horizontal;
-            this.vertical = vertical;
-        }
-    }
-
     public boolean launchSidebarIntoPendingSplit(ComponentName component, UserHandle user, int displayId) {
         if (mSplitPicker != null && mSplitPicker.launchSidebarApp(component, user, displayId)) return true;
         final AppDragSlot slot = getPendingSidebarSplitSlot(displayId);
@@ -1853,23 +1876,6 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         final AppDragSlot picker = mSplitPicker == null ? null : mSplitPicker.pendingSidebarSlot(displayId);
         if (picker != null) return picker;
         return mStageCoordinator.getPendingSidebarSplitSlot(displayId);
-    }
-
-    public void moveFloatingTaskToSplit(int taskId) {
-        mMainExecutor.execute(() -> {
-            final ActivityManager.RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(taskId);
-            if (task == null) return;
-            final ActivityManager.RunningTaskInfo companion = isSplitScreenVisible()
-                    ? null : getFloatingSplitCompanion(task);
-            final AppDragSlot slot = getFloatingSplitSlot(task, companion);
-            if (slot == null) return;
-            if (isSplitScreenVisible()) {
-                startTaskInSplitSlot(task, slot);
-            } else {
-                if (companion == null || !mStageCoordinator.canStartSplitEntry()) return;
-                mStageCoordinator.startFloatingPair(taskId, companion.taskId, slot.position);
-            }
-        });
     }
 
     /** Checks same-app multi-instance support before promising a split destination. */

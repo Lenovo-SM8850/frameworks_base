@@ -1537,6 +1537,27 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         verify(host).ended(any())
     }
 
+    @Test fun menuOwnerIsLayeredAboveEveryOtherDividerAndResetsOnDismiss() {
+        add()
+        add()
+        val transaction = mock<SurfaceControl.Transaction>(defaultAnswer = org.mockito.Mockito.RETURNS_SELF)
+        val leashes = createdDividers.map { divider ->
+            mock<SurfaceControl>().also {
+                whenever(it.isValid).thenReturn(true)
+                whenever(divider.dividerLeash).thenReturn(it)
+            }
+        }
+        dividerHandlers[1].onDividerHandleMenuChanged(true)
+        coordinator.applySurfaceChanges(transaction)
+        leashes.forEachIndexed { index, leash ->
+            verify(transaction).setLayer(leash, if (index == 1) Int.MAX_VALUE else Int.MAX_VALUE - 1)
+        }
+        dividerHandlers[1].onDividerHandleMenuChanged(false)
+        org.mockito.Mockito.clearInvocations(transaction)
+        coordinator.applySurfaceChanges(transaction)
+        leashes.forEach { verify(transaction).setLayer(it, Int.MAX_VALUE - 1) }
+    }
+
     @Test fun frameworkPinRequestKeepsTheGroupForTheFloatingRemovalHandler() {
         add()
         add()
