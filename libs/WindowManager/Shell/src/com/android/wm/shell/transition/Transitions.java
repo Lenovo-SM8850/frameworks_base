@@ -16,6 +16,7 @@
 
 package com.android.wm.shell.transition;
 
+import android.graphics.Rect;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
 import static android.os.Trace.TRACE_TAG_WINDOW_MANAGER;
@@ -2352,5 +2353,16 @@ public class Transitions implements RemoteCallable<Transitions>,
             typeStr = DesktopModeTransitionTypes.transitTypeToString(transitType);
         }
         return typeStr + "(FIRST_CUSTOM+" + (transitType - TRANSIT_FIRST_CUSTOM) + ")";
+    }
+
+    /** Restores floating presentation after a transition resets its task leash. */
+    public static void applyFloatingWindowTransform(TransitionInfo.Change change,
+            SurfaceControl.Transaction t) {
+        final android.app.TaskInfo task = change.getTaskInfo();
+        if (task == null || !task.isFloatingWindow) return;
+        final Rect logical = task.configuration.windowConfiguration.getBounds();
+        t.setMatrix(change.getLeash(), task.floatingWindowScale, 0, 0, task.floatingWindowScale);
+        t.setPosition(change.getLeash(), task.positionInParent.x, task.positionInParent.y);
+        t.setWindowCrop(change.getLeash(), logical.width(), logical.height());
     }
 }
