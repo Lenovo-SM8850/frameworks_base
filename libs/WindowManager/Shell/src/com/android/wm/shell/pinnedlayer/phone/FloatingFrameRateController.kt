@@ -133,7 +133,7 @@ class FloatingFrameRateController(
     }
 
     fun update() {
-        val enabled = false
+        val enabled = supportsOverride() && !SurfaceFrameRate.isInteracting
         if (!enabled && owned.isEmpty()) return
         val count = tasks.values.count { it.info.isFloatingWindow && it.info.displayId == DEFAULT_DISPLAY }
         val gameDisplays = emptySet<Int>()
