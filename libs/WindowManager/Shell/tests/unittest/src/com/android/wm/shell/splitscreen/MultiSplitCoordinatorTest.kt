@@ -417,6 +417,26 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         return slot
     }
 
+    @Test fun landscapePairOffersColumnsAtSideEdgesAndRowsInTheMiddle() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        val slots = coordinator.getSlots(0)
+        assertThat(slots.filter { it.threeColumns }).hasSize(4)
+        assertThat(slots.filter { !it.threeColumns }).hasSize(4)
+        val column = com.android.wm.shell.draganddrop.SidebarDragPolicy.resolveSplitSlot(
+            null, true, true, true, 2, 4, slots, 100, 1200)!!
+        assertThat(column.threeColumns).isTrue()
+        val row = com.android.wm.shell.draganddrop.SidebarDragPolicy.resolveSplitSlot(
+            null, true, true, true, 2, 4, slots, 800, 100)!!
+        assertThat(row.threeColumns).isFalse()
+        assertThat(coordinator.startIntent(pendingIntent, null, null, column)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val model = groups.get(10)!!.layout
+        assertThat(model.isThreeColumns).isTrue()
+        assertThat(model.getLeaves()).hasSize(3)
+        assertThat(coordinator.getSlots(0).all { it.occupied }).isTrue()
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+    }
+
     @Test fun handleAddBesideUsesTheSameColumnDestinationAndPickerIdentity() {
         mContext.resources.configuration.smallestScreenWidthDp = 600
         val slot = coordinator.getAddSlot(20)!!
