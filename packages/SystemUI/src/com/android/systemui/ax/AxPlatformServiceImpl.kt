@@ -89,6 +89,7 @@ class AxPlatformServiceImpl @Inject constructor(
     override fun start() {
         stateManager.supportedFeatures = featureController.supportedFeatures
         stateManager.labelProvider = featureMapper
+        stateManager.liveStateProvider = featureController::getLiveState
         sBinder = binderStub
         Log.i(TAG, "AxPlatform service ready")
         observers.registerAll()
