@@ -211,11 +211,53 @@ class MultiSplitCoordinator(
         } ?: emptyList()
     }
 
+    fun startRecents(info: TransitionInfo) {
+        publishGroup()
+        recentsTransitions.addAll(runningTransitions.filter { readyInfos[it] === info })
+        setRecentsAnimating(true)
+        clearStripZone()
+        val parent = host.rootInfo()?.token ?: return
+        dividers.values.forEach { split ->
+            val leash = split.dividerLeash?.takeIf { it.isValid } ?: return@forEach
+            val rect = Rect()
+            split.getDividerLeashBounds(rect)
+            rect.offset(split.rootBounds.left, split.rootBounds.top)
+            // Recents owns and releases its copy, as it does for the ordinary pair divider.
+            val change = TransitionInfo.Change(null,
+                SurfaceControl(leash, "MultiSplitCoordinator.startRecents"))
+            change.setParent(parent)
+            change.setStartAbsBounds(rect)
+            change.setEndAbsBounds(rect)
+            change.setMode(TRANSIT_TO_BACK)
+            change.setFlags(FLAG_IS_DIVIDER_BAR)
+            info.addChange(change)
+        }
+    }
+
+    private fun setRecentsAnimating(animating: Boolean) {
+        recentsAnimating = animating
+        dividers.values.forEach { it.setRecentsAnimating(animating) }
+    }
+
     private fun reparentDividers(t: SurfaceControl.Transaction) {
         val parent = host.rootLeash() ?: return
         dividers.values.forEach { split ->
             split.dividerLeash?.takeIf { it.isValid }?.let { t.reparent(it, parent) }
         }
+    }
+
+    fun cancelRecents() {
+        setRecentsAnimating(false)
+        syncQueue.runInSync {
+            restoreAnimationBranches(it)
+            applySurfaceChanges(it)
+        }
+        host.rootInfo()?.let {
+            organizer.applyTransaction(WindowContainerTransaction()
+                .setReparentLeafTaskIfRelaunch(it.token, true))
+        }
+        setDividerVisible(host.rootInfo()?.isVisible == true, null)
+        recentsTransitions.clear()
     }
 
     private fun restoreBusy(): Boolean = keyguard || insertion != null || pending != null || interacting ||
@@ -388,6 +430,43 @@ class MultiSplitCoordinator(
             .reorder(host.rootInfo()!!.token, true)
         returnPair(wct)
         return true
+    }
+
+    fun hasRestoreRemote(transition: IBinder): Boolean = restoreRemotes.containsKey(transition)
+
+    private fun consumeRestoreRemote(transition: IBinder, aborted: Boolean) {
+        val remote = restoreRemotes.remove(transition) ?: return
+        notifyRemote(remote, transition, aborted)
+    }
+
+    private fun notifyRemote(remote: RemoteTransition, transition: IBinder, aborted: Boolean) {
+        try {
+            remote.remoteTransition.onTransitionConsumed(transition, aborted)
+        } catch (e: RemoteException) {
+            Log.w("MultiSplitCoordinator", "Restore transition client disconnected", e)
+        }
+    }
+
+    /** Returning to apps restores every root and child endpoint in the recents finish WCT. */
+    fun finishRecents(returnToApp: Boolean, wct: WindowContainerTransaction,
+        t: SurfaceControl.Transaction) {
+        val showGroup = returnToApp || restoring
+        setRecentsAnimating(false)
+        restoreAnimationBranches(t)
+        setDividerVisible(showGroup, t)
+        if (showGroup) {
+            applyTasks(wct)
+            wct.reorder(host.rootInfo()!!.token, true)
+            stages.values.forEach { stage ->
+                stage.mRootLeash?.takeIf { it.isValid }?.let { t.show(it).setAlpha(it, 1f) }
+                stage.restoreChildSurfaces(t)
+            }
+        } else {
+            host.rootInfo()?.let { wct.setReparentLeafTaskIfRelaunch(it.token, true) }
+        }
+        applySurfaceChanges(t)
+        publishGroup()
+        recentsTransitions.clear()
     }
 
     fun isReorderingToTop(wct: WindowContainerTransaction): Boolean = wct.hierarchyOps.any { op ->
@@ -1576,6 +1655,71 @@ class MultiSplitCoordinator(
         }
     }
 
+    override fun startAnimation(transition: IBinder, info: TransitionInfo,
+        start: SurfaceControl.Transaction, finish: SurfaceControl.Transaction,
+        callback: Transitions.TransitionFinishCallback): Boolean {
+        if (transition != pending) return false
+        if (restoring) {
+            setRecentsAnimating(false)
+            reparentDividers(start)
+        }
+        info.changes.forEach { change ->
+            if (TransitionUtil.isClosingType(change.mode)) {
+                start.hide(change.leash)
+            } else {
+                start.show(change.leash).setAlpha(change.leash, 1f)
+                val offset = change.endRelOffset
+                start.setPosition(change.leash, offset.x.toFloat(), offset.y.toFloat())
+                start.setWindowCrop(change.leash, change.endAbsBounds.width(),
+                    change.endAbsBounds.height())
+            }
+        }
+        syncDividers(start)
+        applySurfaceChanges(start)
+        applySurfaceChanges(finish)
+        val remote = restoreRemotes.remove(transition)
+        if (remote != null) {
+            val remoteInfo = info.localRemoteCopy()
+            restoreInfos[transition] = remoteInfo
+            if (restoring) projectAnimationBranches(remoteInfo, start)
+            val handler = OneShotRemoteHandler(executor, transitions.leashManager, remote)
+            restoreHandlers[transition] = handler
+            handler.setTransition(transition)
+            return handler.startAnimation(transition, remoteInfo, start, finish) { wct ->
+                restoreAnimationBranches(finish)
+                applySurfaceChanges(finish)
+                restoreHandlers.remove(transition)
+                restoreInfos.remove(transition)?.releaseAllSurfaces()
+                callback.onTransitionFinished(wct)
+            }
+        }
+        start.apply()
+        executor.execute { callback.onTransitionFinished(null) }
+        return true
+    }
+
+    override fun onTransitionConsumed(transition: IBinder, aborted: Boolean,
+        finish: SurfaceControl.Transaction?) {
+        consumeRestoreRemote(transition, aborted)
+        restoreHandlers.remove(transition)?.let { handler ->
+            handler.onTransitionConsumed(transition, aborted, finish)
+            if (finish != null) restoreAnimationBranches(finish)
+            else syncQueue.runInSync { restoreAnimationBranches(it) }
+            restoreInfos.remove(transition)?.releaseAllSurfaces()
+        }
+        finishInsertion(transition, aborted)
+        if (recentsAnimating && transition in recentsTransitions) cancelRecents()
+        if (transition == pending) {
+            restoring = false
+            pending = null
+            if (isActive) {
+                syncDividers(finish)
+                if (finish != null) applySurfaceChanges(finish)
+                scheduleReconcile()
+            }
+        }
+    }
+
     override fun onTransitionReady(transition: IBinder, info: TransitionInfo,
         start: SurfaceControl.Transaction, finish: SurfaceControl.Transaction) {
         runningTransitions.add(transition)
@@ -1800,11 +1944,6 @@ class MultiSplitCoordinator(
 
     private val animationParents = linkedMapOf<SurfaceControl, Pair<SurfaceControl, Rect>>()
 
-    private fun setRecentsAnimating(animating: Boolean) {
-        recentsAnimating = animating
-        dividers.values.forEach { it.setRecentsAnimating(animating) }
-    }
-
     val isLeftRightSplit: Boolean get() = layout?.root?.orientation == Orientation.LEFT_RIGHT
 
     /** Replacement addresses a whole existing leaf, including an unsplit half. */
@@ -1821,14 +1960,6 @@ class MultiSplitCoordinator(
     /** Revalidates the preview revision and capacity at DROP, then launches in a single WCT. */
     fun startIntent(intent: PendingIntent, fillIn: Intent?, options: Bundle?, slot: AppDragSlot): Boolean =
         insert(slot, options, true) { wct, opts, _ -> wct.sendPendingIntent(intent, fillIn, opts.toBundle()) }
-
-    private fun notifyRemote(remote: RemoteTransition, transition: IBinder, aborted: Boolean) {
-        try {
-            remote.remoteTransition.onTransitionConsumed(transition, aborted)
-        } catch (e: RemoteException) {
-            Log.w("MultiSplitCoordinator", "Restore transition client disconnected", e)
-        }
-    }
 
     fun dump(pw: PrintWriter, prefix: String) {
         pw.println("${prefix}MultiSplitCoordinator: active=$isActive capacity=${host.capacity()} " +
@@ -1854,71 +1985,6 @@ class MultiSplitCoordinator(
     }
 
     val activeStages: List<StageTaskListener> get() = stages.values.toList()
-
-    override fun onTransitionConsumed(transition: IBinder, aborted: Boolean,
-        finish: SurfaceControl.Transaction?) {
-        consumeRestoreRemote(transition, aborted)
-        restoreHandlers.remove(transition)?.let { handler ->
-            handler.onTransitionConsumed(transition, aborted, finish)
-            if (finish != null) restoreAnimationBranches(finish)
-            else syncQueue.runInSync { restoreAnimationBranches(it) }
-            restoreInfos.remove(transition)?.releaseAllSurfaces()
-        }
-        finishInsertion(transition, aborted)
-        if (recentsAnimating && transition in recentsTransitions) cancelRecents()
-        if (transition == pending) {
-            restoring = false
-            pending = null
-            if (isActive) {
-                syncDividers(finish)
-                if (finish != null) applySurfaceChanges(finish)
-                scheduleReconcile()
-            }
-        }
-    }
-
-    override fun startAnimation(transition: IBinder, info: TransitionInfo,
-        start: SurfaceControl.Transaction, finish: SurfaceControl.Transaction,
-        callback: Transitions.TransitionFinishCallback): Boolean {
-        if (transition != pending) return false
-        if (restoring) {
-            setRecentsAnimating(false)
-            reparentDividers(start)
-        }
-        info.changes.forEach { change ->
-            if (TransitionUtil.isClosingType(change.mode)) {
-                start.hide(change.leash)
-            } else {
-                start.show(change.leash).setAlpha(change.leash, 1f)
-                val offset = change.endRelOffset
-                start.setPosition(change.leash, offset.x.toFloat(), offset.y.toFloat())
-                start.setWindowCrop(change.leash, change.endAbsBounds.width(),
-                    change.endAbsBounds.height())
-            }
-        }
-        syncDividers(start)
-        applySurfaceChanges(start)
-        applySurfaceChanges(finish)
-        val remote = restoreRemotes.remove(transition)
-        if (remote != null) {
-            val remoteInfo = info.localRemoteCopy()
-            restoreInfos[transition] = remoteInfo
-            if (restoring) projectAnimationBranches(remoteInfo, start)
-            val handler = OneShotRemoteHandler(executor, transitions.leashManager, remote)
-            restoreHandlers[transition] = handler
-            handler.setTransition(transition)
-            return handler.startAnimation(transition, remoteInfo, start, finish) { wct ->
-                restoreAnimationBranches(finish)
-                applySurfaceChanges(finish)
-                restoreHandlers.remove(transition)
-                restoreInfos.remove(transition)?.releaseAllSurfaces()
-                callback.onTransitionFinished(wct)
-            }
-        }
-        start.apply()
-        executor.execute { callback.onTransitionFinished(null) }
-        return true
-    }
 
     /** Keeps nested leaves inside the two branch targets understood by launcher animations. */
     fun projectAnimationBranches(info: TransitionInfo, t: SurfaceControl.Transaction) {
@@ -2028,25 +2094,4 @@ class MultiSplitCoordinator(
         info.changes.removeAll(removed.toSet())
         info.changes.addAll(first.coerceAtMost(info.changes.size), branches)
     }
-
-    fun cancelRecents() {
-        setRecentsAnimating(false)
-        syncQueue.runInSync {
-            restoreAnimationBranches(it)
-            applySurfaceChanges(it)
-        }
-        host.rootInfo()?.let {
-            organizer.applyTransaction(WindowContainerTransaction()
-                .setReparentLeafTaskIfRelaunch(it.token, true))
-        }
-        setDividerVisible(host.rootInfo()?.isVisible == true, null)
-        recentsTransitions.clear()
-    }
-
-    private fun consumeRestoreRemote(transition: IBinder, aborted: Boolean) {
-        val remote = restoreRemotes.remove(transition) ?: return
-        notifyRemote(remote, transition, aborted)
-    }
-
-    fun hasRestoreRemote(transition: IBinder): Boolean = restoreRemotes.containsKey(transition)
 }

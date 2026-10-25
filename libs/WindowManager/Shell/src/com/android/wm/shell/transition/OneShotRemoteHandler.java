@@ -42,8 +42,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * specific remote animation to a specific transition.
  */
 public class OneShotRemoteHandler implements Transitions.TransitionHandler {
-            private final AtomicBoolean mFinished = new AtomicBoolean();
-
     private final ShellExecutor mMainExecutor;
     private final TransitionLeashManager mTransitionLeashManager;
 
@@ -53,6 +51,9 @@ public class OneShotRemoteHandler implements Transitions.TransitionHandler {
 
     /** The remote to delegate animation to */
     private RemoteTransition mRemote;
+
+    @Nullable
+    private IRemoteTransitionFinishedCallback mFinishCallback;
 
     public OneShotRemoteHandler(
             @NonNull ShellExecutor mainExecutor,
@@ -76,9 +77,16 @@ public class OneShotRemoteHandler implements Transitions.TransitionHandler {
         ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS, "Using registered One-shot remote"
                 + " transition %s for (#%d).", mRemote, info.getDebugId());
 
-        final IBinder.DeathRecipient remoteDied = createDeathRecipient(finishCallback);
+        final AtomicBoolean finished = new AtomicBoolean();
+        Transitions.TransitionFinishCallback wrappedCallback = wct -> {
+            if (!finished.compareAndSet(false, true)) return;
+            mFinishCallback = null;
+            finishCallback.onTransitionFinished(wct);
+        };
+        final IBinder.DeathRecipient remoteDied = createDeathRecipient(wrappedCallback);
         IRemoteTransitionFinishedCallback cb =
-                createFinishedCallback(info, finishTransaction, finishCallback, remoteDied);
+                createFinishedCallback(info, finishTransaction, wrappedCallback, remoteDied);
+        mFinishCallback = cb;
         Transitions.setRunningRemoteTransitionDelegate(transition);
         try {
             if (mRemote.asBinder() != null) {
@@ -99,10 +107,21 @@ public class OneShotRemoteHandler implements Transitions.TransitionHandler {
                 mRemote.asBinder().unlinkToDeath(remoteDied, 0 /* flags */);
             }
             finishTransaction.merge(startTransaction);
-            finishCallback.onTransitionFinished(null /* wct */);
+            wrappedCallback.onTransitionFinished(null /* wct */);
             mRemote = null;
         }
         return true;
+    }
+
+    /** Finishes a playing animation through its remote completion callback. */
+    public void finishAnimation() {
+        final IRemoteTransitionFinishedCallback callback = mFinishCallback;
+        if (callback == null) return;
+        try {
+            callback.onTransitionFinished(null /* wct */, null /* sct */);
+        } catch (RemoteException e) {
+            Log.e(Transitions.TAG, "Error finishing one-shot remote transition.", e);
+        }
     }
 
     @Override
@@ -249,6 +268,8 @@ public class OneShotRemoteHandler implements Transitions.TransitionHandler {
             @NonNull Transitions.TransitionFinishCallback finishCallback,
             @NonNull IBinder.DeathRecipient remoteDied) {
         return new IRemoteTransitionFinishedCallback.Stub() {
+            private final AtomicBoolean mFinished = new AtomicBoolean();
+
             @Override
             public void onTransitionFinished(WindowContainerTransaction wct,
                     SurfaceControl.Transaction sct) {
