@@ -174,6 +174,37 @@ public class SplitScreenControllerTests extends ShellTestCase {
     }
 
     @Test
+    public void swapSplitTask_checksMembershipWhenExecutorRuns() {
+        final int taskId = 42;
+        doReturn(true).when(mSplitScreenController).isTaskInSplitScreenForeground(taskId);
+        when(mStageCoordinator.canMutateSplit()).thenReturn(true);
+
+        mSplitScreenController.swapSplitTask(taskId);
+        ArgumentCaptor<Runnable> action = ArgumentCaptor.forClass(Runnable.class);
+        verify(mMainExecutor).execute(action.capture());
+        verify(mStageCoordinator, never()).switchSplitPosition(anyString());
+
+        doReturn(false).when(mSplitScreenController).isTaskInSplitScreenForeground(taskId);
+        action.getValue().run();
+        verify(mStageCoordinator, never()).switchSplitPosition(anyString());
+    }
+
+    @Test
+    public void swapSplitTask_ignoresFurtherTapsDuringMutation() {
+        final int taskId = 42;
+        doReturn(true).when(mSplitScreenController).isTaskInSplitScreenForeground(taskId);
+        when(mStageCoordinator.canMutateSplit()).thenReturn(true, false);
+        when(mStageCoordinator.isSplitScreenVisible()).thenReturn(true);
+        mSplitScreenController.swapSplitTask(taskId);
+        mSplitScreenController.swapSplitTask(taskId);
+        ArgumentCaptor<Runnable> actions = ArgumentCaptor.forClass(Runnable.class);
+        verify(mMainExecutor, times(2)).execute(actions.capture());
+
+        actions.getAllValues().forEach(Runnable::run);
+        verify(mStageCoordinator, times(1)).switchSplitPosition("handle menu");
+    }
+
+    @Test
     public void floatingSplitEntry_requiresAnActualFreeCompatibleSlot() {
         ActivityManager.RunningTaskInfo task = new ActivityManager.RunningTaskInfo();
         task.displayId = DEFAULT_DISPLAY;

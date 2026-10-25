@@ -55,6 +55,7 @@ class HandleMenuAnimator(
     private val animators: MutableList<Animator> = mutableListOf()
     private var runningAnimation: AnimatorSet? = null
     private val windowingPill: ViewGroup = handleMenu.requireViewById(R.id.windowing_pill)
+    private val splitActionsPill: ViewGroup = handleMenu.requireViewById(R.id.split_actions_pill)
     private val moreActionsPill: ViewGroup = handleMenu.requireViewById(R.id.more_actions_pill)
     private val openInAppOrBrowserPill: ViewGroup =
         handleMenu.requireViewById(R.id.open_in_app_or_browser_pill)
@@ -344,6 +345,4 @@ class HandleMenuAnimator(
                 start()
             }
     }
-
-    private val splitActionsPill: ViewGroup = handleMenu.requireViewById(R.id.split_actions_pill)
 }

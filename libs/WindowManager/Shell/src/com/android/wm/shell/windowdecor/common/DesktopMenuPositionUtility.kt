@@ -46,6 +46,11 @@ fun calculateMenuPosition(
     if (taskInfo.isFullscreen) {
         return Point(nonFreeformPosition.x, nonFreeformPosition.y + marginTop)
     }
+    val leafBounds = Rect()
+    if (splitScreenController.getMultiSplitTaskBounds(taskInfo.taskId, leafBounds)) {
+        return Point(leafBounds.left + nonFreeformPosition.x,
+            leafBounds.top + nonFreeformPosition.y + marginTop)
+    }
     // Only the splitscreen case left.
     val splitPosition = splitScreenController.getSplitPosition(taskInfo.taskId)
     val leftOrTopStageBounds = Rect()
