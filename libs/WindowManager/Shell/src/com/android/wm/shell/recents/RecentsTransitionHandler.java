@@ -180,6 +180,63 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
     }
 
     /**
+     * Applies Shell visibility policy to floating surfaces while a transient Recents transition
+     * owns them. The caller also updates WM's hidden state with its visibility WCT.
+     */
+    public void setFloatingTasksHidden(int displayId, boolean hidden) {
+        if (mFloatingTasksHidden.get(displayId) == hidden) return;
+        mFloatingTasksHidden.put(displayId, hidden);
+        final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
+                new ArrayMap<>();
+        boolean hasController = false;
+        for (RecentsController controller : mControllers) {
+            if (controller.mDisplayId == displayId) {
+                hasController = true;
+                tasks.putAll(controller.getFloatingTaskSurfaces());
+            }
+        }
+        if (!hasController && !hidden) {
+            // Overview may report hidden after cleanup released the Recents controller.
+            for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
+                    : mShellTaskOrganizer.getInitialTasks()) {
+                if (task.first.displayId == displayId && task.first.isFloatingWindow
+                        && task.first.configuration.windowConfiguration.isAlwaysOnTop()) {
+                    tasks.put(task.first.taskId, task);
+                }
+            }
+        }
+        if (tasks.isEmpty()) return;
+        try (SurfaceControl.Transaction t = newSurfaceTransaction()) {
+            for (int i = 0; i < tasks.size(); ++i) {
+                final SurfaceControl surface = tasks.valueAt(i).second;
+                if (!surface.isValid()) continue;
+                if (hidden) t.hide(surface);
+                else t.show(surface);
+            }
+            // A merged transition may also have hidden a temporary handler leash.
+            for (RecentsController controller : mControllers) {
+                if (controller.mDisplayId != displayId) continue;
+                for (int i = 0; i < controller.mFloatingTasks.size(); ++i) {
+                    final TransitionInfo.Change change = controller.mFloatingTasks.valueAt(i);
+                    final Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task =
+                            tasks.get(change.getTaskInfo().taskId);
+                    final SurfaceControl leash = change.getLeash();
+                    if (task == null || !leash.isValid() || leash == task.second
+                            || leash.isSameSurface(task.second)) continue;
+                    if (hidden) t.hide(leash);
+                    else t.show(leash);
+                }
+            }
+            t.apply();
+        }
+    }
+
+    private SurfaceControl.Transaction newSurfaceTransaction() {
+        return mFinishTransactionSupplier != null
+                ? mFinishTransactionSupplier.get() : new SurfaceControl.Transaction();
+    }
+
+    /**
      * Sets a background color on the transition root layered behind the outgoing task. {@code null}
      * may be used to clear any previously set colors to avoid showing a background at all. The
      * color is always shown at full opacity.
@@ -657,48 +714,6 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          * to cancel a transition after it has started, instead callers should call one of
          * the cancel() methods to ensure that Launcher is notified.
          */
-
-        private void rememberFloatingTask(TransitionInfo.Change change) {
-            final TransitionInfo.Change previous = mFloatingTasks.get(change.getContainer());
-            if (previous != null && previous.getMode() == android.view.WindowManager.TRANSIT_CLOSE
-                    && !TransitionUtil.isOpeningType(change.getMode())) return;
-            mFloatingTasks.put(change.getContainer(), change);
-        }
-
-
-        private boolean isFloatingAboveHome(ActivityManager.RunningTaskInfo task) {
-            final TransitionInfo.Change change = mFloatingTasks.get(task.token);
-            return task.isFloatingWindow && task.displayId == mDisplayId
-                    && task.configuration.windowConfiguration.isAlwaysOnTop()
-                    && (change == null
-                            || change.getMode() != android.view.WindowManager.TRANSIT_CLOSE);
-        }
-
-
-        private ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>>
-                getFloatingTaskSurfaces() {
-            final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
-                    new ArrayMap<>();
-            // Prefer organizer surfaces over temporary one-off handler leashes.
-            for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
-                    : mShellTaskOrganizer.getInitialTasks()) {
-                if (isFloatingAboveHome(task.first)) tasks.put(task.first.taskId, task);
-            }
-            for (int i = 0; i < mFloatingTasks.size(); ++i) {
-                final TransitionInfo.Change change = mFloatingTasks.valueAt(i);
-                final ActivityManager.RunningTaskInfo current =
-                        mShellTaskOrganizer.getRunningTaskInfo(change.getTaskInfo().taskId);
-                if (current == null || !isFloatingAboveHome(current)) continue;
-                final Pair<ActivityManager.RunningTaskInfo, SurfaceControl> organized =
-                        tasks.get(current.taskId);
-                if (organized != null && organized.second.isValid()) continue;
-                final TaskState taskState = mTaskStates.get(change.getContainer());
-                tasks.put(current.taskId, Pair.create(current, taskState != null
-                        ? taskState.mTaskSurface : change.getLeash()));
-            }
-            return tasks;
-        }
-
         void cleanUp() {
             ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
                     "[%d] RecentsController.cleanup", mInstanceId);
@@ -2029,6 +2044,45 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             }
         }
 
+        private void rememberFloatingTask(TransitionInfo.Change change) {
+            final TransitionInfo.Change previous = mFloatingTasks.get(change.getContainer());
+            if (previous != null && previous.getMode() == android.view.WindowManager.TRANSIT_CLOSE
+                    && !TransitionUtil.isOpeningType(change.getMode())) return;
+            mFloatingTasks.put(change.getContainer(), change);
+        }
+
+        private boolean isFloatingAboveHome(ActivityManager.RunningTaskInfo task) {
+            final TransitionInfo.Change change = mFloatingTasks.get(task.token);
+            return task.isFloatingWindow && task.displayId == mDisplayId
+                    && task.configuration.windowConfiguration.isAlwaysOnTop()
+                    && (change == null
+                            || change.getMode() != android.view.WindowManager.TRANSIT_CLOSE);
+        }
+
+        private ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>>
+                getFloatingTaskSurfaces() {
+            final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
+                    new ArrayMap<>();
+            // Prefer organizer surfaces over temporary one-off handler leashes.
+            for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
+                    : mShellTaskOrganizer.getInitialTasks()) {
+                if (isFloatingAboveHome(task.first)) tasks.put(task.first.taskId, task);
+            }
+            for (int i = 0; i < mFloatingTasks.size(); ++i) {
+                final TransitionInfo.Change change = mFloatingTasks.valueAt(i);
+                final ActivityManager.RunningTaskInfo current =
+                        mShellTaskOrganizer.getRunningTaskInfo(change.getTaskInfo().taskId);
+                if (current == null || !isFloatingAboveHome(current)) continue;
+                final Pair<ActivityManager.RunningTaskInfo, SurfaceControl> organized =
+                        tasks.get(current.taskId);
+                if (organized != null && organized.second.isValid()) continue;
+                final TaskState taskState = mTaskStates.get(change.getContainer());
+                tasks.put(current.taskId, Pair.create(current, taskState != null
+                        ? taskState.mTaskSurface : change.getLeash()));
+            }
+            return tasks;
+        }
+
         /**
          * Runs the actual logic to finish the recents transition.
          */
@@ -2292,62 +2346,5 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          */
         void handleFinishRecents(boolean returnToApp, @NonNull WindowContainerTransaction finishWct,
                 @NonNull SurfaceControl.Transaction finishT);
-    }
-
-    /**
-     * Applies Shell visibility policy to floating surfaces while a transient Recents transition
-     * owns them. The caller also updates WM's hidden state with its visibility WCT.
-     */
-    public void setFloatingTasksHidden(int displayId, boolean hidden) {
-        if (mFloatingTasksHidden.get(displayId) == hidden) return;
-        mFloatingTasksHidden.put(displayId, hidden);
-        final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
-                new ArrayMap<>();
-        boolean hasController = false;
-        for (RecentsController controller : mControllers) {
-            if (controller.mDisplayId == displayId) {
-                hasController = true;
-                tasks.putAll(controller.getFloatingTaskSurfaces());
-            }
-        }
-        if (!hasController && !hidden) {
-            // Overview may report hidden after cleanup released the Recents controller.
-            for (Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task
-                    : mShellTaskOrganizer.getInitialTasks()) {
-                if (task.first.displayId == displayId && task.first.isFloatingWindow
-                        && task.first.configuration.windowConfiguration.isAlwaysOnTop()) {
-                    tasks.put(task.first.taskId, task);
-                }
-            }
-        }
-        if (tasks.isEmpty()) return;
-        try (SurfaceControl.Transaction t = newSurfaceTransaction()) {
-            for (int i = 0; i < tasks.size(); ++i) {
-                final SurfaceControl surface = tasks.valueAt(i).second;
-                if (!surface.isValid()) continue;
-                if (hidden) t.hide(surface);
-                else t.show(surface);
-            }
-            // A merged transition may also have hidden a temporary handler leash.
-            for (RecentsController controller : mControllers) {
-                if (controller.mDisplayId != displayId) continue;
-                for (int i = 0; i < controller.mFloatingTasks.size(); ++i) {
-                    final TransitionInfo.Change change = controller.mFloatingTasks.valueAt(i);
-                    final Pair<ActivityManager.RunningTaskInfo, SurfaceControl> task =
-                            tasks.get(change.getTaskInfo().taskId);
-                    final SurfaceControl leash = change.getLeash();
-                    if (task == null || !leash.isValid() || leash == task.second
-                            || leash.isSameSurface(task.second)) continue;
-                    if (hidden) t.hide(leash);
-                    else t.show(leash);
-                }
-            }
-            t.apply();
-        }
-    }
-
-    private SurfaceControl.Transaction newSurfaceTransaction() {
-        return mFinishTransactionSupplier != null
-                ? mFinishTransactionSupplier.get() : new SurfaceControl.Transaction();
     }
 }
