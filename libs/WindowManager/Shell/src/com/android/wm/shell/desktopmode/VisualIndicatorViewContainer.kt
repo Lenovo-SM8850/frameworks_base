@@ -68,6 +68,7 @@ constructor(
         object : SurfaceControlViewHostFactory {},
     private val bubbleBoundsProvider: BubbleDropTargetBoundsProvider?,
     private val snapEventHandler: SnapEventHandler,
+    private val inputFlags: Int = 0,
 ) {
     @VisibleForTesting var indicatorView: View? = null
     // Optional extra indicator showing the outline of the bubble bar
@@ -118,7 +119,7 @@ constructor(
                     screenWidth,
                     screenHeight,
                     WindowManager.LayoutParams.TYPE_APPLICATION,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or inputFlags,
                     PixelFormat.TRANSPARENT,
                 )
             lp.title = "Desktop Mode Visual Indicator"
@@ -675,4 +676,26 @@ constructor(
     companion object {
         private const val TAG = "VisualIndicatorViewContainer"
     }
+
+    /** Shows an exact mini destination using the existing indicator's stroke without its fill. */
+    fun updateMiniPreview(bounds: Rect?, radius: Float) {
+        if (isReleased) return
+        miniPreview = true
+        val target = bounds?.let(::Rect)
+        desktopExecutor.execute {
+            if (isReleased) return@execute
+            val view = indicatorView ?: return@execute
+            if (target != null || miniOutline != null) {
+                val outline = miniOutline ?: WindowPreviewOutline(view).also { miniOutline = it }
+                outline.update(target, radius)
+            } else {
+                view.animate().cancel()
+                view.animate().alpha(0f).setDuration(120).start()
+            }
+        }
+    }
+
+    private var miniPreview = false
+
+    private var miniOutline: WindowPreviewOutline? = null
 }
