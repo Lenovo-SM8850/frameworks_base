@@ -160,9 +160,12 @@ interface Vote {
     // Force display to requested refresh rate in MEMC mode
     int PRIORITY_MEMC = 25;
 
+    // Restrict the physical timing and render ceiling while ambient display is visible.
+    int PRIORITY_DOZE = 26;
+
     // The Under-Display Fingerprint Sensor (UDFPS) needs the refresh rate to be locked in order
     // to function, so this needs to be the highest priority of all votes.
-    int PRIORITY_UDFPS = 26;
+    int PRIORITY_UDFPS = 27;
 
     @IntDef(prefix = { "PRIORITY_" }, value = {
             PRIORITY_DEFAULT_RENDER_FRAME_RATE,
@@ -191,6 +194,7 @@ interface Vote {
             PRIORITY_PROXIMITY,
             PRIORITY_USER_PREFERRED,
             PRIORITY_MEMC,
+            PRIORITY_DOZE,
             PRIORITY_UDFPS
     })
     @Retention(RetentionPolicy.SOURCE)
@@ -340,6 +344,8 @@ interface Vote {
                 return "PRIORITY_USER_PREFERRED";
             case PRIORITY_MEMC:
                 return "PRIORITY_MEMC";
+            case PRIORITY_DOZE:
+                return "PRIORITY_DOZE";
             case PRIORITY_UDFPS:
                 return "PRIORITY_UDFPS";
             case PRIORITY_USER_SETTING_MIN_RENDER_FRAME_RATE:
