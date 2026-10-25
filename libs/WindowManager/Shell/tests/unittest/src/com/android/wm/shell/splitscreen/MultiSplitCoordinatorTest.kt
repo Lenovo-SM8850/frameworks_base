@@ -717,6 +717,35 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         assertThat(ids.allValues).containsExactly(group.firstRepresentative, group.secondRepresentative)
     }
 
+    @Test fun returnToAppsRetainsAllRootsInFinishTransaction() {
+        add()
+        add()
+        val wct = WindowContainerTransaction()
+        coordinator.finishRecents(true, wct, mock<SurfaceControl.Transaction>())
+        assertThat(coordinator.activeStages).hasSize(4)
+        assertThat(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ADJACENT_ROOTS &&
+                it.containers.size == 4
+        }).isTrue()
+        assertThat(coordinator.isReorderingToTop(wct)).isTrue()
+    }
+
+    @Test fun pairRestoreDuringOverviewRunsButAnOverlappingMutationIsRejected() {
+        add()
+        add()
+        val group = groups.get(10)!!
+        val recents = Binder()
+        val info = android.window.TransitionInfo(0, 0)
+        coordinator.onTransitionReady(recents, info, mock(), mock())
+        coordinator.startRecents(info)
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, null)).isTrue()
+        val rejected = mock<IRemoteTransition>()
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, RemoteTransition(rejected))).isTrue()
+        verify(rejected).onTransitionConsumed(any(), eq(true))
+    }
+
     @Test fun overviewSingleAndPairDismissalsCollapseOnlyRemovedMembers() {
         add()
         add()
@@ -752,6 +781,35 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
             it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_LAUNCH_TASK
         }).isTrue()
         verify(transitions).startTransition(any(), any(), any())
+    }
+
+    @Test fun restoreAnimationStartsRemoteAndFinishesExactlyOnce() {
+        add()
+        val group = groups.get(10)!!
+        val remote = mock<IRemoteTransition>()
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, RemoteTransition(remote))).isTrue()
+        val callback = mock<Transitions.TransitionFinishCallback>()
+        assertThat(coordinator.startAnimation(token, android.window.TransitionInfo(0, 0),
+            mock(), mock(), callback)).isTrue()
+        val remoteFinish = argumentCaptor<IRemoteTransitionFinishedCallback>()
+        verify(remote).startAnimation(eq(token), any(), any(), remoteFinish.capture())
+        verify(callback, never()).onTransitionFinished(anyOrNull())
+        remoteFinish.firstValue.onTransitionFinished(null, null)
+        val callbacks = argumentCaptor<Runnable>()
+        verify(executor, atLeastOnce()).execute(callbacks.capture())
+        callbacks.allValues.last().run()
+        coordinator.onTransitionConsumed(token, false, null)
+        coordinator.onTransitionFinished(token, false)
+        verify(remote, never()).onTransitionConsumed(any(), any())
+        verify(callback).onTransitionFinished(null)
+    }
+
+    @Test fun missingSavedStageRootInvalidatesTheRecentsProjection() {
+        add()
+        spare[0].mHasRootTask = false
+        assertThat(groups.get(10)).isNull()
+        assertThat(groups.peek(20)).isNull()
     }
 
     @Test fun addBelowKeepsCurrentTaskAboveAndInsertsInOneTransaction() {
@@ -1490,6 +1548,120 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         }
     }
 
+    private fun assertRecentsDividerTargets(additionalApps: Int) {
+        repeat(additionalApps) { add() }
+        withDividerSurfaces { leashes, _ ->
+            val info = android.window.TransitionInfo(TRANSIT_TO_FRONT, 0)
+            try {
+                coordinator.startRecents(info)
+                assertThat(info.changes).hasSize(additionalApps + 1)
+                info.changes.forEachIndexed { index, change ->
+                    assertThat(change.leash.isSameSurface(leashes[index])).isTrue()
+                    assertThat(change.parent).isEqualTo(host.rootInfo()!!.token)
+                    assertThat(change.mode).isEqualTo(android.view.WindowManager.TRANSIT_TO_BACK)
+                    assertThat(change.flags).isEqualTo(
+                        com.android.wm.shell.shared.split.SplitScreenConstants.FLAG_IS_DIVIDER_BAR)
+                    val expected = Rect(4 + index * 100, 5 + index * 200,
+                        16 + index * 100, 96 + index * 200)
+                    assertThat(change.startAbsBounds).isEqualTo(expected)
+                    assertThat(change.endAbsBounds).isEqualTo(expected)
+                }
+                val transaction = mock<SurfaceControl.Transaction>(
+                    defaultAnswer = org.mockito.Mockito.RETURNS_SELF)
+                coordinator.setDividerVisible(false, transaction)
+                coordinator.applySurfaceChanges(transaction)
+                leashes.forEach {
+                    verify(transaction, never()).hide(it)
+                    verify(transaction, never()).show(it)
+                    verify(transaction, never()).setAlpha(eq(it), any())
+                }
+            } finally { info.changes.forEach { it.leash.release() } }
+        }
+    }
+
+    @Test fun threeAppRecentsHandsBothDividersToTheRemoteAnimation() {
+        assertRecentsDividerTargets(1)
+    }
+
+    @Test fun fourAppRecentsHandsEveryDividerToTheRemoteAnimation() {
+        assertRecentsDividerTargets(2)
+    }
+
+    @Test fun homeFinishPreservesTheGroupAndArmsThePairRelaunchPolicy() {
+        add()
+        add()
+        val group = groups.get(10)!!
+        val home = WindowContainerTransaction()
+        coordinator.finishRecents(false, home, mock())
+        assertThat(home.hierarchyOps.any {
+            it.container == host.rootInfo()!!.token.asBinder() &&
+                it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_REPARENT_LEAF_TASK_IF_RELAUNCH &&
+                it.isReparentLeafTaskIfRelaunch
+        }).isTrue()
+        assertThat(groups.get(10)).isEqualTo(group)
+        assertThat(coordinator.restorePair(group.firstRepresentative, group.secondRepresentative,
+            null, null, null)).isTrue()
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(transitions, times(3)).startTransition(any(), wct.capture(), any())
+        assertThat(wct.lastValue.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_REPARENT_LEAF_TASK_IF_RELAUNCH &&
+                !it.isReparentLeafTaskIfRelaunch
+        }).isTrue()
+    }
+
+    @Test fun plainMemberLaunchFromHomeOpensAloneAndClearsTheGroupLikeThePair() {
+        add()
+        add()
+        coordinator.activeStages.forEach { stage ->
+            org.mockito.kotlin.doAnswer {
+                val consumer = it.arguments[0] as java.util.function.Consumer<RunningTaskInfo>
+                consumer.accept(organizer.getRunningTaskInfo(stage.topChildTaskId)!!)
+                null
+            }.whenever(stage).doForAllChildTaskInfos(any())
+        }
+        coordinator.finishRecents(false, WindowContainerTransaction(), mock())
+        val task = organizer.getRunningTaskInfo(30)!!
+        task.configuration.windowConfiguration.windowingMode =
+            android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
+        task.parentTaskId = -1
+        val request = TransitionRequestInfo(TRANSIT_TO_FRONT, task, null)
+        val transition = Binder()
+        assertThat(coordinator.restoreRequest(transition, request)).isNull()
+        val wct = coordinator.handleRequest(transition, request)!!
+        assertThat(coordinator.isActive).isFalse()
+        assertThat(groups.peek(30)).isNull()
+        assertThat(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REPARENT &&
+                it.container == task.token.asBinder() && it.toTop && it.newParent == null
+        }).isTrue()
+    }
+
+    @Test fun returningFromRecentsReparentsAllDividerSurfacesAndDisarmsRelaunch() {
+        add()
+        add()
+        withDividerSurfaces { leashes, root ->
+            val info = android.window.TransitionInfo(TRANSIT_TO_FRONT, 0)
+            try {
+                coordinator.startRecents(info)
+                coordinator.setDividerVisible(false, mock())
+                val transaction = mock<SurfaceControl.Transaction>(
+                    defaultAnswer = org.mockito.Mockito.RETURNS_SELF)
+                val wct = WindowContainerTransaction()
+                coordinator.finishRecents(true, wct, transaction)
+                leashes.forEach {
+                    verify(transaction).reparent(it, root)
+                    verify(transaction, org.mockito.Mockito.atLeastOnce()).show(it)
+                    verify(transaction, org.mockito.Mockito.atLeastOnce()).setAlpha(it, 1f)
+                }
+                createdDividers.forEach { verify(it).setRecentsAnimating(false) }
+                assertThat(wct.hierarchyOps.any {
+                    it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_REPARENT_LEAF_TASK_IF_RELAUNCH &&
+                        !it.isReparentLeafTaskIfRelaunch
+                }).isTrue()
+            } finally { info.changes.forEach { it.leash.release() } }
+        }
+    }
+
     @Test fun homeTransitionUsesThePairRootPolicyWithoutHidingDividersEarly() {
         add()
         withDividerSurfaces { leashes, _ ->
@@ -1516,5 +1688,31 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
             verify(organizer).applyTransaction(wct.capture())
             assertThat(wct.firstValue.hierarchyOps.single().isReparentLeafTaskIfRelaunch).isTrue()
         }
+    }
+
+    @Test fun canceledRecentsReleasesSurfaceOwnershipAndUsesThePairRelaunchPolicy() {
+        add()
+        val info = android.window.TransitionInfo(TRANSIT_TO_FRONT, 0)
+        coordinator.startRecents(info)
+        org.mockito.Mockito.clearInvocations(organizer)
+        coordinator.cancelRecents()
+        createdDividers.forEach { verify(it).setRecentsAnimating(false) }
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(organizer).applyTransaction(wct.capture())
+        assertThat(wct.firstValue.hierarchyOps.single().isReparentLeafTaskIfRelaunch).isTrue()
+    }
+
+    @Test fun backgroundRootChangeDoesNotDisarmTheHomeRelaunchPolicy() {
+        add()
+        coordinator.finishRecents(false, WindowContainerTransaction(), mock())
+        val info = android.window.TransitionInfo(android.view.WindowManager.TRANSIT_CHANGE, 0)
+        val root = android.window.TransitionInfo.Change(host.rootInfo()!!.token, mock())
+        root.setTaskInfo(host.rootInfo())
+        root.setMode(android.view.WindowManager.TRANSIT_CHANGE)
+        info.addChange(root)
+        org.mockito.Mockito.clearInvocations(organizer)
+        coordinator.onTransitionReady(Binder(), info, mock(), mock())
+        verify(organizer, never()).applyTransaction(any())
+        assertThat(coordinator.isVisible).isFalse()
     }
 }

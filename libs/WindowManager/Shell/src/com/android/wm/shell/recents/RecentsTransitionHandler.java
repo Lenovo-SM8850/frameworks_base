@@ -441,7 +441,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             return;
         }
 
-        controller.merge(info, startT, finishT, finishCallback);
+        controller.merge(transition, info, startT, finishT, finishCallback);
     }
 
     @Override
@@ -906,6 +906,9 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 return false;
             }
 
+            for (RecentsMixedHandler mixer : mMixers) {
+                mixer.onRecentsAnimationAccepted(mTransition, info, t);
+            }
             Transitions.TransitionFinishCallback wrappedCallback = finishCB;
             if (addOneOffHandlerLeashes()) {
                 // First create states for each task in the transition capturing the original info.
@@ -1181,8 +1184,14 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          * {@link RecentsController#consumeMerge} or {@link RecentsController#refuseMerge},
          * respectively.
          */
-        @SuppressLint("NewApi")
         void merge(TransitionInfo info, SurfaceControl.Transaction startT,
+                SurfaceControl.Transaction finishT,
+                Transitions.TransitionFinishCallback finishCallback) {
+            merge(null, info, startT, finishT, finishCallback);
+        }
+
+        @SuppressLint("NewApi")
+        void merge(IBinder transition, TransitionInfo info, SurfaceControl.Transaction startT,
                 SurfaceControl.Transaction finishT,
                 Transitions.TransitionFinishCallback finishCallback) {
             if (mFinishCB == null) {
@@ -1273,6 +1282,13 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             }
 
             mMergingInfo = info;
+            for (RecentsMixedHandler mixer : mMixers) {
+                if (transition != null && mixer.shouldAnimateSeparatelyFromRecents(transition)) {
+                    refuseMerge(startT, () -> cancel("split restore has a launcher remote"));
+                    return;
+                }
+            }
+
             ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
                     "[%d] RecentsController.merge", mInstanceId);
             // Keep all tasks in one list because order matters.
@@ -2399,6 +2415,15 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          * transition and is required to call the associated {@link #startAnimation},
          * {@link #mergeAnimation}, and {@link #onTransitionConsumed} methods.
          */
+        /** Prepares animation targets after all checks that can reject recents have passed. */
+        default void onRecentsAnimationAccepted(IBinder transition, TransitionInfo info,
+                SurfaceControl.Transaction start) {}
+
+        /** Whether an incoming transition must run its own animation after the handoff. */
+        default boolean shouldAnimateSeparatelyFromRecents(IBinder transition) {
+            return false;
+        }
+
         @Nullable
         Consumer<IBinder> handleRecentsRequest(int displayId);
 

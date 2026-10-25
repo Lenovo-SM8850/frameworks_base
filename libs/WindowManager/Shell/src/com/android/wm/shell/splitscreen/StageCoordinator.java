@@ -5130,6 +5130,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Call this when starting the open-recents animation while split-screen is active. */
     public void onRecentsInSplitAnimationStart(TransitionInfo info) {
+        if (isMultiSplitActive()) { mMultiSplit.startRecents(info); return; }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRecentsInSplitAnimationStart: transition=%d",
                 info.getDebugId());
         if (isSplitScreenVisible()) {
@@ -5163,6 +5164,12 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         mSplitLayout.removeTouchZones();
     }
 
+    @Override
+    public void onRecentsInSplitAnimationAccepted(TransitionInfo info,
+            SurfaceControl.Transaction start) {
+        if (isMultiSplitActive()) mMultiSplit.projectAnimationBranches(info, start);
+    }
+
     /** Call this when the recents animation canceled during split-screen. */
     public void onRecentsInSplitAnimationCanceled() {
         onRecentsInSplitAnimationCanceled(null /* info */);
@@ -5170,6 +5177,10 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Call this when the recents animation canceled during split-screen. */
     public void onRecentsInSplitAnimationCanceled(@Nullable TransitionInfo info) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.cancelRecents();
+            return;
+        }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRecentsInSplitAnimationCanceled");
         if (isHomeTransitionEndingOnDisplay(info, mDisplayId)) {
             mSplitLayout.setRecentsAnimating(false /* animating */);
@@ -5219,6 +5230,10 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     public void onRecentsInSplitAnimationFinishing(boolean returnToApp,
             @NonNull WindowContainerTransaction finishWct,
             @NonNull SurfaceControl.Transaction finishT, @Nullable TransitionInfo info) {
+        if (isMultiSplitActive()) {
+            mMultiSplit.finishRecents(returnToApp, finishWct, finishT);
+            return;
+        }
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRecentsInSplitAnimationFinish: returnToApp=%b",
                 returnToApp);
         if (isHomeTransitionEndingOnDisplay(info, mDisplayId)) {
@@ -5276,6 +5291,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
     /** Call this when the recents animation finishes by doing pair-to-pair switch. */
     public void onRecentsPairToPairAnimationFinish(WindowContainerTransaction finishWct) {
+        if (isMultiSplitActive()) return;
         ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "onRecentsPairToPairAnimationFinish");
         // Pair-to-pair switch happened so here should evict the live tile from its stage.
         // Otherwise, the task will remain in stage, and occluding the new task when next time
