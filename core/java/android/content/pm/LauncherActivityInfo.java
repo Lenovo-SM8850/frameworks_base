@@ -127,21 +127,18 @@ public class LauncherActivityInfo {
      * @return The drawable associated with the activity.
      */
     public Drawable getIcon(int density) {
+        com.android.internal.appearance.AppIconResolver.beginRawLoad();
+        Drawable raw;
         try {
-            ComponentName cn = getComponentName();
-            final Resources resources = mPm.getResourcesForApplication(
-                    getActivityInfo().applicationInfo);
-            if (cn != null && resources != null) {
-                Drawable themedIcon = resources.getIconPackOverride(
-                        cn.getPackageName(), cn.getClassName(), density);
-                if (themedIcon != null) {
-                    return themedIcon;
-                }
-            }
-        } catch (Exception e) {
-            android.util.Log.d("LauncherActivityInfo", "Icon pack override failed", e);
+            raw = getIconRaw(density);
+        } finally {
+            com.android.internal.appearance.AppIconResolver.endRawLoad();
         }
+        return com.android.internal.appearance.AppIconResolver.resolveActivity(
+                getActivityInfo(), getUser().getIdentifier(), density, raw);
+    }
 
+    private Drawable getIconRaw(int density) {
         // TODO: Go through LauncherAppsService
         final int iconRes = getActivityInfo().getIconResource();
         Drawable icon = null;
@@ -156,7 +153,9 @@ public class LauncherActivityInfo {
         }
         // Get the default density icon
         if (icon == null) {
-            icon = getActivityInfo().loadIcon(mPm);
+            icon = com.android.internal.appearance.AppIconResolver.shouldResolve(
+                    getUser().getIdentifier())
+                    ? getActivityInfo().loadUnbadgedIcon(mPm) : getActivityInfo().loadIcon(mPm);
         }
         return icon;
     }

@@ -210,6 +210,9 @@ public class LauncherAppsService extends SystemService {
      * @hide Only for use within system server
      */
     public abstract static class LauncherAppsServiceInternal {
+        /** Rebuild launchable package icons after the system appearance revision changes. */
+        public abstract void refreshAppIcons(int userId);
+
         /** Same as startShortcut except supports forwarding of caller uid/pid. */
         public abstract boolean startShortcut(int callerUid, int callerPid, String callingPackage,
                 String packageName, String featureId, String shortcutId, Rect sourceBounds,
@@ -365,6 +368,10 @@ public class LauncherAppsService extends SystemService {
                 mListeners.unregister(listener);
                 mListeners.register(listener, new BroadcastCookie(UserHandle.of(getCallingUserId()),
                         callingPackage, injectBinderCallingPid(), injectBinderCallingUid()));
+            }
+            // Registration also repairs persistent launcher caches after a disconnected change.
+            for (int userId : mUserManagerInternal.getProfileIds(getCallingUserId(), true)) {
+                refreshAppIcons(userId);
             }
         }
 
@@ -2715,27 +2722,7 @@ public class LauncherAppsService extends SystemService {
             }
 
             private void onPackageChanged(String packageName) {
-                UserHandle user = new UserHandle(getChangingUserId());
-                final int n = mListeners.beginBroadcast();
-                try {
-                    for (int i = 0; i < n; i++) {
-                        IOnAppsChangedListener listener = mListeners.getBroadcastItem(i);
-                        BroadcastCookie cookie = (BroadcastCookie) mListeners.getBroadcastCookie(i);
-                        if (!isEnabledProfileOf(cookie, user, "onPackageModified")) {
-                            continue;
-                        }
-                        if (!isPackageVisibleToListener(packageName, cookie, user)) {
-                            continue;
-                        }
-                        try {
-                            listener.onPackageChanged(user, packageName);
-                        } catch (RemoteException re) {
-                            Slog.d(TAG, "onPackageChanged: Callback failed ", re);
-                        }
-                    }
-                } finally {
-                    mListeners.finishBroadcast();
-                }
+                dispatchPackageIconChanged(packageName, UserHandle.of(getChangingUserId()));
             }
 
             @Override
@@ -3003,7 +2990,70 @@ public class LauncherAppsService extends SystemService {
             }
         }
 
+        private void dispatchPackageIconChanged(String packageName, UserHandle user) {
+            final int n = mListeners.beginBroadcast();
+            try {
+                for (int i = 0; i < n; i++) {
+                    IOnAppsChangedListener listener = mListeners.getBroadcastItem(i);
+                    BroadcastCookie cookie = (BroadcastCookie) mListeners.getBroadcastCookie(i);
+                    if (!isEnabledProfileOf(cookie, user, "onPackageModified")) {
+                        continue;
+                    }
+                    if (!isPackageVisibleToListener(packageName, cookie, user)) {
+                        continue;
+                    }
+                    try {
+                        listener.onPackageChanged(user, packageName);
+                    } catch (RemoteException re) {
+                        Slog.d(TAG, "onPackageChanged: Callback failed ", re);
+                    }
+                }
+            } finally {
+                mListeners.finishBroadcast();
+            }
+        }
+
+        // Handler-owned, coalesced batches leave room for ordinary package/shortcut callbacks.
+        private final Set<Integer> mPendingIconRefreshUsers = new HashSet<>();
+        private final Set<Integer> mDirtyIconRefreshUsers = new HashSet<>();
+
+        private void refreshAppIcons(int userId) {
+            mCallbackHandler.post(() -> {
+                if (!mPendingIconRefreshUsers.add(userId)) {
+                    mDirtyIconRefreshUsers.add(userId);
+                    return;
+                }
+                Intent intent = new Intent(Intent.ACTION_MAIN)
+                        .addCategory(Intent.CATEGORY_LAUNCHER);
+                List<ResolveInfo> activities = mPackageManagerInternal.queryIntentActivities(
+                        intent, null, PackageManager.MATCH_DIRECT_BOOT_AWARE
+                                | PackageManager.MATCH_DIRECT_BOOT_UNAWARE,
+                        android.os.Process.SYSTEM_UID, userId);
+                Set<String> packages = new java.util.TreeSet<>();
+                for (ResolveInfo info : activities) packages.add(info.activityInfo.packageName);
+                dispatchIconBatch(userId, new ArrayList<>(packages), 0);
+            });
+        }
+
+        private void dispatchIconBatch(int userId, List<String> packages, int start) {
+            int end = Math.min(start + 24, packages.size());
+            for (int i = start; i < end; i++) {
+                dispatchPackageIconChanged(packages.get(i), UserHandle.of(userId));
+            }
+            if (end < packages.size()) {
+                mCallbackHandler.postDelayed(() -> dispatchIconBatch(userId, packages, end), 16);
+            } else {
+                mPendingIconRefreshUsers.remove(userId);
+                if (mDirtyIconRefreshUsers.remove(userId)) refreshAppIcons(userId);
+            }
+        }
+
         final class LocalService extends LauncherAppsServiceInternal {
+            @Override
+            public void refreshAppIcons(int userId) {
+                LauncherAppsImpl.this.refreshAppIcons(userId);
+            }
+
             @Override
             public boolean startShortcut(int callerUid, int callerPid, String callingPackage,
                     String packageName, String featureId, String shortcutId, Rect sourceBounds,

@@ -220,6 +220,29 @@ public class ApplicationsState {
         mThread.start();
         mBackgroundHandler = new BackgroundHandler(mThread.getLooper());
 
+        android.content.res.ThemeEngine engine =
+                android.content.res.ThemeEngine.getInstance(mContext);
+        if (engine != null) {
+            engine.addThemeChangeListener(category -> {
+                if (category != null
+                        && !android.content.res.ThemeEngine.CATEGORY_ICON_PACK.equals(category)) {
+                    return;
+                }
+                mBackgroundHandler.post(() -> {
+                    AppIconCacheManager.release();
+                    synchronized (mEntriesMap) {
+                        for (AppEntry entry : mAppEntries) {
+                            synchronized (entry) {
+                                entry.icon = null;
+                            }
+                        }
+                    }
+                    mBackgroundHandler.sendEmptyMessage(BackgroundHandler.MSG_LOAD_ICONS);
+                    mMainHandler.sendEmptyMessage(MainHandler.MSG_PACKAGE_ICON_CHANGED);
+                });
+            });
+        }
+
         // Only the owner can see all apps.
         mAdminRetrieveFlags = PackageManager.MATCH_ANY_USER |
                 PackageManager.MATCH_DISABLED_COMPONENTS |

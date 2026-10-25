@@ -42,6 +42,17 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Binder;
+import android.os.Bundle;
+import android.os.UserManager;
+import android.content.pm.ResolveInfo;
+import android.content.res.XmlResourceParser;
+import android.util.Xml;
+import com.android.server.LocalServices;
+import com.android.server.pm.LauncherAppsService;
+import java.io.InputStream;
+import java.io.FilterInputStream;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -108,13 +119,100 @@ public class ThemeEngineManagerService extends SystemService {
     private final Map<String, Map<ComponentName, String>> mPerAppIconPackMaps =
             new ConcurrentHashMap<>();
 
-    private volatile List<String> mInstalledIconPacksCache = null;
+    private final Map<Integer, List<String>> mInstalledIconPacksCache = new ConcurrentHashMap<>();
 
     private final LruCache<String, Bitmap> mBitmapCache;
     private int mLastUiMode = Configuration.UI_MODE_NIGHT_UNDEFINED;
     private int mCachedTextColorPrimary = 0;
     private boolean mTextColorPrimaryCached = false;
     private ContentObserver mSettingsObserver;
+
+    // Published only after parsing on mHandler. Readers never observe a half-loaded pack.
+    private final Map<Integer, IconAppearance> mIconAppearances = new ConcurrentHashMap<>();
+    private long mIconRevision;
+
+    private static final class IconPack {
+        final String packageName;
+        final Map<ComponentName, String> icons;
+        final Map<ComponentName, String> calendars;
+        final List<String> backs;
+        final List<String> masks;
+        final List<String> upons;
+        final float scale;
+        final int capabilities;
+
+        IconPack(String packageName, Map<ComponentName, String> icons,
+                Map<ComponentName, String> calendars, List<String> backs, List<String> masks,
+                List<String> upons, float scale, int capabilities) {
+            this.packageName = packageName;
+            this.icons = Collections.unmodifiableMap(new HashMap<>(icons));
+            this.calendars = Collections.unmodifiableMap(new HashMap<>(calendars));
+            this.backs = List.copyOf(backs);
+            this.masks = List.copyOf(masks);
+            this.upons = List.copyOf(upons);
+            this.scale = scale;
+            this.capabilities = capabilities;
+        }
+    }
+
+    private static final class IconAppearance {
+        final IconPack pack;
+        final Map<String, IconPack> perApp;
+        final long revision;
+
+        IconAppearance(IconPack pack, Map<String, IconPack> perApp, long revision) {
+            this.pack = pack;
+            this.perApp = Collections.unmodifiableMap(new HashMap<>(perApp));
+            this.revision = revision;
+        }
+    }
+
+    private void reloadIconAppearances() {
+        Map<Integer, IconAppearance> next = new HashMap<>();
+        UserManager users = mContext.getSystemService(UserManager.class);
+        for (android.content.pm.UserInfo user : users.getUsers()) {
+            Context context = mContext.createContextAsUser(UserHandle.of(user.id), 0);
+            IconPack pack = null;
+            Map<String, IconPack> perApp = new HashMap<>();
+            Map<String, IconPack> parsed = new HashMap<>();
+            try {
+                String json = Settings.Secure.getStringForUser(context.getContentResolver(),
+                        SETTINGS_THEME_ENGINE_DATA, user.id);
+                JSONObject config = json == null ? new JSONObject() : new JSONObject(json);
+                JSONObject themes = config.optJSONObject("themes");
+                JSONObject category = themes == null ? null : themes.optJSONObject(CATEGORY_ICON_PACK);
+                if (category != null && category.optBoolean("enabled", false)) {
+                    String name = category.optString("packageName", "");
+                    pack = readIconPack(context.getPackageManager(), name);
+                    if (pack != null) parsed.put(name, pack);
+                }
+                JSONObject apps = config.optJSONObject("perAppIconPacks");
+                if (apps != null) {
+                    Iterator<String> keys = apps.keys();
+                    while (keys.hasNext()) {
+                        String name = keys.next();
+                        String selected = apps.optString(name, "");
+                        IconPack appPack = parsed.get(selected);
+                        if (appPack == null) {
+                            appPack = readIconPack(context.getPackageManager(), selected);
+                            if (appPack != null) parsed.put(selected, appPack);
+                        }
+                        if (appPack != null) perApp.put(name, appPack);
+                    }
+                }
+            } catch (JSONException | RuntimeException e) {
+                Slog.w(TAG, "Failed to load app icon appearance for user " + user.id, e);
+            }
+            next.put(user.id, new IconAppearance(pack, perApp, ++mIconRevision));
+        }
+        mIconAppearances.keySet().retainAll(next.keySet());
+        mIconAppearances.putAll(next);
+    }
+
+    private static String chooseLayer(List<String> names, ComponentName component) {
+        return names.isEmpty() ? null
+                : names.get(Math.floorMod(component.hashCode(), names.size()));
+    }
 
     private static final long PERSIST_DEBOUNCE_MS = 500;
     private final Runnable mPersistPerAppRunnable = this::persistPerAppIconPacksNow;
@@ -164,7 +262,10 @@ public class ThemeEngineManagerService extends SystemService {
                     Settings.Secure.getUriFor(SETTINGS_THEME_ENGINE_DATA),
                     false, mSettingsObserver, UserHandle.USER_ALL);
 
-            loadThemeConfig();
+            mContext.getContentResolver().registerContentObserver(
+                    Settings.Secure.getUriFor(Settings.Secure.THEME_CUSTOMIZATION_OVERLAY_PACKAGES),
+                    false, mSettingsObserver, UserHandle.USER_ALL);
+            mHandler.post(() -> notifyThemeChangedInternal(null));
 
             mLastUiMode = mContext.getResources().getConfiguration().uiMode
                     & Configuration.UI_MODE_NIGHT_MASK;
@@ -180,6 +281,7 @@ public class ThemeEngineManagerService extends SystemService {
                         mBitmapCache.evictAll();
                         mTextColorPrimaryCached = false;
                     }
+                    notifyThemeChangedInternal(CATEGORY_ICON_PACK);
                 }
             }, configFilter, null, mHandler);
 
@@ -187,13 +289,39 @@ public class ThemeEngineManagerService extends SystemService {
             packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
             packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
             packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+            packageFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
             packageFilter.addDataScheme("package");
-            mContext.registerReceiver(new BroadcastReceiver() {
+            mContext.registerReceiverAsUser(new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    mInstalledIconPacksCache = null;
+                    mInstalledIconPacksCache.clear();
+                    mThemeResourcesCache.clear();
+                    mIconPackPackage = null;
+                    mIconPackMap.clear();
+                    notifyThemeChangedInternal(CATEGORY_ICON_PACK);
                 }
-            }, packageFilter, null, mHandler);
+            }, UserHandle.ALL, packageFilter, null, mHandler);
+
+            IntentFilter appearanceFilter = new IntentFilter(Intent.ACTION_OVERLAY_CHANGED);
+            appearanceFilter.addDataScheme("package");
+            mContext.registerReceiverAsUser(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    notifyThemeChangedInternal(CATEGORY_ICON_PACK);
+                }
+            }, UserHandle.ALL, appearanceFilter, null, mHandler);
+            IntentFilter userFilter = new IntentFilter(Intent.ACTION_USER_SWITCHED);
+            userFilter.addAction(Intent.ACTION_USER_UNLOCKED);
+            userFilter.addAction(Intent.ACTION_USER_ADDED);
+            userFilter.addAction(Intent.ACTION_USER_REMOVED);
+            userFilter.addAction(Intent.ACTION_DATE_CHANGED);
+            userFilter.addAction(Intent.ACTION_TIMEZONE_CHANGED);
+            mContext.registerReceiverAsUser(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    notifyThemeChangedInternal(CATEGORY_ICON_PACK);
+                }
+            }, UserHandle.ALL, userFilter, null, mHandler);
 
 
             Slog.i(TAG, "ThemeEngineManagerService ready");
@@ -211,6 +339,11 @@ public class ThemeEngineManagerService extends SystemService {
         mBitmapCache.evictAll();
         mPerAppIconPacks.clear();
         mPerAppIconPackMaps.clear();
+        mIconPackPackage = null;
+        mIconPackMap.clear();
+        mIconBackList.clear();
+        mIconMaskList.clear();
+        mIconScale = 1.0f;
 
         try {
             String json = Settings.Secure.getStringForUser(
@@ -367,88 +500,170 @@ public class ThemeEngineManagerService extends SystemService {
     }
 
     private void loadIconPack(String packageName) {
+        IconPack pack = readIconPack(mContext.getPackageManager(), packageName);
+        if (pack == null) return;
         mIconPackPackage = packageName;
-        mIconPackMap.clear();
-        mIconBackList.clear();
-        mIconMaskList.clear();
-        mIconScale = 1.0f;
-
-        Resources res = getThemeResources(packageName);
-        if (res == null) return;
-
-        int resId = res.getIdentifier("appfilter", "xml", packageName);
-        if (resId == 0) return;
-
-        parseAppFilter(res, resId, packageName, mIconPackMap);
+        mIconPackMap.putAll(pack.icons);
+        mIconBackList.addAll(pack.backs);
+        mIconMaskList.addAll(pack.masks);
+        mIconScale = pack.scale;
     }
 
-    private void loadPerAppIconPack(String iconPackPackage) {
-        if (mPerAppIconPackMaps.containsKey(iconPackPackage)) return;
-
-        Resources res = getThemeResources(iconPackPackage);
-        if (res == null) return;
-
-        int resId = res.getIdentifier("appfilter", "xml", iconPackPackage);
-        if (resId == 0) return;
-
-        Map<ComponentName, String> map = new ConcurrentHashMap<>();
-        parseAppFilter(res, resId, iconPackPackage, map);
-        mPerAppIconPackMaps.put(iconPackPackage, map);
+    private void loadPerAppIconPack(String packageName) {
+        if (mPerAppIconPackMaps.containsKey(packageName)) return;
+        IconPack pack = readIconPack(mContext.getPackageManager(), packageName);
+        if (pack != null) mPerAppIconPackMaps.put(packageName, pack.icons);
     }
 
-    private void parseAppFilter(Resources res, int resId, String packageName,
-            Map<ComponentName, String> targetMap) {
-        try {
-            XmlPullParser parser = res.getXml(resId);
-            int eventType = parser.getEventType();
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                String tagName = parser.getName();
-                if (eventType == XmlPullParser.START_TAG) {
-                    if ("item".equals(tagName)) {
-                        String component = parser.getAttributeValue(null, "component");
-                        String drawable = parser.getAttributeValue(null, "drawable");
-                        if (component != null && drawable != null) {
-                            ComponentName cn = parseComponentInfo(component);
-                            if (cn != null) {
-                                targetMap.put(cn, drawable);
-                            }
-                        }
-                    } else if ("iconback".equals(tagName)) {
-                        for (int i = 0; i < parser.getAttributeCount(); i++) {
-                            String val = parser.getAttributeValue(i);
-                            if (val != null && !val.isEmpty()) mIconBackList.add(val);
-                        }
-                    } else if ("iconmask".equals(tagName)) {
-                        for (int i = 0; i < parser.getAttributeCount(); i++) {
-                            String val = parser.getAttributeValue(i);
-                            if (val != null && !val.isEmpty()) mIconMaskList.add(val);
-                        }
-                    } else if ("scale".equals(tagName)) {
-                        String factor = parser.getAttributeValue(null, "factor");
-                        if (factor != null) {
-                            try {
-                                mIconScale = Float.parseFloat(factor);
-                            } catch (NumberFormatException ignored) {
-                            }
-                        }
-                    }
-                }
-                eventType = parser.next();
-            }
-        } catch (XmlPullParserException | IOException e) {
-            Slog.w(TAG, "Failed to parse appfilter.xml for " + packageName, e);
+    // Limit both decoded XML work and uncompiled asset size. Never run package code.
+    private static final int MAX_FILTER_ENTRIES = 100_000;
+    private static final int MAX_FILTER_EVENTS = 500_000;
+    private static final int MAX_FILTER_BYTES = 16 * 1024 * 1024;
+
+    private static final class FilterInput extends FilterInputStream {
+        private int remaining = MAX_FILTER_BYTES;
+        FilterInput(InputStream input) {
+            super(input);
+        }
+        @Override
+        public int read() throws IOException {
+            if (--remaining < 0) throw new IOException("Appfilter too large");
+            return super.read();
+        }
+        @Override
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            if (remaining <= 0) throw new IOException("Appfilter too large");
+            int read = super.read(bytes, offset, Math.min(length, remaining));
+            if (read > 0) remaining -= read;
+            return read;
         }
     }
 
     @Nullable
-    private ComponentName parseComponentInfo(String component) {
-        if (!component.startsWith("ComponentInfo{") || !component.endsWith("}")) {
+    private IconPack readIconPack(PackageManager pm, String packageName) {
+        if (packageName == null || packageName.isEmpty()) return null;
+        try {
+            Resources res = pm.getResourcesForApplication(packageName);
+            int id = res.getIdentifier("appfilter", "xml", packageName);
+            if (id != 0) {
+                try (InputStream input = res.openRawResource(id)) {
+                    if (input.available() > MAX_FILTER_BYTES) {
+                        throw new IOException("Appfilter too large");
+                    }
+                    try (XmlResourceParser parser = res.getXml(id)) {
+                        return parseAppFilter(parser, packageName,
+                                readPackCapabilities(pm, packageName));
+                    }
+                } catch (IOException | XmlPullParserException | RuntimeException e) {
+                    Slog.w(TAG, "Failed compiled appfilter for " + packageName, e);
+                }
+            }
+            try (InputStream input = new FilterInput(res.getAssets().open("appfilter.xml"))) {
+                XmlPullParser parser = Xml.newPullParser();
+                parser.setInput(input, "UTF-8");
+                return parseAppFilter(parser, packageName,
+                        readPackCapabilities(pm, packageName));
+            }
+        } catch (PackageManager.NameNotFoundException | IOException
+                | XmlPullParserException | RuntimeException e) {
             return null;
         }
-        String content = component.substring(14, component.length() - 1);
-        String[] parts = content.split("/");
-        if (parts.length != 2) return null;
-        return new ComponentName(parts[0], parts[1]);
+    }
+
+    private static IconPack parseAppFilter(XmlPullParser parser, String packageName,
+            int capabilities) throws IOException, XmlPullParserException {
+        Map<ComponentName, String> icons = new HashMap<>();
+        Map<ComponentName, String> calendars = new HashMap<>();
+        List<String> backs = new ArrayList<>();
+        List<String> masks = new ArrayList<>();
+        List<String> upons = new ArrayList<>();
+        float scale = 1f;
+        boolean root = false;
+        int events = 0;
+        for (int event = parser.getEventType(); event != XmlPullParser.END_DOCUMENT;
+                event = parser.next()) {
+            if (++events > MAX_FILTER_EVENTS) throw new IOException("Appfilter too complex");
+            if (event != XmlPullParser.START_TAG) continue;
+            String tag = parser.getName();
+            if (parser.getDepth() == 1) {
+                if (!"resources".equals(tag)) throw new IOException("Invalid appfilter root");
+                root = true;
+            }
+            if ("item".equals(tag) || "calendar".equals(tag)) {
+                ComponentName component = parseComponentInfo(
+                        parser.getAttributeValue(null, "component"));
+                String name = parser.getAttributeValue(null,
+                        "calendar".equals(tag) ? "prefix" : "drawable");
+                if (component != null && validDrawableName(name)) {
+                    if (icons.size() + calendars.size() >= MAX_FILTER_ENTRIES) {
+                        throw new IOException("Too many appfilter entries");
+                    }
+                    ("calendar".equals(tag) ? calendars : icons).put(component, name);
+                }
+            } else if ("iconback".equals(tag) || "iconmask".equals(tag)
+                    || "iconupon".equals(tag)) {
+                List<String> target = "iconback".equals(tag) ? backs
+                        : "iconmask".equals(tag) ? masks : upons;
+                for (int i = 0; i < parser.getAttributeCount() && target.size() < 32; i++) {
+                    String name = parser.getAttributeValue(i);
+                    if (validDrawableName(name)) target.add(name);
+                }
+            } else if ("scale".equals(tag)) {
+                try {
+                    float value = Float.parseFloat(parser.getAttributeValue(null, "factor"));
+                    if (Float.isFinite(value) && value > 0 && value <= 2f) scale = value;
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+        if (!root || (icons.isEmpty() && calendars.isEmpty() && backs.isEmpty()
+                && masks.isEmpty() && upons.isEmpty())) {
+            throw new IOException("Empty appfilter");
+        }
+        return new IconPack(packageName, icons, calendars, backs, masks, upons, scale, capabilities);
+    }
+
+    private static boolean validDrawableName(String name) {
+        return name != null && name.length() <= 255 && name.matches("[a-zA-Z0-9_]+");
+    }
+
+    @Nullable
+    private static ComponentName parseComponentInfo(String value) {
+        if (value == null || value.length() > 2048) return null;
+        if (value.startsWith("ComponentInfo{") && value.endsWith("}")) {
+            value = value.substring(14, value.length() - 1);
+        }
+        return ComponentName.unflattenFromString(value);
+    }
+
+    private static final String[] ICON_PACK_ACTIONS = {
+            "org.adw.launcher.THEMES", "com.novalauncher.THEME",
+            "com.gau.go.launcherex.theme", "com.dlto.atom.launcher.THEME",
+            "com.anddoes.launcher.THEME", "ch.deletescape.lawnchair.ICONPACK",
+            "ginlemon.smartlauncher.THEMES", "com.teslacoilsw.launcher.THEME",
+            "com.fede.launcher.THEME_ICONPACK", "org.adw.launcher.icons.ACTION_PICK_ICON",
+            "net.oneplus.launcher.icons.ACTION_PICK_ICON", "com.sonymobile.home.ICON_PACK",
+            "app.lawnchair.icons.THEMED_ICON"
+    };
+
+    private static int readPackCapabilities(PackageManager pm, String packageName) {
+        int capabilities = pm.queryIntentActivities(new Intent("app.lawnchair.icons.THEMED_ICON")
+                .setPackage(packageName), PackageManager.GET_RESOLVED_FILTER).isEmpty() ? 0 : 1;
+        for (ResolveInfo info : pm.queryIntentActivities(new Intent("org.adw.launcher.THEMES")
+                .setPackage(packageName), PackageManager.GET_RESOLVED_FILTER)) {
+            if (info.filter == null) continue;
+            if (info.filter.hasCategory("org.icontheme.CHANGES_WITH_MATERIAL_YOU_COLORS")) {
+                capabilities |= 2;
+            }
+            if (info.filter.hasCategory("org.icontheme.CHANGES_WITH_DARK_MODE")) {
+                capabilities |= 4;
+            }
+            if (info.filter.hasCategory("org.icontheme.FALLBACK_TO_THEMED_ICON")) {
+                capabilities |= 8;
+            }
+        }
+        // All snapshots are invalidated on configuration/overlay changes, covering these flags.
+        return capabilities;
     }
 
     @Nullable
@@ -549,6 +764,10 @@ public class ThemeEngineManagerService extends SystemService {
     }
 
     private void notifyThemeChangedInternal(@Nullable String category) {
+        if (Looper.myLooper() != mHandler.getLooper()) {
+            mHandler.post(() -> notifyThemeChangedInternal(category));
+            return;
+        }
         String dispatchCategory = category;
         boolean clearDispatching = true;
         synchronized (mThemeChangeLock) {
@@ -606,6 +825,8 @@ public class ThemeEngineManagerService extends SystemService {
         final long ident = Binder.clearCallingIdentity();
         try {
             loadThemeConfig();
+            reloadIconAppearances();
+            android.app.PropertyInvalidatedCache.invalidateCache(ThemeEngine.APP_ICON_CACHE_KEY);
 
             int count = mCallbacks.beginBroadcast();
             try {
@@ -620,6 +841,14 @@ public class ThemeEngineManagerService extends SystemService {
                 mCallbacks.finishBroadcast();
             }
 
+            LauncherAppsService.LauncherAppsServiceInternal launcher =
+                    LocalServices.getService(LauncherAppsService.LauncherAppsServiceInternal.class);
+            if (launcher != null) {
+                for (int userId : mIconAppearances.keySet()) {
+                    launcher.refreshAppIcons(userId);
+                }
+            }
+
             if (category == null || CATEGORY_ICON_PACK.equals(category)) {
                 Intent intent = new Intent(ThemeEngine.ACTION_THEME_CHANGED);
                 intent.putExtra(ThemeEngine.EXTRA_THEME_CATEGORY, CATEGORY_ICON_PACK);
@@ -632,24 +861,161 @@ public class ThemeEngineManagerService extends SystemService {
     }
 
     @NonNull
-    private List<String> scanInstalledIconPacks() {
-        List<String> result = new ArrayList<>();
-        PackageManager pm = mContext.getPackageManager();
-        List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
-        for (ApplicationInfo app : apps) {
-            try {
-                Resources res = pm.getResourcesForApplication(app);
-                int filterId = res.getIdentifier("appfilter", "xml", app.packageName);
-                if (filterId != 0) {
-                    result.add(app.packageName);
-                }
-            } catch (Exception ignored) {
+    private List<String> scanInstalledIconPacks(int userId) {
+        PackageManager pm = mContext.createContextAsUser(UserHandle.of(userId), 0)
+                .getPackageManager();
+        Set<String> candidates = new LinkedHashSet<>();
+        for (String action : ICON_PACK_ACTIONS) {
+            for (ResolveInfo info : pm.queryIntentActivities(new Intent(action),
+                    PackageManager.GET_RESOLVED_FILTER)) {
+                candidates.add(info.activityInfo.packageName);
             }
+        }
+        for (ResolveInfo info : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN)
+                .addCategory("com.anddoes.launcher.THEME"), PackageManager.GET_RESOLVED_FILTER)) {
+            candidates.add(info.activityInfo.packageName);
+        }
+        // Intent declarations are hints, never a requirement or sufficient validation.
+        for (ApplicationInfo app : pm.getInstalledApplications(0)) {
+            candidates.add(app.packageName);
+        }
+        List<String> result = new ArrayList<>();
+        for (String packageName : candidates) {
+            if (readIconPack(pm, packageName) != null) result.add(packageName);
         }
         return result;
     }
 
     private final class BinderService extends IThemeEngineManager.Stub {
+
+        private void enforceIconUser(int userId) {
+            if (userId < 0) throw new IllegalArgumentException("Invalid user");
+            int callerUser = UserHandle.getCallingUserId();
+            if (callerUser == userId) return;
+            if (mContext.checkCallingOrSelfPermission(
+                    android.Manifest.permission.INTERACT_ACROSS_USERS_FULL)
+                    == PackageManager.PERMISSION_GRANTED
+                    || mContext.checkCallingOrSelfPermission(
+                            android.Manifest.permission.INTERACT_ACROSS_USERS)
+                            == PackageManager.PERMISSION_GRANTED) return;
+            // Privileged presentation apps can read icon metadata in their enabled profiles.
+            mContext.enforceCallingOrSelfPermission(
+                    android.Manifest.permission.WRITE_SECURE_SETTINGS, "getAppIconAppearance");
+            final long identity = Binder.clearCallingIdentity();
+            try {
+                UserManager users = mContext.getSystemService(UserManager.class);
+                android.content.pm.UserInfo user = users.getUserInfo(userId);
+                if (user == null || !user.isEnabled()
+                        || !users.isSameProfileGroup(callerUser, userId)) {
+                    throw new SecurityException("Profile is not accessible");
+                }
+            } finally {
+                Binder.restoreCallingIdentity(identity);
+            }
+        }
+
+        @Override
+        public Bundle getAppIconResources(String packageName, int userId) {
+            enforceIconUser(userId);
+            int uid = Binder.getCallingUid();
+            if (packageName == null || LocalServices.getService(
+                    android.content.pm.PackageManagerInternal.class)
+                    .filterAppAccess(packageName, uid, userId)) return null;
+            final long identity = Binder.clearCallingIdentity();
+            try {
+                PackageManager pm = mContext.createContextAsUser(UserHandle.of(userId), 0)
+                        .getPackageManager();
+                android.content.pm.PackageInfo info = pm.getPackageInfo(packageName,
+                        PackageManager.GET_ACTIVITIES | PackageManager.MATCH_DISABLED_COMPONENTS);
+                android.util.SparseArray<String> icons = new android.util.SparseArray<>();
+                addIconResource(icons, info.applicationInfo.icon, "");
+                addIconResource(icons, info.applicationInfo.roundIconRes, "");
+                if (info.activities != null) {
+                    for (android.content.pm.ActivityInfo activity : info.activities) {
+                        addIconResource(icons, activity.getIconResource(), activity.name);
+                    }
+                }
+                int[] ids = new int[icons.size()];
+                String[] classes = new String[icons.size()];
+                for (int i = 0; i < icons.size(); i++) {
+                    ids[i] = icons.keyAt(i);
+                    classes[i] = icons.valueAt(i);
+                }
+                Bundle result = new Bundle();
+                result.putLong("version", info.getLongVersionCode());
+                result.putLong("updated", info.lastUpdateTime);
+                result.putIntArray("ids", ids);
+                result.putStringArray("classes", classes);
+                return result;
+            } catch (PackageManager.NameNotFoundException e) {
+                return null;
+            } finally {
+                Binder.restoreCallingIdentity(identity);
+            }
+        }
+
+        private void addIconResource(android.util.SparseArray<String> icons, int id,
+                String activity) {
+            if (id == 0) return;
+            // Bound the per-package transaction; exceptional excess IDs retain their raw icons.
+            if (icons.indexOfKey(id) < 0) {
+                if (icons.size() < 512) icons.put(id, activity.length() <= 512 ? activity : "");
+            } else if (!icons.get(id).equals(activity)) {
+                // A shared source ID has lost activity identity: application fallback is stable.
+                icons.put(id, "");
+            }
+        }
+
+        @Override
+        public Bundle getAppIconAppearance(ComponentName component, int userId) {
+            enforceIconUser(userId);
+            int uid = Binder.getCallingUid();
+            IconAppearance state = mIconAppearances.get(userId);
+            if (state == null) return null;
+            Bundle result = new Bundle();
+            result.putBoolean("enabled", state.pack != null || !state.perApp.isEmpty());
+            result.putLong("revision", state.revision);
+            if (component == null) return result;
+            final long identity = Binder.clearCallingIdentity();
+            try {
+                PackageManager pm = mContext.createContextAsUser(UserHandle.of(userId), 0)
+                        .getPackageManager();
+                // Do not expose another user's hidden packages through the descriptor API.
+                if (LocalServices.getService(android.content.pm.PackageManagerInternal.class)
+                        .filterAppAccess(component.getPackageName(), uid, userId)) return result;
+                IconPack pack = state.perApp.getOrDefault(component.getPackageName(), state.pack);
+                if (pack == null) return result;
+                if (component.getClassName().isEmpty()) {
+                    List<ResolveInfo> activities = pm.queryIntentActivities(
+                            new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                                    .setPackage(component.getPackageName()), 0);
+                    // A resource ID collision cannot recover an arbitrary activity's identity.
+                    if (activities.size() == 1) {
+                        component = new ComponentName(activities.get(0).activityInfo.packageName,
+                                activities.get(0).activityInfo.name);
+                    }
+                }
+                if (LocalServices.getService(android.content.pm.PackageManagerInternal.class)
+                        .filterAppAccess(pack.packageName, uid, userId)) return result;
+                try {
+                    result.putParcelable("packInfo", pm.getApplicationInfo(pack.packageName, 0));
+                } catch (PackageManager.NameNotFoundException e) {
+                    return result;
+                }
+                result.putString("pack", pack.packageName);
+                result.putString("drawable", pack.icons.get(component));
+                result.putString("calendar", pack.calendars.get(component));
+                result.putString("back", chooseLayer(pack.backs, component));
+                result.putString("mask", chooseLayer(pack.masks, component));
+                result.putString("upon", chooseLayer(pack.upons, component));
+                result.putFloat("scale", pack.scale);
+                result.putBoolean("monochrome", (pack.capabilities & 1) != 0);
+                result.putInt("capabilities", pack.capabilities);
+                return result;
+            } finally {
+                Binder.restoreCallingIdentity(identity);
+            }
+        }
 
         @Override
         public Bitmap getIconPackIcon(ComponentName component, int density) {
@@ -688,7 +1054,7 @@ public class ThemeEngineManagerService extends SystemService {
         @Override
         public boolean hasActiveIconPack() {
             synchronized (ThemeEngineManagerService.this) {
-                return mIconPackPackage != null && !mIconPackMap.isEmpty();
+                return mIconPackPackage != null;
             }
         }
 
@@ -771,10 +1137,27 @@ public class ThemeEngineManagerService extends SystemService {
 
         @Override
         public List<String> getInstalledIconPacks() {
-            if (mInstalledIconPacksCache == null) {
-                mInstalledIconPacksCache = scanInstalledIconPacks();
+            int userId = UserHandle.getCallingUserId();
+            int callerUid = Binder.getCallingUid();
+            java.util.concurrent.FutureTask<List<String>> scan =
+                    new java.util.concurrent.FutureTask<>(() -> {
+                        List<String> packs = mInstalledIconPacksCache.get(userId);
+                        if (packs == null) {
+                            packs = scanInstalledIconPacks(userId);
+                            mInstalledIconPacksCache.put(userId, packs);
+                        }
+                        return new ArrayList<>(packs);
+                    });
+            mHandler.post(scan);
+            try {
+                List<String> result = scan.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                android.content.pm.PackageManagerInternal pm =
+                        LocalServices.getService(android.content.pm.PackageManagerInternal.class);
+                result.removeIf(packageName -> pm.filterAppAccess(packageName, callerUid, userId));
+                return result;
+            } catch (Exception e) {
+                return Collections.emptyList();
             }
-            return new ArrayList<>(mInstalledIconPacksCache);
         }
 
         @Override
@@ -864,7 +1247,16 @@ public class ThemeEngineManagerService extends SystemService {
 
         @Override
         public void registerCallback(IThemeEngineCallback callback) {
-            if (callback != null) mCallbacks.register(callback);
+            if (callback != null) {
+                mCallbacks.register(callback);
+                // Also reconnect clients whose first request raced service initialization.
+                mHandler.post(() -> {
+                    try {
+                        callback.onThemeChanged(CATEGORY_ICON_PACK);
+                    } catch (RemoteException ignored) {
+                    }
+                });
+            }
         }
 
         @Override

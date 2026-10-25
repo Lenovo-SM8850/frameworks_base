@@ -887,3 +887,11 @@ test_module_config {
     ],
     include_filters: ["android.companion.virtual."],
 }
+
+// Focused icon-pack compositor/guard checks, without compiling the full framework test suite.
+android_ravenwood_test {
+    name: "AppIconResolverTests",
+    srcs: ["src/com/android/internal/appearance/AppIconResolverTest.java"],
+    libs: ["framework", "framework-res"],
+    static_libs: ["androidx.test.ext.junit", "androidx.test.rules", "ravenwood-junit"],
+}

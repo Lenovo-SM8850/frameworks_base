@@ -1054,6 +1054,19 @@ public class Resources {
      */
     @Nullable
     public Drawable getDrawableForDensity(@DrawableRes int id, int density, @Nullable Theme theme) {
+        Drawable raw = getDrawableForDensityRaw(id, density, theme);
+        return com.android.internal.appearance.AppIconResolver.resolveResource(
+                this, id, density, theme, raw);
+    }
+
+    /**
+     * Load without app-icon policy; also used while inflating pack layers.
+     * @hide
+     */
+    @Nullable
+    public Drawable getDrawableForDensityRaw(@DrawableRes int id, int density,
+            @Nullable Theme theme) {
+        com.android.internal.appearance.AppIconResolver.beginRawLoad();
         final TypedValue value = obtainTempTypedValue();
         try {
             final ResourcesImpl impl = mResourcesImpl;
@@ -1061,6 +1074,7 @@ public class Resources {
             return loadDrawable(value, id, density, theme);
         } finally {
             releaseTempTypedValue(value);
+            com.android.internal.appearance.AppIconResolver.endRawLoad();
         }
     }
 
