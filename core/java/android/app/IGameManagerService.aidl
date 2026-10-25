@@ -54,4 +54,6 @@ interface IGameManagerService {
     void removeGameStateListener(IGameStateListener gameStateListener);
     @EnforcePermission("MANAGE_GAME_MODE")
     void toggleGameDefaultFrameRate(boolean isEnabled);
+    @JavaPassthrough(annotation="@android.annotation.RequiresPermission(android.Manifest.permission.MANAGE_GAME_MODE)")
+    void resetGameModeConfigOverride(String packageName, int userId, int gameModeToReset);
 }
