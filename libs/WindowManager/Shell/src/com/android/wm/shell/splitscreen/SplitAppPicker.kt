@@ -81,6 +81,9 @@ class SplitAppPicker(
         root.layoutDirection = res.configuration.layoutDirection
         root.setPadding(padding, px(R.dimen.split_picker_padding_top), padding, padding)
         root.isFocusableInTouchMode = true
+        root.elevation = res.getDimension(R.dimen.split_picker_elevation)
+        root.setBackgroundResource(R.drawable.split_picker_background)
+        root.clipToOutline = true
         val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(label(R.style.SplitPickerTitle,
             context.getString(R.string.split_picker_title)).apply {
@@ -97,10 +100,13 @@ class SplitAppPicker(
             isFocusable = true
             isClickable = true
             setOnClickListener { cancel() }
+            setBackgroundResource(R.drawable.split_picker_button_background)
         })
         root.addView(header)
         search.hint = context.getString(R.string.split_picker_search)
         search.contentDescription = search.hint
+        search.setTextAppearance(R.style.SplitPickerSearch)
+        search.setBackgroundResource(R.drawable.split_picker_search_background)
         search.gravity = Gravity.CENTER_VERTICAL
         search.setPaddingRelative(px(R.dimen.split_picker_search_padding), 0,
             px(R.dimen.split_picker_search_padding), 0)
@@ -109,11 +115,11 @@ class SplitAppPicker(
         search.compoundDrawablePadding = px(R.dimen.split_picker_search_icon_padding)
         search.compoundDrawableTintList = ColorStateList.valueOf(
             context.getColor(com.android.internal.R.color.materialColorOnSurfaceVariant))
-        search.minHeight = px(R.dimen.split_picker_search_height)
         search.setSingleLine()
         search.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         search.imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         // Single-line text input sets a one-line height, so apply the minimum height after it.
+        search.minHeight = px(R.dimen.split_picker_search_height)
         search.setOnEditorActionListener { _, action, _ ->
             if (action == EditorInfo.IME_ACTION_DONE) {
                 hideKeyboard()
@@ -224,6 +230,7 @@ class SplitAppPicker(
                 contentDescription = if (available) app.badgedLabel else
                     context.getString(R.string.split_picker_disabled_app,
                         app.badgedLabel, context.getString(reason))
+                setBackgroundResource(R.drawable.split_picker_cell_background)
                 setOnClickListener { if (!launching) select(app) }
             }
             cell.addView(ImageView(context).apply {
@@ -286,6 +293,7 @@ class SplitAppPicker(
     }
 
     private fun label(appearance: Int, value: CharSequence) = TextView(context).apply {
+        setTextAppearance(appearance)
         text = value
         gravity = Gravity.CENTER_VERTICAL
     }
