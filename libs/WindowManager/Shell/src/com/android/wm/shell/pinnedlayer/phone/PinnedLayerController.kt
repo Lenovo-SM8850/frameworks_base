@@ -408,11 +408,18 @@ class PinnedLayerController(
         )
         recentsTransitionHandler.addTransitionStateListener(
             object : RecentsTransitionStateListener {
+                override fun onTransitionSurfacesCommitted(displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    overviewShowing = shellController.isOverviewVisible(displayId)
+                    updateVisibility()
+                    raiseAfterRecents()
+                }
+
                 override fun onTransitionFinishedToHome(displayId: Int) {
                     if (displayId != DEFAULT_DISPLAY) return
                     recentsRunning = false
                     overviewShowing = shellController.isOverviewVisible(displayId)
-                    transitions.runOnIdle { updateVisibility() }
+                    updateVisibility()
                 }
 
                 override fun onTransitionStateChanged(state: Int, displayId: Int) {
@@ -422,12 +429,29 @@ class PinnedLayerController(
                     if (recentsRunning) {
                         updateVisibility()
                     } else {
-                        // Restore after Recents has applied its final surface transaction.
-                        transitions.runOnIdle { updateVisibility() }
-                    }
+                        // Cleanup precedes the final transaction; reconcile again on commit.
+                        updateVisibility()
+                        }
                 }
             }
         )
+    }
+
+    // Recents layers the task it opens itself. WM does not re-apply the unchanged layer of an
+    // always-on-top floating task that took no part in that transition, so the opened task can
+    // cover it until the next layout. Put visible floating tasks back on top, keeping their order.
+    private fun raiseAfterRecents() {
+        if (keyguardShowing || overviewShowing || recentsRunning) return
+        val tasks = getPinnedTasks().filter { it.taskId !in minimizedTasks }
+        if (tasks.isEmpty()) return
+        SurfaceControl.Transaction().use { t ->
+            tasks.forEachIndexed { i, task ->
+                taskLeashes[task.taskId]?.takeIf { it.isValid }?.let {
+                    t.setLayer(it, RAISED_FLOATING_LAYER + i)
+                }
+            }
+            t.apply()
+        }
     }
 
     private fun updateVisibility() {
@@ -533,6 +557,8 @@ class PinnedLayerController(
     }
 
     companion object {
+        private const val RAISED_FLOATING_LAYER = 1_000_000
+
         const val MAX_VISIBLE_FLOATING_TASKS = MultitaskingWindowLimit.MAX_WINDOWS
     }
 
