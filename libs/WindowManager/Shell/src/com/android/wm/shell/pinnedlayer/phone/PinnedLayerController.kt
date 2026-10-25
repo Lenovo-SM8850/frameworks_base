@@ -16,15 +16,17 @@
 
 package com.android.wm.shell.pinnedlayer.phone
 
+import android.app.ActivityManager.AppTask.WINDOWING_LAYER_PINNED
+import android.app.TaskInfo
 import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
 import android.content.pm.UserInfo
 import android.content.res.Configuration
 import com.android.wm.shell.common.MultitaskingWindowLimit
 import com.android.wm.shell.common.DisplayController
+import com.android.wm.shell.common.TaskStackListenerCallback
+import com.android.wm.shell.common.TaskStackListenerImpl
 import com.android.wm.shell.sysui.UserChangeListener
-import android.app.ActivityManager.AppTask.WINDOWING_LAYER_PINNED
-import android.app.TaskInfo
 import android.app.TaskWindowingLayerRequestHandler.REMOTE_CALLBACK_RESULT_KEY
 import android.app.TaskWindowingLayerRequestHandler.RESULT_APPROVED
 import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
@@ -67,8 +69,8 @@ import com.android.wm.shell.transition.Transitions
 import com.android.wm.shell.windowdecor.OnTaskRepositionAnimationListener
 
 /**
- * A controller that is responsible for managing [WINDOWING_LAYER_PINNED] layer that has PiP
- * policies like single window and always-on-top.
+ * Manages visible freeform tasks within the shared multitasking budget in the always-on-top
+ * [WINDOWING_LAYER_PINNED] layer.
  *
  * The controller is the main decider when the task is pinned and it's responsible for dispatching
  * callbacks.
@@ -1336,5 +1338,41 @@ class PinnedLayerController(
         fun onPinnedTasksAdded(taskInfo: TaskInfo)
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
+    }
+
+    /** Shares floating restore state with callers that own the launch transition. */
+    @JvmOverloads
+    fun prepareMinimizedTaskRestore(task: TaskInfo, wct: WindowContainerTransaction,
+        expandMini: Boolean = true): Boolean {
+        if (keyguardShowing) return false
+        val taskId = task.taskId
+        val entry = minimizeState.entries[taskId]
+        if (!task.isFloatingWindow) {
+            if (entry != null) removeMinimizeHandle(taskId)
+            return false
+        }
+        val mini = presentationController.miniState.get(task.userId, taskId)
+            ?: presentationController.recoverMini(task)
+        if (entry == null && (!expandMini || mini == null)) return false
+        val restoreMini = expandMini && mini != null
+        if (restoreMini && miniInteractions?.prepareRestore(task, wct) != true) return false
+        val bounds = if (restoreMini) null else {
+            mini?.let { Rect(it.bounds) }
+                ?: presentationController.clampToDisplay(task, entry!!.bounds) ?: return false
+        }
+        minimizeOldestIfNeeded(task, wct)
+        minimizedTasks -= taskId
+        visiblePinnedTasks += taskId
+        currentPinnedTaskId = taskId
+        removeMinimizeHandle(taskId)
+        wct.merge(getLayerPinnedWct(task.token), true)
+        if (!restoreMini) {
+            if (mini != null) {
+                wct.setFloatingWindowPresentation(task.token,
+                    android.graphics.Point(bounds!!.left, bounds.top), mini.scale)
+            } else presentationController.applyPresentation(task, bounds!!, wct, task.floatingWindowScale)
+        }
+        wct.setHidden(task.token, false).reorder(task.token, true)
+        return true
     }
 }
