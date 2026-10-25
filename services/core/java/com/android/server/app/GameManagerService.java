@@ -1817,6 +1817,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
      */
     @VisibleForTesting
     @RequiresPermission(Manifest.permission.MANAGE_GAME_MODE)
+    @Override
     public void resetGameModeConfigOverride(String packageName, @UserIdInt int userId,
             @GameMode int gameModeToReset) throws SecurityException {
         checkPermission(Manifest.permission.MANAGE_GAME_MODE);
