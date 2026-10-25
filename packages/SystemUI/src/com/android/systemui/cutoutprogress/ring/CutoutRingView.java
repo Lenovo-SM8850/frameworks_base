@@ -32,6 +32,7 @@ import android.graphics.Typeface;
 import android.text.TextPaint;
 import android.util.TypedValue;
 import android.view.DisplayCutout;
+import android.view.DisplayInfo;
 import android.view.Surface;
 import android.view.View;
 import android.view.WindowInsets;
@@ -528,6 +529,12 @@ public final class CutoutRingView extends View {
         mHasCutout = false;
 
         DisplayCutout cutout = insets.getDisplayCutout();
+        if (cutout == null && getDisplay() != null) {
+            // Use the display cutout when window insets do not include it
+            DisplayInfo info = new DisplayInfo();
+            getDisplay().getDisplayInfo(info);
+            cutout = info.displayCutout;
+        }
         if (cutout != null) {
             Path native31 = null;
             try { native31 = cutout.getCutoutPath(); } catch (NoSuchMethodError ignored) {}
@@ -558,6 +565,13 @@ public final class CutoutRingView extends View {
         recalcScaledPath();
         invalidate();
         return super.onApplyWindowInsets(insets);
+    }
+
+    @Override
+    protected void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Turning between the two landscape rotations leaves the insets unchanged
+        requestApplyInsets();
     }
 
     private void recalcScaledPath() {
