@@ -307,6 +307,17 @@ class MultiDisplayVeiledResizeTaskPositioner(
         displayController
             .getDisplayLayout(windowDecoration.taskInfo.displayId)
             ?.getStableBounds(stableBounds)
+        if (task.isFloatingWindow && !stableBounds.isEmpty) {
+            val layout = displayController.getDisplayLayout(task.displayId)
+            if (layout != null) {
+                floatingMinimumScale = minOf(floatingStartScale,
+                    com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.scale(
+                        floatingLogicalBounds, stableBounds, minOf(layout.width(), layout.height()),
+                        (8 * windowDecoration.decorWindowContext.resources.displayMetrics.density).toInt()))
+                floatingMinimumVisibleSize = (minOf(floatingLogicalBounds.width(),
+                    floatingLogicalBounds.height()) * floatingMinimumScale).roundToInt()
+            }
+        }
         return Rect(repositionTaskBounds)
     }
 
@@ -505,6 +516,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun onDragPositioningEnd(displayId: Int, x: Float, y: Float): Rect {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
+        windowDecoration.floatingMiniPreviewCancellation = null
+        miniPreview.close()
         logD(
             TAG,
             windowDecoration.taskInfo.taskId,
@@ -660,7 +675,27 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun close() {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
+        windowDecoration.floatingMiniPreviewCancellation = null
+        miniPreview.close()
+        closing = true
+        pendingFloatingTransition = null
+        pendingFloatingChange = null
+        resetVeilIfVisible()
+        restoreFloatingPresentation()
+        stopFloatingObserver()
+        floatingPreviewTransaction?.close()
+        floatingPreviewTransaction = null
         displayController.removeDisplayWindowListener(this)
+    }
+
+    private fun floatingMinimums(): Pair<Int, Int> {
+        val task = windowDecoration.taskInfo
+        val density = windowDecoration.decorWindowContext.resources.displayMetrics.density
+        val defaultMin = (max(1, task.defaultMinSize) * density).roundToInt()
+        return Pair(if (task.minWidth > 0) task.minWidth else defaultMin,
+            if (task.minHeight > 0) task.minHeight else defaultMin)
     }
 
     private fun moveFloatingResize(x: Float, y: Float): Rect {
@@ -1061,6 +1096,17 @@ class MultiDisplayVeiledResizeTaskPositioner(
         dragEventListeners.remove(dragEventListener)
     }
 
+    override fun onDisplayConfigurationChanged(displayId: Int,
+        configuration: android.content.res.Configuration) {
+        if (displayId != startDisplayId) return
+        onDragPositioningCancel()
+    }
+
+    override fun onDisplayRemoved(displayId: Int) {
+        if (displayId != startDisplayId) return
+        onDragPositioningCancel()
+    }
+
     override fun onTopologyChanged(topology: DisplayTopology?) {
         // TODO: b/383069173 - Cancel window drag when topology changes happen during drag.
 
@@ -1079,14 +1125,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
 
         private val ALPHA_FOR_WINDOW_ON_DISPLAY_WITH_CURSOR = 1.0f
         private val ALPHA_FOR_WINDOW_ON_NON_CURSOR_DISPLAY = 0.7f
-    }
-
-    private fun floatingMinimums(): Pair<Int, Int> {
-        val task = windowDecoration.taskInfo
-        val density = windowDecoration.decorWindowContext.resources.displayMetrics.density
-        val defaultMin = (max(1, task.defaultMinSize) * density).roundToInt()
-        return Pair(if (task.minWidth > 0) task.minWidth else defaultMin,
-            if (task.minHeight > 0) task.minHeight else defaultMin)
     }
 
     private fun isFloatingFocusOnlyChange(info: TransitionInfo,

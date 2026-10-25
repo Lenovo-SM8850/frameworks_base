@@ -1346,6 +1346,18 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
     }
 
 
+    private fun beginFloatingMove() {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.floatingWindowPosition.set(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_UNDEFINED,
+            DISPLAY_ID_0, 400f, 110f, INPUT_METHOD_TYPE_UNKNOWN)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 1000f, 30f)
+    }
+
+
     @Test fun floatingResizeFeedback_rearmsAfterLeavingMinimumAndAfterCancel() = runOnUiThread {
         val task = mockWindowDecoration.taskInfo
         task.isFloatingWindow = true
