@@ -187,66 +187,10 @@ class SidebarDragLayout(
         resolvePreview()
     }
 
-    private fun stopPreview() {
-        showing = false
-        statusBar.disable(StatusBarManager.DISABLE_NONE)
-        zones.forEach { it.second.setShowingMargin(false) }
-        floatingOutline.update(null, floatingRadius)
-        highlighted = null
-        destination = null
-    }
-
-    override fun hide(event: DragEvent?, hideCompleteCallback: Runnable?) {
-        if (!sidebar) { ordinary.hide(event, hideCompleteCallback); return }
-        if (!sidebarSource) ordinary.hide(event, null)
-        stopPreview()
-        val animator = zones.firstOrNull()?.second?.animator
-        if (hideCompleteCallback != null) {
-            if (animator == null) hideCompleteCallback.run()
-            else animator.addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) { hideCompleteCallback.run() }
-            })
-        }
-        if (event?.action == DragEvent.ACTION_DRAG_ENDED ||
-            event?.action == DragEvent.ACTION_DROP) finishSession()
-    }
-
-    override fun hasDropped(): Boolean = if (sidebar) dropped else ordinary.hasDropped()
-
-    override fun drop(event: DragEvent?, dragSurface: SurfaceControl,
-        hideTaskToken: WindowContainerToken?, dropCompleteCallback: Runnable?): Boolean {
-        if (!sidebar) return ordinary.drop(event, dragSurface, hideTaskToken, dropCompleteCallback)
-        if (!sidebarSource && (ordinary as? DragLayout)?.isOverBubblesDropZone == true) {
-            dropped = true
-            val handled = ordinary.drop(event, dragSurface, hideTaskToken, dropCompleteCallback)
-            finishSession()
-            return handled
-        }
-        if (event != null) { x = event.x.toInt(); y = event.y.toInt() }
-        // Refresh task and split state synchronously before resolving DROP.
-        if (!cancelled) policy?.refreshSnapshot()
-        val target = if (cancelled) null else resolvePreview()
-        val handled = target != null && policy?.launch(target) == true
-        dropped = true
-        hide(event, dropCompleteCallback)
-        policy = null
-        if (handled) DragLayout.hideDragSurface(dragSurface)
-        return handled
-    }
-
-    override fun onConfigChanged(newConfig: Configuration?) {
-        ordinary.onConfigChanged(newConfig)
-        zones.forEach { it.second.onThemeChange() }
-        if (sidebar) {
-            policy?.refreshSnapshot()
-            cancelled = true
-            finishSession()
-        }
-    }
-
-    override fun dump(pw: PrintWriter, prefix: String?) {
-        ordinary.dump(pw, prefix)
-        pw.println("${prefix}sidebar=$sidebar cancelled=$cancelled destination=$destination")
+    /** A persistent taskbar sends no disallowed region; dropping back onto it must cancel like the transient one. */
+    private fun isOverTaskbar(): Boolean {
+        val bottom = preview.rootWindowInsets?.getInsets(WindowInsets.Type.tappableElement())?.bottom ?: 0
+        return bottom > 0 && y >= preview.height - bottom
     }
 
     private fun resolvePreview(): SidebarDragPolicy.Destination? {
@@ -315,9 +259,65 @@ class SidebarDragLayout(
         return next
     }
 
-    /** A persistent taskbar sends no disallowed region; dropping back onto it must cancel like the transient one. */
-    private fun isOverTaskbar(): Boolean {
-        val bottom = preview.rootWindowInsets?.getInsets(WindowInsets.Type.tappableElement())?.bottom ?: 0
-        return bottom > 0 && y >= preview.height - bottom
+    private fun stopPreview() {
+        showing = false
+        statusBar.disable(StatusBarManager.DISABLE_NONE)
+        zones.forEach { it.second.setShowingMargin(false) }
+        floatingOutline.update(null, floatingRadius)
+        highlighted = null
+        destination = null
+    }
+
+    override fun hide(event: DragEvent?, hideCompleteCallback: Runnable?) {
+        if (!sidebar) { ordinary.hide(event, hideCompleteCallback); return }
+        if (!sidebarSource) ordinary.hide(event, null)
+        stopPreview()
+        val animator = zones.firstOrNull()?.second?.animator
+        if (hideCompleteCallback != null) {
+            if (animator == null) hideCompleteCallback.run()
+            else animator.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) { hideCompleteCallback.run() }
+            })
+        }
+        if (event?.action == DragEvent.ACTION_DRAG_ENDED ||
+            event?.action == DragEvent.ACTION_DROP) finishSession()
+    }
+
+    override fun hasDropped(): Boolean = if (sidebar) dropped else ordinary.hasDropped()
+
+    override fun drop(event: DragEvent?, dragSurface: SurfaceControl,
+        hideTaskToken: WindowContainerToken?, dropCompleteCallback: Runnable?): Boolean {
+        if (!sidebar) return ordinary.drop(event, dragSurface, hideTaskToken, dropCompleteCallback)
+        if (!sidebarSource && (ordinary as? DragLayout)?.isOverBubblesDropZone == true) {
+            dropped = true
+            val handled = ordinary.drop(event, dragSurface, hideTaskToken, dropCompleteCallback)
+            finishSession()
+            return handled
+        }
+        if (event != null) { x = event.x.toInt(); y = event.y.toInt() }
+        // Refresh task and split state synchronously before resolving DROP.
+        if (!cancelled) policy?.refreshSnapshot()
+        val target = if (cancelled) null else resolvePreview()
+        val handled = target != null && policy?.launch(target) == true
+        dropped = true
+        hide(event, dropCompleteCallback)
+        policy = null
+        if (handled) DragLayout.hideDragSurface(dragSurface)
+        return handled
+    }
+
+    override fun onConfigChanged(newConfig: Configuration?) {
+        ordinary.onConfigChanged(newConfig)
+        zones.forEach { it.second.onThemeChange() }
+        if (sidebar) {
+            policy?.refreshSnapshot()
+            cancelled = true
+            finishSession()
+        }
+    }
+
+    override fun dump(pw: PrintWriter, prefix: String?) {
+        ordinary.dump(pw, prefix)
+        pw.println("${prefix}sidebar=$sidebar cancelled=$cancelled destination=$destination")
     }
 }
