@@ -308,6 +308,7 @@ public class StageTaskListener implements ShellTaskOrganizer.TaskListener {
                 taskInfo.taskId, taskInfo.baseActivity, stageTypeToString(mId), taskInfo.displayId);
         if (mRootTaskInfo.taskId == taskInfo.taskId) {
             mRootTaskInfo = taskInfo;
+            mCallbacks.onRootTaskInfoChanged(this);
         } else if (taskInfo.parentTaskId == mRootTaskInfo.taskId) {
             if (!taskInfo.supportsMultiWindowWithoutConstraints
                     || !ArrayUtils.contains(CONTROLLED_ACTIVITY_TYPES, taskInfo.getActivityType())

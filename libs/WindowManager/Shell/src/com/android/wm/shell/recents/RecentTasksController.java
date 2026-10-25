@@ -69,6 +69,7 @@ import com.android.wm.shell.shared.annotations.ExternalThread;
 import com.android.wm.shell.shared.annotations.ShellMainThread;
 import com.android.wm.shell.shared.desktopmode.DesktopState;
 import com.android.wm.shell.shared.split.SplitBounds;
+import com.android.wm.shell.splitscreen.MultiSplitGroupRepository;
 import com.android.wm.shell.sysui.ShellCommandHandler;
 import com.android.wm.shell.sysui.ShellController;
 import com.android.wm.shell.sysui.ShellInit;
@@ -121,6 +122,13 @@ public class RecentTasksController implements TaskStackListenerCallback,
     // Mapping of split task ids, mappings are symmetrical (ie. if t1 is the taskid of a task in a
     // pair, then mSplitTasks[t1] = t2, and mSplitTasks[t2] = t1)
     private final SparseIntArray mSplitTasks = new SparseIntArray();
+
+    private final MultiSplitGroupRepository mMultiSplitGroups =
+            new MultiSplitGroupRepository(this::notifyRecentTasksChanged);
+
+    public MultiSplitGroupRepository getMultiSplitGroups() {
+        return mMultiSplitGroups;
+    }
 
     private int mUserId;
     /**

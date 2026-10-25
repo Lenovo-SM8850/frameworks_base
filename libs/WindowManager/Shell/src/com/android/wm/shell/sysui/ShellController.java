@@ -16,6 +16,8 @@
 
 package com.android.wm.shell.sysui;
 
+import android.content.Intent;
+import java.util.function.BiPredicate;
 import static android.content.pm.ActivityInfo.CONFIG_ASSETS_PATHS;
 import static android.content.pm.ActivityInfo.CONFIG_FONT_SCALE;
 import static android.content.pm.ActivityInfo.CONFIG_LAYOUT_DIRECTION;
@@ -600,4 +602,10 @@ public class ShellController {
             }
         }
     }
+
+    public void setSidebarPendingSplitLauncher(BiPredicate<Intent, Integer> launcher) {
+        mSidebarPendingSplitLauncher = launcher;
+    }
+
+    private BiPredicate<Intent, Integer> mSidebarPendingSplitLauncher = (intent, display) -> false;
 }
