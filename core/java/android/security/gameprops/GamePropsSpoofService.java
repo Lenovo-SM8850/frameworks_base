@@ -120,23 +120,22 @@ public final class GamePropsSpoofService {
         BUILTIN_PROFILES = new HashMap<>();
         Object[][] entries = {
             // key          brand          model               manufacturer    device             fingerprint                                                                                                product
-            { "BS4C",     "Black Shark", "2SM-X706B",         "Xiaomi",       "2SM-X706B",       "BlackShark/PRS-H0/Black Shark 4:13/TQ3A.230805.001/20230315:user/release-keys",                       "2SM-X706B"   },
-            { "F5",       "POCO",        "23049PCD8G",        "Xiaomi",       "marble",          "POCO/marble_global/marble:15/AQ3A.250226.002/OS3.0.3.0.VMRMIXM:user/release-keys",                    "marble"      },
             { "S25U",     "samsung",     "SM-S938B",          "samsung",      "pa3q",            "samsung/pa3qxxx/pa3q:15/AP3A.240905.015.A2/S938BXXU9CZDP:user/release-keys",                          "pa3qxxx"     },
-            { "GZF5",     "samsung",     "SM-F9460",          "samsung",      "q2q",             "samsung/q2qzh/q2q:15/UP1A.231005.007/F946BXXU1BWK4:user/release-keys",                                "q2qxxx"    },
-            { "HMV2R",    "HONOR",       "VER-N49DP",         "HONOR",        "VER",             "HONOR/VER-N49DP/VER:13/ENG.20240918.123456:user/release-keys",                                        "VER-N49DP"   },
-            { "LY70023",  "Lenovo",      "Lenovo TB-9707F",   "lenovo",       "TB-9707F",        "Lenovo/TB-9707F_PRC/TB-9707F:13/TKQ1.221013.002/15.0.342_231018:user/release-keys",                   "TB-9707F"    },
-            { "MI11TP",   "Xiaomi",      "2107113SG",         "Xiaomi",       "vili",            "Xiaomi/vili_global/vili:14/UKQ1.231207.002/V816.0.22.0.UKDMIXM:user/release-keys",                    "vili"        },
-            { "MI13",     "Xiaomi",      "2211133G",          "Xiaomi",       "fuxi",            "Xiaomi/fuxi_global/fuxi:14/UKQ1.230804.001/V816.0.3.0.UMCMIXM:user/release-keys",                     "fuxi"        },
-            { "MI13P",    "Xiaomi",      "2210132G",          "Xiaomi",       "nuwa",            "Xiaomi/nuwa_global/nuwa:13/TKQ1.221114.001/OS2.0.100.0.VMBMIXM:user/release-keys",                    "nuwa"        },
-            { "MI14P",    "Xiaomi",      "23116PN5BC",        "Xiaomi",       "shennong",        "Xiaomi/shennong/shennong:15/AQ3A.240627.003/OS2.0.202.0.VNBCNXM:user/release-keys",                   "shennong"    },
-            { "OP12",     "OnePlus",     "CPH2581",           "OnePlus",      "OP594DL1",        "OnePlus/OP594DL1/OP594DL1:14/UKQ1.230917.001/1702951307528:user/release-keys",                        "OP594DL1"    },
+            { "GTS12U",   "samsung",     "SM-X940",           "samsung",      null,              null,                                                                                                  "gts12uwifi"  },
+            { "IQPADU",   "vivo",        "iPA2691",           "vivo",         null,              null,                                                                                                  "DPD2605"     },
             { "OP13",     "OnePlus",     "PJZ110",            "OnePlus",      "OP5D0DL1",        "OnePlus/PJZ110/OP5D0DL1:15/AP3A.240617.008/V.1bd19a1-1-2:user/release-keys",                          "PJZ110"      },
+            { "OP15",     "OnePlus",     "PLK110",            "OnePlus",      null,              null,                                                                                                  "infiniti"    },
+            { "OPPAD3P",  "OnePlus",     "OPD2513",           "OnePlus",      null,              null,                                                                                                  "iceland-o"   },
             { "PXL11PXL", "google",      "Pixel 11 Pro XL",   "Google",       "kodiak",          "google/kodiak/kodiak:17/CD1A.260714.001.A9/15938155:user/release-keys",                               "kodiak"      },
-            { "RM9P",     "nubia",       "NX769J",            "ZTE",          "NX769J",          "nubia/NX769J/NX769J:14/UKQ1.230917.001/20240813.173312:user/release-keys",                            "NX769J"      },
             { "RM10P",    "nubia",       "NX789J",            "ZTE",          "NX789J",          "nubia/NX789J-UN/NX789J:15/AQ3A.240812.002/20241212.194919:user/release-keys",                         "NX789J"      },
+            { "RMA2",     "nubia",       "NP06J",             "nubia",        null,              null,                                                                                                  "np06j"       },
             { "RM15P5G",  "realme",      "RMX5101",           "realme",       "RE60B4L1",        "realme/RMX5101IN/RE60B4L1:15/AP3A.240617.008/V.R4T2.26cec0e-80bb4e-80b757:user/release-keys",         "RMX5101"     },
             { "ROG9P",    "asus",        "ASUSAI2501",        "asus",         "ASUSAI2501",      "asus/WWAI2501/ASUSAI2501:15/AQ3A.240829.003/35.1810.1810.346-0:user/release-keys",                    "ASUSAI2501"  },
+            { "OPPADMINI", "OPPO", "OPD2515", "OPPO", null, null, "ivy" },
+            { "MIPAD9PM", "Xiaomi", "M367FC", "Xiaomi", null, null, "yingtian" },
+            { "MIPAD9P", "Xiaomi", "2612CRPFFC", "Xiaomi", null, null, "shuntian" },
+            { "OPPAD5P", "OPPO", "OPD2511", "OPPO", null, null, "iceland" },
+            { "IQPAD6P", "vivo", "iPA2673", "vivo", null, null, "DPD2540" },
         };
         for (Object[] e : entries) {
             BUILTIN_PROFILES.put(
@@ -147,14 +146,14 @@ public final class GamePropsSpoofService {
         }
     }
 
-    /** Convenience builder for a profile map. Null fp/product are skipped. */
+    /** Convenience builder for a profile map. Null device/fp/product are skipped. */
     private static Map<String, Object> profile(String brand, String model, String manufacturer,
             String device, String fingerprint, String product) {
         Map<String, Object> m = new HashMap<>();
         m.put("BRAND",        brand);
         m.put("MODEL",        model);
         m.put("MANUFACTURER", manufacturer);
-        m.put("DEVICE",       device);
+        if (device      != null) m.put("DEVICE",       device);
         if (fingerprint != null) m.put("FINGERPRINT", fingerprint);
         if (product     != null) m.put("PRODUCT",     product);
         return m;
