@@ -16,7 +16,6 @@
 
 package com.android.wm.shell.recents;
 
-import android.util.SparseBooleanArray;
 import static android.app.ActivityTaskManager.INVALID_TASK_ID;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_HOME;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_RECENTS;
@@ -64,6 +63,7 @@ import android.util.ArrayMap;
 import android.util.IntArray;
 import android.util.Pair;
 import android.util.Slog;
+import android.util.SparseBooleanArray;
 import android.view.RemoteAnimationTarget;
 import android.view.SurfaceControl;
 import android.window.DesktopExperienceFlags;
@@ -123,6 +123,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
     private final ArrayList<RecentsController> mControllers = new ArrayList<>();
     private final ArrayList<RecentsTransitionStateListener> mStateListeners = new ArrayList<>();
     private Supplier<SurfaceControl.Transaction> mFinishTransactionSupplier = null;
+    private final SparseBooleanArray mFloatingTasksHidden = new SparseBooleanArray();
 
     /**
      * List of other handlers which might need to mix recents with other things. These are checked
@@ -188,8 +189,8 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
     }
 
     /**
-     * Used for testing to provide a supplier for the transaction used in
-     * RecentsController#finishInner() which later gets merged into the final finish transaction.
+     * Used for testing to provide Recents cleanup and floating visibility transactions.
+     * The cleanup transaction later gets merged into the final finish transaction.
      */
     @VisibleForTesting
     public void setFinishTransactionSupplier(
@@ -428,6 +429,13 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          *
          */
         private HashMap<WindowContainerToken, TaskState> mTaskStates = new HashMap<>();
+        private final ArrayMap<WindowContainerToken, TransitionInfo.Change> mFloatingTasks =
+                new ArrayMap<>();
+        private final HashSet<WindowContainerToken> mStartingFloatingTasks =
+                new HashSet<>();
+        private boolean mFinishingToHome;
+        private boolean mFinishingHomeGesture;
+
 
         /**
          * List of tasks that we are switching away from via this transition, ordered from top most
@@ -650,6 +658,23 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          * the cancel() methods to ensure that Launcher is notified.
          */
 
+        private void rememberFloatingTask(TransitionInfo.Change change) {
+            final TransitionInfo.Change previous = mFloatingTasks.get(change.getContainer());
+            if (previous != null && previous.getMode() == android.view.WindowManager.TRANSIT_CLOSE
+                    && !TransitionUtil.isOpeningType(change.getMode())) return;
+            mFloatingTasks.put(change.getContainer(), change);
+        }
+
+
+        private boolean isFloatingAboveHome(ActivityManager.RunningTaskInfo task) {
+            final TransitionInfo.Change change = mFloatingTasks.get(task.token);
+            return task.isFloatingWindow && task.displayId == mDisplayId
+                    && task.configuration.windowConfiguration.isAlwaysOnTop()
+                    && (change == null
+                            || change.getMode() != android.view.WindowManager.TRANSIT_CLOSE);
+        }
+
+
         private ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>>
                 getFloatingTaskSurfaces() {
             final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
@@ -674,17 +699,6 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             return tasks;
         }
 
-
-        private boolean isFloatingAboveHome(ActivityManager.RunningTaskInfo task) {
-            final TransitionInfo.Change change = mFloatingTasks.get(task.token);
-            return task.isFloatingWindow && task.displayId == mDisplayId
-                    && task.configuration.windowConfiguration.isAlwaysOnTop()
-                    && (change == null
-                            || change.getMode() != android.view.WindowManager.TRANSIT_CLOSE);
-        }
-
-        private final ArrayMap<WindowContainerToken, TransitionInfo.Change> mFloatingTasks =
-                new ArrayMap<>();
         void cleanUp() {
             ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
                     "[%d] RecentsController.cleanup", mInstanceId);
@@ -704,6 +718,10 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             mFinishTransaction = null;
             mAwaitingCancelCompletion = false;
             mTaskStates.clear();
+            mFloatingTasks.clear();
+            mStartingFloatingTasks.clear();
+            mFinishingToHome = false;
+            mFinishingHomeGesture = false;
             mPausingTasks = null;
             mPausingDeskId = -1;
             mClosingTasks = null;
@@ -835,6 +853,10 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 cancel("No listener (" + (mListener == null)
                         + ") or no transition (" + (mTransition == null) + ")");
                 return false;
+            }
+            for (ActivityManager.RunningTaskInfo task
+                    : mShellTaskOrganizer.getRunningTasks(mDisplayId)) {
+                if (isFloatingAboveHome(task)) mStartingFloatingTasks.add(task.token);
             }
             // First see if this is a valid recents transition.
             boolean hasPausingTasks = false;
@@ -1238,9 +1260,28 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             final TransitionUtil.LeafTaskFilter leafTaskFilter =
                     new TransitionUtil.LeafTaskFilter(info);
             boolean hasTaskChanges = false;
+            final boolean openingHome = info.getChanges().stream().anyMatch(change ->
+                    change.getTaskInfo() != null
+                            && change.getTaskInfo().getActivityType() == ACTIVITY_TYPE_HOME
+                            && TransitionUtil.isOpeningType(change.getMode()));
             for (int i = 0; i < info.getChanges().size(); ++i) {
                 final TransitionInfo.Change change = info.getChanges().get(i);
                 final ActivityManager.RunningTaskInfo taskInfo = change.getTaskInfo();
+                if (taskInfo != null && taskInfo.isFloatingWindow) {
+                    if (TransitionUtil.isOpeningType(change.getMode())
+                            && (change.getMode() == TRANSIT_OPEN
+                                    || !mStartingFloatingTasks.contains(change.getContainer())
+                                    || (!openingHome
+                                            && change.hasFlags(TransitionInfo.FLAG_MOVED_TO_TOP)))) {
+                        // Explicit floating launches own their transition, like bubbles.
+                        refuseMerge(startT, () -> cancel(
+                                "task #" + taskInfo.taskId + " is launching floating"));
+                        return;
+                    }
+                    rememberFloatingTask(change);
+                    startT.hide(change.getLeash());
+                    continue;
+                }
                 if (taskInfo != null && mBubbleHelper.isBubbleTask(taskInfo)) {
                     ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
                             "[%d]   Canceling due to bubble task", mInstanceId);
@@ -1728,9 +1769,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 return;
             }
 
-            final SurfaceControl.Transaction t = mFinishTransactionSupplier != null
-                    ? mFinishTransactionSupplier.get()
-                    : new SurfaceControl.Transaction();
+            final SurfaceControl.Transaction t = newSurfaceTransaction();
 
             if (mAwaitingCancelCompletion) {
                 ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
@@ -1768,6 +1807,22 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
 
             // Note: returning to a desk tile, whether it be by clicking the tile or one of the
             // existing exploded tasks is considered to be returning to app.
+            final TransitionInfo.Change recentsChange = mRecentsTask != null
+                    ? mInfo.getChange(mRecentsTask) : null;
+            if (!toHome && mState == STATE_NORMAL && !mKeyguardLocked && recentsChange != null
+                    && recentsChange.getTaskInfo().topActivityType == ACTIVITY_TYPE_HOME
+                    && mPausingTasks != null && mPausingTasks.isEmpty() && mOpeningTasks.isEmpty()) {
+                // Floating tasks are not app targets, so there is no app order to restore.
+                for (ActivityManager.RunningTaskInfo task
+                        : mShellTaskOrganizer.getRunningTasks(mDisplayId)) {
+                    if (isFloatingAboveHome(task)) {
+                        toHome = true;
+                        break;
+                    }
+                }
+            }
+            mFinishingToHome = toHome || mWillFinishToHome;
+            mFinishingHomeGesture = mFinishingToHome && sendUserLeaveHint;
             boolean returningToApp = !toHome
                     && !mWillFinishToHome
                     && mPausingTasks != null
@@ -1982,6 +2037,8 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                     "[%d] RecentsController.finishInner: Completing finish", mInstanceId);
             final Transitions.TransitionFinishCallback finishCb = mFinishCB;
             final IResultReceiver runnerFinishCb = mPendingRunnerFinishCb;
+            final boolean finishedToHome = mFinishingToHome;
+            final boolean finishedHomeGesture = mFinishingHomeGesture;
 
             // We merge the cleanup transaction (prepared in finishInner()) with the last accepted
             // finish transaction to ensure that it's applied after the default finish transaction
@@ -1989,6 +2046,16 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             mFinishTransaction.merge(mPendingFinishTransaction);
 
             cleanUp();
+            if (finishedToHome) {
+                for (int i = 0; i < mStateListeners.size(); ++i) {
+                    mStateListeners.get(i).onTransitionFinishedToHome(mDisplayId);
+                }
+            }
+            if (finishedHomeGesture) {
+                for (int i = 0; i < mStateListeners.size(); ++i) {
+                    mStateListeners.get(i).onHomeGestureFinished(mDisplayId);
+                }
+            }
             finishCb.onTransitionFinished(wct);
             if (runnerFinishCb != null) {
                 try {
@@ -2278,8 +2345,6 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             t.apply();
         }
     }
-
-    private final SparseBooleanArray mFloatingTasksHidden = new SparseBooleanArray();
 
     private SurfaceControl.Transaction newSurfaceTransaction() {
         return mFinishTransactionSupplier != null
