@@ -173,6 +173,19 @@ class DesktopModeImpl(
             Boolean::class.javaObjectType,
         ) ?: false
 
+    override fun isDesktopModeSupportedOnDisplay(displayId: Int) =
+        mainExecutor.executeBlockingForResult(
+            {
+                desktopTasksController.getOrNull()?.isDesktopModeSupportedOnDisplay(displayId)
+                    ?: false
+            },
+            Boolean::class.javaObjectType,
+        ) ?: false
+
+    override fun toggleDesktopMode(displayId: Int) {
+        mainExecutor.execute { desktopTasksController.getOrNull()?.toggleDesktopMode(displayId) }
+    }
+
     override fun togglePeek(displayId: Int) {
         if (displayId != DEFAULT_DISPLAY) {
             ProtoLog.w(
