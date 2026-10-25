@@ -46,6 +46,41 @@ class FloatingMiniStateTest {
         assertThat(sized.height()).isEqualTo(1784)
     }
 
+    @Test fun stashThreshold_hasHysteresisAndKeepsVisibleStripOnHorizontalEdges() {
+        assertThat(FloatingMiniState.stashEdge(Rect(-216, 300, 144, 840), stable))
+            .isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(FloatingMiniState.stashEdge(Rect(-217, 300, 143, 840), stable))
+            .isEqualTo(FloatingMiniState.Edge.LEFT)
+        assertThat(FloatingMiniState.canUnstash(Rect(-180, 300, 180, 840), stable,
+            FloatingMiniState.Edge.LEFT)).isFalse()
+        assertThat(FloatingMiniState.canUnstash(Rect(-179, 300, 181, 840), stable,
+            FloatingMiniState.Edge.LEFT)).isTrue()
+        for (edge in FloatingMiniState.Edge.entries.filter { it != FloatingMiniState.Edge.NONE }) {
+            val stashed = FloatingMiniState.stash(Rect(200, 300, 560, 840), stable, edge, 28)
+            val intersection = Rect(stashed)
+            assertThat(intersection.intersect(stable)).isTrue()
+            if (edge == FloatingMiniState.Edge.LEFT || edge == FloatingMiniState.Edge.RIGHT) {
+                assertThat(intersection.width()).isEqualTo(28)
+            } else assertThat(intersection.height()).isEqualTo(28)
+        }
+    }
+
+    @Test fun rotationRefit_keepsStashEdgeAndUserIsolation() {
+        val state = FloatingMiniState()
+        val restore = FloatingMiniState.Restore(Rect(200, 300, 800, 1200), logical, .75f)
+        val entry = state.enter(10, 1, restore, Rect(-332, 300, 28, 840), .45f)
+        entry.edge = FloatingMiniState.Edge.LEFT
+        val rotated = Rect(0, 100, 1900, 1200)
+        val refit = FloatingMiniState.refit(entry.bounds, stable, rotated)
+        val stashed = FloatingMiniState.stash(refit, rotated, entry.edge, 28)
+        assertThat(stashed.right).isEqualTo(28)
+        assertThat(stashed.top).isAtLeast(rotated.top)
+        assertThat(stashed.bottom).isAtMost(rotated.bottom)
+        assertThat(state.get(11, 1)).isNull()
+        state.removeUser(11)
+        assertThat(state.get(10, 1)).isSameInstanceAs(entry)
+    }
+
     @Test fun dynamicResizeFloor_keepsLogicalBoundsAtLimitAndCommitsPastLimit() {
         val start = Rect(200, 300, 800, 1200)
         val scale = FloatingMiniState.scale(logical, stable, 1200, 8)
@@ -71,4 +106,39 @@ class FloatingMiniStateTest {
         assertThat(FloatingMiniState.clamp(Rect(2300, 300, 2959, 1355), area))
             .isEqualTo(Rect(1901, 300, 2560, 1355))
     }
+
+    @Test fun topAndBottomPushOut_neverStashAndRefitFullyInside() {
+        for (bounds in listOf(Rect(300, -400, 660, 140), Rect(300, 1800, 660, 2340))) {
+            assertThat(FloatingMiniState.stashEdge(bounds, stable)).isEqualTo(FloatingMiniState.Edge.NONE)
+            assertThat(stable.contains(FloatingMiniState.clamp(bounds, stable, 8))).isTrue()
+        }
+    }
+
+    @Test fun tidy_threeWindowsChooseNearestCornerAndStackVertically() {
+        val occupied = mutableListOf<Rect>()
+        repeat(3) {
+            occupied += requireNotNull(FloatingMiniState.tidyBounds(Rect(600, 120, 1200, 1020),
+                Rect(0, 0, 360, 540), stable, 8, occupied))
+        }
+        assertThat(occupied).containsExactly(Rect(832, 108, 1192, 648),
+            Rect(832, 656, 1192, 1196), Rect(832, 1204, 1192, 1744)).inOrder()
+    }
+
+    @Test fun tidy_usesHorizontalEdgeAfterVerticalEdgeFills() {
+        val area = Rect(0, 0, 1000, 800)
+        val occupied = listOf(Rect(690, 10, 990, 310), Rect(690, 320, 990, 620))
+        assertThat(FloatingMiniState.tidyBounds(Rect(700, 20, 990, 310),
+            Rect(0, 0, 300, 300), area, 10, occupied)).isEqualTo(Rect(380, 10, 680, 310))
+    }
+
+    @Test fun tidy_fullCornerEdgesFallBackToAnotherCorner() {
+        val area = Rect(0, 0, 1000, 800)
+        val occupied = listOf(Rect(490, 10, 990, 310), Rect(690, 320, 990, 790),
+            Rect(10, 10, 480, 310))
+        val target = requireNotNull(FloatingMiniState.tidyBounds(Rect(700, 20, 990, 310),
+            Rect(0, 0, 300, 300), area, 10, occupied))
+        assertThat(target).isEqualTo(Rect(380, 490, 680, 790))
+        occupied.forEach { assertThat(Rect.intersects(target, it)).isFalse() }
+    }
+
 }

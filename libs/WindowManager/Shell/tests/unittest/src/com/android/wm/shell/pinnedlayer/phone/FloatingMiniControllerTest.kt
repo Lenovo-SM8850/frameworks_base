@@ -195,6 +195,18 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(h.task.floatingWindowScale).isEqualTo(.45f)
     }
 
+    @Test fun interruptedStash_reachesTargetStrip() {
+        val h = Harness()
+        h.controller.onDragEnded(h.task, h.task.presentationBounds, Rect(-217, 200, 143, 740))
+        whenever(h.animator.animatedValue).thenReturn(.5f)
+        h.updateListener.onAnimationUpdate(h.animator)
+        h.interrupt()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        assertThat(entry.bounds).isEqualTo(Rect(-332, 200, 28, 740))
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.LEFT)
+        assertThat(h.task.presentationBounds).isEqualTo(entry.bounds)
+    }
+
     @Test fun drag_coalescesMovesAndReusesTransactionAndLeash() {
         val h = Harness()
         h.controller.beginDrag(h.task)
@@ -246,6 +258,17 @@ class FloatingMiniControllerTest : ShellTestCase() {
         }
     }
 
+    @Test fun miniReleasedPastTopOrBottom_returnsFullyInsideWithoutStash() {
+        listOf(Rect(300, -400, 660, 140), Rect(300, 1800, 660, 2340)).forEach { end ->
+            val h = Harness()
+            h.controller.onDragEnded(h.task, h.task.presentationBounds, end)
+            h.interrupt()
+            val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+            assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+            assertThat(Rect(0, 100, 1200, 1900).contains(entry.bounds)).isTrue()
+        }
+    }
+
     @Test fun tapWithoutDrag_releasesInteractionOwner() {
         val h = Harness()
         h.controller.beginDrag(h.task)
@@ -264,6 +287,34 @@ class FloatingMiniControllerTest : ShellTestCase() {
         callback.firstValue.doFrame(6_060_606)
         verify(h.transaction).close()
         verify(h.transaction, never()).apply()
+    }
+
+    @Test fun restoreAfterUnstash_usesUnstashedMiniCenter() {
+        val h = Harness()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        entry.edge = FloatingMiniState.Edge.LEFT
+        entry.bounds.set(-332, 730, 28, 1270)
+        h.controller.unstash(h.task)
+        h.interrupt()
+        assertThat(entry.bounds).isEqualTo(Rect(8, 730, 368, 1270))
+        h.controller.restore(h.task)
+        h.animatorListener.onAnimationEnd(h.animator)
+        assertThat(h.changes.last().presentationBounds).isEqualTo(Rect(0, 550, 600, 1450))
+        assertThat(h.changes.last().floatingWindowScale).isEqualTo(.75f)
+    }
+
+
+    @Test fun stashTargetQuery_usesExistingThresholdWithoutMutatingEntry() {
+        val h = Harness()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        val before = Rect(entry.bounds)
+        assertThat(h.controller.getStashTarget(h.task, Rect(-216, 200, 144, 740)))
+            .isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(h.controller.getStashTarget(h.task, Rect(-217, 200, 143, 740)))
+            .isEqualTo(FloatingMiniState.Edge.LEFT)
+        assertThat(entry.bounds).isEqualTo(before)
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(h.changes).isEmpty()
     }
 
     private fun Harness.occupy(bounds: Rect, id: Int = 43, user: Int = task.userId,
@@ -312,6 +363,19 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(h.state.get(h.task.userId, h.task.taskId)!!.bounds).isEqualTo(target.bounds)
         assertThat(h.state.get(other.userId, other.taskId)!!.bounds).isEqualTo(occupied)
         assertThat(target.scale).isEqualTo(.45f)
+    }
+
+    @Test fun placement_filtersDisplaysHiddenTasksAndStashedStrips() {
+        val h = Harness()
+        val bounds = Rect(8, 108, 368, 648)
+        val others = listOf(h.occupy(bounds, id = 44, display = 2),
+            h.occupy(bounds, id = 45, visible = false),
+            h.occupy(bounds, id = 46, edge = FloatingMiniState.Edge.LEFT))
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(ArrayList(listOf(h.task) + others))
+        val target = requireNotNull(h.controller.getDragTarget(h.task,
+            Rect(300, 500, 660, 1040), Rect(0, 100, 360, 640)))
+        assertThat(target.bounds).isEqualTo(bounds)
+        assertThat(h.changes).isEmpty()
     }
 
     @Test fun crowdedEdges_noFitUsesDeterministicSnapWithoutShrinkingOrMovingOthers() {
@@ -436,5 +500,73 @@ class FloatingMiniControllerTest : ShellTestCase() {
         val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
         assertThat(entry.bounds.width().toFloat() / entry.bounds.height())
             .isWithin(.005f).of(1300f / 800f)
+    }
+
+
+    private fun occupiedMini(h: Harness, user: Int = h.task.userId,
+        display: Int = 0, visible: Boolean = true): FloatingMiniState.Entry {
+        val other = TestRunningTaskInfoBuilder().setTaskId(43).setDisplayId(display).build().apply {
+            userId = user
+            isFloatingWindow = true
+            isVisible = visible
+        }
+        whenever(h.organizer.getRunningTasks(0)).thenReturn(arrayListOf(h.task, other))
+        val restore = requireNotNull(h.state.get(h.task.userId, h.task.taskId)).restore
+        return h.state.enter(other.userId, other.taskId, restore, Rect(8, 300, 368, 840), .45f)
+    }
+
+    @Test fun tapStashedStrip_avoidsVisibleMiniFromAnotherProfile() {
+        val h = Harness()
+        val other = occupiedMini(h, user = h.task.userId + 10)
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        entry.edge = FloatingMiniState.Edge.LEFT
+        entry.bounds.set(-332, 300, 28, 840)
+        h.controller.unstash(h.task)
+        h.interrupt()
+        assertThat(Rect.intersects(entry.bounds, other.bounds)).isFalse()
+        assertThat(Rect(8, 108, 1192, 1892).contains(entry.bounds)).isTrue()
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(entry.scale).isEqualTo(.45f)
+        assertThat(entry.restore.bounds).isEqualTo(h.normal)
+        assertThat(other.bounds).isEqualTo(Rect(8, 300, 368, 840))
+    }
+
+    @Test fun miniReleaseAwayFromCorner_avoidsOccupiedMini() {
+        val h = Harness()
+        val other = occupiedMini(h)
+        other.bounds.set(420, 730, 780, 1270)
+        h.controller.onDragEnded(h.task, h.task.presentationBounds, Rect(other.bounds))
+        h.interrupt()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        assertThat(Rect.intersects(entry.bounds, other.bounds)).isFalse()
+        assertThat(entry.scale).isEqualTo(.45f)
+        assertThat(entry.restore.bounds).isEqualTo(h.normal)
+        assertThat(other.bounds).isEqualTo(Rect(420, 730, 780, 1270))
+    }
+
+    @Test fun dragStashedMiniOnscreen_avoidsOccupiedMini() {
+        val h = Harness()
+        val other = occupiedMini(h)
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        entry.edge = FloatingMiniState.Edge.LEFT
+        entry.bounds.set(-332, 300, 28, 840)
+        h.controller.onDragEnded(h.task, Rect(entry.bounds), Rect(other.bounds))
+        h.interrupt()
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(Rect.intersects(entry.bounds, other.bounds)).isFalse()
+        assertThat(entry.scale).isEqualTo(.45f)
+    }
+
+    @Test fun tapStashedStrip_ignoresHiddenAndOtherDisplayMinis() {
+        for ((display, visible) in listOf(0 to false, 1 to true)) {
+            val h = Harness()
+            occupiedMini(h, display = display, visible = visible)
+            val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+            entry.edge = FloatingMiniState.Edge.LEFT
+            entry.bounds.set(-332, 300, 28, 840)
+            h.controller.unstash(h.task)
+            h.interrupt()
+            assertThat(entry.bounds).isEqualTo(Rect(8, 300, 368, 840))
+        }
     }
 }
