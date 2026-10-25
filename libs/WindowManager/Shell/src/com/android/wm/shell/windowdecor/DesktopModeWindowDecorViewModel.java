@@ -661,6 +661,17 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (decoration == null) return;
         final RunningTaskInfo oldTaskInfo = decoration.getTaskInfo();
+        if (FloatingDecorInfo.canSkipRelayout(oldTaskInfo, taskInfo)) {
+            decoration.updateFloatingTaskInfo(taskInfo);
+            return;
+        }
+        if (oldTaskInfo.isFloatingWindow != taskInfo.isFloatingWindow) {
+            try (SurfaceControl.Transaction t = mTransactionFactory.get()) {
+                recreateWindowDecoration(taskInfo, decoration.getTaskSurface(), t, t);
+                t.apply();
+            }
+            return;
+        }
 
         if (taskInfo.displayId != oldTaskInfo.displayId
                 && !DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) {

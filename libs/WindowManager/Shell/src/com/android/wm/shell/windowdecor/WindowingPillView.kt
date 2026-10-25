@@ -16,7 +16,6 @@
 
 package com.android.wm.shell.windowdecor
 
-import com.android.wm.shell.shared.bubbles.BubbleFlagHelper
 import android.annotation.ColorInt
 import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context

@@ -16,16 +16,6 @@
 
 package com.android.wm.shell.windowdecor
 
-import android.animation.ArgbEvaluator
-import android.animation.ValueAnimator
-import android.content.res.ColorStateList
-import android.widget.LinearLayout
-import android.widget.TextView
-import android.window.DesktopExperienceFlags
-import androidx.core.view.isGone
-import androidx.core.view.isVisible
-import com.android.app.animation.Interpolators.EMPHASIZED
-import kotlin.math.max
 import android.animation.Animator
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator

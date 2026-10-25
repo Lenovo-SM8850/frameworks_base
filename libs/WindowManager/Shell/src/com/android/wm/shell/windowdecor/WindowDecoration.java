@@ -471,6 +471,12 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         return (T) LayoutInflater.from(context).inflate(layoutResId, null);
     }
 
+    public void updateFloatingTaskInfo(RunningTaskInfo taskInfo) {
+        mTaskInfo = taskInfo;
+    }
+
+    private boolean mFloatingWindowDecorScaled;
+
     private void updateDecorationContainerSurface(
             SurfaceControl.Transaction startT, RelayoutResult<T> outResult) {
         if (mDecorationContainerSurface == null) {
@@ -972,8 +978,6 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
             return new SurfaceControlViewHost(c, d, wmm, callsite);
         }
     }
-
-    private boolean mFloatingWindowDecorScaled;
 
     private void loadTaskSurfaceOutline(RelayoutParams params, Context context,
             RelayoutResult<T> outResult) {
