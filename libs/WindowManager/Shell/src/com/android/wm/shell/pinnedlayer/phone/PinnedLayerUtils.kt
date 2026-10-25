@@ -44,6 +44,8 @@ object PinnedLayerUtils {
             .apply { if (bounds != null) setBounds(windowContainerToken, bounds) }
             .setAlwaysOnTop(windowContainerToken, true)
             .setDisablePip(windowContainerToken, true)
+            .setFloatingWindow(windowContainerToken, true)
+            .setInterceptBackPressedOnTaskRoot(windowContainerToken, true)
     }
 
     /**
@@ -87,5 +89,8 @@ object PinnedLayerUtils {
         return WindowContainerTransaction()
             .setAlwaysOnTop(windowContainerToken, false)
             .setDisablePip(windowContainerToken, false)
+            .setFloatingWindow(windowContainerToken, false)
+            .setHidden(windowContainerToken, false)
+            .setInterceptBackPressedOnTaskRoot(windowContainerToken, false)
     }
 }
