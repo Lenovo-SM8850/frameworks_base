@@ -543,4 +543,20 @@ class FloatingMiniController(
                 from, task.floatingWindowScale, destination, scale)
         }
     }
+
+    fun isStashed(task: TaskInfo): Boolean = state.get(task.userId, task.taskId)?.edge
+        ?.let { it != FloatingMiniState.Edge.NONE } == true
+
+    fun unstash(task: TaskInfo) {
+        val entry = state.get(task.userId, task.taskId) ?: return
+        if (!isStashed(task)) return
+        val stable = stable(task)
+        if (stable.isEmpty) return
+        val margin = (8 * density(task)).toInt()
+        val destination = avoidMiniOverlap(task,
+            FloatingMiniState.clamp(entry.bounds, stable, margin), stable, margin)
+        entry.edge = FloatingMiniState.Edge.NONE
+        animate(task, Rect(entry.bounds), entry.scale, destination, entry.scale)
+        changed(task)
+    }
 }
