@@ -1248,6 +1248,58 @@ public class DisplayContentTests extends WindowTestsBase {
     }
 
     @Test
+    public void testLargeScreenOrientationTranslucentActivityInAnotherTask() {
+        assertLargeScreenOrientationBehindDialog(android.R.style.Theme_Translucent, true);
+    }
+
+    @Test
+    public void testLargeScreenOrientationFloatingActivityInAnotherTask() {
+        assertLargeScreenOrientationBehindDialog(android.R.style.Theme_Material_Dialog, true);
+    }
+
+    @Test
+    public void testLargeScreenOrientationTranslucentActivityInSameTask() {
+        assertLargeScreenOrientationBehindDialog(android.R.style.Theme_Translucent, false);
+    }
+
+    private void assertLargeScreenOrientationBehindDialog(int theme, boolean separateTask) {
+        final ActivityRecord bottom = new ActivityBuilder(mAtm).setCreateTask(true)
+                .setOnTop(true).setScreenOrientation(SCREEN_ORIENTATION_LANDSCAPE).build();
+        final ActivityBuilder overlayBuilder = new ActivityBuilder(mAtm).setOnTop(true)
+                .setActivityTheme(theme).setScreenOrientation(SCREEN_ORIENTATION_UNSPECIFIED);
+        if (separateTask) {
+            overlayBuilder.setCreateTask(true);
+        } else {
+            overlayBuilder.setTask(bottom.getTask());
+        }
+        final ActivityRecord overlay = overlayBuilder.build();
+        assertFalse(overlay.providesOrientation());
+        assertFalse(overlay.occludesParent());
+        assertEquals(!separateTask, bottom.getTask() == overlay.getTask());
+        assertTrue(bottom.isVisibleRequested());
+        assertTrue(overlay.isVisibleRequested());
+        // The default component of the bottom activity belongs to a different package.
+        assertNotEquals(bottom.packageName, overlay.packageName);
+        spyOn(mDisplayContent);
+        final Configuration config = new Configuration(mDisplayContent.getConfiguration());
+        config.smallestScreenWidthDp = 600;
+        doReturn(config).when(mDisplayContent).getConfiguration();
+        doReturn(true).when(mDisplayContent).getIgnoreOrientationRequest();
+        final DisplayRotation rotation = mDisplayContent.getDisplayRotation();
+        rotation.setFixedToUserRotation(IWindowManager.FIXED_TO_USER_ROTATION_DISABLED);
+        rotation.setUserRotation(WindowManagerPolicy.USER_ROTATION_FREE, ROTATION_0,
+                "DisplayContentTests");
+        mDisplayContent.mFocusedApp = overlay;
+        final int portraitRotation = rotation.isAnyPortrait(ROTATION_0) ? ROTATION_0 : ROTATION_90;
+        assertTrue(rotation.isLandscapeOrSeascape(rotation.rotationForOrientation(
+                SCREEN_ORIENTATION_UNSPECIFIED, portraitRotation)));
+
+        overlay.setRequestedOrientation(SCREEN_ORIENTATION_PORTRAIT);
+        assertTrue(rotation.isAnyPortrait(rotation.rotationForOrientation(
+                SCREEN_ORIENTATION_UNSPECIFIED, portraitRotation)));
+    }
+
+    @Test
     public void testUnspecifiedOrientationTranslucentTop() {
         mDisplayContent.setIgnoreOrientationRequest(false);
         final ActivityRecord bottom = new ActivityBuilder(mAtm).setVisible(false)
