@@ -1387,6 +1387,15 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
         assertNewFloatingLaunchFinish(false, TRANSIT_OPEN);
     }
 
+    @Test
+    public void testNewFloatingLaunchDuringRecentsFinishToHome() throws Exception {
+        assertNewFloatingLaunchFinish(true, TRANSIT_OPEN);
+    }
+
+    @Test
+    public void testNewFloatingTaskToFrontDuringRecentsIsLaunch() throws Exception {
+        assertNewFloatingLaunchFinish(false, TRANSIT_TO_FRONT);
+    }
 
     private void assertNewFloatingLaunchFinish(boolean toHome, int mode) throws Exception {
         final IBinder transition = startRecentsTransition(false);
@@ -1427,4 +1436,5 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
                 any(), any());
         assertNull(mRecentsTransitionHandler.findController(transition));
     }
+
 }
