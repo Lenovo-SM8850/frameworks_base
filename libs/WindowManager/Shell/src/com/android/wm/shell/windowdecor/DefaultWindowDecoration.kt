@@ -201,7 +201,7 @@ constructor(
         get() = desktopUserRepositories.current.isTaskInFullImmersiveState(taskInfo.taskId)
 
     private val taskBounds
-        get() = taskInfo.getConfiguration().windowConfiguration.bounds
+        get() = taskInfo.presentationBounds
 
     private val taskWidth
         get() = taskBounds.width()
@@ -293,6 +293,10 @@ constructor(
      * To be called when exclusion region is changed to allow [relayout] to be called if necessary.
      */
     override fun onExclusionRegionChanged(exclusionRegion: Region) {
+        if (taskInfo.isFloatingWindow) {
+            this.exclusionRegion.set(exclusionRegion)
+            return
+        }
         if (captionType == CaptionController.CaptionType.APP_HANDLE) {
             // Avoid unnecessary relayouts for app handle. See b/383672263
             return
@@ -311,6 +315,7 @@ constructor(
     }
 
     private fun isFluidResizingApp(): Boolean {
+        if (taskInfo.isFloatingWindow) return false
         if (!desktopConfig.isVeiledResizeEnabled) {
             return true
         }
@@ -407,7 +412,7 @@ constructor(
                     desktopModeCompatPolicy.shouldExcludeCaptionFromAppBounds(taskInfo),
                     desktopConfig,
                     inSyncWithTransition,
-                )
+                ).let { if (floatingWindowPreview) it.copy(floatingWindowPreview = true) else it }
 
             val wct = windowContainerTransactionSupplier.invoke()
             val oldDecorationSurface = decorationContainerSurface
@@ -422,7 +427,7 @@ constructor(
 
             // After this line, [WindowDecoration2.taskInfo] is up-to-date and should be
             // used instead of the taskInfo passed to the relayout method.
-            if (!wct.isEmpty) {
+            if (!floatingWindowPreview && !wct.isEmpty) {
                 if (relayoutParams.shouldSetAppBounds) {
                     // When expanding from PiP to freeform, we need to start a Transition for
                     // applying
@@ -488,7 +493,7 @@ constructor(
         val captionType =
             when {
                 !shouldCreateCaption -> CaptionController.CaptionType.NO_CAPTION
-                isPinnedLayer -> CaptionController.CaptionType.APP_PINNED
+                isPinnedLayer -> CaptionController.CaptionType.APP_HEADER
                 taskInfo.isFreeform -> CaptionController.CaptionType.APP_HEADER
                 isFullscreenDesktop(taskInfo) -> CaptionController.CaptionType.FULLSCREEN_HEADER
                 else -> CaptionController.CaptionType.APP_HANDLE
@@ -609,20 +614,21 @@ constructor(
             runningTaskInfo = taskInfo,
             captionType = captionType,
             inputFeatures = inputFeatures,
-            isInsetSource = isInsetSource,
+            isInsetSource = isInsetSource && !taskInfo.isFloatingWindow,
             insetSourceFlags = insetSourceFlags,
             displayExclusionRegion = Region.obtain(displayExclusionRegion),
             shadowRadiusId = getShadowRadiusId(captionType, hasGlobalFocus),
             cornerRadiusId = getCornerRadiusId(captionType, shouldIgnoreCornerRadius),
             borderSettingsId = getBorderSettingsId(captionType, taskInfo, hasGlobalFocus),
-            boxShadowSettingsIds = getShadowSettingsIds(captionType, hasGlobalFocus),
+            boxShadowSettingsIds = if (floatingFocusEnabled) null
+                else getShadowSettingsIds(captionType, hasGlobalFocus),
             isCaptionVisible = isCaptionVisible,
             windowDecorConfig = windowDecorConfig,
             asyncViewHost = asyncViewHost,
             applyStartTransactionOnDraw = applyStartTransactionOnDraw,
             setTaskVisibilityPositionAndCrop = shouldSetTaskVisibilityPositionAndCrop,
             hasGlobalFocus = hasGlobalFocus,
-            shouldSetAppBounds = shouldSetAppBounds,
+            shouldSetAppBounds = shouldSetAppBounds && !taskInfo.isFloatingWindow,
             shouldSetBackground = shouldSetBackground,
             shouldUpdateTaskSurfaceOutline = shouldUpdateTaskSurfaceOutline,
             inSyncWithTransition = inSyncWithTransition,
@@ -784,7 +790,9 @@ constructor(
 
     private fun updateDragResizeListenerIfNeeded(prevContainerSurface: SurfaceControl?) {
         val taskPositionChanged = !taskInfo.positionInParent.equals(taskPositionInParent)
-        if (!taskInfo.isDragResizable(inFullImmersive)) {
+        taskPositionInParent.set(taskInfo.positionInParent.x, taskInfo.positionInParent.y)
+        if (!taskInfo.isDragResizable(inFullImmersive) ||
+            pinnedLayerController?.isMini(taskInfo) == true) {
             closeDragResizeListener()
             if (taskPositionChanged) {
                 // We still want to track caption bar's exclusion region on a non-resizeable task.
@@ -839,6 +847,7 @@ constructor(
                 getFineResizeCornerSize(res),
                 getLargeResizeCornerSize(res),
                 disabledResizingEdge,
+                taskInfo.isFloatingWindow,
             )
         listener.addInitializedCallback {
             onUpdateFinished.invoke(listener.setGeometry(newGeometry, touchSlop))
@@ -877,8 +886,11 @@ constructor(
             // Task can't be moved in full immersive, so skip excluding the caption region.
             return exclusionRegion
         }
-        exclusionRegion.union(Rect(0, 0, taskWidth, captionController?.getCaptionHeight() ?: 0))
-        exclusionRegion.translate(positionInParent.x, positionInParent.y)
+        if (!taskInfo.isFloatingWindow) {
+            exclusionRegion.union(Rect(0, 0, taskWidth, captionController?.getCaptionHeight() ?: 0))
+        }
+        val taskBounds = taskInfo.presentationBounds
+        exclusionRegion.translate(taskBounds.left, taskBounds.top)
         return exclusionRegion
     }
 
@@ -951,6 +963,12 @@ constructor(
     }
 
     /** Fade the resize veil out. */
+    fun updateFloatingWindowChildScale(t: SurfaceControl.Transaction, scale: Float) {
+        val inverse = 1f / scale
+        decorationContainerSurface?.let { t.setMatrix(it, inverse, 0f, 0f, inverse) }
+        resizeVeil?.updateParentScale(t, scale)
+    }
+
     fun hideResizeVeil() {
         resizeVeil?.hideVeil()
     }

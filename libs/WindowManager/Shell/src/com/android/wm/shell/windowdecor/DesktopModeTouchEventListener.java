@@ -210,6 +210,7 @@ public class DesktopModeTouchEventListener
             if (decoration.getHandleMenuController() != null
                     && !decoration.getHandleMenuController().isHandleMenuActive()) {
                 mWindowDecorationActions.onCaptionViewReceivedInteraction(decoration.getTaskInfo());
+                decoration.getHandleMenuController().setFloatingMenuAnchor(v);
                 mWindowDecorationActions.onOpenHandleMenu(mTaskId);
             }
         } else if (id == R.id.maximize_window) {
@@ -296,15 +297,19 @@ public class DesktopModeTouchEventListener
             // to offset position relative to caption as a whole.
             int[] viewLocation = new int[2];
             v.getLocationInWindow(viewLocation);
-            mIsResizeGesture = decoration.shouldResizeListenerHandleEvent(e,
-                    new Point(viewLocation[0], viewLocation[1]));
+            mIsResizeGesture = !decoration.getTaskInfo().isFloatingWindow
+                    && id != R.id.floating_bottom_handle
+                    && decoration.shouldResizeListenerHandleEvent(e,
+                            new Point(viewLocation[0], viewLocation[1]));
             // The caption window may be a spy window when the caption background is
             // transparent, which means events will fall through to the app window. Make
             // sure to cancel these events if they do not happen in the intersection of the
             // customizable region and what the app reported as exclusion areas, because
             // the drag-move or other caption gestures should take priority outside those
             // regions.
-            mIsCustomHeaderGesture = downInCustomizableCaptionRegion
+            mIsCustomHeaderGesture = !decoration.getTaskInfo().isFloatingWindow
+                    && id != R.id.floating_bottom_handle
+                    && downInCustomizableCaptionRegion
                     && downInExclusionRegion && isTransparentCaption;
 
             WdLog.motionEventLogD(TAG, mTaskId,
@@ -522,7 +527,7 @@ public class DesktopModeTouchEventListener
         WdLog.motionEventLogD(TAG, mTaskId, "handleFreeformMotionEvent(%s)", viewName);
         updateTouchStatus(e);
         final int id = v.getId();
-        if (mGestureDetector.onTouchEvent(e)) {
+        if (!taskInfo.isFloatingWindow && mGestureDetector.onTouchEvent(e)) {
             WdLog.motionEventLogD(TAG, mTaskId,
                     "handleFreeformMotionEvent(%s) handled by gesture detector", viewName);
             return true;

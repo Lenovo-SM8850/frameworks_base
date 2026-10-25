@@ -455,7 +455,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         // transitions to resize the task, so onTaskInfoChanged relayouts is the only way to make
         // sure the crop is set correctly.
         final boolean shouldSetTaskVisibilityPositionAndCrop =
-                !mDesktopConfig.isVeiledResizeEnabled()
+                !taskInfo.isFloatingWindow && !mDesktopConfig.isVeiledResizeEnabled()
                         && mTaskDragResizer.isResizingOrAnimating();
         // For headers only (i.e. in freeform): use |applyStartTransactionOnDraw| so that the
         // transaction (that applies task crop) is synced with the buffer transaction (that draws
@@ -538,6 +538,11 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 /* occludingElementsCalculator = */ () -> getOccludingElements(),
                 mDecorThemeUtilFactory);
 
+        if (mFloatingFocusEnabled) {
+            mRelayoutParams.mShadowRadiusId = FloatingFocusIndicator.shadowRadiusId(taskInfo.isFocused);
+            mRelayoutParams.mBoxShadowSettingsIds = null;
+        }
+
         final Configuration newConfig = mRelayoutParams.mWindowDecorConfig;
 
         boolean configChanged = false;
@@ -565,7 +570,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         relayout(mRelayoutParams, startT, finishT, wct, oldRootView, taskSurface, mResult);
         // After this line, mTaskInfo is up-to-date and should be used instead of taskInfo
 
-        if (!wct.isEmpty()) {
+        if (!mFloatingWindowPreview && !wct.isEmpty()) {
             if (mRelayoutParams.mShouldSetAppBounds) {
                 // When expanding from PiP to freeform, we need to start a Transition for applying
                 // the inset changes so that PiP receives the insets for the final bounds. This is
@@ -606,6 +611,13 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
             });
         }
 
+        if (mTaskInfo.isFloatingWindow) {
+            mLastValidDragArea = calculateValidDragArea();
+            if (!hasGlobalFocus) closeHandleMenu();
+            updateDragResizeListenerIfNeeded(oldDecorationSurface, inFullImmersive);
+            Trace.endSection();
+            return;
+        }
         notifyCaptionStateChanged();
         Trace.beginSection("DesktopModeWindowDecoration#relayout-bindData");
         if (isAppHandle(mWindowDecorViewHolder)) {
@@ -763,6 +775,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                     mSurfaceControlTransactionSupplier,
                     mDisplayController,
                     event -> {
+                        if (mTaskInfo.isFloatingWindow) return;
                         final boolean isDown = event.getAction() == ACTION_DOWN;
                         final boolean isUpOrCancel =
                                 event.getAction() == ACTION_UP
@@ -795,7 +808,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 new Size(mResult.mWidth, mResult.mHeight),
                 getResizeEdgeHandleSize(res), getResizeHandleEdgeInset(res),
                 getFineResizeCornerSize(res), getLargeResizeCornerSize(res),
-                mDisabledResizingEdge);
+                mDisabledResizingEdge, mTaskInfo.isFloatingWindow);
         newListener.addInitializedCallback(() -> {
             onUpdateFinished.accept(newListener.setGeometry(newGeometry, touchSlop));
         });
@@ -878,7 +891,10 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 mResult.mCaptionY,
                 mResult.mCaptionX + mResult.mCaptionWidth,
                 mResult.mCaptionY + mResult.mCaptionHeight);
-        if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
+        final Rect leafBounds = new Rect();
+        if (mSplitScreenController.getMultiSplitTaskBounds(mTaskInfo.taskId, leafBounds)) {
+            handleBounds.offset(leafBounds.left, leafBounds.top);
+        } else if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
                 == SPLIT_POSITION_BOTTOM_OR_RIGHT
         ) {
             if (mSplitScreenController.isLeftRightSplit()) {
@@ -901,7 +917,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
             return;
         }
         final Rect appChipPositionInWindow = appHeader.getAppChipLocationInWindow();
-        final Rect taskBounds = mTaskInfo.configuration.windowConfiguration.getBounds();
+        final Rect taskBounds = mTaskInfo.getPresentationBounds();
         final Rect appChipGlobalPosition = new Rect(
                 taskBounds.left + appChipPositionInWindow.left,
                 taskBounds.top + appChipPositionInWindow.top,
@@ -959,7 +975,10 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
 
     private Point determineHandlePosition() {
         final Point position = new Point(mResult.mCaptionX, 0);
-        if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
+        final Rect leafBounds = new Rect();
+        if (mSplitScreenController.getMultiSplitTaskBounds(mTaskInfo.taskId, leafBounds)) {
+            position.offset(leafBounds.left, leafBounds.top);
+        } else if (mSplitScreenController.getSplitPosition(mTaskInfo.taskId)
                 == SPLIT_POSITION_BOTTOM_OR_RIGHT
         ) {
             if (mSplitScreenController.isLeftRightSplit()) {
@@ -1185,7 +1204,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 relayoutParams.mInsetSourceFlags |= FLAG_FORCE_CONSUMING_OPAQUE_CAPTION_BAR;
             }
             if (inFullImmersiveMode) {
-                final Rect taskBounds = taskInfo.getConfiguration().windowConfiguration.getBounds();
+                final Rect taskBounds = taskInfo.getPresentationBounds();
                 final Insets systemBarInsets = displayInsetsState.calculateInsets(
                         taskBounds, taskBounds,
                         WindowInsets.Type.systemBars() & ~WindowInsets.Type.captionBar(),
@@ -1273,6 +1292,10 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         // from being visible if freeform task window above is translucent.
         // Otherwise if fluid resize is enabled, add a background to freeform tasks.
         relayoutParams.mShouldSetBackground = desktopConfig.shouldSetBackground(taskInfo);
+        if (taskInfo.isFloatingWindow) {
+            relayoutParams.mShouldSetAppBounds = false;
+            relayoutParams.mIsInsetSource = false;
+        }
     }
 
     private static int getCornerRadiusId(int layoutResId) {
@@ -1310,9 +1333,10 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         final int[] maximizeButtonLocation = new int[2];
         maximizeWindowButton.getLocationInWindow(maximizeButtonLocation);
 
-        int menuLeft = (mPositionInParent.x + maximizeButtonLocation[0] - (menuWidth
+        final Rect taskBounds = mTaskInfo.getPresentationBounds();
+        int menuLeft = (taskBounds.left + mResult.mCaptionX + maximizeButtonLocation[0] - (menuWidth
                 - maximizeWindowButton.getWidth()) / 2);
-        int menuTop = (mPositionInParent.y + captionHeight);
+        int menuTop = (taskBounds.top + captionHeight);
         final int menuRight = menuLeft + menuWidth;
         final int menuBottom = menuTop + menuHeight;
 
@@ -1425,6 +1449,14 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
     /**
      * Fade the resize veil out.
      */
+    void updateFloatingWindowChildScale(SurfaceControl.Transaction t, float scale) {
+        final float inverse = 1f / scale;
+        if (mDecorationContainerSurface != null) {
+            t.setMatrix(mDecorationContainerSurface, inverse, 0, 0, inverse);
+        }
+        if (mResizeVeil != null) mResizeVeil.updateParentScale(t, scale);
+    }
+
     public void hideResizeVeil() {
         mResizeVeil.hideVeil();
     }
@@ -1452,7 +1484,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 R.dimen.freeform_required_visible_empty_space_in_header);
         final int rightButtonsWidth = loadDimensionPixelSize(mContext.getResources(),
                 R.dimen.desktop_mode_right_edge_buttons_width);
-        final int taskWidth = mTaskInfo.configuration.windowConfiguration.getBounds().width();
+        final int taskWidth = mTaskInfo.getPresentationBounds().width();
         final DisplayLayout layout = mDisplayController.getDisplayLayout(mTaskInfo.displayId);
         final int displayWidth = layout.width();
         final Rect stableBounds = new Rect();
@@ -1584,6 +1616,13 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         return mLayoutMenu != null;
     }
 
+    private View mFloatingMenuAnchor;
+
+    @Override
+    public void setFloatingMenuAnchor(View view) {
+        mFloatingMenuAnchor = view;
+    }
+
     /**
      * Updates app info and creates and displays handle menu window.
      */
@@ -1661,6 +1700,9 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 mResult.mCaptionY + mResult.mCaptionTopPadding,
                 mDecorThemeUtilFactory
         );
+        if (mTaskInfo.isFloatingWindow && mFloatingMenuAnchor != null) {
+            mHandleMenu.setFloatingMenuAnchor(mFloatingMenuAnchor);
+        }
         mWindowDecorViewHolder.onHandleMenuOpened();
         mHandleMenu.show(
                 /* openInBrowserClickListener= */ (intent) -> {
@@ -1695,7 +1737,7 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         if (mTaskInfo.isFreeform()) {
             // The menu uses display-wide coordinates for positioning, so make position the sum
             // of task position and caption position.
-            final Rect taskBounds = mTaskInfo.configuration.windowConfiguration.getBounds();
+            final Rect taskBounds = mTaskInfo.getPresentationBounds();
             mManageWindowsMenu = new DesktopHeaderManageWindowsMenu(
                     mTaskInfo,
                     /* x= */ taskBounds.left + mResult.mCaptionX,
@@ -1807,8 +1849,8 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         final ActivityManager.RunningTaskInfo taskInfo =
                 mTaskOrganizer.getRunningTaskInfo(mTaskInfo.taskId);
         if (taskInfo == null) return result;
-        final Point positionInParent = taskInfo.positionInParent;
-        result.offset(-positionInParent.x, -positionInParent.y);
+        final Rect taskBounds = taskInfo.getPresentationBounds();
+        result.offset(-taskBounds.left, -taskBounds.top);
         return result;
     }
 
@@ -1976,7 +2018,8 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         }
         exclusionRegion.union(new Rect(0, 0, mResult.mWidth,
                 getCaptionHeight(mTaskInfo.getWindowingMode())));
-        exclusionRegion.translate(mPositionInParent.x, mPositionInParent.y);
+        final Rect taskBounds = mTaskInfo.getPresentationBounds();
+        exclusionRegion.translate(taskBounds.left, taskBounds.top);
         return exclusionRegion;
     }
 

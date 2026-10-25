@@ -3097,4 +3097,5 @@ public class DisplayRotationTests {
             return sCurrentUptimeMillis;
         }
     }
+
 }

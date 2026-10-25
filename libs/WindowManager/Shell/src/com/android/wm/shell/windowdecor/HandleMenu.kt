@@ -81,9 +81,8 @@ import kotlinx.coroutines.launch
 /**
  * Handle menu opened when the appropriate button is clicked on.
  *
- * Displays up to 3 pills that show the following: App Info: App name, app icon, and collapse button
- * to close the menu. Windowing Options(Proto 2 only): Buttons to change windowing modes. Additional
- * Options: Miscellaneous functions including screenshot and closing task.
+ * Displays windowing options and additional actions, with separate close and app-to-web pills
+ * when available. Tapping outside dismisses the menu.
  */
 class HandleMenu
 private constructor(
@@ -108,7 +107,7 @@ private constructor(
     private val shouldShowRestartButton: Boolean,
     private val appToWebData: AppToWebData?,
     private val desktopModeUiEventLogger: DesktopModeUiEventLogger,
-    private val captionView: View,
+    private var captionView: View,
     private val captionWidth: Int,
     private val captionHeight: Int,
     captionX: Int,
@@ -119,7 +118,8 @@ private constructor(
     private val decorThemeUtilFactory: DecorThemeUtil.Factory,
 ) {
     private val isViewAboveStatusBar: Boolean
-        get() = (DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue() && !taskInfo.isFreeform)
+        get() = taskInfo.isFloatingWindow ||
+            (DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue() && !taskInfo.isFreeform)
 
     private val pillTopMargin: Int =
         loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_pill_spacing_margin)
@@ -156,8 +156,16 @@ private constructor(
 
     private var loadAppInfoJob: Job? = null
 
+    private var floatingBottomAnchor = false
+
     init {
         updateHandleMenuPillPositions(captionX, captionY)
+    }
+
+    fun setFloatingMenuAnchor(view: View) {
+        captionView = view
+        floatingBottomAnchor = view.id == R.id.floating_bottom_handle
+        updateHandleMenuPillPositions(0, 0)
     }
 
     fun show(
@@ -214,7 +222,7 @@ private constructor(
                     shouldShowManageWindowsButton = shouldShowManageWindowsButton,
                     shouldShowChangeAspectRatioButton = shouldShowChangeAspectRatioButton,
                     shouldShowGameControlsButton = shouldShowGameControlsButton,
-                    shouldShowDesktopModeButton = shouldShowDesktopModeButton,
+                    shouldShowDesktopModeButton = false,
                     shouldShowRestartButton = shouldShowRestartButton,
                     appToWebData = appToWebData,
                     splitScreenController = splitScreenController,
@@ -256,7 +264,8 @@ private constructor(
         val lpFlags = LayoutParams.FLAG_NOT_FOCUSABLE or LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
         handleMenuViewContainer =
             if (
-                (!taskInfo.isFreeform && DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) ||
+                taskInfo.isFloatingWindow ||
+                    (!taskInfo.isFreeform && DesktopModeFlags.ENABLE_HANDLE_INPUT_FIX.isTrue()) ||
                     forceShowSystemBars
             ) {
                 AdditionalSystemViewContainer(
@@ -359,7 +368,25 @@ private constructor(
     private fun updateHandleMenuPillPositions(captionX: Int, captionY: Int) {
         val menuX: Int
         val menuY: Int
-        val taskBounds = taskInfo.getConfiguration().windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
+        if (taskInfo.isFloatingWindow) {
+            val metrics = context.getSystemService(android.view.WindowManager::class.java)
+                .maximumWindowMetrics
+            val stable = Rect(metrics.bounds)
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(systemBars())
+            stable.inset(insets)
+            val width = menuWidth + 2 * marginMenuPadding
+            val height = menuHeight + marginMenuPadding
+            val handleHeight = minOf(taskBounds.height(), (24 * context.resources.displayMetrics.density).toInt())
+            val x = (taskBounds.centerX() - width / 2)
+                .coerceIn(stable.left, maxOf(stable.left, stable.right - width))
+            val y = (if (floatingBottomAnchor) taskBounds.bottom - handleHeight - height
+                else taskBounds.top + handleHeight)
+                .coerceIn(stable.top, maxOf(stable.top, stable.bottom - height))
+            globalMenuPosition.set(x, y)
+            handleMenuPosition.set(x.toFloat(), y.toFloat())
+            return
+        }
         globalMenuPosition.set(
             calculateMenuPosition(
                 splitScreenController,
@@ -451,7 +478,10 @@ private constructor(
             // stage position, not relative to the display as a whole.
             val inputRelativeToMenu =
                 PointF(inputPoint.x - globalMenuPosition.x, inputPoint.y - globalMenuPosition.y)
-            if (
+            val leafBounds = Rect()
+            if (splitScreenController.getMultiSplitTaskBounds(taskInfo.taskId, leafBounds)) {
+                inputRelativeToMenu.offset(leafBounds.left.toFloat(), leafBounds.top.toFloat())
+            } else if (
                 splitScreenController.getSplitPosition(taskInfo.taskId) ==
                     SplitScreenConstants.SPLIT_POSITION_BOTTOM_OR_RIGHT
             ) {
@@ -477,6 +507,9 @@ private constructor(
     /** Determines handle menu height based the max size and the visibility of pills. */
     private fun getHandleMenuHeight(): Int {
         var menuHeight = loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_height)
+        // The app info row and its following inter-pill gap are no longer displayed.
+        menuHeight -= loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_app_info_pill_height)
+        menuHeight -= pillTopMargin
         if (!shouldShowWindowingPill) {
             menuHeight -=
                 loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
@@ -511,6 +544,21 @@ private constructor(
             menuHeight -=
                 loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_open_in_browser_pill_height)
             menuHeight -= pillTopMargin
+        }
+        if (shouldShowSplitActions) {
+            menuHeight +=
+                loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height) +
+                    pillTopMargin
+        }
+        if (splitScreenController.getAddBelowSlot(taskInfo.taskId) != null) {
+            menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
+        }
+        if (splitScreenController.getReplaceSplitSlot(taskInfo.taskId) != null) {
+            menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
+        }
+        if (taskInfo.isFloatingWindow) {
+            menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height) +
+                pillTopMargin
         }
         return menuHeight
     }
@@ -619,6 +667,20 @@ private constructor(
         val windowingPillView: WindowingPillView =
             rootView.requireViewById<WindowingPillView>(R.id.windowing_pill)
 
+        private val splitActionsPill = rootView.requireViewById<ViewGroup>(R.id.split_actions_pill)
+        private val splitCloseButton =
+            splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_close_button)
+
+        private val splitReplaceButton =
+            splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_replace_button)
+
+        private val splitAddButton =
+            splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_add_button)
+
+        private val floatingClosePill = rootView.requireViewById<View>(R.id.floating_close_pill)
+        private val floatingCloseButton =
+            floatingClosePill.requireViewById<HandleMenuActionButton>(R.id.floating_close_button)
+
         // More Actions Pill.
         private val moreActionsPill = rootView.requireViewById<View>(R.id.more_actions_pill)
         private val screenshotBtn =
@@ -649,6 +711,10 @@ private constructor(
 
         private val menuButtons =
             listOf(
+                splitCloseButton,
+                splitAddButton,
+                splitReplaceButton,
+                floatingCloseButton,
                 newWindowBtn,
                 changeAspectRatioBtn,
                 gameControlsBtn,
@@ -676,6 +742,7 @@ private constructor(
                 windowDecorationActions,
                 desktopModeUiEventLogger,
                 shouldShowDesktopModeButton,
+                showFloatingButton = true,
                 onPillItemClicked = { onHandleMenuClicked?.invoke() },
             )
             menuButtons.forEach { it.setOnClickListener(this) }
@@ -691,6 +758,24 @@ private constructor(
 
         override fun onClick(v: View) {
             when (v.id) {
+                R.id.split_add_button -> {
+                    if (splitScreenController.getAddBelowSlot(taskInfo.taskId) != null) {
+                        windowDecorationActions.onAddSplitBelow(taskInfo.taskId)
+                    }
+                }
+                R.id.split_replace_button -> {
+                    if (splitScreenController.getReplaceSplitSlot(taskInfo.taskId) != null) {
+                        windowDecorationActions.onReplaceSplitApp(taskInfo.taskId)
+                    }
+                }
+                R.id.split_close_button -> {
+                    if (splitScreenController.canMutateSplitTask(taskInfo.taskId)) {
+                        windowDecorationActions.onClose(taskInfo)
+                    }
+                }
+                R.id.floating_close_button -> {
+                    if (taskInfo.isFloatingWindow) windowDecorationActions.onClose(taskInfo)
+                }
                 R.id.new_window_button -> {
                     windowDecorationActions.onNewWindow(taskInfo.taskId)
                 }
@@ -725,6 +810,51 @@ private constructor(
             this.style = calculateMenuStyle(taskInfo)
 
             bindAppInfoPill(style)
+            val isInSplitScreen =
+                splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId)
+            splitActionsPill.isGone = !isInSplitScreen
+            val addSlot = splitScreenController.getAddBelowSlot(taskInfo.taskId)
+            splitAddButton.isGone = !isInSplitScreen || addSlot == null
+            splitReplaceButton.isGone = !isInSplitScreen ||
+                splitScreenController.getReplaceSplitSlot(taskInfo.taskId) == null
+            splitAddButton.setText(getString(if (addSlot?.splitBelow != false) {
+                R.string.split_picker_add_below
+            } else R.string.split_picker_add_to_side))
+            if (isInSplitScreen) {
+                splitActionsPill.background.setTint(style.backgroundColor)
+                splitAddButton.setTextColor(style.textColor)
+                splitAddButton.setDrawableTint(style.textColor)
+                splitAddButton.background = createBackgroundDrawable(
+                    color = style.textColor,
+                    cornerRadius = handleMenuCornerRadius,
+                    drawableInsets = DrawableInsets(),
+                )
+                splitReplaceButton.setTextColor(style.textColor)
+                splitReplaceButton.setDrawableTint(style.textColor)
+                splitReplaceButton.background = createBackgroundDrawable(
+                    color = style.textColor,
+                    cornerRadius = handleMenuCornerRadius,
+                    drawableInsets = DrawableInsets(),
+                )
+                splitCloseButton.setTextColor(style.textColor)
+                splitCloseButton.setDrawableTint(style.textColor)
+                splitCloseButton.background = createBackgroundDrawable(
+                    color = style.textColor,
+                    cornerRadius = handleMenuCornerRadius,
+                    drawableInsets = DrawableInsets(),
+                )
+            }
+            floatingClosePill.isGone = !taskInfo.isFloatingWindow
+            if (taskInfo.isFloatingWindow) {
+                floatingClosePill.background.setTint(style.backgroundColor)
+                floatingCloseButton.setTextColor(style.textColor)
+                floatingCloseButton.setDrawableTint(style.textColor)
+                floatingCloseButton.background = createBackgroundDrawable(
+                    color = style.textColor,
+                    cornerRadius = handleMenuCornerRadius,
+                    drawableInsets = DrawableInsets(),
+                )
+            }
             windowingPillView.isGone = !shouldShowWindowingPill
             if (shouldShowWindowingPill) {
                 val isInSplitScreen = splitScreenController.isTaskInSplitScreen(taskInfo.taskId)
@@ -735,6 +865,19 @@ private constructor(
                 bindMoreActionsPill(style)
             }
             bindOpenInAppOrBrowserPill(style)
+            // The first visible pill takes the menu's top margin; subsequent pills keep the gap.
+            var firstPill = true
+            listOf(windowingPillView, floatingClosePill, splitActionsPill, moreActionsPill,
+                openInAppOrBrowserPill)
+                .filter { !it.isGone }
+                .forEach { pill ->
+                    (pill.layoutParams as ViewGroup.MarginLayoutParams).topMargin =
+                        context.resources.getDimensionPixelSize(
+                            if (firstPill) R.dimen.desktop_mode_handle_menu_margin_top
+                            else R.dimen.desktop_mode_handle_menu_pill_spacing_margin
+                        )
+                    firstPill = false
+                }
         }
 
         /** Sets the app's name. */
@@ -749,6 +892,11 @@ private constructor(
 
         /** Animates the menu opening. */
         fun animateOpenMenu() {
+            if (taskInfo.isFloatingWindow) {
+                rootView.alpha = 0f
+                rootView.animate().alpha(1f).setDuration(150).start()
+                return
+            }
             if (taskInfo.isFullscreen || taskInfo.isMultiWindow) {
                 animator.animateCaptionHandleExpandToOpen(captionView)
             } else {
@@ -758,6 +906,10 @@ private constructor(
 
         /** Animates the menu closing. */
         fun animateCloseMenu(onAnimFinish: () -> Unit) {
+            if (taskInfo.isFloatingWindow) {
+                rootView.animate().alpha(0f).setDuration(100).withEndAction(onAnimFinish).start()
+                return
+            }
             if (taskInfo.isFullscreen || taskInfo.isMultiWindow) {
                 animator.animateCollapseIntoHandleClose(captionView, onAnimFinish)
             } else {
@@ -771,6 +923,7 @@ private constructor(
          * because input is detected through the status bar layer with a global input monitor.
          */
         fun checkMotionEvent(ev: MotionEvent, inputPointLocal: PointF) {
+            if (!appInfoPill.isShown) return
             val inputInCollapseButton =
                 pointInView(collapseMenuButton, inputPointLocal.x, inputPointLocal.y)
             val action = ev.actionMasked

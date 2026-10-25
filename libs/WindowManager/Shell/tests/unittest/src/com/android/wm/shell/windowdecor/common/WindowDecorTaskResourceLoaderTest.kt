@@ -23,6 +23,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.PackageManager.NameNotFoundException
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.LocaleList
@@ -67,6 +68,7 @@ import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.spy
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoMoreInteractions
@@ -234,9 +236,11 @@ class WindowDecorTaskResourceLoaderTest : ShellTestCase() {
                 .setBaseIntent(Intent().apply { component = componentName })
                 .build()
         loader.onWindowDecorCreated(task)
+        val shapedIcon = mock<AdaptiveIconDrawable>()
         doReturn(appIconDrawable).whenever(mockPackageManager).getDefaultActivityIcon()
-        whenever(mockHeaderIconFactory.createIconBitmap(appIconDrawable, 1f)).thenReturn(mock())
-        whenever(mockVeilIconFactory.createScaledBitmap(appIconDrawable, MODE_DEFAULT))
+        whenever(mockHeaderIconFactory.wrapToAdaptiveIcon(appIconDrawable)).thenReturn(shapedIcon)
+        whenever(mockHeaderIconFactory.createIconBitmap(shapedIcon, 1f)).thenReturn(mock())
+        whenever(mockVeilIconFactory.createScaledBitmap(shapedIcon, MODE_DEFAULT))
             .thenReturn(mock())
         doThrow(NameNotFoundException())
             .whenever(mockPackageManager)
@@ -244,25 +248,62 @@ class WindowDecorTaskResourceLoaderTest : ShellTestCase() {
 
         loader.getVeilIcon(task)
 
-        verify(mockVeilIconFactory).createScaledBitmap(appIconDrawable, MODE_DEFAULT)
+        verify(mockVeilIconFactory).createScaledBitmap(shapedIcon, MODE_DEFAULT)
         assertThat(loader.taskToResourceCache[task.taskId]).isNull()
     }
 
-    private fun createTaskInfo(userId: Int): ActivityManager.RunningTaskInfo {
-        val appIconDrawable = mock<Drawable>()
-        val badgedAppIconDrawable = mock<Drawable>()
+    @Test
+    fun legacyIcon_isShapedBeforeWorkProfileBadgeAndSharedWithVeil() = runTest {
+        val legacy = mock<Drawable>()
+        val badged = mock<Drawable>()
+        val task = createTaskInfo(10, legacy, badged)
+        loader.onWindowDecorCreated(task)
+
+        loader.getNameAndHeaderIcon(task)
+        advanceUntilIdle()
+
+        val shaped = argumentCaptor<Drawable>()
+        verify(mockHeaderIconFactory).wrapToAdaptiveIcon(legacy)
+        verify(mockPackageManager).getUserBadgedIcon(shaped.capture(), eq(UserHandle.of(10)))
+        assertThat(shaped.firstValue).isInstanceOf(AdaptiveIconDrawable::class.java)
+        assertThat(shaped.firstValue).isNotSameInstanceAs(legacy)
+        verify(mockHeaderIconFactory).createIconBitmap(badged, 1f)
+        verify(mockHeaderIconFactory, never()).wrapToAdaptiveIcon(badged)
+        verify(mockVeilIconFactory).createScaledBitmap(shaped.firstValue, MODE_DEFAULT)
+    }
+
+    @Test
+    fun adaptiveIcon_isUnchangedBeforeBadgingAndVeilRendering() = runTest {
+        val adaptive = mock<AdaptiveIconDrawable>()
+        val task = createTaskInfo(context.userId, adaptive)
+        loader.onWindowDecorCreated(task)
+
+        loader.getNameAndHeaderIcon(task)
+        advanceUntilIdle()
+
+        verify(mockPackageManager).getUserBadgedIcon(adaptive, UserHandle.of(context.userId))
+        verify(mockVeilIconFactory).createScaledBitmap(adaptive, MODE_DEFAULT)
+    }
+
+    private fun createTaskInfo(
+        userId: Int,
+        appIconDrawable: Drawable = mock(),
+        badgedAppIconDrawable: Drawable = mock(),
+    ): ActivityManager.RunningTaskInfo {
+        val shapedIcon = appIconDrawable as? AdaptiveIconDrawable ?: mock<AdaptiveIconDrawable>()
+        whenever(mockHeaderIconFactory.wrapToAdaptiveIcon(appIconDrawable)).thenReturn(shapedIcon)
         val activityInfo = ActivityInfo().apply { applicationInfo = ApplicationInfo() }
         val componentName = ComponentName("com.foo", "BarActivity")
         whenever(mockPackageManager.getActivityInfo(eq(componentName), anyInt()))
             .thenReturn(activityInfo)
         whenever(mockPackageManager.getApplicationLabel(activityInfo.applicationInfo))
             .thenReturn("Test App")
-        whenever(mockPackageManager.getUserBadgedIcon(appIconDrawable, UserHandle.of(userId)))
+        whenever(mockPackageManager.getUserBadgedIcon(shapedIcon, UserHandle.of(userId)))
             .thenReturn(badgedAppIconDrawable)
         whenever(mockIconProvider.getIcon(activityInfo)).thenReturn(appIconDrawable)
         whenever(mockHeaderIconFactory.createIconBitmap(badgedAppIconDrawable, 1f))
             .thenReturn(mock())
-        whenever(mockVeilIconFactory.createScaledBitmap(appIconDrawable, MODE_DEFAULT))
+        whenever(mockVeilIconFactory.createScaledBitmap(shapedIcon, MODE_DEFAULT))
             .thenReturn(mock())
         return TestRunningTaskInfoBuilder()
             .setUserId(userId)

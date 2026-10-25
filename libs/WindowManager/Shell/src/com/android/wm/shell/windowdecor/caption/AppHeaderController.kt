@@ -237,11 +237,11 @@ class AppHeaderController(
                 captionLayout.captionY + captionLayout.captionTopPadding,
             )
 
-            updateLayoutMenu(startT)
-
-            updateViewHolder(params.hasGlobalFocus)
-
-            notifyCaptionStateChanged()
+            if (!taskInfo.isFloatingWindow) {
+                updateLayoutMenu(startT)
+                updateViewHolder(params.hasGlobalFocus)
+                notifyCaptionStateChanged()
+            }
             return captionLayout
         }
 
@@ -250,7 +250,7 @@ class AppHeaderController(
             return 0
         }
         val displayInsetsState = displayController.getInsetsState(taskInfo.displayId)
-        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         val systemBarInsets =
             displayInsetsState.calculateInsets(
                 /* frame= */ taskBounds,
@@ -276,7 +276,7 @@ class AppHeaderController(
 
     private fun notifyAppHeaderStateChanged() {
         val appChipPositionInWindow = viewHolder.getAppChipLocationInWindow()
-        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         val appChipGlobalPosition =
             Rect(
                 taskBounds.left + appChipPositionInWindow.left,
@@ -453,6 +453,12 @@ class AppHeaderController(
         viewHolder.onMaximizeWindowHoverEnter()
     }
 
+    private var floatingMenuAnchor: View? = null
+
+    override fun setFloatingMenuAnchor(view: View) {
+        floatingMenuAnchor = view
+    }
+
     /** Updates app info and creates and displays handle menu window. */
     override fun createHandleMenu(minimumInstancesFound: Boolean) {
         if (isHandleMenuActive || handleMenuCreationJob?.isActive == true) return
@@ -503,8 +509,8 @@ class AppHeaderController(
                     layoutResId = R.layout.desktop_mode_app_header,
                     splitScreenController = splitScreenController,
                     shouldShowWindowingPill =
-                        !Flags.enableConsolidatedWindowOptions() &&
-                            desktopState.canEnterDesktopModeOrShowAppHandle,
+                        taskInfo.isFloatingWindow || (!Flags.enableConsolidatedWindowOptions() &&
+                            desktopState.canEnterDesktopModeOrShowAppHandle),
                     shouldShowNewWindowButton = supportsMultiInstance,
                     shouldShowManageWindowsButton = shouldShowManageWindowsButton,
                     shouldShowChangeAspectRatioButton = shouldShowChangeAspectRatioButton,
@@ -525,6 +531,9 @@ class AppHeaderController(
                     decorThemeUtilFactory = decorThemeUtilFactory,
                 )
                 .apply {
+                    if (taskInfo.isFloatingWindow) {
+                        floatingMenuAnchor?.let(::setFloatingMenuAnchor)
+                    }
                     show(
                         openInAppOrBrowserClickListener = { intent ->
                             windowDecorationActions.onOpenInBrowser(taskInfo.taskId, intent)
@@ -559,7 +568,7 @@ class AppHeaderController(
     override fun createManageWindowsMenu(snapshotList: ArrayList<Pair<Int, TaskSnapshot>>) {
         // The menu uses display-wide coordinates for positioning, so make position the sum
         // of task position and caption position.
-        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
+        val taskBounds = taskInfo.presentationBounds
         manageWindowsMenu =
             DesktopHeaderManageWindowsMenu(
                 callerTaskInfo = taskInfo,
@@ -650,7 +659,7 @@ class AppHeaderController(
             resources.getDimensionPixelSize(R.dimen.freeform_required_visible_empty_space_in_header)
         val rightButtonsWidth =
             resources.getDimensionPixelSize(R.dimen.desktop_mode_right_edge_buttons_width)
-        val taskWidth = taskInfo.configuration.windowConfiguration.bounds.width()
+        val taskWidth = taskInfo.presentationBounds.width()
         val layout = displayController.getDisplayLayout(taskInfo.displayId) ?: return Rect()
         val displayWidth = layout.width()
         val stableBounds = Rect()
@@ -702,10 +711,11 @@ class AppHeaderController(
     private fun determineMaxY(requiredEmptySpace: Int, stableBounds: Rect): Int =
         stableBounds.bottom - requiredEmptySpace
 
-    override fun getCaptionHeight(): Int = dimensions.height + getCaptionTopPadding()
+    override fun getCaptionHeight(): Int =
+        if (taskInfo.isFloatingWindow) 0 else dimensions.height + getCaptionTopPadding()
 
     override fun getCaptionWidth(): Int =
-        taskInfo.getConfiguration().windowConfiguration.bounds.width()
+        taskInfo.presentationBounds.width()
 
     override val occludingElements: List<OccludingElement>
         get() = viewHolder.getOccludingElements()

@@ -321,6 +321,24 @@ class MultiDisplayVeiledResizeTaskPositioner(
             x,
             y,
         )
+        if (floatingDragCancelled) return Rect(repositionTaskBounds)
+        if (windowDecoration.taskInfo.isFloatingWindow) {
+            if (isResizing) return moveFloatingResize(x, y)
+            DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
+                taskBoundsAtDragStart, repositionStartPoint, x, y)
+            if (!miniPreviewCancelled) {
+                miniPreview.updateFeedback(windowDecoration.taskInfo,
+                    windowDecoration.pinnedLayerController?.getMiniDragTarget(windowDecoration.taskInfo,
+                        taskBoundsAtDragStart, repositionTaskBounds),
+                    allowFloatingFeedback && inputMethod == InputMethod.TOUCH,
+                    windowDecoration::performFloatingTargetHapticFeedback)
+            }
+            if (!floatingMovePending) {
+                floatingMovePending = true
+                Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
+            }
+            return Rect(repositionTaskBounds)
+        }
         // If the window needs to be resized to its bounds before snap or maximize, then wait until
         // resizing is complete before moving it.
         if (
@@ -723,6 +741,14 @@ class MultiDisplayVeiledResizeTaskPositioner(
         t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
             repositionTaskBounds.top.toFloat())
             .setFrameTimeline(Choreographer.getInstance().vsyncId).apply()
+    }
+
+    private fun cancelFloatingFrame() {
+        if (floatingFramePending || floatingMovePending) {
+            floatingMovePending = false
+            Choreographer.getInstance().removeFrameCallback(floatingFrameCallback)
+            floatingFramePending = false
+        }
     }
 
     private fun cancelFloatingDragForTransition() {

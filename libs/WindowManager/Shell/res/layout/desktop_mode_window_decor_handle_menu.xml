@@ -30,6 +30,8 @@
 
     <LinearLayout
         android:id="@+id/app_info_pill"
+        android:visibility="gone"
+        android:importantForAccessibility="noHideDescendants"
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="@dimen/desktop_mode_handle_menu_app_info_pill_height"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_margin_top"
@@ -73,50 +75,25 @@
         android:background="@drawable/desktop_mode_decor_handle_menu_background"
         android:gravity="center_vertical"/>
 
-    <FrameLayout
+    <LinearLayout
         android:id="@+id/floating_close_pill"
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_pill_spacing_margin"
-        android:background="@drawable/bubble_manage_menu_bg"
-        android:clipToOutline="true"
-        android:elevation="@dimen/bubble_manage_menu_elevation"
+        android:layout_marginStart="1dp"
+        android:orientation="vertical"
+        android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
+        android:background="@drawable/desktop_mode_decor_handle_menu_background"
         android:visibility="gone">
 
-        <LinearLayout
+        <com.android.wm.shell.windowdecor.HandleMenuActionButton
             android:id="@+id/floating_close_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/bubble_menu_item_height"
-            android:background="@drawable/bubble_manage_menu_row"
-            android:gravity="center_vertical"
-            android:paddingStart="@dimen/bubble_menu_padding"
-            android:paddingEnd="@dimen/bubble_menu_padding"
-            android:orientation="horizontal"
-            android:clickable="true"
-            android:focusable="true"
             android:contentDescription="@string/floating_window_close"
-            android:tooltipText="@string/floating_window_close">
-
-            <ImageView
-                android:id="@+id/floating_close_icon"
-                android:layout_width="@dimen/bubble_menu_icon_size"
-                android:layout_height="@dimen/bubble_menu_icon_size"
-                android:src="@drawable/ic_remove_no_shadow"
-                android:tint="@color/bubbles_icon_tint"
-                android:contentDescription="@null"/>
-
-            <TextView
-                android:id="@+id/floating_close_label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:textColor="@color/materialColorOnSurface"
-                android:textAppearance="@*android:style/TextAppearance.DeviceDefault"
-                android:text="@string/floating_window_close"/>
-
-        </LinearLayout>
-    </FrameLayout>
+            android:tooltipText="@string/floating_window_close"
+            android:text="@string/floating_window_close"
+            android:src="@drawable/ic_remove_no_shadow"
+            style="@style/DesktopModeHandleMenuActionButton"/>
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/split_actions_pill"
@@ -225,6 +202,7 @@
                 android:focusable="false"
                 android:scaleType="centerCrop"/>
         </LinearLayout>
+
     </LinearLayout>
 
     <LinearLayout

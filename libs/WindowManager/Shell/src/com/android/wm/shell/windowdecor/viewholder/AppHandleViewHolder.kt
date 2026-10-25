@@ -21,6 +21,7 @@ import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Point
+import android.graphics.Rect
 import android.hardware.input.InputManager
 import android.os.Bundle
 import android.os.Handler
@@ -45,6 +46,8 @@ import com.android.internal.policy.SystemBarUtils
 import com.android.internal.protolog.ProtoLog
 import com.android.window.flags.Flags
 import com.android.wm.shell.R
+import com.android.wm.shell.windowdecor.common.NavigationHandleColor
+import com.android.wm.shell.windowdecor.common.HandleRegionSampler
 import com.android.wm.shell.desktopmode.DesktopModeUiEventLogger
 import com.android.wm.shell.desktopmode.DesktopModeUiEventLogger.DesktopUiEventEnum.A11Y_APP_HANDLE_MENU_OPENED
 import com.android.wm.shell.desktopmode.DesktopTasksController
@@ -104,6 +107,14 @@ class AppHandleViewHolder(
     private val inputManager = context.getSystemService(InputManager::class.java)
     private val decorThemeUtil = DecorThemeUtil(context)
     private val animator: AppHandleAnimator = AppHandleAnimator(rootView, captionHandle)
+    @VisibleForTesting var regionSampler = HandleRegionSampler(captionHandle) { light ->
+        val color = NavigationHandleColor.get(context, light)
+        if (DesktopExperienceFlags.ENABLE_REENABLE_APP_HANDLE_COLOR_ANIMATIONS.isTrue) {
+            animator.animateColorChange(color)
+        } else captionHandle.imageTintList = ColorStateList.valueOf(color)
+    }
+    private var handleMenuOpen = false
+    private var captionVisible = false
     private var statusBarInputLayerExists = false
 
     // An invisible View that takes up the same coordinates as captionHandle but is layered
@@ -170,6 +181,7 @@ class AppHandleViewHolder(
         showInputLayer: Boolean,
         isCaptionVisible: Boolean,
     ) {
+        captionVisible = isCaptionVisible
         setVisibility(isCaptionVisible)
         if (DesktopExperienceFlags.ENABLE_REENABLE_APP_HANDLE_COLOR_ANIMATIONS.isTrue) {
             animator.animateColorChange(getCaptionHandleBarColor(taskInfo))
@@ -177,6 +189,12 @@ class AppHandleViewHolder(
             captionHandle.imageTintList = ColorStateList.valueOf(getCaptionHandleBarColor(taskInfo))
         }
         this.taskInfo = taskInfo
+        val sampleBounds = Rect(position.x + captionHandle.paddingLeft,
+            position.y + captionHandle.paddingTop,
+            position.x + width - captionHandle.paddingRight,
+            position.y + height - captionHandle.paddingBottom)
+        regionSampler.update(sampleBounds, isCaptionVisible && !handleMenuOpen,
+            shouldUseLightCaptionColors(taskInfo))
         if (!shouldAddStatusBarInputLayer) {
             return
         }
@@ -198,10 +216,14 @@ class AppHandleViewHolder(
     }
 
     override fun onHandleMenuOpened() {
+        handleMenuOpen = true
+        regionSampler.setVisible(false)
         animator.animateCaptionHandleAlpha(startValue = 1f, endValue = 0f)
     }
 
     override fun onHandleMenuClosed() {
+        handleMenuOpen = false
+        regionSampler.setVisible(captionVisible)
         animator.animateCaptionHandleAlpha(startValue = 0f, endValue = 1f)
     }
 
@@ -328,11 +350,8 @@ class AppHandleViewHolder(
 
     @ColorInt
     private fun getCaptionHandleBarColor(taskInfo: RunningTaskInfo): Int {
-        return if (shouldUseLightCaptionColors(taskInfo)) {
-            context.getColor(R.color.desktop_mode_caption_handle_bar_light)
-        } else {
-            context.getColor(R.color.desktop_mode_caption_handle_bar_dark)
-        }
+        return NavigationHandleColor.get(context,
+            regionSampler.sampledLight ?: shouldUseLightCaptionColors(taskInfo))
     }
 
     /**
@@ -393,6 +412,7 @@ class AppHandleViewHolder(
     }
 
     override fun close() {
+        regionSampler.close()
         animator.cancel()
     }
 

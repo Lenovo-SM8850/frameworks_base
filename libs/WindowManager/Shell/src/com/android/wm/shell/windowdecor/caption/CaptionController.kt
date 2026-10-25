@@ -137,10 +137,25 @@ abstract class CaptionController<T>(
             hasGlobalFocus = params.hasGlobalFocus
             this.decorWindowContext = decorWindowContext
 
+            if (taskInfo.isFloatingWindow) {
+                // Retain menu ownership without creating an invisible input window.
+                getOrCreateViewHolder()
+                isCaptionVisible = false
+                captionInsets?.remove(wct)
+                captionInsets = null
+                windowDecorationInsets?.remove(wct)
+                windowDecorationInsets = null
+                captionViewHost?.release(startT)
+                captionViewHost = null
+                captionLayoutResult = CaptionRelayoutResult(0, taskInfo.presentationBounds.width(),
+                    0, 0, 0, Region())
+                return captionLayoutResult
+            }
+
             val viewHolder = getOrCreateViewHolder()
             isCaptionVisible = taskInfo.isVisible && params.isCaptionVisible
             val viewHost = getOrCreateViewHost(decorWindowContext, display)
-            val taskBounds = taskInfo.getConfiguration().windowConfiguration.bounds
+            val taskBounds = taskInfo.presentationBounds
             val captionTopPadding = getCaptionTopPadding()
             val captionHeight = getCaptionHeight()
             val captionWidth = getCaptionWidth()
@@ -305,7 +320,7 @@ abstract class CaptionController<T>(
             .setWindowCrop(captionSurface, captionWidth, captionHeight)
             .setPosition(captionSurface, captionX.toFloat(), /* y= */ 0f)
             .setLayer(captionSurface, CAPTION_LAYER_Z_ORDER)
-            .show(captionSurface)
+            .setVisibility(captionSurface, !taskInfo.isFloatingWindow)
         val layers = arrayOf<SurfaceControl?>(captionSurface)
         clearExcludeLayerJob()
         setExcludeLayerJob =
@@ -352,10 +367,12 @@ abstract class CaptionController<T>(
         taskBounds: Rect,
         localCaptionBounds: Rect,
     ) {
-        if (!isCaptionVisible || !params.isInsetSource) {
+        if (params.floatingWindowPreview) return
+        if (taskInfo.isFloatingWindow || !isCaptionVisible || !params.isInsetSource) {
             captionInsets?.remove(wct)
             captionInsets = null
         }
+        if (taskInfo.isFloatingWindow) return
         // Caption inset is the full width of the task with the |captionHeight| and
         // positioned at the top of the task bounds, also in absolute coordinates.
         // So just reuse the task bounds and adjust the bottom coordinate.
@@ -466,6 +483,7 @@ abstract class CaptionController<T>(
      * Inject the given [MotionEvent] into the root view if it exists and the gesture started in it.
      */
     fun injectMotionEvent(e: MotionEvent) {
+        if (taskInfo.isFloatingWindow) return
         val rootView = windowDecorationViewHolder?.rootView ?: return
 
         val isDown = e.action == MotionEvent.ACTION_DOWN

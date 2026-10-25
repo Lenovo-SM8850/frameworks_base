@@ -108,6 +108,19 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
      * repositioning.
      */
     static final int CAPTION_LAYER_Z_ORDER = -1;
+    boolean mFloatingWindowPreview;
+    public boolean mFloatingFocusEnabled;
+    private Float mFloatingFocusShadowRadius;
+
+    public void updateFloatingFocusShadow(Float radius) {
+        mFloatingFocusShadowRadius = radius;
+        if (radius != null && mTaskInfo.isFloatingWindow && mTaskSurface.isValid()) {
+            try (SurfaceControl.Transaction t = new SurfaceControl.Transaction()) {
+                t.setShadowRadius(mTaskSurface, radius / mTaskInfo.floatingWindowScale).apply();
+            }
+        }
+    }
+
     /**
      * The Z-order of the task input sink in {@link DragPositioningCallback}.
      * <p>
@@ -302,7 +315,7 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         updateCaptionVisibility(outResult.mRootView, params);
         Trace.endSection();
 
-        final Rect taskBounds = mTaskInfo.getConfiguration().windowConfiguration.getBounds();
+        final Rect taskBounds = mTaskInfo.getPresentationBounds();
         outResult.mWidth = taskBounds.width();
         outResult.mHeight = taskBounds.height();
         outResult.mRootView.setTaskFocusState(mHasGlobalFocus);
@@ -323,22 +336,24 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
                 CaptionRegionHelper.calculateCustomizableRegion(mDecorWindowContext,
                         mTaskInfo, params.mOccludingElementsCalculator.get(), localCaptionBounds));
 
-        if (params.mBorderSettingsId != Resources.ID_NULL) {
-            outResult.mBorderSettings = BoxShadowHelper.getBorderSettings(mDecorWindowContext,
-                    params.mBorderSettingsId);
-        }
+        loadTaskSurfaceOutline(params, mDecorWindowContext, outResult);
 
-        if (params.mBoxShadowSettingsIds != null) {
-            outResult.mBoxShadowSettings = BoxShadowHelper.getBoxShadowSettings(mDecorWindowContext,
-                    params.mBoxShadowSettingsIds);
+        if (mTaskInfo.isFloatingWindow) {
+            mIsCaptionVisible = false;
+            if (mViewHost != null) {
+                mViewHost.release(startT);
+                mViewHost = null;
+            }
+            outResult.mCaptionHeight = 0;
+            outResult.mCaptionTopPadding = 0;
+            outResult.mCustomizableCaptionRegion.setEmpty();
+            updateDecorationContainerSurface(startT, outResult);
+            updateCaptionInsets(params, wct, outResult, taskBounds, localCaptionBounds,
+                    mDecorWindowContext);
+            updateTaskSurface(params, startT, finishT, outResult);
+            Trace.endSection();
+            return;
         }
-
-        outResult.mCornerRadius = params.mCornerRadiusId == Resources.ID_NULL
-                ? INVALID_CORNER_RADIUS : loadDimensionPixelSize(resources,
-                params.mCornerRadiusId);
-        outResult.mShadowRadius = params.mShadowRadiusId == Resources.ID_NULL
-                ? INVALID_SHADOW_RADIUS : loadDimensionPixelSize(resources,
-                params.mShadowRadiusId);
 
         Trace.beginSection("relayout-createViewHostIfNeeded");
         createViewHostIfNeeded(mDecorWindowContext, mDisplay);
@@ -456,6 +471,12 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         return (T) LayoutInflater.from(context).inflate(layoutResId, null);
     }
 
+    public void updateFloatingTaskInfo(RunningTaskInfo taskInfo) {
+        mTaskInfo = taskInfo;
+    }
+
+    private boolean mFloatingWindowDecorScaled;
+
     private void updateDecorationContainerSurface(
             SurfaceControl.Transaction startT, RelayoutResult<T> outResult) {
         if (mDecorationContainerSurface == null) {
@@ -472,6 +493,12 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
                             TaskConstants.TASK_CHILD_LAYER_WINDOW_DECORATIONS);
         }
 
+        if (mTaskInfo.isFloatingWindow || mFloatingWindowDecorScaled) {
+            final float decorScale = mTaskInfo.isFloatingWindow
+                    ? 1f / mTaskInfo.floatingWindowScale : 1f;
+            startT.setMatrix(mDecorationContainerSurface, decorScale, 0, 0, decorScale);
+            mFloatingWindowDecorScaled = mTaskInfo.isFloatingWindow;
+        }
         startT.setWindowCrop(mDecorationContainerSurface, outResult.mWidth, outResult.mHeight)
                 .show(mDecorationContainerSurface);
     }
@@ -482,7 +509,7 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
                 .setWindowCrop(captionSurface, outResult.mCaptionWidth, outResult.mCaptionHeight)
                 .setPosition(captionSurface, outResult.mCaptionX, 0 /* y */)
                 .setLayer(captionSurface, CAPTION_LAYER_Z_ORDER)
-                .show(captionSurface);
+                .setVisibility(captionSurface, !mTaskInfo.isFloatingWindow);
         SurfaceControl[] layers = {captionSurface};
         mBgExecutor.execute(() -> {
             synchronized (mTaskOrganizer) {
@@ -497,7 +524,8 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
     private void updateCaptionInsets(RelayoutParams params, WindowContainerTransaction wct,
             RelayoutResult<T> outResult, Rect taskBounds, Rect localCaptionBounds,
             Context decorWindowContext) {
-        if (!mIsCaptionVisible || !params.mIsInsetSource) {
+        if (mFloatingWindowPreview) return;
+        if (mTaskInfo.isFloatingWindow || !mIsCaptionVisible || !params.mIsInsetSource) {
             if (mWindowDecorationInsets != null) {
                 mWindowDecorationInsets.remove(wct);
                 mWindowDecorationInsets = null;
@@ -547,7 +575,14 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
 
     private void updateTaskSurface(RelayoutParams params, SurfaceControl.Transaction startT,
             SurfaceControl.Transaction finishT, RelayoutResult<T> outResult) {
-        if (params.mSetTaskVisibilityPositionAndCrop) {
+        if (mTaskInfo.isFloatingWindow && params.mSetTaskVisibilityPositionAndCrop) {
+            final Rect logical = mTaskInfo.configuration.windowConfiguration.getBounds();
+            final float scale = mTaskInfo.floatingWindowScale;
+            startT.setWindowCrop(mTaskSurface, logical.width(), logical.height())
+                    .setMatrix(mTaskSurface, scale, 0, 0, scale);
+            finishT.setWindowCrop(mTaskSurface, logical.width(), logical.height())
+                    .setMatrix(mTaskSurface, scale, 0, 0, scale);
+        } else if (params.mSetTaskVisibilityPositionAndCrop) {
             final Point taskPosition = mTaskInfo.positionInParent;
             startT.setWindowCrop(mTaskSurface, outResult.mWidth, outResult.mHeight);
             finishT.setWindowCrop(mTaskSurface, outResult.mWidth, outResult.mHeight)
@@ -574,7 +609,7 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
     private void updateTaskSurfaceOutline(
             RelayoutParams params, SurfaceControl.Transaction startT,
             SurfaceControl.Transaction finishT, RelayoutResult<T> outResult) {
-        if (!params.mInSyncWithTransition) {
+        if (!params.mInSyncWithTransition && !mTaskInfo.isFloatingWindow) {
             // Update these outline properties only when the relayout is driven by Transition
             // callbacks because they must be updated together with some of other properties (e.g.,
             // position) which is set by transition handler although the outline properties are
@@ -594,13 +629,16 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
             finishT.setBoxShadowSettings(mTaskSurface, outResult.mBoxShadowSettings);
         }
 
+        final float scale = mTaskInfo.isFloatingWindow ? mTaskInfo.floatingWindowScale : 1f;
         if (outResult.mShadowRadius != INVALID_SHADOW_RADIUS) {
-            startT.setShadowRadius(mTaskSurface, outResult.mShadowRadius);
-            finishT.setShadowRadius(mTaskSurface, outResult.mShadowRadius);
+            final float radius = mFloatingFocusEnabled && mFloatingFocusShadowRadius != null
+                    ? mFloatingFocusShadowRadius : outResult.mShadowRadius;
+            startT.setShadowRadius(mTaskSurface, radius / scale);
+            finishT.setShadowRadius(mTaskSurface, radius / scale);
         }
         if (outResult.mCornerRadius != INVALID_CORNER_RADIUS) {
-            startT.setCornerRadius(mTaskSurface, outResult.mCornerRadius);
-            finishT.setCornerRadius(mTaskSurface, outResult.mCornerRadius);
+            startT.setCornerRadius(mTaskSurface, outResult.mCornerRadius / scale);
+            finishT.setCornerRadius(mTaskSurface, outResult.mCornerRadius / scale);
         }
     }
 
@@ -624,6 +662,10 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
     }
 
     void onExclusionRegionChanged(@NonNull Region exclusionRegion) {
+        if (mTaskInfo.isFloatingWindow) {
+            mExclusionRegion.set(exclusionRegion);
+            return;
+        }
         relayout(mTaskInfo, mHasGlobalFocus, exclusionRegion);
     }
 

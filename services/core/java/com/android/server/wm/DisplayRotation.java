@@ -962,6 +962,15 @@ public class DisplayRotation {
             return null;
         }
         ActivityRecord app = mDisplayContent.mFocusedApp;
+        final Task focusedRootTask = app != null ? app.getRootTask() : null;
+        if (focusedRootTask != null && focusedRootTask.isFloatingWindow()) {
+            // Floating windows, including minis, follow the display rather than orienting it.
+            // Keep the fullscreen task underneath as the source of the per-app rotation policy.
+            final Task fullscreenTask = focusedRootTask.getDisplayArea().getRootTask(
+                    task -> task.getWindowingMode() == WINDOWING_MODE_FULLSCREEN
+                            && task.isVisibleRequested());
+            app = fullscreenTask != null ? fullscreenTask.topRunningActivity() : null;
+        }
         if (app != null && app.getTask() != null) {
             final ActivityRecord top = app.getTask().topRunningActivity();
             if (top != null) {

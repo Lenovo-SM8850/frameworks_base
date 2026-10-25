@@ -34,11 +34,12 @@ import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.core.view.isGone
+import com.android.internal.annotations.VisibleForTesting
+import com.android.internal.policy.DesktopModeCompatPolicy
 import com.android.window.flags.Flags
 import com.android.wm.shell.R
 import com.android.wm.shell.common.split.SplitScreenUtils
 import com.android.wm.shell.desktopmode.DesktopModeUiEventLogger
-import com.android.wm.shell.shared.bubbles.BubbleFlagHelper
 import com.android.wm.shell.shared.desktopmode.DesktopModeTransitionSource
 import com.android.wm.shell.windowdecor.common.DecorThemeUtil
 import com.android.wm.shell.windowdecor.common.DrawableInsets
@@ -96,10 +97,16 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private val decorThemeUtil = DecorThemeUtil(context)
     private lateinit var style: MenuStyle
 
+    private val rotateBtn: ImageButton
+    private val rotateDescriptionId = context.resources.getIdentifier(
+        "accessibility_rotate_button", "string", "com.android.systemui")
+    private var showFloatingButton = true
     private val fullscreenBtn: ImageButton
     private val splitscreenBtn: ImageButton
     private val floatingBtn: ImageButton
     private val desktopBtn: ImageButton
+
+    @VisibleForTesting var desktopModeCompatPolicy = DesktopModeCompatPolicy(context)
 
     private lateinit var taskInfo: RunningTaskInfo
     private lateinit var windowDecorationActions: WindowDecorationActions
@@ -112,9 +119,21 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         LayoutInflater.from(context)
             .inflate(R.layout.desktop_mode_window_decor_windowing_pill, this, true)
 
+        rotateBtn = requireViewById(R.id.rotate_window_button)
+        if (rotateDescriptionId != 0) {
+            rotateBtn.contentDescription = context.getString(rotateDescriptionId)
+            rotateBtn.tooltipText = rotateBtn.contentDescription
+        }
         fullscreenBtn = requireViewById<ImageButton>(R.id.fullscreen_button)
         splitscreenBtn = requireViewById<ImageButton>(R.id.split_screen_button)
         floatingBtn = requireViewById<ImageButton>(R.id.floating_button)
+        floatingBtn.contentDescription = context.getString(R.string.float_button_text)
+        ViewCompat.replaceAccessibilityAction(
+            floatingBtn,
+            AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CLICK,
+            context.getString(R.string.float_button_text),
+            null,
+        )
         desktopBtn = requireViewById<ImageButton>(R.id.desktop_button)
     }
 
@@ -131,11 +150,21 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         desktopModeUiEventLogger: DesktopModeUiEventLogger,
         shouldShowDesktopModeButton: Boolean,
         onPillItemClicked: (() -> Unit),
+    ) = initialize(windowDecorationActions, desktopModeUiEventLogger,
+        shouldShowDesktopModeButton, true, onPillItemClicked)
+
+    fun initialize(
+        windowDecorationActions: WindowDecorationActions,
+        desktopModeUiEventLogger: DesktopModeUiEventLogger,
+        shouldShowDesktopModeButton: Boolean,
+        showFloatingButton: Boolean,
+        onPillItemClicked: (() -> Unit),
     ) {
         this.windowDecorationActions = windowDecorationActions
         this.desktopModeUiEventLogger = desktopModeUiEventLogger
         this.shouldShowDesktopModeButton = shouldShowDesktopModeButton
         this.onPillItemClicked = onPillItemClicked
+        this.showFloatingButton = showFloatingButton
 
         listOf(fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
             it.setOnClickListener(this)
@@ -233,6 +262,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
 
     override fun onClick(v: View) {
         when (v.id) {
+            R.id.rotate_window_button -> windowDecorationActions.onRotate(taskInfo)
             R.id.fullscreen_button -> {
                 windowDecorationActions.onToFullscreen(taskInfo.taskId)
             }
@@ -258,18 +288,27 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         this.style = calculateMenuStyle(taskInfo)
 
         background.setTint(style.backgroundColor)
-
-        if (!BubbleFlagHelper.enableBubbleToFullscreen() || taskInfo.isFreeform) {
-            floatingBtn.visibility = View.GONE
+        rotateBtn.isGone = !taskInfo.isFloatingWindow || taskInfo.displayId != DEFAULT_DISPLAY ||
+            rotateDescriptionId == 0
+        rotateBtn.apply {
+            imageTintList = style.buttonColor
+            background = createBackgroundDrawable(color = style.textColor,
+                cornerRadius = iconButtonRippleRadius, drawableInsets = iconButtonDrawableInsetsBase)
         }
+        val floatDesk = windowDecorationActions.canMoveDeskToFloating(taskInfo)
+        floatingBtn.isGone = !showFloatingButton || taskInfo.displayId != DEFAULT_DISPLAY ||
+            (!taskInfo.isResizeable && !floatDesk) || taskInfo.isFloatingWindow ||
+            (!floatDesk && desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(taskInfo)) ||
+            taskInfo.activityType != android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD ||
+            (!taskInfo.isFullscreen && !isInSplitScreen && !floatDesk)
 
-        if (!Flags.enableNonDefaultDisplaySplitBugfix() && taskInfo.displayId != DEFAULT_DISPLAY) {
-            splitscreenBtn.visibility = View.GONE
-        }
+        splitscreenBtn.isGone = !canEnterSplitScreen ||
+            (!Flags.enableNonDefaultDisplaySplitBugfix() && taskInfo.displayId != DEFAULT_DISPLAY)
 
         // Currently split screen doesn't override task windowing mode when it's entering split.
         // So a split task can have WINDOWING_MODE_FULLSCREEN. Use `isInSplitScreen` to check if
         // the task is in split screen.
+        fullscreenBtn.isGone = false
         fullscreenBtn.isSelected = taskInfo.isFullscreen && !isInSplitScreen
         fullscreenBtn.isEnabled = !taskInfo.isFullscreen || isInSplitScreen
         fullscreenBtn.imageTintList = style.buttonColor
@@ -279,7 +318,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         floatingBtn.isSelected = taskInfo.isPinned
         floatingBtn.isEnabled = !taskInfo.isPinned
         floatingBtn.imageTintList = style.buttonColor
-        desktopBtn.isGone = !shouldShowDesktopModeButton
+        desktopBtn.isGone = true
         desktopBtn.isSelected = taskInfo.isFreeform
         desktopBtn.isEnabled = !taskInfo.isFreeform
         desktopBtn.imageTintList = style.buttonColor
