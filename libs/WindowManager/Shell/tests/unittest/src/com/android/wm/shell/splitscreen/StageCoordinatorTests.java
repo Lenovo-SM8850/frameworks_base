@@ -1801,6 +1801,19 @@ public class StageCoordinatorTests extends ShellTestCase {
     }
 
     @Test
+    public void replacePairSlotTargetsWholeHalfInsteadOfFreeInsertionPreviews() {
+        doReturn(true).when(mStageCoordinator).isSplitScreenVisible();
+        doReturn(SPLIT_POSITION_TOP_OR_LEFT).when(mStageCoordinator).getSplitPosition(mTaskId);
+        final SplitScreenController.AppDragSlot slot =
+                mStageCoordinator.getReplaceSplitSlot(mTaskId);
+        assertThat(slot).isNotNull();
+        assertThat(slot.bounds).isEqualTo(mBounds1);
+        assertThat(slot.occupied).isTrue();
+        assertThat(slot.leafId).isEqualTo(-1);
+        verify(mStageCoordinator, never()).getAppDragSlots(anyInt());
+    }
+
+    @Test
     public void sidebarRepeatTaskDropDuringPendingEnterDoesNotMutatePairLayout() {
         mSplitScreenTransitions.mPendingEnter = mock(SplitScreenTransitions.EnterSession.class);
         mStageCoordinator.startTask(mTaskId, SPLIT_POSITION_BOTTOM_OR_RIGHT, null, null,

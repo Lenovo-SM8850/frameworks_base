@@ -84,4 +84,17 @@ class SplitPickerControllerTest : ShellTestCase() {
         assertThat(controller.profileActivities(10)).isEmpty()
         assertThat(controller.resolveProfileActivity(component, secondary, 10)).isNull()
     }
+    @Test fun replacementUsesAnOccupiedDestinationEvenWhenAddIsUnavailable() {
+        val split = mock<SplitScreenController>()
+        val organizer = mock<com.android.wm.shell.ShellTaskOrganizer>()
+        val task = android.app.ActivityManager.RunningTaskInfo().apply { taskId = 42 }
+        whenever(organizer.getRunningTaskInfo(42)).thenReturn(task)
+        val picker = SplitPickerController(mContext, split, organizer, mock(), mock(), mock(), mock(),
+            Executor { it.run() })
+        picker.show(42, true)
+        verify(split).getReplaceSplitSlot(42)
+        verify(split, never()).getAddBelowSlot(any())
+        verify(launcher, never()).getActivityList(any(), any())
+    }
+
 }

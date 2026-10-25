@@ -27,6 +27,20 @@ class SplitPickerPolicyTest : ShellTestCase() {
         minHeight: Int = 100) = SplitPickerPolicy.availability(info, bounds, enabled,
         suspended, quiet, unlocked, visible, force, compat, minWidth, minHeight)
 
+    @Test fun replacementSelectsOnlyAnotherPaneInTheSameUserAndGroup() {
+        val first = ComponentName("first", "Main")
+        val second = ComponentName("second", "Main")
+        val selection = SplitPickerSession(0, 42, mapOf(
+            42 to SplitPickerSession.Member(10, Binder(), first),
+            43 to SplitPickerSession.Member(10, Binder(), second)),
+            slot(bounds, occupied = true), 7, 10, true)
+        assertThat(SplitPickerPolicy.replacementMember(selection, second, 10)).isEqualTo(43)
+        assertThat(SplitPickerPolicy.replacementMember(selection, first, 10)).isNull()
+        assertThat(SplitPickerPolicy.replacementMember(selection, second, 11)).isNull()
+        assertThat(SplitPickerPolicy.replacementMember(selection, ComponentName("other", "Main"), 10)).isNull()
+        assertThat(SplitPickerPolicy.replacementMember(selection.copy(replace = false), second, 10)).isNull()
+    }
+
     @Test fun launchableResizableAppFitsDestination() {
         assertThat(availability()).isEqualTo(Availability.AVAILABLE)
     }
@@ -106,6 +120,13 @@ class SplitPickerPolicyTest : ShellTestCase() {
         assertThat(session().matches(revision, members, 7, 0)).isFalse()
         val otherLeaf = AppDragSlot(0, 2, bounds, bounds, false, 1, false, 3, true)
         assertThat(session().matches(otherLeaf, members, 7, 0)).isFalse()
+    }
+    @Test fun replacementSessionCannotTurnIntoInsertion() {
+        val occupied = slot(bounds, occupied = true)
+        val replacement = SplitPickerSession(0, 42, members, occupied, 7, 0, true)
+        assertThat(replacement.matches(occupied, members, 7, 0)).isTrue()
+        assertThat(replacement.matches(slot(bounds), members, 7, 0)).isFalse()
+        assertThat(session().matches(occupied, members, 7, 0)).isFalse()
     }
 
     @Test fun searchMatchesLabelsWithoutCaseOrSurroundingWhitespace() {

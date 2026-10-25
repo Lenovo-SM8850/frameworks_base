@@ -25,6 +25,13 @@ object SplitPickerPolicy {
         return Availability.AVAILABLE
     }
 
+    /** A visible app may be selected only as another pane of this exact replacement session. */
+    fun replacementMember(selection: SplitPickerSession, component: android.content.ComponentName,
+        userId: Int): Int? = if (!selection.replace) null else selection.members.entries.firstOrNull {
+            it.key != selection.sourceTaskId && it.value.userId == userId &&
+                it.value.component?.packageName == component.packageName
+        }?.key
+
     /** Prefers the pointed half; an infeasible branch falls back to the nearest free half. */
     @JvmStatic
     fun chooseFloatingSlot(slots: List<AppDragSlot>, window: Rect, minWidth: Int,
@@ -54,13 +61,6 @@ object SplitPickerPolicy {
         val y = target.top.coerceIn(stable.top, stable.bottom - h)
         return Rect(x, y, x + w, y + h)
     }
-
-    /** A visible app may be selected only as another pane of this exact replacement session. */
-    fun replacementMember(selection: SplitPickerSession, component: android.content.ComponentName,
-        userId: Int): Int? = if (!selection.replace) null else selection.members.entries.firstOrNull {
-            it.key != selection.sourceTaskId && it.value.userId == userId &&
-                it.value.component?.packageName == component.packageName
-        }?.key
 }
 
 /** A session cannot outlive its exact group, destination, or controller generation. */
