@@ -735,5 +735,39 @@ public class SplitScreenControllerTests extends ShellTestCase {
         verify(mStageCoordinator, never()).startTaskInSplitSlot(any(), any());
     }
 
+    @Test
+    public void sidebarImmutableIntentCarriesInstanceFlagsAndDisallowsPictureInPicture() {
+        Intent activity = createStartIntent("multiActivity");
+        PendingIntent pending = PendingIntent.getActivity(mContext, 0, activity, FLAG_IMMUTABLE);
+        ActivityManager.RunningTaskInfo visible = createTaskInfo(WINDOWING_MODE_MULTI_WINDOW,
+                ACTIVITY_TYPE_STANDARD, activity);
+        visible.taskId = 91;
+        visible.userId = mContext.getUserId();
+        when(mTaskOrganizer.getRunningTasks()).thenReturn(new java.util.ArrayList<>(java.util.List.of(visible)));
+        when(mStageCoordinator.getCurrentStageTypeOfTask(91)).thenReturn(SplitScreen.STAGE_TYPE_MAIN);
+        when(mMultiInstanceHelper.supportsMultiInstanceSplit(activity.getComponent(), visible.userId))
+                .thenReturn(true);
+        when(mStageCoordinator.startSidebarIntent(any(), any(), any(), any())).thenReturn(true);
+        SplitScreenController.AppDragSlot slot = new SplitScreenController.AppDragSlot(
+                SPLIT_POSITION_TOP_OR_LEFT, 2, new Rect(0, 0, 800, 600),
+                new Rect(0, 0, 800, 600), false, 0, false, 1);
+        android.app.ActivityOptions supplied = android.app.ActivityOptions.makeBasic();
+        supplied.setLaunchDisplayId(7);
+        assertTrue(mSplitScreenController.startSidebarIntent(pending, visible.userId, null,
+                supplied.toBundle(), slot));
+        verify(mStageCoordinator).startSidebarIntent(eq(pending), mIntentCaptor.capture(),
+                mLaunchOptionsCaptor.capture(), eq(slot));
+        int required = FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_TASK;
+        assertTrue(pending.isImmutable());
+        assertEquals(7, android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
+                .getLaunchDisplayId());
+        assertEquals(required, android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
+                .getPendingIntentLaunchFlags() & required);
+        assertEquals(0, mIntentCaptor.getValue().getFlags() & FLAG_ACTIVITY_NO_USER_ACTION);
+        assertEquals(0, mLaunchOptionsCaptor.getValue()
+                .getInt("android.activity.pendingIntentLaunchFlags") & FLAG_ACTIVITY_NO_USER_ACTION);
+        assertTrue(android.app.ActivityOptions.fromBundle(mLaunchOptionsCaptor.getValue())
+                .disallowEnterPictureInPictureWhileLaunching());
+    }
 
 }

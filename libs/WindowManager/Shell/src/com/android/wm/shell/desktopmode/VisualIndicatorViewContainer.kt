@@ -68,6 +68,7 @@ constructor(
         object : SurfaceControlViewHostFactory {},
     private val bubbleBoundsProvider: BubbleDropTargetBoundsProvider?,
     private val snapEventHandler: SnapEventHandler,
+    private val inputFlags: Int = 0,
 ) {
     @VisibleForTesting var indicatorView: View? = null
     // Optional extra indicator showing the outline of the bubble bar
@@ -92,6 +93,7 @@ constructor(
     ) {
         if (isReleased) return
         desktopExecutor.execute {
+            if (isReleased) return@execute
             val resources = context.resources
             val metrics = resources.displayMetrics
             val screenWidth: Int
@@ -120,7 +122,7 @@ constructor(
                     screenWidth,
                     screenHeight,
                     WindowManager.LayoutParams.TYPE_APPLICATION,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or inputFlags,
                     PixelFormat.TRANSPARENT,
                 )
             lp.title = "Desktop Mode Visual Indicator"
@@ -163,7 +165,7 @@ constructor(
             // We want this indicator to be behind the dragged task, but in front of all others.
             // TODO(411292927): If the indicator is on a different display, this relative layer
             // might not work as expected, but we'll address that in the functional CL.
-            t.setRelativeLayer(indicatorLeash, taskSurface, -1)
+            t.setRelativeLayer(indicatorLeash, taskSurface, if (miniPreview) 1 else -1)
             syncQueue.runInSync { transaction: SurfaceControl.Transaction ->
                 transaction.merge(t)
                 t.close()
@@ -391,7 +393,6 @@ constructor(
                 }
             }
         }
-        isReleased = true
     }
 
     private fun getOrCreateBubbleBarIndicator(type: IndicatorType): View? {
@@ -614,16 +615,17 @@ constructor(
                         return desktopStableBounds
                     }
                     IndicatorType.TO_DESKTOP_INDICATOR -> {
-                        val adjustmentPercentage = (1f - DESKTOP_MODE_INITIAL_BOUNDS_SCALE)
+                        val landscape = layout.width() > layout.height()
+                        val shortEdge = (maxOf(layout.width(), layout.height()) * .30f).toInt()
+                        val longEdge = maxOf(shortEdge,
+                            (minOf(layout.width(), layout.height()) * .72f).toInt())
+                        val width = if (landscape) longEdge else shortEdge
+                        val height = if (landscape) shortEdge else longEdge
                         return Rect(
-                            (adjustmentPercentage * desktopStableBounds.width() / 2).toInt(),
-                            (adjustmentPercentage * desktopStableBounds.height() / 2).toInt(),
-                            (desktopStableBounds.width() -
-                                    (adjustmentPercentage * desktopStableBounds.width() / 2))
-                                .toInt(),
-                            (desktopStableBounds.height() -
-                                    (adjustmentPercentage * desktopStableBounds.height() / 2))
-                                .toInt(),
+                            desktopStableBounds.centerX() - width / 2,
+                            desktopStableBounds.centerY() - height / 2,
+                            desktopStableBounds.centerX() + (width + 1) / 2,
+                            desktopStableBounds.centerY() + (height + 1) / 2,
                         )
                     }
                     IndicatorType.TO_SPLIT_LEFT_INDICATOR -> {

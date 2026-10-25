@@ -19,6 +19,9 @@ package com.android.wm.shell.shared.draganddrop;
 /** Constants that can be used by both Shell and other users of the library, e.g. Launcher */
 public class DragAndDropConstants {
 
+    /** Requests sidebar app placement; receivers must also verify the PendingIntent creator. */
+    public static final String EXTRA_SIDEBAR_APP_DRAG = "com.android.wm.shell.SIDEBAR_APP_DRAG";
+
     /**
      * An Intent extra that Launcher can use to specify a region of the screen where Shell should
      * ignore drag events.

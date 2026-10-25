@@ -176,6 +176,27 @@ public class DragAndDropControllerTest extends ShellTestCase {
     }
 
     @Test
+    public void testDockDragEnteredResolvesPreviewWithoutWaitingForPointerMotion() {
+        final View source = mock(View.class);
+        final Display display = mock(Display.class);
+        doReturn(display).when(source).getDisplay();
+        doReturn(DEFAULT_DISPLAY).when(display).getDisplayId();
+        final ClipData clipData = createAppClipData(MIMETYPE_APPLICATION_SHORTCUT);
+        final DragEvent event = mock(DragEvent.class);
+        doReturn(ACTION_DRAG_STARTED).when(event).getAction();
+        doReturn(clipData).when(event).getClipData();
+        doReturn(clipData.getDescription()).when(event).getClipDescription();
+        final DragLayout layout = mock(DragLayout.class);
+        mController.addDisplayDropTarget(0, mContext, mock(WindowManager.class),
+                mock(FrameLayout.class), layout);
+        mController.onDrag(source, event);
+        doReturn(DragEvent.ACTION_DRAG_ENTERED).when(event).getAction();
+        mController.onDrag(source, event);
+        verify(layout).show();
+        verify(layout).update(event);
+    }
+
+    @Test
     public void testOnDragStarted_withNoClipDataOrDescription() {
         final View dragLayout = mock(View.class);
         final Display display = mock(Display.class);

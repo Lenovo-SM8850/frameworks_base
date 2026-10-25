@@ -106,6 +106,9 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
     private final Transitions mTransitions;
     private final DesktopState mDesktopState;
     private SplitScreenController mSplitScreen;
+    private Lazy<java.util.Optional<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>>
+            mSidebarFloatingController;
+    private com.android.wm.shell.common.TaskStackListenerImpl mSidebarTaskStackListener;
     private final BubbleFeatureConfig mBubbleFeatureConfig;
     private Lazy<DragToBubbleController> mDragToBubbleController;
     private ShellExecutor mMainExecutor;
@@ -214,6 +217,17 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
         mSplitScreen = splitscreen;
     }
 
+    public void setSidebarFloatingController(
+            Lazy<java.util.Optional<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>>
+                    controller) {
+        mSidebarFloatingController = controller;
+    }
+
+    public void setSidebarTaskStackListener(
+            com.android.wm.shell.common.TaskStackListenerImpl listener) {
+        mSidebarTaskStackListener = listener;
+    }
+
     /** Adds a listener to be notified of drag and drop events. */
     public void addListener(DragAndDropListener listener) {
         mListeners.add(listener);
@@ -271,8 +285,11 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
             dragToBubbleController = mDragToBubbleController.get();
             rootView.addView(dragToBubbleController.getDropTargetContainer());
         }
-        DragLayoutProvider dragLayout = new DragLayout(context, mSplitScreen,
-                dragToBubbleController, mIconProvider);
+        DragLayoutProvider dragLayout = new SidebarDragLayout(context,
+                new DragLayout(context, mSplitScreen, dragToBubbleController, mIconProvider),
+                mSplitScreen, () -> mSidebarFloatingController == null ? null
+                        : mSidebarFloatingController.get().orElse(null),
+                mShellTaskOrganizer, mSidebarTaskStackListener, mIconProvider);
         dragLayout.addDraggingView(rootView);
         try {
             wm.addView(rootView, layoutParams);
@@ -336,7 +353,7 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
         ProtoLog.v(ShellProtoLogGroup.WM_SHELL_DRAG_AND_DROP,
                 "Handling vanished task: id=%d component=%s", taskInfo.taskId,
                 taskInfo.baseIntent.getComponent());
-        pd.dragSession.updateRunningTask();
+        if (!pd.dragSession.isSidebarAppDrag) pd.dragSession.updateRunningTask();
         pd.dragLayout.updateSession(pd.dragSession);
     }
 
@@ -365,7 +382,8 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
             dragSession.updateRunningTask();
             final ActivityManager.RunningTaskInfo taskInfo = dragSession.runningTaskInfo;
             // Desktop tasks will have their own drag handling.
-            final boolean isDesktopDrag = taskInfo != null && taskInfo.isFreeform()
+            final boolean isDesktopDrag = !dragSession.isSidebarAppDrag
+                    && taskInfo != null && taskInfo.isFreeform()
                     && mDesktopState.canEnterDesktopMode();
             pd.isHandlingDrag = DragUtils.canHandleDrag(event) && !isDesktopDrag;
             ProtoLog.v(ShellProtoLogGroup.WM_SHELL_DRAG_AND_DROP,
@@ -406,6 +424,7 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
                 break;
             case ACTION_DRAG_ENTERED:
                 pd.dragLayout.show();
+                pd.dragLayout.update(event);
                 break;
             case ACTION_DRAG_LOCATION:
                 pd.dragLayout.update(event);
