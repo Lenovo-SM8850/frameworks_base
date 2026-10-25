@@ -138,4 +138,26 @@ class FloatingWindowGeometryStore(
     }
 
     private val loadingUsers = mutableSetOf<Int>()
+
+    fun store(packageName: String, userId: Int, orientation: Int, bounds: Rect, stable: Rect,
+        displayWidth: Int, displayHeight: Int, density: Int, manual: Boolean, landscape: Boolean,
+        scale: Float = FloatingWindowGeometry.DEFAULT_SCALE,
+        presentationState: PresentationState = PresentationState.NORMAL) {
+        if (presentationState != PresentationState.NORMAL ||
+            bounds.isEmpty || stable.isEmpty || !stable.contains(bounds) || !scale.isFinite() ||
+            scale <= 0f || scale > 1f ||
+            min(bounds.width(), bounds.height()) <= .3f * min(displayWidth, displayHeight) + 2) return
+        val value = JSONObject().put("presentation", presentationState.name).put("left", (bounds.left - stable.left).toDouble() / stable.width())
+            .put("top", (bounds.top - stable.top).toDouble() / stable.height())
+            .put("width", bounds.width().toDouble() / stable.width())
+            .put("height", bounds.height().toDouble() / stable.height())
+            .put("short", min(displayWidth, displayHeight))
+            .put("long", max(displayWidth, displayHeight)).put("density", density)
+            .put("manual", manual).put("landscape", landscape).put("scale", scale.toDouble())
+        val data = user(userId)
+        val key = "$packageName:$orientation"
+        if (data.optJSONObject(key)?.toString() == value.toString()) return
+        data.put(key, value)
+        persist(userId)
+    }
 }

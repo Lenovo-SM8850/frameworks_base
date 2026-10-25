@@ -1073,6 +1073,16 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
             DISPLAY_ID_0, 700f, 1000f, INPUT_METHOD_TYPE_UNKNOWN)
     }
 
+    @Test
+    fun floatingBoundsTransition_consumedRestoresCommittedDecorations() = runOnUiThread {
+        verifyFloatingBoundsTransitionConsumed(false)
+    }
+
+    @Test
+    fun floatingBoundsTransition_abortedRestoresCommittedDecorations() = runOnUiThread {
+        verifyFloatingBoundsTransitionConsumed(true)
+    }
+
     private fun verifyFloatingBoundsTransitionConsumed(aborted: Boolean) {
         beginFloatingCorner()
         taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1100f, 1600f)
