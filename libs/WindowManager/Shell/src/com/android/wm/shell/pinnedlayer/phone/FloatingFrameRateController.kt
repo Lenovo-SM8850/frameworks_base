@@ -35,6 +35,15 @@ class FloatingFrameRateController(
     private var thermalStatus = PowerManager.THERMAL_STATUS_NONE
 
     init {
+        resolver.registerContentObserver(Settings.System.getUriFor(GAME_LIST_KEY), false,
+            object : ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    executor.execute {
+                        gamePackages.clear()
+                        update()
+                    }
+                }
+            }, UserHandle.USER_ALL)
         SurfaceFrameRate.addInteractionListener { update() }
         transitions?.registerObserver(object : com.android.wm.shell.transition.Transitions.TransitionObserver {
             private val active = mutableSetOf<android.os.IBinder>()
@@ -136,7 +145,8 @@ class FloatingFrameRateController(
         val enabled = supportsOverride() && !SurfaceFrameRate.isInteracting
         if (!enabled && owned.isEmpty()) return
         val count = tasks.values.count { it.info.isFloatingWindow && it.info.displayId == DEFAULT_DISPLAY }
-        val gameDisplays = emptySet<Int>()
+        val gameDisplays = tasks.values.map { it.info }.filter(::isFullscreenGame)
+            .map { it.displayId }.toSet()
         val changes = mutableMapOf<SurfaceControl, Float>()
         tasks.values.forEach { task ->
             val info = task.info
@@ -146,7 +156,7 @@ class FloatingFrameRateController(
             val fps = if (enabled) vote(floating,
                 focusedTaskId?.let { it == info.taskId } ?: info.isFocused, count,
                 entry != null, entry?.edge != null && entry.edge != FloatingMiniState.Edge.NONE,
-                thermalStatus, false) else 0f
+                thermalStatus, info.displayId in gameDisplays) else 0f
             if ((votes[task.leash] ?: 0f) != fps && task.leash.isValid) changes[task.leash] = fps
             if (fps > 0f) {
                 owned += task.leash
