@@ -6040,6 +6040,10 @@
          config_defaultPeakRefreshRate will act as the default frame rate. -->
     <integer name="config_defaultRefreshRate">60</integer>
 
+    <!-- Minimum physical refresh rate of the default display outside ambient display.
+         Applies to app requests too; 0 leaves the supported modes unrestricted. -->
+    <integer name="config_minPhysicalRefreshRate">0</integer>
+
     <!-- Physical refresh rate while ambient display is visible; 0 disables the vote. -->
     <integer name="config_dozeRefreshRate">0</integer>
 
