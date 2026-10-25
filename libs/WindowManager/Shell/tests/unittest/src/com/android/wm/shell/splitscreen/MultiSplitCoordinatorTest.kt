@@ -417,6 +417,46 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         return slot
     }
 
+    @Test fun handleAddBesideUsesTheSameColumnDestinationAndPickerIdentity() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        val slot = coordinator.getAddSlot(20)!!
+        assertThat(slot.threeColumns).isTrue()
+        assertThat(slot.splitBelow).isFalse()
+        assertThat(slot.bounds).isEqualTo(coordinator.getSlots(0).first {
+            it.threeColumns && it.leafId == slot.leafId && it.newTaskFirst == slot.newTaskFirst
+        }.bounds)
+        assertThat(coordinator.getBelowSlotForValidation(20)!!.threeColumns).isTrue()
+        assertThat(coordinator.startIntent(pendingIntent, null, null, slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(groups.get(10)!!.layout.isThreeColumns).isTrue()
+    }
+
+    @Test fun portraitAndSmallScreensKeepExistingRowInsertion() {
+        mContext.resources.configuration.smallestScreenWidthDp = 599
+        assertThat(coordinator.getSlots(0).none { it.threeColumns }).isTrue()
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        whenever(split.rootBounds).thenReturn(Rect(0, 0, 2400, 3200))
+        whenever(split.isLeftRightSplit).thenReturn(false)
+        assertThat(coordinator.getSlots(0).none { it.threeColumns }).isTrue()
+        assertThat(coordinator.getBelowSlot(20)!!.threeColumns).isFalse()
+    }
+
+    @Test fun insertionAndHandleActionRespectFiveWindowBudgetAndRecheckAtDrop() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        val slot = coordinator.getBelowSlot(20)!!
+        whenever(organizer.getRunningTasks(0)).thenReturn(java.util.ArrayList((1..3).map {
+            RunningTaskInfo().apply {
+                taskId = 100 + it
+                isFloatingWindow = true
+                isVisible = true
+            }
+        }))
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+        assertThat(coordinator.getAddSlot(20)).isNull()
+        assertThat(coordinator.getSlots(0)).isEmpty()
+        assertThat(coordinator.startIntent(pendingIntent, null, null, slot)).isFalse()
+    }
+
     @Test fun insertTwoToThreeToFourThenReplaceMaintainsFourRoots() {
         add()
         assertThat(coordinator.activeStages).hasSize(3)
