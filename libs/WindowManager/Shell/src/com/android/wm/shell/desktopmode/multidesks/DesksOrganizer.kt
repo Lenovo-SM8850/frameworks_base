@@ -39,6 +39,9 @@ interface DesksOrganizer {
     /** Activates the given desk, making it visible in its display. */
     fun activateDesk(wct: WindowContainerTransaction, deskId: Int, skipReorder: Boolean = false)
 
+    /** Adopts floating tasks of the activating user and their profiles in the activation WCT. */
+    fun prepareFloatingTasksForDesk(wct: WindowContainerTransaction, deskId: Int, userId: Int)
+
     /** Deactivates the given desk, removing it as the default launch container for new tasks. */
     fun deactivateDesk(wct: WindowContainerTransaction, deskId: Int, skipReorder: Boolean = false)
 
