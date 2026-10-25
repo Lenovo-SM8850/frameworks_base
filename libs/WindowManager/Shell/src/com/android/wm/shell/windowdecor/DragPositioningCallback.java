@@ -89,4 +89,7 @@ public interface DragPositioningCallback {
 
     /** Cancels an active drag without committing a release action. */
     default void onDragPositioningCancel() {}
+
+    /** Whether the active drag was cancelled before release. */
+    default boolean isDragPositioningCancelled() { return false; }
 }

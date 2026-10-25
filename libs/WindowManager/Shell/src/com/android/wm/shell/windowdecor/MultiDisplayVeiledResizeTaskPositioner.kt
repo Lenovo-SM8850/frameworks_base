@@ -15,7 +15,6 @@
  */
 package com.android.wm.shell.windowdecor
 
-import com.android.wm.shell.common.SurfaceFrameRate
 import android.app.ActivityManager.RunningTaskInfo
 import android.graphics.PointF
 import com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometry
@@ -42,6 +41,7 @@ import com.android.internal.jank.InteractionJankMonitor
 import com.android.window.flags.Flags
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.DisplayController
+import com.android.wm.shell.common.SurfaceFrameRate
 import com.android.wm.shell.common.MultiDisplayDragMoveBoundsCalculator
 import com.android.wm.shell.common.MultiDisplayDragMoveIndicatorController
 import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.InputMethod
@@ -787,6 +787,27 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
     }
 
+    override fun isDragPositioningCancelled() = floatingDragCancelled
+
+    override fun onDragPositioningCancel() {
+        if (!floatingDragActive) return
+        cancelFloatingDragForTransition()
+        floatingDragActive = false
+        SurfaceFrameRate.setInteracting(this, false)
+    }
+
+    private fun stopFloatingObserver() {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
+        floatingDragActive = false
+        SurfaceFrameRate.setInteracting(this, false)
+        if (floatingObserverRegistered) {
+            transitions.unregisterObserver(this)
+            floatingObserverRegistered = false
+        }
+        windowDecoration.floatingWindowTransitionListener = null
+    }
+
     private fun cancelFloatingDragForTransition() {
         allowFloatingFeedback = false
         resizeFeedback.reset()
@@ -1142,24 +1163,5 @@ class MultiDisplayVeiledResizeTaskPositioner(
 
         private val ALPHA_FOR_WINDOW_ON_DISPLAY_WITH_CURSOR = 1.0f
         private val ALPHA_FOR_WINDOW_ON_NON_CURSOR_DISPLAY = 0.7f
-    }
-
-    override fun onDragPositioningCancel() {
-        if (!floatingDragActive) return
-        cancelFloatingDragForTransition()
-        floatingDragActive = false
-        SurfaceFrameRate.setInteracting(this, false)
-    }
-
-    private fun stopFloatingObserver() {
-        allowFloatingFeedback = false
-        resizeFeedback.reset()
-        floatingDragActive = false
-        SurfaceFrameRate.setInteracting(this, false)
-        if (floatingObserverRegistered) {
-            transitions.unregisterObserver(this)
-            floatingObserverRegistered = false
-        }
-        windowDecoration.floatingWindowTransitionListener = null
     }
 }
