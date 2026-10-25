@@ -36,6 +36,65 @@ class MultiSplitLayoutTest {
     private val left = DividerId(11)
     private val right = DividerId(12)
 
+    @Test fun eitherPairedSideConvertsToColumnsAndBackToItsOriginalSide() {
+        val three = MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f, a,
+            Split(right, Orientation.TOP_BOTTOM, 0.5f, b, c)))
+        for (source in listOf(three, three.mirror()!!)) {
+            val ordered = source.getLeaves()
+            val columns = source.rotateThreeAppShape()!!
+            assertTrue(columns.isThreeColumns)
+            assertEquals(ordered, columns.getLeaves())
+            val back = columns.rotateThreeAppShape()!!
+            assertEquals(source.root, back.root)
+            assertNull(back.columnPairFirst)
+            assertEquals(source.root.first is Split, columns.columnPairFirst)
+            val portrait = columns.reorient(Orientation.TOP_BOTTOM)
+            assertEquals(source.reorient(Orientation.TOP_BOTTOM).root, portrait.root)
+            assertEquals(columns.columnPairFirst, portrait.columnPairFirst)
+            assertEquals(columns.root, portrait.reorient(Orientation.LEFT_RIGHT).root)
+        }
+    }
+
+    @Test fun unknownColumnOriginFallsBackToSingleFirstInBothMappings() {
+        val known = MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
+            Split(left, Orientation.TOP_BOTTOM, 0.5f, a, b), c)).rotateThreeAppShape()!!
+        val unknown = MultiSplitLayout(known.root, threeColumnGroup = true)
+        assertNull(unknown.columnPairFirst)
+        assertEquals(a, unknown.rotateThreeAppShape()!!.root.first)
+        val portrait = unknown.reorient(Orientation.TOP_BOTTOM)
+        assertEquals(a, portrait.root.first)
+        assertNull(portrait.columnPairFirst)
+        assertEquals(unknown.root, portrait.reorient(Orientation.LEFT_RIGHT).root)
+    }
+
+    @Test fun columnOriginSurvivesAssignmentSwapAndRatioNormalization() {
+        val columns = MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
+            Split(left, Orientation.TOP_BOTTOM, 0.5f, a, b), c)).rotateThreeAppShape()!!
+        for (model in listOf(columns, columns.reorient(Orientation.TOP_BOTTOM))) {
+            val changed = listOf(model.assign(a.id, 99)!!, model.swap(a.id, c.id)!!,
+                model.normal(), model.withRootRatio(0.5f)) +
+                listOfNotNull(model.resize(main, 0.4f))
+            for (result in changed) {
+                assertEquals(true, result.columnPairFirst)
+                val back = result.reorient(Orientation.LEFT_RIGHT).rotateThreeAppShape()!!
+                assertTrue(back.root.first is Split)
+                assertEquals(result.getLeaves(), back.getLeaves())
+            }
+        }
+    }
+
+    @Test fun portraitMirrorUpdatesTheRememberedPairedSide() {
+        val columns = MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f,
+            Split(left, Orientation.TOP_BOTTOM, 0.5f, a, b), c)).rotateThreeAppShape()!!
+        val mirrored = columns.reorient(Orientation.TOP_BOTTOM).mirror()!!
+        assertEquals(false, mirrored.columnPairFirst)
+        assertEquals(listOf(c, a, b), mirrored.getLeaves())
+        val back = mirrored.reorient(Orientation.LEFT_RIGHT).rotateThreeAppShape()!!
+        assertEquals(c, back.root.first)
+        assertEquals(listOf(a, b), back.getLeaves().drop(1))
+        assertTrue(mirrored.mirror()!!.columnPairFirst == true)
+    }
+
     @Test fun threeColumnsEqualPortraitBoundsAndRotationRoundTrip() {
         val three = MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f, a,
             Split(right, Orientation.TOP_BOTTOM, 0.5f, b, c)))
@@ -58,6 +117,28 @@ class MultiSplitLayoutTest {
         assertFalse(ordinary.threeColumnGroup)
         assertEquals(three.root, ordinary.root)
         assertFalse(columns.rotateThreeAppShape()!!.threeColumnGroup)
+    }
+
+    @Test fun columnGroupsCannotGrowInEitherOrientationAndRemovingReturnsAPair() {
+        val columns = MultiSplitLayout(Split(main, Orientation.LEFT_RIGHT, 0.5f, a,
+            Split(right, Orientation.TOP_BOTTOM, 0.5f, b, c))).rotateThreeAppShape()!!
+        assertTrue(MultiSplitLayout.isAllowed(columns.root, true))
+        assertFalse(MultiSplitLayout.isAllowed(columns.root))
+        assertFalse(MultiSplitLayout.isAllowed(grid().root, true))
+        assertFalse(MultiSplitLayout.isAllowed(pair().root, true))
+        for (model in listOf(columns, columns.reorient(Orientation.TOP_BOTTOM))) {
+            for (leaf in model.getLeaves()) {
+                assertNull(model.insertionAxis(leaf.id))
+                for (axis in Orientation.entries) assertNull(model.insert(leaf.id, d, left,
+                    axis, 0.5f, display, Insets.NONE, 10, 0))
+                assertEquals(2, model.remove(leaf.id)!!.getLeaves().size)
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MultiSplitLayout(columns.root.copy(first = Split(left, Orientation.TOP_BOTTOM,
+                0.5f, a, d)), threeColumnGroup = true)
+        }
+        assertThrows(IllegalArgumentException::class.java) { MultiSplitLayout(columns.root) }
     }
 
     @Test fun mirrorMovesWholeSidesAndKeepsPairOrderAcrossBothAxes() {

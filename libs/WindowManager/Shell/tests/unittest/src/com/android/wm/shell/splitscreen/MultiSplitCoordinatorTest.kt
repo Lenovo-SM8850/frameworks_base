@@ -75,6 +75,47 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         mContext.resources.configuration.smallestScreenWidthDp = originalSmallestWidth
     }
 
+    @Test fun pairedSideHasRotateActionInBothMirroredShapesAndRecentsKeepsColumns() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        add()
+        if (groups.get(10)!!.layout.root.first is MultiSplitLayout.Split) {
+            assertThat(coordinator.mirror()).isTrue()
+            coordinator.onTransitionFinished(token, false)
+        }
+        for (mirrored in listOf(false, true)) {
+            if (mirrored) {
+                assertThat(coordinator.mirror()).isTrue()
+                coordinator.onTransitionFinished(token, false)
+            }
+            val original = groups.get(10)!!.layout
+            val inner = dividerHandlers.last { it.canRotateThreeAppShape() }
+            inner.onRotateThreeAppShape()
+            coordinator.onTransitionFinished(token, false)
+            val saved = groups.get(10)!!
+            assertThat(saved.layout.isThreeColumns).isTrue()
+            assertThat(saved.layout.columnPairFirst).isEqualTo(original.root.first is MultiSplitLayout.Split)
+            coordinator.setDividerVisible(false, null)
+            assertThat(coordinator.restorePair(saved.firstRepresentative, saved.secondRepresentative,
+                null, null, null)).isTrue()
+            coordinator.onTransitionFinished(token, false)
+            assertThat(groups.get(10)!!.layout.isThreeColumns).isTrue()
+            assertThat(groups.get(10)!!.layout.columnPairFirst).isEqualTo(saved.layout.columnPairFirst)
+            whenever(split.rootBounds).thenReturn(Rect(0, 0, 2400, 3200))
+            whenever(split.isLeftRightSplit).thenReturn(false)
+            coordinator.onConfigurationChanged(Configuration().apply { smallestScreenWidthDp = 600 },
+                WindowContainerTransaction())
+            assertThat(groups.get(10)!!.layout.root.first is MultiSplitLayout.Split)
+                .isEqualTo(original.root.first is MultiSplitLayout.Split)
+            whenever(split.rootBounds).thenReturn(Rect(0, 0, 3200, 2400))
+            whenever(split.isLeftRightSplit).thenReturn(true)
+            coordinator.onConfigurationChanged(Configuration().apply { smallestScreenWidthDp = 600 },
+                WindowContainerTransaction())
+            assertThat(coordinator.rotateThreeAppShape()).isTrue()
+            coordinator.onTransitionFinished(token, false)
+            assertThat(groups.get(10)!!.layout.root).isEqualTo(original.normal().root)
+        }
+    }
+
     @Test fun rotateColumnsGuardsGrowthAndRestoresOnlyColumnGroups() {
         mContext.resources.configuration.smallestScreenWidthDp = 600
         add()
@@ -329,6 +370,8 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
 
     @Before fun setup() {
         originalSmallestWidth = mContext.resources.configuration.smallestScreenWidthDp
+        // Keep legacy row fixtures independent of the instrumentation device's tablet size.
+        mContext.resources.configuration.smallestScreenWidthDp = 599
         mContext.getOrCreateTestableResources().addOverride(
             com.android.internal.R.dimen.default_minimal_size_resizable_task, 100)
         whenever(host.groups()).thenReturn(groups)
@@ -366,11 +409,72 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
     }
 
     private fun add(): AppDragSlot {
-        val slot = coordinator.getSlots(0).filter { !it.occupied }
+        // Existing group fixtures exercise the row topology; column entry has its own tests.
+        val slot = coordinator.getSlots(0).filter { !it.occupied && !it.threeColumns }
             .maxBy { it.bounds.width().toLong() * it.bounds.height() }
         assertThat(coordinator.startIntent(pendingIntent, null, Bundle(), slot)).isTrue()
         coordinator.onTransitionFinished(token, false)
         return slot
+    }
+
+    @Test fun landscapePairOffersColumnsAtSideEdgesAndRowsInTheMiddle() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        val slots = coordinator.getSlots(0)
+        assertThat(slots.filter { it.threeColumns }).hasSize(4)
+        assertThat(slots.filter { !it.threeColumns }).hasSize(4)
+        val column = com.android.wm.shell.draganddrop.SidebarDragPolicy.resolveSplitSlot(
+            null, true, true, true, 2, 4, slots, 100, 1200)!!
+        assertThat(column.threeColumns).isTrue()
+        val row = com.android.wm.shell.draganddrop.SidebarDragPolicy.resolveSplitSlot(
+            null, true, true, true, 2, 4, slots, 800, 100)!!
+        assertThat(row.threeColumns).isFalse()
+        assertThat(coordinator.startIntent(pendingIntent, null, null, column)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        val model = groups.get(10)!!.layout
+        assertThat(model.isThreeColumns).isTrue()
+        assertThat(model.getLeaves()).hasSize(3)
+        assertThat(coordinator.getSlots(0).all { it.occupied }).isTrue()
+        assertThat(coordinator.getBelowSlot(10)).isNull()
+    }
+
+    @Test fun handleAddBesideUsesTheSameColumnDestinationAndPickerIdentity() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        val slot = coordinator.getAddSlot(20)!!
+        assertThat(slot.threeColumns).isTrue()
+        assertThat(slot.splitBelow).isFalse()
+        assertThat(slot.bounds).isEqualTo(coordinator.getSlots(0).first {
+            it.threeColumns && it.leafId == slot.leafId && it.newTaskFirst == slot.newTaskFirst
+        }.bounds)
+        assertThat(coordinator.getBelowSlotForValidation(20)!!.threeColumns).isTrue()
+        assertThat(coordinator.startIntent(pendingIntent, null, null, slot)).isTrue()
+        coordinator.onTransitionFinished(token, false)
+        assertThat(groups.get(10)!!.layout.isThreeColumns).isTrue()
+    }
+
+    @Test fun portraitAndSmallScreensKeepExistingRowInsertion() {
+        mContext.resources.configuration.smallestScreenWidthDp = 599
+        assertThat(coordinator.getSlots(0).none { it.threeColumns }).isTrue()
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        whenever(split.rootBounds).thenReturn(Rect(0, 0, 2400, 3200))
+        whenever(split.isLeftRightSplit).thenReturn(false)
+        assertThat(coordinator.getSlots(0).none { it.threeColumns }).isTrue()
+        assertThat(coordinator.getBelowSlot(20)!!.threeColumns).isFalse()
+    }
+
+    @Test fun insertionAndHandleActionRespectFiveWindowBudgetAndRecheckAtDrop() {
+        mContext.resources.configuration.smallestScreenWidthDp = 600
+        val slot = coordinator.getBelowSlot(20)!!
+        whenever(organizer.getRunningTasks(0)).thenReturn(java.util.ArrayList((1..3).map {
+            RunningTaskInfo().apply {
+                taskId = 100 + it
+                isFloatingWindow = true
+                isVisible = true
+            }
+        }))
+        assertThat(coordinator.getBelowSlot(20)).isNull()
+        assertThat(coordinator.getAddSlot(20)).isNull()
+        assertThat(coordinator.getSlots(0)).isEmpty()
+        assertThat(coordinator.startIntent(pendingIntent, null, null, slot)).isFalse()
     }
 
     @Test fun insertTwoToThreeToFourThenReplaceMaintainsFourRoots() {

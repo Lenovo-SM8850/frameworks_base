@@ -409,6 +409,7 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         public final boolean newTaskFirst;
         public final int layoutVersion;
         public final boolean splitBelow;
+        public final boolean threeColumns;
 
         public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied) {
             this(position, index, bounds, hitBounds, occupied, -1, false, -1);
@@ -422,6 +423,14 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
 
         public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied,
                 int leafId, boolean newTaskFirst, int layoutVersion, boolean splitBelow) {
+            this(position, index, bounds, hitBounds, occupied, leafId, newTaskFirst,
+                    layoutVersion, splitBelow, false);
+        }
+
+        public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied,
+                int leafId, boolean newTaskFirst, int layoutVersion, boolean splitBelow,
+                boolean threeColumns) {
+            this.threeColumns = threeColumns;
             this.splitBelow = splitBelow;
             this.leafId = leafId;
             this.newTaskFirst = newTaskFirst;

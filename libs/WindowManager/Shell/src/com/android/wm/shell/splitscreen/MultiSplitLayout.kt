@@ -322,6 +322,49 @@ class MultiSplitLayout @JvmOverloads constructor(
         }
     }
 
+    private fun threeAppRoot(orientation: Orientation, columns: Boolean): Split {
+        val ordered = getLeaves()
+        val child = listOf(root.first, root.second).filterIsInstance<Split>().single()
+        val childAxis = if (columns || orientation == Orientation.TOP_BOTTOM) {
+            Orientation.LEFT_RIGHT
+        } else Orientation.TOP_BOTTOM
+        val pairFirst = !columns && columnPairFirst == true
+        val pair = Split(child.id, childAxis, 0.5f,
+            ordered[if (pairFirst) 0 else 1], ordered[if (pairFirst) 1 else 2])
+        val single = ordered[if (pairFirst) 2 else 0]
+        return Split(root.id, orientation, 0.5f,
+            if (pairFirst) pair else single, if (pairFirst) single else pair)
+    }
+
+    /** Moves the complete single and paired sides, retaining the pair's internal order. */
+    fun mirror(): MultiSplitLayout? {
+        if (isThreeColumns || getLeaves().size != 3) return null
+        return MultiSplitLayout(root.copy(first = root.second, second = root.first,
+            ratio = 1f - root.ratio), strip, threeColumnGroup,
+            if (threeColumnGroup) root.second is Split else null)
+    }
+
+    /** Updates only the selected divider's ratio; descendant ratios remain unchanged. */
+    fun resize(id: DividerId, ratio: Float): MultiSplitLayout? {
+        if (isThreeColumns || id !in dividers || !ratio.isFinite() || ratio <= 0f || ratio >= 1f) return null
+        fun update(node: Node): Node = when (node) {
+            is Leaf -> node
+            is Split -> node.copy(
+                ratio = if (node.id == id) ratio else node.ratio,
+                first = update(node.first), second = update(node.second),
+            )
+        }
+        return MultiSplitLayout(update(root) as Split, strip, threeColumnGroup, columnPairFirst)
+    }
+
+    /** A structural change without a surviving peek starts at the normal middle target. */
+    fun normal(): MultiSplitLayout =
+        MultiSplitLayout(root.copy(ratio = 0.5f), threeColumnGroup = threeColumnGroup,
+            columnPairFirst = columnPairFirst)
+
+    fun withRootRatio(ratio: Float, strip: LeafId? = null): MultiSplitLayout =
+        MultiSplitLayout(root.copy(ratio = ratio), strip, threeColumnGroup, columnPairFirst)
+
     private fun replace(node: Node, id: LeafId, transform: (Leaf) -> Node): Node = when (node) {
         is Leaf -> if (node.id == id) transform(node) else node
         is Split -> node.copy(

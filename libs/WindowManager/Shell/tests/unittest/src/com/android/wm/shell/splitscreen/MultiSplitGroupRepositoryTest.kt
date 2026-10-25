@@ -30,6 +30,38 @@ class MultiSplitGroupRepositoryTest : ShellTestCase() {
         tasks.filter { task -> layout.getLeaves().any { it.taskId == task.taskId } },
         Rect(0, 0, 3200, 2400), 8)!!
 
+    @Test fun columnSnapshotsKeepBothOriginsThroughPortraitAndLandscapeRestore() {
+        val three = MultiSplitLayout(Split(DividerId(0), Orientation.LEFT_RIGHT, 0.5f,
+            Split(DividerId(1), Orientation.TOP_BOTTOM, 0.5f,
+                Leaf(LeafId(0), 10), Leaf(LeafId(1), 11)), Leaf(LeafId(2), 12)))
+        for (source in listOf(three, three.mirror()!!)) {
+            val columns = source.rotateThreeAppShape()!!
+            save(columns)
+            val restored = groups.get(10)!!.layout
+            assertThat(restored.columnPairFirst).isEqualTo(source.root.first is Split)
+            assertThat(restored.rotateThreeAppShape()!!.root).isEqualTo(source.root)
+            save(restored.reorient(Orientation.TOP_BOTTOM))
+            val portrait = groups.get(10)!!.layout
+            assertThat(portrait.root.first is Split).isEqualTo(source.root.first is Split)
+            assertThat(portrait.columnPairFirst).isEqualTo(restored.columnPairFirst)
+            assertThat(portrait.reorient(Orientation.LEFT_RIGHT).rotateThreeAppShape()!!.root)
+                .isEqualTo(source.root)
+        }
+    }
+
+    @Test fun columnOriginChangeUpdatesSnapshotEvenWhenColumnGeometryIsIdentical() {
+        val columns = model.remove(LeafId(3))!!.rotateThreeAppShape()!!
+        val first = save(columns)
+        val changed = MultiSplitLayout(columns.root, threeColumnGroup = true,
+            columnPairFirst = columns.columnPairFirst != true)
+        val second = save(changed)
+        assertThat(second).isNotSameInstanceAs(first)
+        assertThat(groups.get(10)!!.layout.columnPairFirst).isEqualTo(changed.columnPairFirst)
+        val unknown = save(MultiSplitLayout(columns.root, threeColumnGroup = true))
+        assertThat(unknown.layout.columnPairFirst).isNull()
+        assertThat(unknown.layout.rotateThreeAppShape()!!.root.first).isInstanceOf(Leaf::class.java)
+    }
+
     @Test fun everyMemberResolvesOneSnapshotAndOuterBranchMetadata() {
         val group = save()
         tasks.forEach { assertThat(groups.get(it.taskId)).isSameInstanceAs(group) }
