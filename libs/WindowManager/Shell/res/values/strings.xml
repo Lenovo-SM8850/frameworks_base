@@ -294,7 +294,7 @@
     <!-- Accessibility text for the handle more options button [CHAR LIMIT=NONE] -->
     <string name="more_button_text">More</string>
     <!-- Accessibility text for the handle floating window button [CHAR LIMIT=NONE] -->
-    <string name="float_button_text">Float</string>
+    <string name="float_button_text">Floating window</string>
     <!-- Accessibility text for the handle menu select button [CHAR LIMIT=NONE] -->
     <string name="select_text">Select</string>
     <!-- Accessibility text for the handle menu screenshot button [CHAR LIMIT=NONE] -->
@@ -413,4 +413,31 @@
 
     <!-- Text to show during package update. -->
     <string name="package_update_text">Updating...</string>
+    <string name="floating_window_restore">Restore %1$s floating window</string>
+    <string name="floating_window_handle">Floating window handle</string>
+    <!-- Action to close the floating window from its handle menu. -->
+    <string name="floating_window_close">Close floating window</string>
+    <!-- Split handle menu actions. -->
+    <string name="handle_menu_swap_horizontal">Swap apps left and right</string>
+    <string name="handle_menu_swap_vertical">Swap apps above and below</string>
+    <string name="handle_menu_close_app">Close this app</string>
+    <string name="handle_menu_close_named_app">Close %1$s</string>
+    <!-- Shell-owned destination app picker. -->
+    <string name="split_picker_add_below">Add split below</string>
+    <string name="split_picker_add_to_side">Add split to the side</string>
+    <string name="split_picker_title">Choose an app</string>
+    <string name="split_picker_search">Search apps</string>
+    <string name="split_picker_recent">Recent</string>
+    <string name="split_picker_all_apps">All apps</string>
+    <string name="split_picker_close">Close</string>
+    <string name="split_picker_already_open">Already open in this split</string>
+    <string name="split_picker_unavailable">Unavailable for this split</string>
+    <string name="split_picker_disabled_app">%1$s, %2$s</string>
+    <string name="split_picker_empty">No matching apps</string>
+    <string name="split_picker_loading">Loading apps…</string>
+    <string name="split_picker_launching">Opening app in split</string>
+    <string name="handle_menu_replace_app">Replace with another app</string>
+    <!-- Toggles a landscape three-app group between columns and a single side with a pair. -->
+    <string name="split_divider_rotate_three_apps">Rotate three-app layout</string>
+    <string name="split_picker_no_results">No apps found</string>
 </resources>

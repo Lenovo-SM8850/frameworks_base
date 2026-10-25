@@ -51,7 +51,8 @@ object CaptionRegionHelper {
             return null
         }
 
-        val taskPositionInParent = taskInfo.positionInParent
+        val taskBounds = taskInfo.presentationBounds
+        val taskPositionInParent = Point(taskBounds.left, taskBounds.top)
         val captionBoundsInDisplay =
             localCaptionBoundsToDisplay(localCaptionBounds, taskPositionInParent)
 
@@ -110,7 +111,8 @@ object CaptionRegionHelper {
             // empty.
             return Region.obtain()
         }
-        val taskPositionInParent = taskInfo.positionInParent
+        val taskBounds = taskInfo.presentationBounds
+        val taskPositionInParent = Point(taskBounds.left, taskBounds.top)
         val captionBoundsInDisplay =
             localCaptionBoundsToDisplay(localCaptionBounds, taskPositionInParent)
 

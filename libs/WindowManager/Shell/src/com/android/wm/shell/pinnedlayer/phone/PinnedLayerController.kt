@@ -20,21 +20,19 @@ import android.app.ActivityManager.AppTask.WINDOWING_LAYER_PINNED
 import android.app.TaskInfo
 import android.app.TaskWindowingLayerRequestHandler.REMOTE_CALLBACK_RESULT_KEY
 import android.app.TaskWindowingLayerRequestHandler.RESULT_APPROVED
+import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
 import android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.IBinder
 import android.os.IRemoteCallback
 import android.os.RemoteException
+import android.view.Display.DEFAULT_DISPLAY
 import android.view.SurfaceControl
 import android.view.WindowManager.TRANSIT_CHANGE
 import android.view.WindowManager.TRANSIT_CLOSE
-import android.view.WindowManager.TRANSIT_OPEN
 import android.view.WindowManager.TRANSIT_TO_BACK
-import android.view.WindowManager.TRANSIT_TO_FRONT
 import android.window.TransitionInfo
-import android.window.TransitionInfo.FLAG_IS_WALLPAPER
-import android.window.TransitionInfo.FLAG_SHOW_WALLPAPER
 import android.window.TransitionRequestInfo
 import android.window.WindowContainerTransaction
 import com.android.wm.shell.RootTaskDisplayAreaOrganizer
@@ -48,7 +46,13 @@ import com.android.wm.shell.pinnedlayer.phone.PinnedLayerLogs.logW
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.getLayerPinnedWct
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.getLayerUnpinnedWct
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.getRemovedFromLayerWct
+import com.android.wm.shell.recents.RecentsTransitionHandler
+import com.android.wm.shell.recents.RecentsTransitionStateListener
 import com.android.wm.shell.shared.TransactionPool
+import com.android.wm.shell.shared.TransitionUtil
+import com.android.wm.shell.sysui.KeyguardChangeListener
+import com.android.wm.shell.sysui.OverviewVisibilityChangeListener
+import com.android.wm.shell.sysui.ShellController
 import com.android.wm.shell.sysui.ShellInit
 import com.android.wm.shell.transition.Transitions
 import com.android.wm.shell.windowdecor.OnTaskRepositionAnimationListener
@@ -77,7 +81,92 @@ class PinnedLayerController(
     // Stores ids of pinned TaskInfo.
     private val pinnedTasks = mutableSetOf<Int>()
     private var currentPinnedTaskId: Int? = null
+    private val visiblePinnedTasks = linkedSetOf<Int>()
+    private val minimizedTasks = mutableSetOf<Int>()
+    private val minimizeState = FloatingMinimizeState()
+    private var minimizeHandles: FloatingMinimizeHandles? = null
+    private var miniInteractions: FloatingMiniController? = null
+    private var frameRates: FloatingFrameRateController? = null
+    private val miniListeners = mutableSetOf<(TaskInfo) -> Unit>()
+    private val taskLeashes = mutableMapOf<Int, SurfaceControl>()
+    private val hdrLeashes = mutableMapOf<Int, SurfaceControl>()
+    private data class AppEntry(val component: android.content.ComponentName, val userId: Int,
+        val displayId: Int, val destination: PinnedLayerPresentationController.EntryDestination)
+    private val appEntries = mutableMapOf<IBinder, AppEntry>()
+    private var sidebarExecutor: com.android.wm.shell.common.ShellExecutor? = null
+
+    private val pendingRotations = mutableMapOf<IBinder, Pair<Int, Rect>>()
+
+    fun hasExpandedFloatingWindows(): Boolean = getPinnedTasks().any {
+        it.displayId == DEFAULT_DISPLAY && it.isFloatingWindow && it.isVisible &&
+            it.taskId in visiblePinnedTasks && it.taskId !in minimizedTasks && !isMini(it)
+    }
+
     fun originalFloatingAspect(task: TaskInfo): Float = presentationController.originalAspect(task)
+
+    fun rememberManualOrientation(task: TaskInfo, landscape: Boolean, bounds: Rect) {
+        if (task.isFloatingWindow) presentationController.setManualOrientation(task, landscape, bounds)
+    }
+
+    fun configureInteractions(context: Context, displayController: DisplayController,
+        mainExecutor: com.android.wm.shell.common.ShellExecutor) {
+        sidebarExecutor = mainExecutor
+        frameRates = FloatingFrameRateController(context, shellTaskOrganizer, mainExecutor,
+            presentationController.miniState, transitions = transitions)
+        miniInteractions = FloatingMiniController(shellTaskOrganizer, displayController,
+            presentationController.miniState) { task ->
+            frameRates?.update()
+            mainExecutor.execute { miniListeners.toList().forEach { it(task) } }
+        }
+        fun recover(task: RunningTaskInfo) {
+            if (!task.isFloatingWindow || task.displayId != DEFAULT_DISPLAY) return
+            if (task.taskId !in pinnedTasks) pin(task)
+            val entry = presentationController.recoverMini(task)
+                ?: presentationController.miniState.get(task.userId, task.taskId) ?: return
+            miniInteractions?.recover(task, entry)
+        }
+        shellTaskOrganizer.addTaskAppearedListener(object : ShellTaskOrganizer.TaskAppearedListener {
+            override fun onTaskAppeared(taskInfo: RunningTaskInfo, leash: SurfaceControl) {
+                mainExecutor.execute {
+                    shellTaskOrganizer.getRunningTaskInfo(taskInfo.taskId)?.let(::recover)
+                }
+            }
+        })
+        shellTaskOrganizer.initialTasks.forEach { recover(it.first) }
+        context.registerReceiverForAllUsers(object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: android.content.Intent) {
+                val userId = intent.getIntExtra(android.content.Intent.EXTRA_USER_HANDLE,
+                    android.os.UserHandle.USER_NULL)
+                if (intent.action == android.content.Intent.ACTION_USER_REMOVED &&
+                    userId != android.os.UserHandle.USER_NULL) {
+                    mainExecutor.execute { presentationController.removeUser(userId) }
+                }
+            }
+        }, android.content.IntentFilter(android.content.Intent.ACTION_USER_REMOVED), null, null)
+        minimizeHandles = FloatingMinimizeHandles(context, displayController, minimizeState,
+            { shellTaskOrganizer.getRunningTaskInfo(it) }, ::restoreMinimizedTask)
+        displayController.addDisplayChangingController { displayId, from, to, _, wct ->
+            if (displayId == DEFAULT_DISPLAY && from != to) {
+                getPinnedTasks().forEach { task ->
+                    if (miniInteractions?.rotate(task, from, to, wct) == true) return@forEach
+                    presentationController.getRotationBounds(task, from, to)?.let { bounds ->
+                        presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
+                        minimizeState.entries[task.taskId]?.bounds?.set(bounds)
+                    }
+                }
+            }
+        }
+        displayController.addDisplayWindowListener(object : DisplayController.OnDisplaysChangedListener {
+            override fun onDisplayConfigurationChanged(displayId: Int, configuration: Configuration) {
+                frameRates?.clearDisplay(displayId)
+                mainExecutor.execute { frameRates?.update() }
+                if (displayId == DEFAULT_DISPLAY) minimizeHandles?.update()
+            }
+            override fun onDisplayRemoved(displayId: Int) {
+                frameRates?.removeDisplay(displayId)
+            }
+        })
+    }
 
 
     private val pinnedTasksListeners = mutableSetOf<PinnedTasksListener>()
@@ -91,6 +180,55 @@ class PinnedLayerController(
 
     private fun onInit() {
         transitions.registerObserver(this)
+        shellTaskOrganizer.addTaskAppearedListener(object : ShellTaskOrganizer.TaskAppearedListener {
+            override fun onTaskAppeared(taskInfo: RunningTaskInfo, leash: SurfaceControl) {
+                taskLeashes[taskInfo.taskId] = leash
+                updateHdrHeadroom(taskInfo.taskId, taskInfo.isFloatingWindow)
+            }
+        })
+        shellTaskOrganizer.initialTasks.forEach {
+            taskLeashes[it.first.taskId] = it.second
+            updateHdrHeadroom(it.first.taskId, it.first.isFloatingWindow)
+        }
+        shellTaskOrganizer.addTaskVanishedListener(object : ShellTaskOrganizer.TaskVanishedListener {
+            override fun onTaskVanished(taskInfo: RunningTaskInfo) {
+                updateHdrHeadroom(taskInfo.taskId, false)
+                taskLeashes.remove(taskInfo.taskId)
+                if (taskInfo.isFloatingWindow || taskInfo.taskId in pinnedTasks) {
+                    unpin(taskInfo)
+                    presentationController.forgetTask(taskInfo.taskId)
+                }
+            }
+        })
+        shellTaskOrganizer.addTaskInfoChangedListener(object : ShellTaskOrganizer.TaskInfoChangedListener {
+            override fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+                // Let the transition start transaction change HDR ownership atomically first.
+                transitions.runOnIdle {
+                    shellTaskOrganizer.getRunningTaskInfo(taskInfo.taskId)?.let {
+                        updateHdrHeadroom(it.taskId, it.isFloatingWindow)
+                    }
+                }
+                if (taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
+                    consumeAppEntry(taskInfo, false)?.let { entry ->
+                        // Keep the entry until the opening request consumes its task snapshot.
+                        if (taskInfo.floatingWindowRestoreBounds != entry.bounds ||
+                            taskInfo.floatingWindowScale != entry.scale) {
+                            val wct = WindowContainerTransaction()
+                            presentationController.applyPresentation(taskInfo, entry.bounds, wct, entry.scale)
+                            shellTaskOrganizer.applyTransaction(wct)
+                        }
+                        return
+                    }
+                    presentationController.recoverMini(taskInfo)?.let {
+                        miniInteractions?.recover(taskInfo, it)
+                    }
+                    miniInteractions?.onTaskInfoChanged(taskInfo)
+                    presentationController.rememberBounds(taskInfo)
+                } else if (!taskInfo.isFloatingWindow && taskInfo.taskId in pinnedTasks) {
+                    unpin(taskInfo)
+                }
+            }
+        })
     }
 
     /**
@@ -108,7 +246,9 @@ class PinnedLayerController(
      * @return a pinned [TaskInfo].
      */
     fun getCurrentPinnedTask(): TaskInfo? {
-        return currentPinnedTaskId?.let { shellTaskOrganizer.getRunningTaskInfo(it) }
+        return (currentPinnedTaskId?.takeIf { it in visiblePinnedTasks }
+                ?: visiblePinnedTasks.lastOrNull())
+            ?.let { shellTaskOrganizer.getRunningTaskInfo(it) }
     }
 
     /**
@@ -121,7 +261,289 @@ class PinnedLayerController(
      * @return `true` when the task is pinned, `false` otherwise.
      * @see Transitions.TransitionObserver.onTransitionReady
      */
-    fun isPinned(taskId: Int): Boolean = pinnedTasks.contains(taskId)
+    fun isPinned(taskId: Int): Boolean =
+        shellTaskOrganizer.getRunningTaskInfo(taskId)?.isFloatingWindow == true ||
+            pinnedTasks.contains(taskId) ||
+            activeTransitions.values.any { pending ->
+                pending.any { it is ActiveTransition.Pin && it.taskInfo.taskId == taskId }
+            }
+
+    /** Returns all live floating tasks, including minimized tasks. */
+    fun getPinnedTasks(): List<TaskInfo> =
+        pinnedTasks.mapNotNull { shellTaskOrganizer.getRunningTaskInfo(it) }
+
+    /** Registers visibility policy after Shell dependencies have been constructed. */
+    fun configureVisibility(
+        shellController: ShellController,
+        recentsTransitionHandler: RecentsTransitionHandler,
+    ) {
+        recentsVisibilityHandler = recentsTransitionHandler
+        shellController.addUserChangeListener(object : UserChangeListener {
+            override fun onUserChanged(newUserId: Int, userContext: Context) {
+                minimizeHandles?.setUsers(setOf(newUserId))
+            }
+            override fun onUserProfilesChanged(profiles: List<UserInfo>) {
+                minimizeHandles?.setUsers(profiles.map { it.id }.toSet())
+            }
+        })
+        shellController.addKeyguardChangeListener(object : KeyguardChangeListener {
+            override fun onKeyguardVisibilityChanged(
+                visible: Boolean, occluded: Boolean, animatingDismiss: Boolean,
+            ) {
+                keyguardShowing = visible
+                updateVisibility()
+            }
+        })
+        shellController.addOverviewVisibilityChangeListener(
+            object : OverviewVisibilityChangeListener {
+                override fun onOverviewShown(displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    overviewShowing = true
+                    updateVisibility()
+                }
+
+                override fun onOverviewHidden(displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    overviewShowing = false
+                    updateVisibility()
+                }
+            }
+        )
+        recentsTransitionHandler.addTransitionStateListener(
+            object : RecentsTransitionStateListener {
+                override fun onTransitionFinishedToHome(displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    recentsRunning = false
+                    overviewShowing = shellController.isOverviewVisible(displayId)
+                    transitions.runOnIdle { updateVisibility() }
+                }
+
+                override fun onTransitionStateChanged(state: Int, displayId: Int) {
+                    if (displayId != DEFAULT_DISPLAY) return
+                    recentsRunning = RecentsTransitionStateListener.isRunning(state)
+                    overviewShowing = shellController.isOverviewVisible(displayId)
+                    if (recentsRunning) {
+                        updateVisibility()
+                    } else {
+                        // Restore after Recents has applied its final surface transaction.
+                        transitions.runOnIdle { updateVisibility() }
+                    }
+                }
+            }
+        )
+    }
+
+    private fun updateVisibility() {
+        // A Home gesture runs Recents before Overview is actually shown.
+        val hidden = keyguardShowing || overviewShowing
+        if (hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, true)
+        minimizeHandles?.setVisible(!hidden)
+        val wct = WindowContainerTransaction()
+        if (!hidden && !recentsRunning) minimizeOverflow(MultitaskingWindowLimit.splitLeaves(
+            shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)), wct)
+        getPinnedTasks().filter { it.taskId !in minimizedTasks }.forEach {
+            wct.setHidden(it.token, hidden)
+        }
+        if (!wct.isEmpty) {
+            shellTaskOrganizer.applyTransaction(wct)
+        }
+        if (!hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, false)
+    }
+
+    fun canResolveSidebarSplit(): Boolean = !keyguardShowing && !recentsRunning && !overviewShowing
+
+    /** Read-only geometry query; no pinning or remembered-entry state changes during hover. */
+    fun calculateSidebarEntry(component: android.content.ComponentName, userId: Int, displayId: Int,
+        info: android.content.pm.ActivityInfo, existing: TaskInfo?, x: Int, y: Int):
+        PinnedLayerPresentationController.EntryDestination? =
+        presentationController.calculateAppEntry(component, userId, displayId, info, existing, x, y)
+
+    /** Carries the previewed presentation through the existing launch-cookie handoff. */
+    fun setSidebarLaunchOptions(options: android.app.ActivityOptions,
+        component: android.content.ComponentName, userId: Int, displayId: Int,
+        destination: PinnedLayerPresentationController.EntryDestination): IBinder? {
+        // Refuse destinations the presentation cannot represent
+        presentationController.logicalEntryBounds(destination, displayId) ?: return null
+        val cookie = android.os.Binder()
+        appEntries[cookie] = AppEntry(component, userId, displayId, destination)
+        // Expire refused launches on the same Shell executor that owns the presentation map.
+        sidebarExecutor?.executeDelayed({ appEntries.remove(cookie) }, 10_000)
+        options.setLaunchCookie(cookie)
+        // WM treats launch bounds as visible floating bounds; logical (unscaled) bounds open the window
+        // larger than the preview until the cookie's presentation shrinks it
+        options.setLaunchBounds(android.graphics.Rect(destination.bounds))
+        return cookie
+    }
+
+    fun clearSidebarLaunch(cookie: IBinder) { appEntries.remove(cookie) }
+
+    private fun consumeAppEntry(task: TaskInfo, consume: Boolean = true):
+        PinnedLayerPresentationController.EntryDestination? {
+        val cookie = task.launchCookies.firstOrNull { appEntries.containsKey(it) } ?: return null
+        val entry = appEntries[cookie] ?: return null
+        if (entry.userId != task.userId || entry.displayId != task.displayId ||
+            (entry.component != task.baseActivity && entry.component != task.realActivity &&
+                entry.component != task.baseIntent?.component)) {
+            appEntries.remove(cookie)
+            return null
+        }
+        if (consume) appEntries.remove(cookie)
+        return entry.destination
+    }
+
+    fun getFloatingLaunchBounds(task: TaskInfo): Rect? =
+        presentationController.getPinEntryDestinationBounds(task)
+
+    /** Adds entry properties before starting a Shell-owned transition. */
+    fun prepareFloatingTask(task: TaskInfo, wct: WindowContainerTransaction): Boolean =
+        prepareFloatingTask(task, wct, null, false)
+
+    fun prepareFloatingTask(task: TaskInfo, wct: WindowContainerTransaction,
+        visibleBounds: Rect?, minimized: Boolean): Boolean {
+        if (!isPinningSupported(task)) return false
+        val initial = presentationController.getPinEntryDestinationBounds(task) ?: return false
+        val bounds = visibleBounds?.let { presentationController.getPreservedEntryBounds(task, it) }
+            ?: initial
+        if (!minimized) minimizeOldestIfNeeded(task, wct)
+        pinnedTasks += task.taskId
+        visiblePinnedTasks += task.taskId
+        minimizedTasks -= task.taskId
+        removeMinimizeHandle(task.taskId)
+        wct.merge(getLayerPinnedWct(task.token), true)
+        val scale = presentationController.entryScale(task)
+        if (visibleBounds != null) {
+            presentationController.setManualOrientation(task, bounds.width() > bounds.height(), bounds)
+        }
+        presentationController.applyPresentation(task, bounds, wct, scale)
+        wct.setHidden(task.token, keyguardShowing || overviewShowing)
+        if (minimized) {
+            visiblePinnedTasks -= task.taskId
+            minimizedTasks += task.taskId
+            minimizeState.minimize(task.taskId, task.userId, bounds, true,
+                scale)
+            minimizeHandles?.update()
+            wct.merge(getLayerUnpinnedWct(task.token, isMinimizing = true), true)
+        }
+        return true
+    }
+
+    companion object {
+        const val MAX_VISIBLE_FLOATING_TASKS = MultitaskingWindowLimit.MAX_WINDOWS
+    }
+
+    private fun minimizeOldestIfNeeded(task: TaskInfo, wct: WindowContainerTransaction) {
+        val split = MultitaskingWindowLimit.splitLeaves(
+            shellTaskOrganizer.getRunningTasks(task.displayId)) - task.taskId
+        minimizeOverflow(split, wct, task.taskId)
+    }
+
+    private fun minimizeOverflow(split: Set<Int>, wct: WindowContainerTransaction,
+        incoming: Int? = null) {
+        val floating = visiblePinnedTasks.filter { id ->
+            shellTaskOrganizer.getRunningTaskInfo(id)?.displayId == DEFAULT_DISPLAY
+        }
+        MultitaskingWindowLimit.overflow(split, floating, incoming).forEach { oldestId ->
+            visiblePinnedTasks -= oldestId
+            minimizedTasks += oldestId
+            shellTaskOrganizer.getRunningTaskInfo(oldestId)?.let { oldest ->
+                presentationController.rememberBounds(oldest)
+                addMinimizeHandle(oldest)
+                wct.merge(getLayerUnpinnedWct(oldest.token, isMinimizing = true), true)
+                wct.setHidden(oldest.token, true)
+            }
+        }
+    }
+
+    /** Every split/float entry, including launches joining an existing transition, arrives here. */
+    private fun enforceMultitaskingLimit(info: TransitionInfo) {
+        if (keyguardShowing || recentsRunning || overviewShowing) return
+        val tasks = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY).associateBy { it.taskId }
+            .toMutableMap()
+        val closing = mutableSetOf<Int>()
+        info.changes.forEach { change ->
+            val task = change.taskInfo ?: return@forEach
+            if (task.displayId != DEFAULT_DISPLAY) return@forEach
+            if (TransitionUtil.isClosingType(change.mode)) closing += task.taskId
+            else tasks[task.taskId] = task
+        }
+        do {
+            val removed = tasks.values.filter {
+                it.taskId in closing || it.parentTaskId in closing
+            }.map { it.taskId }
+            closing.addAll(removed)
+            removed.forEach { tasks.remove(it) }
+        } while (removed.isNotEmpty())
+        val split = MultitaskingWindowLimit.splitLeaves(tasks.values)
+        val wct = WindowContainerTransaction()
+        minimizeOverflow(split, wct)
+        if (!wct.isEmpty) shellTaskOrganizer.applyTransaction(wct)
+    }
+
+    fun rotateTask(task: TaskInfo): Boolean {
+        val bounds = presentationController.getManualRotationBounds(task) ?: return false
+        val landscape = bounds.width() > bounds.height()
+        presentationController.setManualOrientation(task, landscape, bounds)
+        val wct = WindowContainerTransaction()
+        presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
+        val startBounds = Rect(task.presentationBounds)
+        val transition = transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        pendingRotations[transition] = task.taskId to startBounds
+        return true
+    }
+
+    /** Minimizes a floating task while retaining its identity for Recents. */
+    @JvmOverloads
+    fun minimizeTask(task: TaskInfo, right: Boolean = true): Boolean {
+        if (!isPinned(task.taskId)) return false
+        presentationController.rememberBounds(task)
+        unpin(task, rememberAsPinned = true)
+        addMinimizeHandle(task, right)
+        val wct = getLayerUnpinnedWct(task.token, isMinimizing = true).setHidden(task.token, true)
+        transitions.startTransition(TRANSIT_TO_BACK, wct, null)
+        return true
+    }
+
+    /** Leaves the floating layer when maximizing, without replacing the task. */
+    fun maximizeTask(task: TaskInfo): Boolean {
+        if (!isPinned(task.taskId)) return false
+        presentationController.rememberBounds(task)
+        unpin(task)
+        val wct = getRemovedFromLayerWct(task.token)
+            .setHidden(task.token, false)
+            .setWindowingMode(task.token, WINDOWING_MODE_FULLSCREEN)
+            .setBounds(task.token, Rect())
+            .reorder(task.token, true)
+        transitions.startTransition(TRANSIT_CHANGE, wct, null)
+        return true
+    }
+
+    /** Clears floating ownership without bringing a departing task back to the foreground. */
+    private fun getExitToBackWct(task: TaskInfo): WindowContainerTransaction =
+        getRemovedFromLayerWct(task.token)
+            .setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED)
+            .setBounds(task.token, Rect())
+            .setHidden(task.token, false)
+            .reorder(task.token, false)
+
+    /** Completes a root Back after the app has exhausted its own navigation. */
+    fun onFloatingTaskRootBack(task: RunningTaskInfo) {
+        if (!task.isFloatingWindow || keyguardShowing || recentsRunning || overviewShowing) return
+        if (isMini(task) || presentationController.recoverMini(task) != null ||
+            task.taskId in minimizedTasks) {
+            minimizeTask(task)
+            return
+        }
+        logV("Leaving floating mode after root Back taskId=%d", task.taskId)
+        val transition = transitions.startTransition(TRANSIT_TO_BACK, getExitToBackWct(task), null)
+        activeTransitions[transition] = mutableSetOf(
+            ActiveTransition.Unpin(task, exitFloating = true))
+    }
+
+    /** Handles an app departure while retaining actual minis and Shell visibility policy. */
+    fun shouldLeaveFloatingOnBack(task: TaskInfo): Boolean =
+        task.isFloatingWindow && !isMini(task) && presentationController.recoverMini(task) == null &&
+            task.taskId !in minimizedTasks &&
+            !keyguardShowing && !recentsRunning && !overviewShowing
 
     /**
      * Pins a task and adds it to the active transitions for the given transition token.
@@ -148,22 +570,18 @@ class PinnedLayerController(
         )
         return WindowContainerTransaction().apply {
             val transitions = activeTransitions.getOrPut(transition) { mutableSetOf() }
-            transitions += ActiveTransition.Pin(task, remoteCallback)
-            val bounds =
-                if (!isPinned(task.taskId)) {
+            val appEntry = consumeAppEntry(task)
+            val bounds = appEntry?.bounds ?:
+                if (task.taskId !in pinnedTasks) {
                     presentationController.getPinEntryDestinationBounds(task)
                 } else {
                     presentationController.clampToDisplay(
                         task,
-                        task.configuration.windowConfiguration.bounds,
+                        task.floatingWindowRestoreBounds,
                     )
                 }
             merge(getLayerPinnedWct(task.token, bounds), /* transfer= */ true)
 
-            val pinnedTask = getCurrentPinnedTask()
-            if (pinnedTask != null && pinnedTask.token != task.token) {
-                merge(unpinTask(transition, pinnedTask, UnpinStrategy.CLOSE), /* transfer= */ true)
-            }
         }
     }
 
@@ -194,6 +612,7 @@ class PinnedLayerController(
             UnpinStrategy.CLOSE ->
                 getLayerUnpinnedWct(task.token, isMinimizing = unpinStrategy == UnpinStrategy.HIDE)
             UnpinStrategy.CLEAN -> getRemovedFromLayerWct(task.token)
+                .setBounds(task.token, task.presentationBounds)
         }
     }
 
@@ -290,7 +709,8 @@ class PinnedLayerController(
         val isPinned = isPinned(task.taskId)
         val isSameDisplay = task.displayId == displayId
         val isDisplayUnavailable = displayAreaInfo == null
-        val isDisplayEligibleTarget = desktopState.isEligibleWindowDropTarget(displayId)
+        val isDisplayEligibleTarget = displayId == DEFAULT_DISPLAY &&
+            desktopState.isEligibleWindowDropTarget(displayId)
         logD(
             "moveToDisplay: task=%d, displayId=%d, isPinned=%b, isSameDisplayRequest=%b, " +
                 "isDisplayUnavailable=%b, isDisplayEligibleDropTarget=%b",
@@ -446,7 +866,10 @@ class PinnedLayerController(
     ) {
         val newBounds =
             presentationController.calculateNewTaskBounds(triggerTask, requestedLocation) ?: return
-        outWct.setBounds(triggerTask.token, newBounds)
+        if (triggerTask.isFloatingWindow) {
+            presentationController.applyPresentation(triggerTask, newBounds, outWct,
+                triggerTask.floatingWindowScale)
+        } else outWct.setBounds(triggerTask.token, newBounds)
     }
 
     // TODO(b/449681882): Remove when Handler introduces its own state management for animations.
@@ -469,6 +892,43 @@ class PinnedLayerController(
         startTransaction: SurfaceControl.Transaction,
         finishTransaction: SurfaceControl.Transaction,
     ) {
+        pendingRotations.remove(transition)?.let { (taskId, startBounds) ->
+            info.changes.firstOrNull {
+                it.taskInfo?.taskId == taskId && it.mode == TRANSIT_CHANGE
+            }?.let { change ->
+                logV("Floating rotate ready taskId=%d floating=%b start=%s captured=%s " +
+                    "rotation=%d->%d independent=%b", taskId,
+                    change.taskInfo!!.isFloatingWindow, change.startFloatingWindowBounds,
+                    startBounds, change.startRotation, change.endRotation,
+                    TransitionInfo.isIndependent(change, info))
+                if (change.taskInfo!!.isFloatingWindow && change.startFloatingWindowBounds.isEmpty &&
+                    !keyguardShowing && !overviewShowing) {
+                    // A bounds-only rotate can lack Core's visible-task presentation snapshot.
+                    change.setStartFloatingWindowBounds(startBounds)
+                }
+            }
+        }
+        val pending = activeTransitions[transition].orEmpty()
+        val releasing = pending.filterIsInstance<ActiveTransition.Unpin>().filter {
+            !it.minimized && (it.exitFloating || info.changes.none { change ->
+                change.taskInfo?.taskId == it.taskInfo.taskId && change.mode == TRANSIT_TO_BACK
+            })
+        }.map { it.taskInfo.taskId }.toSet()
+        info.changes.forEach { change ->
+            val task = change.taskInfo ?: return@forEach
+            // Prefer the organizer's task surface over a transition's temporary animation leash.
+            val leash = taskLeashes.getOrPut(task.taskId) { change.leash }
+            updateHdrHeadroom(task.taskId,
+                task.isFloatingWindow && change.mode != TRANSIT_CLOSE && task.taskId !in releasing,
+                leash, startTransaction)
+        }
+        pending.filter { entry -> info.changes.none {
+            it.taskInfo?.taskId == entry.taskInfo.taskId
+        } }.forEach { entry ->
+            updateHdrHeadroom(entry.taskInfo.taskId, entry.taskInfo.taskId !in releasing,
+                transaction = startTransaction)
+        }
+        miniInteractions?.onTransitionReady(info, startTransaction, finishTransaction)
         // TODO(b/449681882): Clean transitions here. Handler should track animation data
         // separately. Use PinnedLayerUiState instead.
         val transitions = activeTransitions.getOrDefault(transition, emptySet())
@@ -476,7 +936,10 @@ class PinnedLayerController(
             logV("onTransitionReady: Pin layer transition ready: %s", transition)
             when (transition) {
                 is ActiveTransition.Pin -> {
-                    pin(transition.taskInfo)
+                    val updatedTask = info.changes
+                        .firstOrNull { it.taskInfo?.taskId == transition.taskInfo.taskId }?.taskInfo
+                        ?: transition.taskInfo
+                    pin(updatedTask)
 
                     // Only send result if the transition caused by an API request.
                     if (transition.resultCallback != null) {
@@ -493,49 +956,162 @@ class PinnedLayerController(
                 }
             }
         }
-        checkFullscreenTaskOpenedAndClosePinnedIfNeeded(info)
+        info.changes.forEach { change ->
+            val task = change.taskInfo ?: return@forEach
+            val owned = activeTransitions.values.any { entries ->
+                entries.any { it.taskInfo.taskId == task.taskId }
+            }
+            val policyTransition = info.type == android.view.WindowManager.TRANSIT_SLEEP ||
+                info.type == android.view.WindowManager.TRANSIT_WAKE ||
+                info.type != TRANSIT_TO_BACK && info.type != TRANSIT_CLOSE &&
+                info.changes.any {
+                    it.taskInfo?.activityType == ACTIVITY_TYPE_HOME &&
+                        TransitionUtil.isOpeningType(it.mode)
+                }
+            val keyguardTransition = info.isKeyguardGoingAway ||
+                info.flags and (android.view.WindowManager.KEYGUARD_VISIBILITY_TRANSIT_FLAGS or
+                    android.view.WindowManager.TRANSIT_FLAG_KEYGUARD_LOCKED) != 0
+            if (!owned && !policyTransition && !keyguardTransition &&
+                task.taskId in visiblePinnedTasks && shouldLeaveFloatingOnBack(task) &&
+                (change.mode == TRANSIT_TO_BACK || change.mode == TRANSIT_CLOSE)) {
+                logV("Leaving floating mode after app departure taskId=%d type=%d mode=%d",
+                    task.taskId, info.type, change.mode)
+                unpin(task)
+                if (change.mode == TRANSIT_TO_BACK) {
+                    shellTaskOrganizer.applyTransaction(getExitToBackWct(task))
+                    // Later observers and handlers must not restore the discarded transform.
+                    task.isFloatingWindow = false
+                } else {
+                    // A finished activity may leave an empty recent task, or remove it entirely.
+                    this.transitions.runOnIdle {
+                        shellTaskOrganizer.getRunningTaskInfo(task.taskId)?.takeIf {
+                            it.isFloatingWindow && !it.isVisible
+                        }?.let { shellTaskOrganizer.applyTransaction(getExitToBackWct(it)) }
+                    }
+                }
+                return@forEach
+            }
+            if (task.isFloatingWindow && change.mode != TRANSIT_CLOSE) {
+                consumeAppEntry(task)?.let { entry ->
+                    val wct = WindowContainerTransaction()
+                    presentationController.applyPresentation(task, entry.bounds, wct, entry.scale)
+                    shellTaskOrganizer.applyTransaction(wct)
+                }
+                val restoring = task.taskId in minimizedTasks &&
+                    (TransitionUtil.isOpeningType(change.mode) ||
+                        (change.mode == TRANSIT_CHANGE &&
+                            task.configuration.windowConfiguration.isAlwaysOnTop))
+                if (task.taskId !in pinnedTasks || restoring) {
+                    val wct = WindowContainerTransaction()
+                    minimizeOldestIfNeeded(task, wct)
+                    minimizedTasks -= task.taskId
+                    removeMinimizeHandle(task.taskId)
+                    pin(task)
+                    if (restoring) {
+                        wct.merge(getLayerPinnedWct(task.token), true)
+                        wct.setHidden(task.token, keyguardShowing || overviewShowing)
+                        wct.reorder(task.token, true)
+                    }
+                    if (!wct.isEmpty) shellTaskOrganizer.applyTransaction(wct)
+                }
+                if (!restoring && !task.configuration.windowConfiguration.isAlwaysOnTop &&
+                    task.taskId in visiblePinnedTasks && !policyTransition && !keyguardTransition &&
+                    !keyguardShowing && !recentsRunning && !overviewShowing) {
+                    visiblePinnedTasks -= task.taskId
+                    minimizedTasks += task.taskId
+                    addMinimizeHandle(task)
+                }
+                presentationController.rememberBounds(task)
+            } else if (task.taskId in pinnedTasks &&
+                (change.mode == TRANSIT_CLOSE || task.windowingMode != WINDOWING_MODE_FREEFORM ||
+                    task.hasParentTask())) {
+                unpin(task)
+            }
+        }
+        if (keyguardShowing || recentsRunning || overviewShowing) updateVisibility()
+        enforceMultitaskingLimit(info)
     }
 
-    /**
-     * Pinned tasks does not work well over the fullscreen tasks yet: b/488007558 In order to not
-     * break windowing state, pinned tasks are going to be closed if fullscreen task appears on the
-     * same display.
-     */
-    private fun checkFullscreenTaskOpenedAndClosePinnedIfNeeded(info: TransitionInfo) {
-        val pinnedTask = getCurrentPinnedTask() ?: return
-
-        val changeWithFullscreenTask =
-            info.changes.firstOrNull { change ->
-                val taskInfo = change.taskInfo
-                taskInfo != null &&
-                    !isPinned(taskInfo.taskId) &&
-                    taskInfo.displayId == pinnedTask.displayId &&
-                    taskInfo.windowingMode == WINDOWING_MODE_FULLSCREEN &&
-                    !(change.hasFlags(FLAG_IS_WALLPAPER or FLAG_SHOW_WALLPAPER)) &&
-                    (change.mode == TRANSIT_OPEN ||
-                        change.mode == TRANSIT_TO_FRONT ||
-                        change.mode == TRANSIT_CHANGE)
+    override fun onTransitionFinished(transition: IBinder, aborted: Boolean) {
+        pendingRotations.remove(transition)
+        miniInteractions?.onTransitionFinished(aborted)
+        val pending = activeTransitions.remove(transition).orEmpty()
+        if (aborted) {
+            taskLeashes.keys.toList().forEach { id ->
+                updateHdrHeadroom(id, shellTaskOrganizer.getRunningTaskInfo(id)?.isFloatingWindow == true)
+            }
+            val liveFloatingIds = shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
+                .filter { it.isFloatingWindow }.map { it.taskId }
+            (pinnedTasks + visiblePinnedTasks + liveFloatingIds).toList().forEach { id ->
+                val task = shellTaskOrganizer.getRunningTaskInfo(id)
+                if (task == null || !task.isFloatingWindow) {
+                    task?.let { unpin(it) }
+                    pinnedTasks -= id
+                    visiblePinnedTasks -= id
+                    minimizedTasks -= id
+                    removeMinimizeHandle(id)
+                } else if (task.configuration.windowConfiguration.isAlwaysOnTop) {
+                    pinnedTasks += id
+                    minimizedTasks -= id
+                    removeMinimizeHandle(id)
+                    visiblePinnedTasks += id
+                } else {
+                    pinnedTasks += id
+                    visiblePinnedTasks -= id
+                    minimizedTasks += id
+                    if (id !in minimizeState.entries) addMinimizeHandle(task)
+                }
             }
 
-        if (changeWithFullscreenTask != null) {
-            logD(
-                "Closing pinned task as fullscreen task appeared on same display. " +
-                    "Pinned task id=%d, caused by change=%s",
-                pinnedTask.taskId,
-                changeWithFullscreenTask,
-            )
-            closeTask(pinnedTask)
+            pending.filterIsInstance<ActiveTransition.Pin>().forEach {
+                val task = shellTaskOrganizer.getRunningTaskInfo(it.taskInfo.taskId)
+                if (task?.isFloatingWindow != true) unpin(it.taskInfo)
+            }
+        }
+    }
+
+    /** Owns the HDR cap for the lifetime of a floating task, including minis and hidden tasks. */
+    private fun updateHdrHeadroom(taskId: Int, floating: Boolean,
+        leash: SurfaceControl? = taskLeashes[taskId],
+        transaction: SurfaceControl.Transaction? = null) {
+        val previous = hdrLeashes[taskId]
+        val next = leash?.takeIf { floating && it.isValid }
+        if (previous == null && next == null) return
+        val t = transaction ?: transactionPool.acquire()
+        if (previous != null && previous != next) {
+            if (previous.isValid) t.setDesiredMaxHdrHeadroom(previous, 0f)
+            hdrLeashes.remove(taskId)
+        }
+        if (next != null) {
+            // A floating window is secondary content; cap its entire subtree at SDR headroom.
+            t.setDesiredMaxHdrHeadroom(next, 1.0f)
+            hdrLeashes[taskId] = next
+        }
+        if (transaction == null) {
+            t.apply()
+            transactionPool.release(t)
         }
     }
 
     private fun pin(taskInfo: TaskInfo) {
         pinnedTasks += taskInfo.taskId
+        if (taskInfo.taskId !in minimizedTasks) visiblePinnedTasks += taskInfo.taskId
         currentPinnedTaskId = taskInfo.taskId
         pinnedTasksListeners.forEach { it.onPinnedTasksAdded(taskInfo) }
     }
 
     private fun unpin(taskInfo: TaskInfo, rememberAsPinned: Boolean = false) {
+        if (!rememberAsPinned) miniInteractions?.remove(taskInfo)
+        frameRates?.update()
+        visiblePinnedTasks -= taskInfo.taskId
+        if (rememberAsPinned) {
+            minimizedTasks += taskInfo.taskId
+            addMinimizeHandle(taskInfo)
+        }
         if (!rememberAsPinned) {
+            minimizedTasks -= taskInfo.taskId
+            removeMinimizeHandle(taskInfo.taskId)
+            presentationController.forgetTask(taskInfo.taskId)
             pinnedTasks -= taskInfo.taskId
             pinnedTasksListeners.forEach { it.onPinnedTasksRemoved(taskInfo) }
         }

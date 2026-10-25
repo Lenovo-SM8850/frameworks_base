@@ -5078,4 +5078,11 @@
     <!-- Accessibility label for the thumbs down button on attribution dialog. [CHAR_LIMIT=NONE] -->
     <string name="ace_attribution_thumbs_down_button_accessibility_description">Thumbs down feedback button</string>
 
+    <!-- Quick Settings tile for the desktop session. -->
+    <string name="quick_settings_desktop_mode_label">Desktop mode</string>
+    <!-- Notification long-press action to launch the app beside another app. -->
+    <string name="notification_open_split_screen">Open in split screen</string>
+    <!-- Notification guts action to open the app in a floating window. -->
+    <string name="notification_open_floating">Open in floating window</string>
+    <string name="dolby_atmos" translatable="false">Dolby Atmos</string>
 </resources>

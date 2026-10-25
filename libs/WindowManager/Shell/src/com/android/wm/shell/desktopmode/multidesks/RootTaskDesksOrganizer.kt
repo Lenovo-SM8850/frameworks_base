@@ -29,7 +29,10 @@ import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
 import android.app.WindowConfiguration.windowingModeToString
 import android.content.res.Configuration
 import android.os.Trace
+import android.os.UserHandle
+import android.os.UserManager
 import android.util.SparseArray
+import android.view.Display.DEFAULT_DISPLAY
 import android.view.SurfaceControl
 import android.view.WindowManager.TRANSIT_TO_FRONT
 import android.window.DesktopExperienceFlags
@@ -49,6 +52,7 @@ import com.android.wm.shell.common.LaunchAdjacentController
 import com.android.wm.shell.desktopmode.createActivityOptionsForStartTask
 import com.android.wm.shell.desktopmode.desktopfirst.isDisplayDesktopFirst
 import com.android.wm.shell.desktopmode.multidesks.DesksOrganizer.OnCreateCallback
+import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils
 import com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_DESKTOP_MODE
 import com.android.wm.shell.sysui.ShellCommandHandler
 import com.android.wm.shell.sysui.ShellInit
@@ -67,6 +71,7 @@ class RootTaskDesksOrganizer(
     private val shellTaskOrganizer: ShellTaskOrganizer,
     private val launchAdjacentController: LaunchAdjacentController,
     private val rootTaskDisplayAreaOrganizer: RootTaskDisplayAreaOrganizer,
+    private val userManager: UserManager? = null,
 ) : DesksOrganizer, ShellTaskOrganizer.TaskListener {
 
     private val createDeskRootRequests = mutableListOf<CreateDeskRequest>()
@@ -262,6 +267,28 @@ class RootTaskDesksOrganizer(
         }
     }
 
+    override fun prepareFloatingTasksForDesk(
+        wct: WindowContainerTransaction, deskId: Int, userId: Int,
+    ) {
+        val root = checkNotNull(deskRootsByDeskId[deskId]) { "Root not found for desk: $deskId" }
+        if (root.taskInfo.displayId == DEFAULT_DISPLAY) {
+            shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)
+                .filter { task ->
+                    task.isFloatingWindow && (task.userId == userId ||
+                        userManager?.getProfileParent(UserHandle.of(task.userId))?.identifier ==
+                            userId)
+                }
+                .forEach { task ->
+                    val bounds = task.presentationBounds
+                    val minimized = !task.configuration.windowConfiguration.isAlwaysOnTop
+                    moveTaskToDesk(wct, deskId, task, minimized)
+                    wct.merge(PinnedLayerUtils.getRemovedFromLayerWct(task.token), true)
+                    wct.setHidden(task.token, false)
+                    wct.setBounds(task.token, bounds)
+                }
+        }
+    }
+
     override fun deactivateDesk(
         wct: WindowContainerTransaction,
         deskId: Int,
@@ -348,8 +375,13 @@ class RootTaskDesksOrganizer(
         if (task is RecentTaskInfo) {
             wct.startTask(task.taskId, createActivityOptionsForStartTask(deskId, this).toBundle())
         }
+        if (task.isFloatingWindow) {
+            wct.merge(PinnedLayerUtils.getRemovedFromLayerWct(task.token), true)
+            wct.setBounds(task.token, task.presentationBounds)
+        }
         wct.setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED)
         if (!minimized) {
+            wct.setHidden(task.token, false)
             wct.reparent(task.token, root.taskInfo.token, /* onTop= */ true)
         } else {
             minimizeTaskInner(
@@ -370,6 +402,7 @@ class RootTaskDesksOrganizer(
         logV("reorderTaskToFront task=%d desk=%d", task.taskId, deskId)
         val root = deskRootsByDeskId[deskId] ?: error("Root not found for desk: $deskId")
         if (task.taskId in root.children) {
+            wct.setHidden(task.token, false)
             wct.reorder(task.token, /* onTop= */ true, /* includingParents= */ true)
             return
         }
@@ -449,6 +482,7 @@ class RootTaskDesksOrganizer(
             )
             return
         }
+        wct.setHidden(task.token, false)
         wct.reparent(task.token, deskRoot.token, /* onTop= */ true)
     }
 

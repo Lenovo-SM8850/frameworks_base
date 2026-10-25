@@ -70,7 +70,7 @@ public class DesktopModeVisualIndicator {
     public enum IndicatorType {
         /** To be used when we don't want to indicate any transition */
         NO_INDICATOR,
-        /** Indicates impending transition into desktop mode */
+        /** Indicates impending transition into a floating window */
         TO_DESKTOP_INDICATOR,
         /** Indicates impending transition into fullscreen */
         TO_FULLSCREEN_INDICATOR,

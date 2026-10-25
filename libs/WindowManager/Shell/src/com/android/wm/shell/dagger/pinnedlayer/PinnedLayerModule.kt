@@ -16,13 +16,24 @@
 
 package com.android.wm.shell.dagger.pinnedlayer
 
+import android.app.ActivityManager.RunningTaskInfo
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.res.Configuration
+import android.os.Handler
+import android.os.PowerManager
+import android.view.Display.DEFAULT_DISPLAY
 import android.view.SurfaceControl
+import android.view.WindowManagerPolicyConstants.NAV_BAR_MODE_GESTURAL
 import com.android.wm.shell.RootTaskDisplayAreaOrganizer
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.MultiDisplayDragMoveIndicatorController
 import com.android.wm.shell.common.ShellExecutor
+import com.android.wm.shell.common.TaskStackListenerImpl
 import com.android.wm.shell.dagger.WMShellBaseModule
 import com.android.wm.shell.dagger.WMSingleton
 import com.android.wm.shell.desktopmode.DesktopTasksController
@@ -30,6 +41,8 @@ import com.android.wm.shell.desktopmode.DesktopUserRepositories
 import com.android.wm.shell.desktopmode.NormalAppLayerController
 import com.android.wm.shell.desktopmode.ShellDesktopState
 import com.android.wm.shell.desktopmode.WindowDragTransitionHandler
+import com.android.wm.shell.pinnedlayer.phone.FloatingTidyController
+import com.android.wm.shell.pinnedlayer.phone.FloatingTidyGestureMonitor
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerFlags
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerHandler
@@ -38,8 +51,11 @@ import com.android.wm.shell.pinnedlayer.phone.PinnedLayerPresentationController
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUiState
 import com.android.wm.shell.pinnedlayer.phone.PinnedWindowRepositionAnimationHandler
 import com.android.wm.shell.pinnedlayer.phone.PinnedWindowRepositionAnimator
+import com.android.wm.shell.recents.RecentsTransitionHandler
 import com.android.wm.shell.shared.TransactionPool
 import com.android.wm.shell.shared.annotations.ShellMainThread
+import com.android.wm.shell.sysui.ConfigurationChangeListener
+import com.android.wm.shell.sysui.ShellController
 import com.android.wm.shell.sysui.ShellInit
 import com.android.wm.shell.transition.Transitions
 import dagger.Module
@@ -52,8 +68,15 @@ object PinnedLayerModule {
     @WMSingleton
     @Provides
     fun providePinnedLayerHandler(
+        context: Context,
+        taskStackListener: TaskStackListenerImpl,
+        displayController: DisplayController,
+        shellTaskOrganizer: ShellTaskOrganizer,
+        @ShellMainThread mainHandler: Handler,
         shellInit: ShellInit,
         transitions: Transitions,
+        shellController: ShellController,
+        recentsTransitionHandler: RecentsTransitionHandler,
         pinnedLayerController: Optional<PinnedLayerController>,
         pinnedLayerUiState: Optional<PinnedLayerUiState>,
         // observer is unused here, but required to inject to make sure it is created so it can
@@ -64,6 +87,82 @@ object PinnedLayerModule {
         desktopUserRepositories: Optional<DesktopUserRepositories>,
     ): Optional<PinnedLayerHandler> {
         if (PinnedLayerFlags.isPinnedLayerEnabled()) {
+            pinnedLayerController.get().configureVisibility(shellController, recentsTransitionHandler)
+            val powerManager = context.getSystemService(PowerManager::class.java)
+            val keyguardManager = context.getSystemService(KeyguardManager::class.java)
+            val pinned = pinnedLayerController.get()
+            shellInit.addInitCallback({
+                lateinit var tidy: FloatingTidyController
+                val monitor = FloatingTidyGestureMonitor.create(context, displayController, mainHandler) {
+                    tidy.onHomeSwipeUp()
+                }
+                tidy = FloatingTidyController(taskStackListener, recentsTransitionHandler, shellController,
+                    transitions, { powerManager.isInteractive }, pinned::tidyFloatingWindows,
+                    canMonitorGestures = {
+                        displayController.getDisplayContext(DEFAULT_DISPLAY)?.resources?.getInteger(
+                            com.android.internal.R.integer.config_navBarInteractionMode) ==
+                            NAV_BAR_MODE_GESTURAL && pinned.hasExpandedFloatingWindows() &&
+                            !keyguardManager.isKeyguardLocked
+                    },
+                    gestureMonitoringChanged = monitor::setEnabled)
+                // Ignore position-only task updates during floating drags.
+                data class Visibility(val display: Int, val visible: Boolean, val floating: Boolean)
+                val visibility = mutableMapOf<Int, Visibility>()
+                fun updateTask(task: RunningTaskInfo) {
+                    val previous = visibility[task.taskId]
+                    if (previous != null && previous.display == task.displayId && previous.visible == task.isVisible &&
+                        previous.floating == task.isFloatingWindow) return
+                    visibility[task.taskId] = Visibility(task.displayId, task.isVisible, task.isFloatingWindow)
+                    tidy.updateGestureMonitoring()
+                }
+                shellTaskOrganizer.initialTasks.forEach { updateTask(it.first) }
+                shellTaskOrganizer.addTaskAppearedListener(object : ShellTaskOrganizer.TaskAppearedListener {
+                    override fun onTaskAppeared(task: RunningTaskInfo, leash: SurfaceControl) {
+                        mainHandler.post {
+                            shellTaskOrganizer.getRunningTaskInfo(task.taskId)?.let(::updateTask)
+                        }
+                    }
+                })
+                shellTaskOrganizer.addTaskInfoChangedListener(object : ShellTaskOrganizer.TaskInfoChangedListener {
+                    override fun onTaskInfoChanged(task: RunningTaskInfo) { updateTask(task) }
+                })
+                shellTaskOrganizer.addTaskVanishedListener(object : ShellTaskOrganizer.TaskVanishedListener {
+                    override fun onTaskVanished(task: RunningTaskInfo) {
+                        visibility.remove(task.taskId)
+                        tidy.updateGestureMonitoring()
+                    }
+                })
+                pinned.addMiniListener { tidy.updateGestureMonitoring() }
+                displayController.addDisplayWindowListener(object : DisplayController.OnDisplaysChangedListener {
+                    override fun onDisplayAdded(displayId: Int) {
+                        if (displayId == DEFAULT_DISPLAY) tidy.updateGestureMonitoring()
+                    }
+                    override fun onDisplayConfigurationChanged(displayId: Int, config: Configuration) {
+                        if (displayId == DEFAULT_DISPLAY) {
+                            monitor.setEnabled(false)
+                            tidy.updateGestureMonitoring()
+                        }
+                    }
+                    override fun onDisplayRemoved(displayId: Int) {
+                        if (displayId == DEFAULT_DISPLAY) monitor.setEnabled(false)
+                    }
+                })
+                shellController.addConfigurationChangeListener(object : ConfigurationChangeListener {
+                    override fun onConfigurationChanged(newConfig: Configuration) {
+                        monitor.setEnabled(false)
+                        tidy.updateGestureMonitoring()
+                    }
+                })
+                context.registerReceiver(object : BroadcastReceiver() {
+                    override fun onReceive(context: Context, intent: Intent) {
+                        tidy.updateGestureMonitoring()
+                    }
+                }, IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                }, null, mainHandler)
+                tidy.updateGestureMonitoring()
+            }, pinned)
             return Optional.of(
                 PinnedLayerHandler(
                     shellInit = shellInit,
@@ -86,6 +185,8 @@ object PinnedLayerModule {
         shellInit: ShellInit,
         transitions: Transitions,
         displayController: DisplayController,
+        @com.android.wm.shell.shared.annotations.ShellBackgroundThread backgroundExecutor: ShellExecutor,
+        @ShellMainThread mainExecutor: ShellExecutor,
         shellTaskOrganizer: ShellTaskOrganizer,
         desktopState: ShellDesktopState,
         windowDragTransitionHandler: WindowDragTransitionHandler,
@@ -103,7 +204,9 @@ object PinnedLayerModule {
                     taskDisplayAreaOrganizer = rootTaskDisplayAreaOrganizer,
                     shellTaskOrganizer = shellTaskOrganizer,
                     presentationController =
-                        PinnedLayerPresentationController(context, displayController, desktopState),
+                        PinnedLayerPresentationController(context, displayController, desktopState,
+                            com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometryStore(
+                                context.filesDir, backgroundExecutor)),
                     windowDragTransitionHandler = windowDragTransitionHandler,
                     windowRepositionAnimationHandler = windowRepositionAnimationHandler,
                     windowRepositionAnimator = windowRepositionAnimator,
@@ -111,7 +214,7 @@ object PinnedLayerModule {
                     desktopState = desktopState,
                     multiDisplayDragMoveIndicatorController =
                         multiDisplayDragMoveIndicatorController,
-                )
+                ).also { it.configureInteractions(context, displayController, mainExecutor) }
             )
         }
         return Optional.empty()

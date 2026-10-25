@@ -63,6 +63,7 @@ object PinnedLayerUtils {
             .setAlwaysOnTop(windowContainerToken, /* alwaysOnTop= */ false)
             .apply {
                 if (isMinimizing) {
+                    setHidden(windowContainerToken, true)
                     reorder(windowContainerToken, /* onTop= */ false)
                 } else {
                     removeTask(windowContainerToken)

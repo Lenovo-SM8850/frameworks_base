@@ -760,6 +760,21 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(rotated.width()).isGreaterThan(rotated.height())
     }
 
+    @Test fun deskEntry_preservesBoundsWithinStableAndScaleLimits() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000))
+        controller.getPinEntryDestinationBounds(task)
+        val requested = Rect(100, 200, 700, 1000)
+        val bounds = requireNotNull(controller.getPreservedEntryBounds(task, requested))
+        assertThat(bounds).isEqualTo(requested)
+        val wct = android.window.WindowContainerTransaction()
+        val scale = controller.entryScale(task)
+        controller.applyPresentation(task, bounds, wct, scale)
+        assertThat(scale).isAtMost(1f)
+        val logical = wct.changes[task.token.asBinder()]!!.configuration.windowConfiguration.bounds
+        assertThat(Rect(0, 100, 1080, 1870).contains(logical)).isTrue()
+        assertThat(kotlin.math.abs(logical.width() * scale - requested.width())).isAtMost(1f)
+    }
+
     @Test
     fun sidebarHover_preservesEntryScaleAndClampsDropPointToStableBounds() {
         val task = createTaskInfo(Rect(0, 0, 500, 800)).apply {

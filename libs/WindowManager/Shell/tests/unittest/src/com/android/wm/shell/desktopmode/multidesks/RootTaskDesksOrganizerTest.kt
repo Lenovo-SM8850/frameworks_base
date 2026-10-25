@@ -19,6 +19,8 @@ import android.app.ActivityManager
 import android.app.ActivityOptions
 import android.app.FullscreenRequestHandler.REQUEST_ALLOW_MODE_ENTER
 import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
+import android.os.UserHandle
+import android.os.UserManager
 import android.platform.test.annotations.EnableFlags
 import android.testing.AndroidTestingRunner
 import android.view.Display.DEFAULT_DISPLAY
@@ -89,6 +91,7 @@ class RootTaskDesksOrganizerTest : ShellTestCase() {
     private val mockShellCommandHandler = mock<ShellCommandHandler>()
     private val mockShellTaskOrganizer = mock<ShellTaskOrganizer>()
     private val mockTDAOrganizer = mock<RootTaskDisplayAreaOrganizer>()
+    private val userManager = mock<UserManager>()
 
     private val launchAdjacentController = LaunchAdjacentController(mock())
     private val taskInfoChangedListener = mock<(ActivityManager.RunningTaskInfo) -> Unit>()
@@ -105,6 +108,7 @@ class RootTaskDesksOrganizerTest : ShellTestCase() {
                 mockShellTaskOrganizer,
                 launchAdjacentController,
                 mockTDAOrganizer,
+                userManager,
             )
         organizer.addOnDesktopTaskInfoChangedListener(taskInfoChangedListener)
         organizer.addOnDesktopTaskVanishedListener(taskVanishedListener)
@@ -584,6 +588,40 @@ class RootTaskDesksOrganizerTest : ShellTestCase() {
         val change = wct.changes[tdaTokenBinder]!!
         assertThat(change.changeMask and Change.CHANGE_IS_TASK_MOVE_ALLOWED).isNotEqualTo(0)
         assertThat(change.isTaskMoveAllowed).isTrue()
+    }
+
+    @Test
+    fun prepareFloatingTasksForDesk_onlyAdoptsActivatingUserAndProfiles() = runTest {
+        val desk = createDeskSuspending(userId = PRIMARY_USER_ID)
+        createDeskSuspending(userId = SECONDARY_USER_ID)
+        assertThat(desk.deskRoot.users).containsExactly(PRIMARY_USER_ID, SECONDARY_USER_ID)
+        val profileId = 12
+        whenever(userManager.getProfileParent(UserHandle.of(profileId)))
+            .thenReturn(UserHandle.of(PRIMARY_USER_ID))
+        val own = createFreeformTask(userId = PRIMARY_USER_ID).apply { isFloatingWindow = true }
+        val profile = createFreeformTask(userId = profileId).apply { isFloatingWindow = true }
+        val other = createFreeformTask(userId = SECONDARY_USER_ID).apply { isFloatingWindow = true }
+        val desktop = createFreeformTask(userId = PRIMARY_USER_ID)
+        whenever(mockShellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY))
+            .thenReturn(arrayListOf(own, profile, other, desktop))
+        val wct = WindowContainerTransaction()
+
+        organizer.prepareFloatingTasksForDesk(wct, desk.deskRoot.deskId, PRIMARY_USER_ID)
+        organizer.activateDesk(wct, desk.deskRoot.deskId)
+
+        for (task in listOf(own, profile)) {
+            val change = requireNotNull(wct.changes[task.token.asBinder()])
+            assertThat(change.floatingWindow).isFalse()
+            assertThat(wct.hierarchyOps.any {
+                it.isReparent && it.container == task.token.asBinder()
+            }).isTrue()
+        }
+        for (task in listOf(other, desktop)) {
+            assertThat(wct.changes).doesNotContainKey(task.token.asBinder())
+            assertThat(wct.hierarchyOps.any {
+                it.isReparent && it.container == task.token.asBinder()
+            }).isFalse()
+        }
     }
 
     @Test

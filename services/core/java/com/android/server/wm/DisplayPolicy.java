@@ -2895,8 +2895,14 @@ public class DisplayPolicy {
                                 && task.hasFillingContent());
         final boolean freeformRootTaskVisible = topFreeformTask != null
                 && topFreeformTask.isVisible();
-        final boolean inNonFullscreenFreeformMode = freeformRootTaskVisible
-                && !topFreeformTask.getBounds().equals(mDisplayContent.getBounds());
+        // Floating overlays must not force the fullscreen app below to consume system bars.
+        // Keep looking past them so ordinary desktop windows retain the legacy policy.
+        final Task topNonFloatingFreeformTask = defaultTaskDisplayArea.getTask(
+                task -> task.inFreeformWindowingMode() && !task.getRootTask().isFloatingWindow()
+                        && task.hasFillingContent());
+        final boolean inNonFullscreenFreeformMode = topNonFloatingFreeformTask != null
+                && topNonFloatingFreeformTask.isVisible()
+                && !topNonFloatingFreeformTask.getBounds().equals(mDisplayContent.getBounds());
         // Always show status/nav bar for non-fullscreen multi window (excluding PiP).
         final boolean showSystemBarsByLegacyPolicy = adjacentTasksVisible
                 || inNonFullscreenFreeformMode;

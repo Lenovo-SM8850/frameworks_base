@@ -267,8 +267,10 @@ class DesktopScrimController(
     }
 
     fun handleExitCleanUp(displayId: Int, shouldEndUpAtHome: Boolean, exitReason: ExitReason) {
-        if (shouldEndUpAtHome && exitReason == ExitReason.RETURN_HOME_OR_OVERVIEW) {
-            // We are going back to home, remove any effects for the maximized/snapped tasks.
+        if ((shouldEndUpAtHome && exitReason == ExitReason.RETURN_HOME_OR_OVERVIEW) ||
+            exitReason == ExitReason.TASK_MOVED_FROM_DESK
+        ) {
+            // The desk is no longer visible, remove effects for its maximized/snapped tasks.
             updateDesktopScrim(displayId, applyLightOutEffect = false)
         }
         if (

@@ -285,8 +285,10 @@ class FullscreenHeaderController(
         val exitFullscreenButtonLocation = viewHolder.getExitFullscreenButtonPosition()
 
         var menuLeft =
-            exitFullscreenButtonLocation[0] - (menuWidth - viewHolder.exitFullscreenButtonWidth) / 2
-        var menuTop = captionHeight
+            taskInfo.presentationBounds.left + captionLayoutResult.captionX +
+                exitFullscreenButtonLocation[0] -
+                (menuWidth - viewHolder.exitFullscreenButtonWidth) / 2
+        var menuTop = taskInfo.presentationBounds.top + captionHeight
         val menuRight = menuLeft + menuWidth
         val menuBottom = menuTop + menuHeight
 

@@ -57,4 +57,5 @@
     <item type="id" name="action_snap_right"/>
     <item type="id" name="action_maximize_restore"/>
     <item type="id" name="action_exit_fullscreen"/>
+    <item type="id" name="floating_bottom_handle" />
 </resources>

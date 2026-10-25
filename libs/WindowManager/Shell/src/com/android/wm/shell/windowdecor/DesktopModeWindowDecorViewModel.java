@@ -2263,6 +2263,11 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         }
 
         @Override
+        public boolean canMoveDeskToFloating(@NonNull RunningTaskInfo taskInfo) {
+            return mDesktopTasksController.canMoveDeskToFloating(taskInfo);
+        }
+
+        @Override
         public void onToFloat(int taskId) {
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to enter float for task=%d",
                     taskId);
