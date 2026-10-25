@@ -604,6 +604,30 @@ class HandleMenuTest : ShellTestCase() {
         }
     }
 
+
+    @Test fun floatingCloseUsesDismissRowBelowIcons_withoutAppName() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FREEFORM, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        task.isFloatingWindow = true
+        task.taskDescription = android.app.ActivityManager.TaskDescription.Builder()
+            .setLabel("Test app").build()
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.windowingPillView.parent as View
+        val pill = root.requireViewById<View>(R.id.windowing_pill)
+        val row = root.requireViewById<View>(R.id.floating_close_pill)
+        val parent = row.parent as android.view.ViewGroup
+        assertEquals(parent.indexOfChild(pill) + 1, parent.indexOfChild(row))
+        assertEquals(View.VISIBLE, row.visibility)
+        val button = root.requireViewById<View>(R.id.floating_close_button)
+        val label = mContext.getString(R.string.floating_window_close)
+        assertEquals(label, button.contentDescription.toString())
+        assertEquals(label, button.tooltipText.toString())
+        assertThat(label).doesNotContain("%")
+        assertThat(label).doesNotContain("Test app")
+        button.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
+    }
+
     @Test fun fullscreenHasNoCloseRow() = runTest {
         createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
         handleMenu = createAndShowHandleMenu()
