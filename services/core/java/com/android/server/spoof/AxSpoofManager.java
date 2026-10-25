@@ -435,7 +435,10 @@ public class AxSpoofManager implements IAxSpoofManager {
         // Spoofing being active isn't enough: with TrickyStore switched off its target list
         // is none of our business.
         if (Settings.System.getIntForUser(
-                mResolver, TRICKYSTORE_ENABLED_KEY, 1, UserHandle.USER_SYSTEM) == 0) return;
+                mResolver, TRICKYSTORE_ENABLED_KEY,
+                        mContext.getResources().getBoolean(
+                                com.android.internal.R.bool.config_defaultTrickyStoreEnabled) ? 1 : 0,
+                        UserHandle.USER_SYSTEM) == 0) return;
 
         String current = Settings.Secure.getStringForUser(
                 mResolver, Settings.Secure.SPOOF_TRICKYSTORE_TARGET, UserHandle.USER_SYSTEM);
@@ -495,7 +498,10 @@ public class AxSpoofManager implements IAxSpoofManager {
                         mResolver, Settings.Secure.SPOOF_TRICKYSTORE_KEYBOX, UserHandle.USER_SYSTEM))
                 && !KEYBOX_SOURCE_USER.equals(keyboxSource)
                 && Settings.System.getIntForUser(
-                        mResolver, TRICKYSTORE_ENABLED_KEY, 1, UserHandle.USER_SYSTEM) != 0;
+                        mResolver, TRICKYSTORE_ENABLED_KEY,
+                        mContext.getResources().getBoolean(
+                                com.android.internal.R.bool.config_defaultTrickyStoreEnabled) ? 1 : 0,
+                        UserHandle.USER_SYSTEM) != 0;
 
         return pifMissing || keyboxMissing;
     }
@@ -639,7 +645,10 @@ public class AxSpoofManager implements IAxSpoofManager {
     private void refreshKeyboxIfStale() throws Exception {
         if (mResolver == null) return;
         if (Settings.System.getIntForUser(
-                mResolver, TRICKYSTORE_ENABLED_KEY, 1, UserHandle.USER_SYSTEM) == 0) {
+                mResolver, TRICKYSTORE_ENABLED_KEY,
+                        mContext.getResources().getBoolean(
+                                com.android.internal.R.bool.config_defaultTrickyStoreEnabled) ? 1 : 0,
+                        UserHandle.USER_SYSTEM) == 0) {
             return;
         }
 
