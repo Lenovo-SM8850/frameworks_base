@@ -527,8 +527,9 @@ class MultiSplitCoordinator(
                     return false
                 }
         }
-        if (isActive && layout?.getLeaves()?.map { it.taskId }?.toSet() !=
-            group.members.map { it.taskId }.toSet()) exit(-1, wct)
+        val membersAlreadyPlaced = isActive && layout?.getLeaves()?.map { it.taskId }?.toSet() ==
+            group.members.map { it.taskId }.toSet()
+        if (isActive && !membersAlreadyPlaced) exit(-1, wct)
         if (!isActive) {
             available.forEach { it.evictOtherChildren(wct, tasks.map { task -> task.taskId }.toSet()) }
             host.started()
@@ -551,8 +552,12 @@ class MultiSplitCoordinator(
         nextDivider = maxOf(nextDivider, maxDivider(group.layout.root) + 1)
         tasks.forEach { task ->
             val leaf = group.layout.getLeaves().first { it.taskId == task.taskId }.id
-            wct.reparent(task.token, stages.getValue(leaf).mRootTaskInfo.token, true)
-                .setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED).setBounds(task.token, Rect())
+            val stage = stages.getValue(leaf).mRootTaskInfo
+            if (!membersAlreadyPlaced || task.parentTaskId != stage.taskId) {
+                wct.reparent(task.token, stage.token, true)
+                    .setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED)
+                    .setBounds(task.token, Rect())
+            }
         }
         visible = true
         restoring = true
