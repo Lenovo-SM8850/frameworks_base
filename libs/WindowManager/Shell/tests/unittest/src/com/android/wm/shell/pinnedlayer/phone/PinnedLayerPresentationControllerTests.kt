@@ -316,6 +316,18 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
+    fun entry_usesLetterboxedAppFrameInsteadOfFullscreenTaskAspect() {
+        val task = createTaskInfo(Rect(0, 0, 1920, 1080)).apply {
+            configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            topActivityMainWindowFrame = Rect(600, 0, 1320, 1080)
+            minWidth = 1
+            minHeight = 1
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(2f / 3)
+    }
+
+    @Test
     fun entry_usesLetterboxBoundsWhenMainWindowMatchesActivityBounds() {
         val task = createTaskInfo(Rect(0, 0, 1920, 1080)).apply {
             configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -817,6 +829,45 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(entry.bounds).isEqualTo(task.floatingWindowRestoreBounds)
         assertThat(entry.scale).isEqualTo(.8f)
         assertThat(controller.entryScale(task)).isEqualTo(.8f)
+    }
+
+    @Test fun customRatio_fullscreenAndSplitEntryUseCurrentAspect() {
+        for (mode in listOf(WindowConfiguration.WINDOWING_MODE_FULLSCREEN,
+            WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW)) {
+            val task = createTaskInfo(Rect(100, 200, 900, 800)).apply {
+                isFloatingWindow = true
+                baseActivity = android.content.ComponentName("test.ratio.$mode", "Main")
+                minWidth = 1
+                minHeight = 1
+                floatingWindowScale = .75f
+                floatingWindowPosition.set(100, 200)
+            }
+            controller.rememberBounds(task)
+            controller.forgetTask(task.taskId)
+            task.isFloatingWindow = false
+            task.configuration.windowConfiguration.setWindowingMode(mode)
+            task.configuration.windowConfiguration.setBounds(Rect(0, 0, 960, 540))
+            task.configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+            assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.005f).of(16f / 9f)
+        }
+    }
+
+    @Test fun originalAspect_survivesPresetResizeAndMiniButForgetsOnExit() {
+        val task = createTaskInfo(Rect(100, 100, 1700, 1000)).apply {
+            isFloatingWindow = true
+        }
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(16f / 9f)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 1300, 1000))
+        task.floatingWindowScale = .3f
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(16f / 9f)
+        task.floatingWindowScale = .75f
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(16f / 9f)
+        controller.forgetTask(task.taskId)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1600, 1000))
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(1.6f)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1000, 1600))
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(.625f)
     }
 
 }

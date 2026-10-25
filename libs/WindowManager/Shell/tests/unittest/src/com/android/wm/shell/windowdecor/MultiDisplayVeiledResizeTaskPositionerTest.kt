@@ -1226,6 +1226,26 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
     }
 
     @Test
+    fun floatingCorner_preservesAspectAndCommitsOnlyAtRelease() = runOnUiThread {
+        val initial = Rect(100, 100, 500, 900)
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.configuration.windowConfiguration.setBounds(initial)
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
+            DISPLAY_ID_0, 500f, 900f, INPUT_METHOD_TYPE_UNKNOWN)
+        val outline = taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 600f, 1100f)
+        Assert.assertEquals(Rect(100, 100, 600, 1100), outline)
+        Assert.assertEquals(initial, task.configuration.windowConfiguration.bounds)
+        taskPositioner.flushFloatingResizePreview()
+        verify(mockWindowDecoration).showResizeVeil(outline)
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 600f, 1100f)
+        verify(mockTransitions, times(1)).startTransition(eq(TRANSIT_CHANGE),
+            argThat { changes[taskBinder]?.configuration?.windowConfiguration?.bounds == outline },
+            eq(taskPositioner))
+    }
+
+    @Test
     fun floatingTopEdge_movesWindow() = runOnUiThread {
         verifyFloatingEdgeMove(CTRL_TYPE_TOP, 400f, 100f, 400f, 40f)
     }
@@ -1353,4 +1373,19 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1000f, -1000f)
         verify(mockWindowDecoration, times(3)).performFloatingTargetHapticFeedback()
     }
+    @Test fun floatingCorner_changesAspectInOneBoundsCommit() = runOnUiThread {
+        beginFloatingCorner()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 800f, 1000f)
+        taskPositioner.flushFloatingResizePreview()
+        verify(mockShellTaskOrganizer, never()).applyTransaction(argThat {
+            changes[taskBinder]?.windowSetMask?.and(WindowConfiguration.WINDOW_CONFIG_BOUNDS) != 0
+        })
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 800f, 1000f)
+        verify(mockTransitions).startTransition(eq(TRANSIT_CHANGE), argThat {
+            val bounds = changes[taskBinder]?.configuration?.windowConfiguration?.bounds
+            bounds != null && bounds.height() > bounds.width() &&
+                kotlin.math.abs(bounds.width().toFloat() / bounds.height() - 3f / 4f) < .003f
+        }, eq(taskPositioner))
+    }
+
 }
