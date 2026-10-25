@@ -38,6 +38,8 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
     private var visibleWidth = 0
     private var visibleHeight = 0
     private var pill: View? = null
+    private var sampler: HandleRegionSampler? = null
+    private val sampleBounds = Rect()
 
     fun update(task: RunningTaskInfo, taskSurface: SurfaceControl,
         transaction: SurfaceControl.Transaction? = null) {
@@ -161,8 +163,4 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         parent = null
         lastScale = Float.NaN
     }
-
-    private var sampler: HandleRegionSampler? = null
-
-    private val sampleBounds = Rect()
 }

@@ -107,6 +107,12 @@ class AppHandleViewHolder(
     private val inputManager = context.getSystemService(InputManager::class.java)
     private val decorThemeUtil = DecorThemeUtil(context)
     private val animator: AppHandleAnimator = AppHandleAnimator(rootView, captionHandle)
+    @VisibleForTesting var regionSampler = HandleRegionSampler(captionHandle) { light ->
+        val color = NavigationHandleColor.get(context, light)
+        if (DesktopExperienceFlags.ENABLE_REENABLE_APP_HANDLE_COLOR_ANIMATIONS.isTrue) {
+            animator.animateColorChange(color)
+        } else captionHandle.imageTintList = ColorStateList.valueOf(color)
+    }
     private var handleMenuOpen = false
     private var captionVisible = false
     private var statusBarInputLayerExists = false
@@ -177,6 +183,7 @@ class AppHandleViewHolder(
     ) {
         captionVisible = isCaptionVisible
         setVisibility(isCaptionVisible)
+        regionSampler.updateTask(taskInfo)
         if (DesktopExperienceFlags.ENABLE_REENABLE_APP_HANDLE_COLOR_ANIMATIONS.isTrue) {
             animator.animateColorChange(getCaptionHandleBarColor(taskInfo))
         } else {
@@ -356,9 +363,12 @@ class AppHandleViewHolder(
         val description = taskInfo.taskDescription
         if (description == null) {
             logD("color calculation: using light color, reason: null description")
-            return false
+            return decorThemeUtil.getAppTheme(taskInfo) == Theme.DARK
         }
-        if (description.systemBarsAppearance == 0) {
+        // Only a task occupying the status bar area can describe the background there.
+        // Zero appearance is valid: it requests light icons on a dark background.
+        if (taskInfo.configuration.windowConfiguration.bounds.top >=
+            SystemBarUtils.getStatusBarHeight(context)) {
             val bgColor = description.backgroundColor
             when (decorThemeUtil.getAppTheme(description)) {
                 Theme.LIGHT -> {
@@ -460,12 +470,5 @@ class AppHandleViewHolder(
     companion object {
         private const val TAG = "AppHandleViewHolder"
         private const val CLICK_DELAY: Long = 500
-    }
-
-    @VisibleForTesting var regionSampler = HandleRegionSampler(captionHandle) { light ->
-        val color = NavigationHandleColor.get(context, light)
-        if (DesktopExperienceFlags.ENABLE_REENABLE_APP_HANDLE_COLOR_ANIMATIONS.isTrue) {
-            animator.animateColorChange(color)
-        } else captionHandle.imageTintList = ColorStateList.valueOf(color)
     }
 }
