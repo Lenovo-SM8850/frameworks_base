@@ -75,7 +75,7 @@ import kotlinx.coroutines.launch
  */
 abstract class WindowDecoration2<T>(
     var taskInfo: RunningTaskInfo,
-    context: Context,
+    private val context: Context,
     private val displayController: DisplayController,
     taskSurface: SurfaceControl,
     private val surfaceControlSupplier: () -> SurfaceControl,

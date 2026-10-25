@@ -2080,7 +2080,8 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
      *
      * <p> When a Recents transition is active we allow that transition to take ownership of the
      * corner radius of its task surfaces, so each window decoration should stop updating the corner
-     * radius of its task surface during that time.
+     * radius of its task surface during that time. Floating tasks are excluded from Recents
+     * targets and retain their decoration-owned corner radius.
      */
     void setIsRecentsTransitionRunning(boolean isRecentsTransitionRunning) {
         mIsRecentsTransitionRunning = isRecentsTransitionRunning;

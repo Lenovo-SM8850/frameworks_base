@@ -17,6 +17,7 @@
 package com.android.wm.shell.windowdecor
 
 import android.app.ActivityManager.RunningTaskInfo
+import android.content.res.Configuration
 import android.graphics.Rect
 import android.graphics.Region
 import android.os.Looper
@@ -50,8 +51,12 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.doReturn
+import org.mockito.Mockito.inOrder
+import org.mockito.Mockito.spy
 import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 
 /**

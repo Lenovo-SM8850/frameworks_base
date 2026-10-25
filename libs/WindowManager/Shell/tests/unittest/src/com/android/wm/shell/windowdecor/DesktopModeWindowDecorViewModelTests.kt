@@ -137,6 +137,13 @@ class DesktopModeWindowDecorViewModelTests : DesktopModeWindowDecorViewModelTest
     }
 
     @Test
+    fun floatingRootBack_usesPinnedLayerExit() {
+        val task = RunningTaskInfo().apply { isFloatingWindow = true }
+        desktopModeWindowDecorViewModel.onBackOnTaskRoot(task)
+        verify(mockPinnedLayerController).onFloatingTaskRootBack(task)
+    }
+
+    @Test
     @EnableFlags(Flags.FLAG_ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS)
     fun createWindowDecoration_displayRetrievedFromDisplayManagerWhenUnavailableInDisplayController() {
         val task = createTask(windowingMode = WINDOWING_MODE_FREEFORM)

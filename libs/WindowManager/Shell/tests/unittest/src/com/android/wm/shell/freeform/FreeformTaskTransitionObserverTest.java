@@ -26,6 +26,7 @@ import static android.view.WindowManager.TRANSIT_OPEN;
 import static android.view.WindowManager.TRANSIT_TO_BACK;
 import static android.view.WindowManager.TRANSIT_TO_FRONT;
 
+import static com.android.wm.shell.transition.Transitions.TRANSIT_END_RECENTS_TRANSITION;
 import static com.android.wm.shell.transition.Transitions.TRANSIT_START_RECENTS_TRANSITION;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -268,6 +269,34 @@ public class FreeformTaskTransitionObserverTest extends ShellTestCase {
 
         mTransitionObserver.onTransitionFinished(transition, false);
         verify(mTaskChangeListener).onTaskMovingToBack(change.getTaskInfo());
+    }
+
+    @Test
+    public void recentsStart_floatingDecorReceivesCoreFinishTransaction() {
+        assertFloatingDecorFinishTransaction(TRANSIT_START_RECENTS_TRANSITION, TRANSIT_CHANGE);
+    }
+
+    @Test
+    public void recentsEndToHome_floatingDecorReceivesCoreFinishTransaction() {
+        assertFloatingDecorFinishTransaction(TRANSIT_END_RECENTS_TRANSITION, TRANSIT_TO_BACK);
+    }
+
+    @Test
+    public void recentsEndToApp_floatingDecorReceivesCoreFinishTransaction() {
+        assertFloatingDecorFinishTransaction(TRANSIT_END_RECENTS_TRANSITION, TRANSIT_TO_FRONT);
+    }
+
+    private void assertFloatingDecorFinishTransaction(int type, int mode) {
+        final TransitionInfo.Change change = createChange(mode, 1, WINDOWING_MODE_FREEFORM);
+        change.getTaskInfo().isFloatingWindow = true;
+        final TransitionInfo info = new TransitionInfoBuilder(type, 0).addChange(change).build();
+        final SurfaceControl.Transaction startT = mock(SurfaceControl.Transaction.class);
+        final SurfaceControl.Transaction finishT = mock(SurfaceControl.Transaction.class);
+
+        mTransitionObserver.onTransitionReady(mock(IBinder.class), info, startT, finishT);
+
+        verify(mWindowDecorViewModel).onTaskChanging(
+                change.getTaskInfo(), change.getLeash(), startT, finishT);
     }
 
     @Test
