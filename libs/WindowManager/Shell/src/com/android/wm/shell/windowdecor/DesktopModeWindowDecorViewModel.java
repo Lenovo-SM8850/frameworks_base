@@ -2228,6 +2228,13 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         }
 
         @Override
+        public void onRotate(@NonNull RunningTaskInfo taskInfo) {
+            if (taskInfo.isFloatingWindow && mViewModel.mPinnedLayerController != null) {
+                mViewModel.mPinnedLayerController.rotateTask(taskInfo);
+            }
+        }
+
+        @Override
         public void onMinimize(@NonNull RunningTaskInfo taskInfo) {
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to minimize task=%d",
                     taskInfo.taskId);
