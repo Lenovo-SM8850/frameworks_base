@@ -27,16 +27,28 @@ import android.view.WindowInsetsController
 import androidx.test.filters.SmallTest
 import com.android.wm.shell.ShellTestCase
 import com.android.wm.shell.TestRunningTaskInfoBuilder
+import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.windowdecor.caption.OccludingElement
 import com.google.common.truth.Truth
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
 
 @SmallTest
 @RunWith(AndroidTestingRunner::class)
 class CaptionWindowDecorationTests : ShellTestCase() {
 
     private val exclusionRegion = Region.obtain()
+    private lateinit var displayController: DisplayController
+
+    @Before
+    fun setUp() {
+        displayController = mock(DisplayController::class.java)
+        `when`(displayController.getDisplay(Display.DEFAULT_DISPLAY)).thenReturn(mContext.display)
+        `when`(displayController.getInsetsState(Display.DEFAULT_DISPLAY)).thenReturn(InsetsState())
+    }
 
     @Test
     fun updateRelayoutParams_freeformAndTransparentAppearance_allowsInputFallthrough() {
@@ -55,7 +67,7 @@ class CaptionWindowDecorationTests : ShellTestCase() {
             false,
             true /* isStatusBarVisible */,
             false /* isKeyguardVisibleAndOccluded */,
-            InsetsState(),
+            displayController,
             true /* hasGlobalFocus */,
             exclusionRegion,
             false /* shouldSetBackground */,
@@ -81,7 +93,7 @@ class CaptionWindowDecorationTests : ShellTestCase() {
             false,
             true /* isStatusBarVisible */,
             false /* isKeyguardVisibleAndOccluded */,
-            InsetsState(),
+            displayController,
             true /* hasGlobalFocus */,
             exclusionRegion,
             false /* shouldSetBackground */,
@@ -103,7 +115,7 @@ class CaptionWindowDecorationTests : ShellTestCase() {
             false,
             true /* isStatusBarVisible */,
             false /* isKeyguardVisibleAndOccluded */,
-            InsetsState(),
+            displayController,
             true /* hasGlobalFocus */,
             exclusionRegion,
             false /* shouldSetBackground */,
