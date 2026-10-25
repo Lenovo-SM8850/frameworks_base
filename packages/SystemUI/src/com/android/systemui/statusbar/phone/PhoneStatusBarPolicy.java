@@ -70,6 +70,7 @@ import com.android.systemui.statusbar.CommandQueue;
 import com.android.systemui.statusbar.phone.ui.StatusBarIconController;
 import com.android.systemui.statusbar.policy.BluetoothController;
 import com.android.systemui.statusbar.policy.DataSaverController;
+import com.android.systemui.statusbar.policy.DolbyAtmosController;
 import com.android.systemui.statusbar.policy.DataSaverController.Listener;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController.DeviceProvisionedListener;
@@ -127,6 +128,8 @@ public class PhoneStatusBarPolicy
     private final String mSlotManagedProfile;
     private final String mSlotRotate;
     private final String mSlotHeadset;
+    private final String mSlotDolbyAtmos;
+    private final DolbyAtmosController mDolbyAtmosController;
     private final String mSlotDataSaver;
     private final String mSlotSensorsOff;
     private final String mSlotScreenRecord;
@@ -251,6 +254,11 @@ public class PhoneStatusBarPolicy
                 com.android.internal.R.string.status_bar_managed_profile);
         mSlotRotate = resources.getString(com.android.internal.R.string.status_bar_rotate);
         mSlotHeadset = resources.getString(com.android.internal.R.string.status_bar_headset);
+        mSlotDolbyAtmos = resources.getString(
+                com.android.internal.R.string.status_bar_dolby_atmos);
+        mDolbyAtmosController = new DolbyAtmosController(
+                context.getSystemService(AudioManager.class), mHandler,
+                visible -> mIconController.setIconVisibility(mSlotDolbyAtmos, visible));
         mSlotDataSaver = resources.getString(com.android.internal.R.string.status_bar_data_saver);
         mSlotSensorsOff = resources.getString(com.android.internal.R.string.status_bar_sensors_off);
         mSlotScreenRecord = resources.getString(
@@ -268,6 +276,12 @@ public class PhoneStatusBarPolicy
 
     /** Initialize the object after construction. */
     public void init() {
+        // Dolby Atmos is a codec-selection indicator combined with same-UID playback activity.
+        mIconController.setIcon(mSlotDolbyAtmos, R.drawable.stat_sys_dolby_atmos,
+                mResources.getString(R.string.dolby_atmos));
+        mIconController.setIconVisibility(mSlotDolbyAtmos, false);
+        mDolbyAtmosController.start();
+
         // listen for broadcasts
         IntentFilter filter = new IntentFilter();
 
@@ -753,6 +767,7 @@ public class PhoneStatusBarPolicy
                 @Override
                 public void onUserChanged(int newUser, Context userContext) {
                     mHandler.post(() -> {
+                        mDolbyAtmosController.refresh();
                         updateAlarm();
                         updateProfileIcon();
                         onUserSetupChanged();

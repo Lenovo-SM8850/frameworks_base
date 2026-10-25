@@ -3414,6 +3414,7 @@
 
   <java-symbol type="string" name="status_bar_rotate" />
   <java-symbol type="string" name="status_bar_headset" />
+  <java-symbol type="string" name="status_bar_dolby_atmos" />
   <java-symbol type="string" name="status_bar_data_saver" />
   <java-symbol type="string" name="status_bar_managed_profile" />
   <java-symbol type="string" name="status_bar_ime" />
