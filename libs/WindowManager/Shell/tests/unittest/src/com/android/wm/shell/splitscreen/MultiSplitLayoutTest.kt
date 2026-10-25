@@ -399,6 +399,39 @@ class MultiSplitLayoutTest {
         assertThat(model.resize(MultiSplitLayout.DividerId(1), Float.NaN)).isNull()
     }
 
+    @Test fun gridHandlesHaveTwoRootSegmentsAndOnePerShortDividerInBothOrientations() {
+        for (orientation in Orientation.entries) {
+            val model = grid().reorient(orientation)
+            val bounds = model.calculateBounds(display, Insets.NONE, 10)!!
+            val handles = model.dividerHandles(bounds)
+            val rootHandles = handles.getValue(main)
+            assertThat(rootHandles.map { it.first to it.second })
+                .containsExactly(a.id to b.id, c.id to d.id).inOrder()
+            val length = if (orientation == Orientation.LEFT_RIGHT) display.height() else display.width()
+            val crossing = bounds.dividers.getValue(left)
+            val before = if (orientation == Orientation.LEFT_RIGHT) crossing.top else crossing.left
+            val after = if (orientation == Orientation.LEFT_RIGHT) crossing.bottom else crossing.right
+            assertThat(rootHandles.map { it.position }).containsExactly(before / 2, (after + length) / 2).inOrder()
+            assertThat(handles.getValue(left).map { it.first to it.second }).containsExactly(a.id to c.id)
+            assertThat(handles.getValue(right).map { it.first to it.second }).containsExactly(b.id to d.id)
+        }
+    }
+
+    @Test fun unequalCrossingsLeaveBothRootHandlesInFacingRows() {
+        for (orientation in Orientation.entries) {
+            val model = grid().resize(left, 0.3f)!!.resize(right, 0.7f)!!.reorient(orientation)
+            val bounds = model.calculateBounds(display, Insets.NONE, 10)!!
+            val handles = model.dividerHandles(bounds).getValue(main)
+            for (divider in listOf(left, right)) {
+                val crossing = bounds.dividers.getValue(divider)
+                val before = if (orientation == Orientation.LEFT_RIGHT) crossing.top else crossing.left
+                val after = if (orientation == Orientation.LEFT_RIGHT) crossing.bottom else crossing.right
+                assertThat(handles[0].position).isLessThan(before)
+                assertThat(handles[1].position).isGreaterThan(after)
+            }
+        }
+    }
+
     @Test fun pairHasOneCenteredHandleAndThreeAppsKeepOneHandleClearOfCrossing() {
         for (orientation in Orientation.entries) {
             val pair = pair().reorient(orientation)

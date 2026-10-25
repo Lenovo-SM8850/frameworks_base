@@ -1537,6 +1537,51 @@ class MultiSplitCoordinatorTest : ShellTestCase() {
         verify(host).ended(any())
     }
 
+    @Test fun rootSegmentCallbacksSwapTheirExactFacingPairsAndRespectMutationGuards() {
+        add()
+        add()
+        val model = groups.get(10)!!.layout
+        val handles = model.dividerHandles(model.calculateBounds(Rect(0, 0, 3200, 2400),
+            android.graphics.Insets.NONE, 8)!!).getValue(model.root.id)
+        // The root divider is allocated after the first short divider.
+        val handler = dividerHandlers[1]
+        for (index in handles.indices) {
+            val before = groups.get(10)!!.layout.getLeaves().associate { it.id to it.taskId }
+            handler.onDividerHandleTapped(index)
+            org.mockito.Mockito.clearInvocations(transitions)
+            handler.onDividerHandleTapped(1 - index)
+            verify(transitions, never()).startTransition(any(), any(), any())
+            coordinator.onTransitionFinished(token, false)
+            val after = groups.get(10)!!.layout.getLeaves().associate { it.id to it.taskId }
+            val handle = handles[index]
+            assertThat(after[handle.first]).isEqualTo(before[handle.second])
+            assertThat(after[handle.second]).isEqualTo(before[handle.first])
+            assertThat(after.filterKeys { it != handle.first && it != handle.second })
+                .isEqualTo(before.filterKeys { it != handle.first && it != handle.second })
+        }
+    }
+
+    @Test fun menuOwnerIsLayeredAboveEveryOtherDividerAndResetsOnDismiss() {
+        add()
+        add()
+        val transaction = mock<SurfaceControl.Transaction>(defaultAnswer = org.mockito.Mockito.RETURNS_SELF)
+        val leashes = createdDividers.map { divider ->
+            mock<SurfaceControl>().also {
+                whenever(it.isValid).thenReturn(true)
+                whenever(divider.dividerLeash).thenReturn(it)
+            }
+        }
+        dividerHandlers[1].onDividerHandleMenuChanged(true)
+        coordinator.applySurfaceChanges(transaction)
+        leashes.forEachIndexed { index, leash ->
+            verify(transaction).setLayer(leash, if (index == 1) Int.MAX_VALUE else Int.MAX_VALUE - 1)
+        }
+        dividerHandlers[1].onDividerHandleMenuChanged(false)
+        org.mockito.Mockito.clearInvocations(transaction)
+        coordinator.applySurfaceChanges(transaction)
+        leashes.forEach { verify(transaction).setLayer(it, Int.MAX_VALUE - 1) }
+    }
+
     @Test fun frameworkPinRequestKeepsTheGroupForTheFloatingRemovalHandler() {
         add()
         add()

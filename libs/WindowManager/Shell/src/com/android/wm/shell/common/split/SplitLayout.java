@@ -221,6 +221,9 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     private final boolean mAllowLeftRightSplitInPortrait;
     private final InteractionJankMonitor mInteractionJankMonitor;
     private boolean mIsLeftRightSplit;
+    private boolean mIsMultiSplitDivider;
+    private int[] mDividerHandlePositions;
+    private int mFlexibleBranchSide = -1;
     private ValueAnimator mDividerFlingAnimator;
     private AnimatorSet mSwapAnimator;
     private boolean mRecentsAnimating;
@@ -287,7 +290,51 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
         mDividerWindowWidth = mDividerSize + 2 * mDividerInsets;
     }
 
-    /** Gets the bounds of the top/left app in screen-based coordinates. */
+    /**
+     * Configures a divider for a geometry branch. Its parent remains the split root surface.
+     * Multi-app IME adjustment is owned by the session, rather than by each branch's pair helper.
+     */
+    public void setMultiSplitDivider(Rect branchBounds, boolean leftRight, float ratio) {
+        setMultiSplitDivider(branchBounds, leftRight, ratio, -1);
+    }
+
+    /** Only the root's single-app half may have a peek endpoint. */
+    public void setMultiSplitDivider(Rect branchBounds, boolean leftRight, float ratio,
+            int flexibleSide) {
+        mFlexibleBranchSide = flexibleSide;
+        final boolean branchChanged = !mIsMultiSplitDivider || !mRootBounds.equals(branchBounds);
+        mIsMultiSplitDivider = true;
+        mRootBounds.set(branchBounds);
+        mIsLeftRightSplit = leftRight;
+        if (branchChanged) {
+            final Configuration configuration = new Configuration(mContext.getResources()
+                    .getConfiguration());
+            configuration.windowConfiguration.setBounds(branchBounds);
+            configuration.windowConfiguration.setAppBounds(null);
+            mSplitWindowManager.setConfiguration(configuration);
+        }
+        updateLayouts();
+        final int length = leftRight ? branchBounds.width() : branchBounds.height();
+        mDividerPosition = Math.round((length - mDividerSize) * ratio);
+        updateBounds(mDividerPosition);
+    }
+
+    /** Sets handle centers along the divider, relative to the branch content bounds. */
+    public void setDividerHandlePositions(int[] positions) {
+        if (java.util.Arrays.equals(mDividerHandlePositions, positions)) return;
+        mDividerHandlePositions = positions.clone();
+        final DividerView view = mSplitWindowManager.getDividerView();
+        if (view != null) view.updateHandlePositions();
+    }
+
+    int[] getDividerHandlePositions() {
+        return mDividerHandlePositions;
+    }
+
+    void onDividerHandleTapped(int index) {
+        if (!isCurrentlySwapping()) mSplitLayoutHandler.onDividerHandleTapped(index);
+    }
+
     boolean canRotateThreeAppShape() {
         return mSplitLayoutHandler.canRotateThreeAppShape();
     }
@@ -299,6 +346,25 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     int getDividerHandleMenuWidth() {
         return mContext.getResources().getDimensionPixelSize(R.dimen.split_divider_handle_menu_size)
                 * (canRotateThreeAppShape() ? 2 : 1);
+    }
+
+    void onDividerHandleMenuChanged(boolean showing) {
+        mSplitLayoutHandler.onDividerHandleMenuChanged(showing);
+    }
+
+    /** Whether this divider belongs to a branch of a multi-app layout. */
+    public boolean isMultiSplitDivider() {
+        return mIsMultiSplitDivider;
+    }
+
+    /** Returns the branch clip in divider-window coordinates, including decorative expansion. */
+    public Rect getMultiSplitDividerCrop() {
+        final Rect window = new Rect();
+        getDividerLeashBounds(window);
+        final Rect crop = new Rect(0, 0, mRootBounds.width(), mRootBounds.height());
+        crop.offset(-window.left, -window.top);
+        if (!crop.intersect(0, 0, window.width(), window.height())) crop.setEmpty();
+        return crop;
     }
 
     public float getFirstNonDismissRatio() {
@@ -428,7 +494,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
 
     /**
      * Gets the actual expanded bounds of the divider leash in parent-based coordinates.
-     * This includes the expansion buffer added to avoid clipping accessibility buttons.
+     * This includes the expansion buffer added to avoid clipping the input region.
      */
     public void getDividerLeashBounds(Rect rect) {
         getRefDividerBounds(rect);
@@ -438,8 +504,10 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             int offsetY = mIsLeftRightSplit ? 0 : expansionOffset;
             rect.left -= offsetX;
             rect.top -= offsetY;
-            rect.right += offsetX;
-            rect.bottom += offsetY;
+            rect.right += mIsLeftRightSplit
+                    ? mSplitWindowManager.getWindowExpansion() - offsetX : 0;
+            rect.bottom += mIsLeftRightSplit
+                    ? 0 : mSplitWindowManager.getWindowExpansion() - offsetY;
         }
     }
 
@@ -1175,7 +1243,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
         // Find the "left/top"-most position of the app surface -- usually 0, but sometimes negative
         // if the left/top app is offscreen.
         int leftTop = 0;
-        if (Flags.enableFlexibleTwoAppSplit()) {
+        if (!mIsMultiSplitDivider && Flags.enableFlexibleTwoAppSplit()) {
             leftTop = mIsLeftRightSplit ? getTopLeftBounds().left : getTopLeftBounds().top;
         }
 
@@ -1207,8 +1275,10 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             int offsetYD = mIsLeftRightSplit ? 0 : expansionOffset;
             endDividerLeashBounds.left -= offsetXD;
             endDividerLeashBounds.top -= offsetYD;
-            endDividerLeashBounds.right += offsetXD;
-            endDividerLeashBounds.bottom += offsetYD;
+            endDividerLeashBounds.right += mIsLeftRightSplit
+                    ? mSplitWindowManager.getWindowExpansion() - offsetXD : 0;
+            endDividerLeashBounds.bottom += mIsLeftRightSplit
+                    ? 0 : mSplitWindowManager.getWindowExpansion() - offsetYD;
         }
 
         ValueAnimator animator1 = moveSurface(t, topLeftStage, getTopLeftRefBounds(), endBounds1,
@@ -1584,6 +1654,9 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     /** Handles layout change event. */
     public interface SplitLayoutHandler {
 
+        /** Reports direct divider interaction before movement starts or after release. */
+        default void onDividerInteractionChanged(boolean interacting) {}
+
         /** Calls when dismissing split. */
         void onSnappedToDismiss(boolean snappedToEnd, int reason, WindowContainerTransaction wct);
 
@@ -1627,6 +1700,11 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
         void setLayoutOffsetTarget(int offsetX, int offsetY, SplitLayout layout);
 
         /** Calls when user double tapped on the divider bar. */
+        default void onDividerHandleTapped(int index) { onDoubleTappedDivider(); }
+        default void onDividerHandleMenuChanged(boolean showing) {}
+        default boolean canRotateThreeAppShape() { return false; }
+        default void onRotateThreeAppShape() {}
+
         default void onDoubleTappedDivider() {
         }
 

@@ -1516,6 +1516,78 @@ class MultiSplitCoordinator(
         }
     }
 
+    private fun syncDividers(t: SurfaceControl.Transaction? = null) {
+        val model = layout ?: return
+        val calculated = bounds(model) ?: return
+        val branches = linkedMapOf<DividerId, Pair<Split, Rect>>()
+        fun walk(node: Node): Rect = when (node) {
+            is Leaf -> Rect(calculated.leaves.getValue(node.id))
+            is Split -> {
+                // Keep each branch rectangle independent when expanding its parent.
+                val rect = Rect(walk(node.first)).apply { union(walk(node.second)) }
+                if (node.id == model.root.id) {
+                    rect.set(displayBounds())
+                    val padding = layoutInsets()
+                    rect.inset(padding.left, padding.top, padding.right, padding.bottom)
+                }
+                branches[node.id] = node to rect
+                rect
+            }
+        }
+        walk(model.root)
+        dividers.keys.toList().filter { it !in branches }.forEach {
+            dividerHandlers.remove(it)?.retired = true
+            dividers.remove(it)?.release(t)
+        }
+        branches.forEach { (id, branch) ->
+            val (node, rect) = branch
+            var created = false
+            val split = dividers.getOrPut(id) {
+                created = true
+                val handler = DividerHandler(id)
+                dividerHandlers[id] = handler
+                host.newDivider(handler, object : SplitWindowManager.ParentContainerCallbacks {
+                    override fun attachToParentSurface(builder: SurfaceControl.Builder) {
+                        builder.setParent(host.rootLeash())
+                    }
+                    override fun onLeashReady(leash: SurfaceControl) {
+                        executor.execute { if (isActive) syncQueue.runInSync { applySurfaceChanges(it) } }
+                    }
+                    override fun inflateOnStageRoot(touchZone: OffscreenTouchZone) {}
+                    override fun onSplitLayoutAnimating(animating: Boolean) {
+                        if (!animating) executor.execute { setInteractive(!isBusy) }
+                    }
+                })
+            }
+            val changed = split.rootBounds != rect || split.isLeftRightSplit !=
+                (node.orientation == Orientation.LEFT_RIGHT)
+            if (!interacting || id != dragDivider) {
+                val singleSide = if (!model.isThreeColumns && node.id == model.root.id && model.getLeaves().size == 3) {
+                    if (node.first is Leaf) 0 else 1
+                } else -1
+                val ratio = if (model.isThreeColumns) {
+                    (calculated.dividers.getValue(id).left - rect.left).toFloat() /
+                        (rect.width() - host.pairLayout().dividerSize)
+                } else node.ratio
+                split.setMultiSplitDivider(rect, node.orientation == Orientation.LEFT_RIGHT,
+                    ratio, singleSide)
+            }
+            if (created) {
+                split.init()
+                split.insetsChanged(insetState)
+            } else if (changed) split.update(t, false)
+        }
+        val handles = model.dividerHandles(calculated)
+        branches.forEach { (id, branch) ->
+            val (node, rect) = branch
+            val origin = if (node.orientation == Orientation.LEFT_RIGHT) rect.top else rect.left
+            dividers.getValue(id).setDividerHandlePositions(
+                handles.getValue(id).map { it.position - origin }.toIntArray())
+        }
+        syncStripZone()
+        setInteractive(!isBusy)
+    }
+
     private fun clearStripZone() {
         if (stripZone == null) return
         val transaction = SurfaceControl.Transaction()

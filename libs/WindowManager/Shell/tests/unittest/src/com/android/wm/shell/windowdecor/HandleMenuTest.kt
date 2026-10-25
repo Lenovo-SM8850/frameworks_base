@@ -635,6 +635,49 @@ class HandleMenuTest : ShellTestCase() {
             .requireViewById<View>(R.id.floating_close_pill).visibility)
     }
 
+    @Test fun splitClose_rechecksMembershipAndPreservesFloatingCloseLabel() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(splitScreenController.isTaskInSplitScreenForeground(task.taskId)).thenReturn(true)
+        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(true)
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.rootView
+        assertEquals(View.VISIBLE, root.requireViewById<View>(R.id.split_actions_pill).visibility)
+        assertEquals(View.GONE, root.requireViewById<View>(R.id.floating_close_pill).visibility)
+        val close = root.requireViewById<HandleMenuActionButton>(R.id.split_close_button)
+        assertEquals(mContext.getString(R.string.handle_menu_close_app), close.textView.text.toString())
+        handleMenu.handleMenuView!!.setAppName("Test app")
+        assertEquals(mContext.getString(R.string.handle_menu_close_named_app, "Test app"),
+            close.contentDescription.toString())
+        close.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
+
+        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(false)
+        close.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions, org.mockito.kotlin.times(1)).onClose(task)
+    }
+
+    @Test fun fullscreen_hidesSplitActions() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.rootView
+        assertEquals(View.GONE, root.requireViewById<View>(R.id.split_actions_pill).visibility)
+    }
+
+    @Test fun floatingSplitEntry_hidesAtCapacityAndReturnsWhenAvailable() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FREEFORM, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        task.isFloatingWindow = true
+        whenever(splitScreenController.canEnterSplitScreen(task)).thenReturn(false)
+        handleMenu = createAndShowHandleMenu()
+        val split = handleMenu.handleMenuView!!.windowingPillView
+            .requireViewById<View>(R.id.split_screen_button)
+        assertEquals(View.GONE, split.visibility)
+        whenever(splitScreenController.canEnterSplitScreen(task)).thenReturn(true)
+        handleMenu.handleMenuView!!.bind(task, true)
+        assertEquals(View.VISIBLE, split.visibility)
+    }
+
     @Test fun desktopFloat_requiresActiveDeskAndNeverShowsForFloatingTask() {
         val actions = mock<WindowDecorationActions>()
         val task = TestRunningTaskInfoBuilder().setWindowingMode(

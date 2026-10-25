@@ -56,6 +56,7 @@ public final class SplitWindowManager extends WindowlessWindowManager {
     private SurfaceControlViewHost mViewHost;
     private SurfaceControl mLeash;
     private DividerView mDividerView;
+    private Rect mMultiSplitTouchBounds;
 
     // The dynamically calculated amount to expand the window bounds to fit decorative elements.
     private int mWindowExpansionPx = 0;
@@ -86,8 +87,15 @@ public final class SplitWindowManager extends WindowlessWindowManager {
 
     void setTouchRegion(@NonNull Rect region) {
         if (mViewHost != null) {
-            setTouchRegion(mViewHost.getWindowToken().asBinder(), new Region(region));
+            setTouchRegion(new Region(region));
         }
+    }
+
+    void setTouchRegion(@NonNull Region region) {
+        if (mViewHost == null) return;
+        final Region touch = new Region(region);
+        if (mMultiSplitTouchBounds != null) touch.op(mMultiSplitTouchBounds, Region.Op.INTERSECT);
+        setTouchRegion(mViewHost.getWindowToken().asBinder(), touch);
     }
 
     @Override
@@ -143,15 +151,14 @@ public final class SplitWindowManager extends WindowlessWindowManager {
 
         final Rect dividerBounds = splitLayout.getDividerBounds();
 
-        int buttonSize = mContext.getResources()
-                .getDimensionPixelSize(R.dimen.split_divider_button_size);
-        int buttonGap = mContext.getResources()
-                .getDimensionPixelSize(R.dimen.split_divider_button_margin);
-        int handleThickness = mContext.getResources().getDimensionPixelSize(
-                splitLayout.isLeftRightSplit()
-                        ? R.dimen.split_divider_handle_height : R.dimen.split_divider_handle_width);
-
-        int requiredThickness = handleThickness + 2 * (buttonSize + buttonGap);
+        // Preserve the input region as well as the existing display-corner allowance.
+        int requiredThickness = Math.max(mContext.getResources().getDimensionPixelSize(
+                !splitLayout.isLeftRightSplit() && desktopState.canEnterDesktopMode()
+                        ? R.dimen.desktop_mode_portrait_split_divider_handle_region_height
+                        : R.dimen.split_divider_handle_region_height),
+                Math.max(mContext.getResources().getDimensionPixelSize(
+                        R.dimen.split_divider_handle_menu_size), splitLayout.isLeftRightSplit()
+                                ? splitLayout.getDividerHandleMenuWidth() : 0));
         int currentThickness = splitLayout.isLeftRightSplit()
                 ? dividerBounds.width() : dividerBounds.height();
         mWindowExpansionPx = Math.max(0, requiredThickness - currentThickness);
@@ -169,6 +176,8 @@ public final class SplitWindowManager extends WindowlessWindowManager {
         lp.setTitle(mWindowName);
         lp.privateFlags |= PRIVATE_FLAG_NO_MOVE_ANIMATION | PRIVATE_FLAG_TRUSTED_OVERLAY;
         lp.accessibilityTitle = mContext.getResources().getString(R.string.accessibility_divider);
+        mMultiSplitTouchBounds = splitLayout.isMultiSplitDivider()
+                ? splitLayout.getMultiSplitDividerCrop() : null;
         mViewHost.setView(mDividerView, lp);
         mDividerView.setup(splitLayout, this, mViewHost, insetsState, desktopState);
         if (isRestoring) {

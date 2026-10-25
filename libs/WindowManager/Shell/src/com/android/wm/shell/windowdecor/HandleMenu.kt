@@ -124,6 +124,8 @@ private constructor(
     private val pillTopMargin: Int =
         loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_pill_spacing_margin)
     private val menuWidth = loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_width)
+    private val shouldShowSplitActions =
+        splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId)
     private val menuHeight = getHandleMenuHeight()
     private val marginMenuTop = loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_margin_top)
     private val marginMenuPadding =
@@ -857,8 +859,11 @@ private constructor(
             }
             windowingPillView.isGone = !shouldShowWindowingPill
             if (shouldShowWindowingPill) {
-                val isInSplitScreen = splitScreenController.isTaskInSplitScreen(taskInfo.taskId)
-                windowingPillView.bind(taskInfo, isInSplitScreen)
+                windowingPillView.bind(
+                    taskInfo,
+                    isInSplitScreen,
+                    splitScreenController.canEnterSplitScreen(taskInfo),
+                )
             }
             moreActionsPill.isGone = !shouldShowMoreActionsPill
             if (shouldShowMoreActionsPill) {
@@ -883,6 +888,8 @@ private constructor(
         /** Sets the app's name. */
         fun setAppName(name: CharSequence) {
             appNameView.text = name
+            splitCloseButton.contentDescription =
+                context.getString(R.string.handle_menu_close_named_app, name)
         }
 
         /** Sets the app's icon. */
@@ -968,6 +975,11 @@ private constructor(
         /** Update the split screen button (horizontal vs. vertical split) orientation. */
         fun updateSplitScreenButtonOrientation(configuration: Configuration) {
             if (shouldShowWindowingPill) {
+                windowingPillView.bind(
+                    taskInfo,
+                    splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId),
+                    splitScreenController.canEnterSplitScreen(taskInfo),
+                )
                 windowingPillView.updateSplitScreenButtonOrientation(configuration)
             }
         }

@@ -151,6 +151,23 @@ public class DividerSnapAlgorithm {
     public DividerSnapAlgorithm(Resources res, int displayWidth, int displayHeight, int dividerSize,
             boolean isLeftRightSplit, Rect insets, Rect pinnedTaskbarInsets, int dockSide,
             int displayId, boolean isMinimizedMode, boolean isHomeResizable) {
+        this(res, displayWidth, displayHeight, dividerSize, isLeftRightSplit, insets,
+                pinnedTaskbarInsets, dockSide, displayId, isMinimizedMode, isHomeResizable, false);
+    }
+
+    /** Uses only onscreen targets for a branch in a multi-app layout. */
+    public DividerSnapAlgorithm(Resources res, int displayWidth, int displayHeight, int dividerSize,
+            boolean isLeftRightSplit, Rect insets, Rect pinnedTaskbarInsets, int dockSide,
+            int displayId, boolean isMinimizedMode, boolean isHomeResizable, boolean multiSplit) {
+        this(res, displayWidth, displayHeight, dividerSize, isLeftRightSplit, insets,
+                pinnedTaskbarInsets, dockSide, displayId, isMinimizedMode, isHomeResizable,
+                multiSplit, -1);
+    }
+
+    public DividerSnapAlgorithm(Resources res, int displayWidth, int displayHeight, int dividerSize,
+            boolean isLeftRightSplit, Rect insets, Rect pinnedTaskbarInsets, int dockSide,
+            int displayId, boolean isMinimizedMode, boolean isHomeResizable, boolean multiSplit,
+            int flexibleSide) {
         mMinFlingVelocityPxPerSecond =
                 MIN_FLING_VELOCITY_DP_PER_SECOND * res.getDisplayMetrics().density;
         mMinDismissVelocityPxPerSecond =
@@ -164,7 +181,9 @@ public class DividerSnapAlgorithm {
         mPinnedTaskbarInsets.set(pinnedTaskbarInsets);
         final boolean enableNonDefaultDisplaySplitBugfix =
                 DesktopExperienceFlags.ENABLE_NON_DEFAULT_DISPLAY_SPLIT_BUGFIX.isTrue();
-        if (Flags.enableFlexibleTwoAppSplit()
+        if (multiSplit) {
+            mSnapMode = SNAP_FIXED_RATIO;
+        } else if (Flags.enableFlexibleTwoAppSplit()
                 && (!enableNonDefaultDisplaySplitBugfix || displayId == DEFAULT_DISPLAY)) {
             mSnapMode = SNAP_FLEXIBLE_HYBRID;
         } else {
@@ -183,11 +202,22 @@ public class DividerSnapAlgorithm {
         mCalculateRatiosBasedOnAvailableSpace = res.getBoolean(
                 com.android.internal.R.bool.config_flexibleSplitRatios);
         // If this is a small screen or a foldable, use offscreen ratios
-        mAllowOffscreenRatios = SplitScreenUtils.allowOffscreenRatios(res);
+        mAllowOffscreenRatios = !multiSplit && SplitScreenUtils.allowOffscreenRatios(res);
         mTaskHeightInMinimizedMode = isHomeResizable ? res.getDimensionPixelSize(
                 com.android.internal.R.dimen.task_height_of_minimized_mode) : 0;
         calculateTargets();
-        mMiddleTarget = mTargets.get(mTargets.size() / 2);
+        if (multiSplit && flexibleSide >= 0 && Flags.enableFlexibleTwoAppSplit()) {
+            final int length = (isLeftRightSplit ? displayWidth : displayHeight) - dividerSize;
+            if (flexibleSide == 0) {
+                mTargets.add(1, new SnapTarget(Math.round(length * 0.1f),
+                        com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_10_90));
+            } else {
+                mTargets.add(mTargets.size() - 1, new SnapTarget(Math.round(length * 0.9f),
+                        com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_90_10));
+            }
+        }
+        mMiddleTarget = mTargets.stream().filter(target -> target.snapPosition == SNAP_TO_2_50_50)
+                .findFirst().orElse(mTargets.get(mTargets.size() / 2));
         mMiddleTarget.isMiddleTarget = true;
         mDismissStartTarget = mTargets.get(0);
         mFirstSplitTarget = mTargets.get(1);

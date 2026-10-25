@@ -296,6 +296,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     private boolean mIsDropEnteringSplitVisible;
     private boolean mSkipEvictingMainStageChildren;
     private boolean mIsExiting;
+    private boolean mDividerInteracting;
+    private boolean mSplitLayoutAnimating;
     private boolean mIsRootTranslucent;
     private @StageType int mLastActiveStage;
     private boolean mBreakOnNextWake;
@@ -1837,6 +1839,43 @@ public class StageCoordinator extends StageCoordinatorAbstract {
         return INVALID_TASK_ID;
     }
 
+    boolean canStartSplitEntry() {
+        return mSplitLayout != null && mMultiSplit != null && !mMultiSplit.isBusy()
+                && !mIsExiting && !mIsDividerRemoteAnimating && !mSplitLayoutAnimating
+                && !mSplitLayout.isCurrentlySwapping() && !mSplitLayout.isCurrentlyDividerFlinging()
+                && mSplitTransitions.mPendingEnter == null
+                && mSplitTransitions.mPendingResize == null
+                && mSplitTransitions.mPendingDismiss == null
+                && mSplitTransitions.mPendingRemotePassthrough == null;
+    }
+
+    /** Explicit floating placement bypasses saved recents-pair restoration. */
+    boolean startFloatingPair(int taskId, int companionId, int position) {
+        if (!canStartSplitEntry() || isSplitScreenVisible()) return false;
+        final WindowContainerTransaction wct = new WindowContainerTransaction();
+        if (isMultiSplitActive()) mMultiSplit.exit(-1, wct);
+        mMultiSplit.forgetGroup(taskId);
+        mMultiSplit.forgetGroup(companionId);
+        prepareStartTasks(wct, taskId, null, companionId, null, position);
+        startWithTask(wct, companionId, null, SNAP_TO_2_50_50, null, null, position);
+        return true;
+    }
+
+    /** Whether a visible split can accept a menu mutation on the Shell main thread. */
+    boolean canMutateSplit() {
+        if (mMultiSplit != null && mMultiSplit.isBusy()) return false;
+        if (isMultiSplitActive()) return mMultiSplit.isVisible() && !mMultiSplit.isBusy();
+        return mSplitLayout != null && mSplitRootTaskInfo != null && isSplitActive()
+                && isSplitScreenVisible() && !mIsExiting && !mIsDividerRemoteAnimating
+                && !mDividerInteracting && !mSplitLayoutAnimating
+                && !mSplitLayout.isCurrentlySwapping()
+                && !mSplitLayout.isCurrentlyDividerFlinging()
+                && mSplitTransitions.mPendingEnter == null
+                && mSplitTransitions.mPendingResize == null
+                && mSplitTransitions.mPendingDismiss == null
+                && mSplitTransitions.mPendingRemotePassthrough == null;
+    }
+
     void switchSplitPosition(String reason) {
         if (isMultiSplitActive()) {
             mMultiSplit.getActiveStages().stream().filter(StageTaskListener::isFocused)
@@ -2088,6 +2127,8 @@ public class StageCoordinator extends StageCoordinatorAbstract {
 
         mShouldUpdateRecents = false;
         mIsDividerRemoteAnimating = false;
+        mDividerInteracting = false;
+        mSplitLayoutAnimating = false;
         mSplitRequest = null;
 
         mSplitLayout.getInvisibleBounds(mTempRect1);

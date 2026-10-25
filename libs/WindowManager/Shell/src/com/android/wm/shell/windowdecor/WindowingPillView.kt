@@ -166,7 +166,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         this.onPillItemClicked = onPillItemClicked
         this.showFloatingButton = showFloatingButton
 
-        listOf(fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
+        listOf(rotateBtn, fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
             it.setOnClickListener(this)
         }
 
@@ -283,7 +283,12 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     }
 
     /** Binds the menu views to the new data. */
-    fun bind(taskInfo: RunningTaskInfo, isInSplitScreen: Boolean) {
+    @JvmOverloads
+    fun bind(
+        taskInfo: RunningTaskInfo,
+        isInSplitScreen: Boolean,
+        canEnterSplitScreen: Boolean = true,
+    ) {
         this.taskInfo = taskInfo
         this.style = calculateMenuStyle(taskInfo)
 

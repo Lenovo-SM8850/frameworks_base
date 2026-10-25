@@ -46,6 +46,35 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"/>
 
+        <LinearLayout
+            android:id="@+id/divider_handle_menu"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_width="@dimen/split_divider_handle_menu_size"
+            android:layout_height="@dimen/split_divider_handle_menu_size"
+            android:layout_gravity="center"
+            android:background="@drawable/desktop_mode_decor_handle_menu_background"
+            android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
+            android:visibility="gone">
+
+            <ImageButton
+                android:id="@+id/divider_handle_menu_swap"
+                android:contentDescription="@string/handle_menu_swap_horizontal"
+                android:tooltipText="@string/handle_menu_swap_horizontal"
+                android:src="@drawable/desktop_mode_ic_handle_menu_swap_horizontal"
+                android:tint="@color/materialColorOnSurface"
+                android:layout_gravity="center"
+                style="@style/DesktopModeHandleMenuWindowingButton" />
+            <ImageButton
+                android:id="@+id/divider_handle_menu_rotate"
+                android:contentDescription="@string/split_divider_rotate_three_apps"
+                android:tooltipText="@string/split_divider_rotate_three_apps"
+                android:src="@drawable/split_divider_ic_rotate"
+                android:tint="@color/materialColorOnSurface"
+                android:visibility="gone"
+                style="@style/DesktopModeHandleMenuWindowingButton" />
+        </LinearLayout>
+
     </FrameLayout>
 
 </com.android.wm.shell.common.split.DividerView>
