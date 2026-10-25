@@ -9949,7 +9949,8 @@ public class WindowManagerService extends IWindowManager.Stub
         }
     }
 
-    private boolean shouldDelayTouchOutside(InputTarget t) {
+    @VisibleForTesting
+    boolean shouldDelayTouchOutside(InputTarget t) {
         final ActivityRecord activity = t.getActivityRecord();
         final Task task = activity != null ? activity.getTask() : null;
 
@@ -9970,8 +9971,12 @@ public class WindowManagerService extends IWindowManager.Stub
         // For cases when there are multiple freeform windows where non-top windows are blocking
         // the gesture zones, delay handling the touch-outside event to prevent refocusing the
         // the non-top windows during the gesture.
+        final WindowState focusedWindow = getFocusedWindowLocked();
+        final Task focusedTask = focusedWindow != null ? focusedWindow.getTask() : null;
+        // Keep the edge DOWN from moving focus behind a floating window before Back starts.
         final boolean shouldDelayTouchForFreeform =
-                task != null && task.getWindowingMode() == WINDOWING_MODE_FREEFORM;
+                (task != null && task.getWindowingMode() == WINDOWING_MODE_FREEFORM)
+                        || (focusedTask != null && focusedTask.isFloatingWindow());
 
         // If non of the above cases are true, handle the touch-outside event directly.
         return shouldDelayTouchForEmbeddedActivity || shouldDelayTouchForFreeform;

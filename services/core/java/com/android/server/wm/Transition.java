@@ -1295,6 +1295,11 @@ class Transition implements BLASTSyncEngine.TransactionReadyListener {
             t.setWindowCrop(targetLeash, clipRect.width(), clipRect.height());
         }
         t.setMatrix(targetLeash, 1, 0, 0, 1);
+        final Task task = target.asTask();
+        if (task != null && task.isFloatingWindow()) {
+            task.applyFloatingWindowTransform(t, targetLeash);
+            return;
+        }
         // The bounds sent to the transition is always a real bounds. This means we lose
         // information about "null" bounds (inheriting from parent). Core will fix-up
         // non-organized window surface bounds; however, since Core can't touch organized
@@ -3466,6 +3471,7 @@ class Transition implements BLASTSyncEngine.TransactionReadyListener {
             change.setMode(info.getTransitMode(target));
             info.mReadyMode = change.getMode();
             change.setStartAbsBounds(info.mAbsoluteBounds);
+            change.setStartFloatingWindowBounds(info.mFloatingWindowBounds);
             change.setFlags(info.getChangeFlags(target));
             info.mReadyFlags = change.getFlags();
             change.setDisplayId(info.mDisplayId, getDisplayId(target));
@@ -4160,6 +4166,7 @@ class Transition implements BLASTSyncEngine.TransactionReadyListener {
         boolean mVisible;
         int mWindowingMode;
         final Rect mAbsoluteBounds = new Rect();
+        final Rect mFloatingWindowBounds = new Rect();
         boolean mShowWallpaper;
         int mRotation = ROTATION_UNDEFINED;
         int mDisplayId = -1;
@@ -4187,6 +4194,11 @@ class Transition implements BLASTSyncEngine.TransactionReadyListener {
             mVisible = origState.isVisibleRequested();
             mWindowingMode = origState.getWindowingMode();
             mAbsoluteBounds.set(origState.getBounds());
+            final Task task = origState.asTask();
+            if (task != null && task.isFloatingWindow() && task.isVisible()
+                    && !task.isForceHidden()) {
+                task.getFloatingWindowBounds(mFloatingWindowBounds);
+            }
             mShowWallpaper = origState.showWallpaper();
             mRotation = origState.getWindowConfiguration().getRotation();
             mStartParent = origState.getParent();

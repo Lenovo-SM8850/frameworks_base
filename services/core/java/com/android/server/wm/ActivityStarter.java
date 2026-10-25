@@ -32,6 +32,7 @@ import static android.app.ActivityManager.isStartResultSuccessful;
 import static android.app.ActivityTaskManager.INVALID_TASK_ID;
 import static android.app.PendingIntent.FLAG_CANCEL_CURRENT;
 import static android.app.PendingIntent.FLAG_ONE_SHOT;
+import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
 import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
 import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
 import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK;
@@ -115,6 +116,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.IIntentSender;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.content.IntentSender;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
@@ -1905,9 +1907,49 @@ class ActivityStarter {
             started.computeInitialCallerInfo();
         }
 
+        if (options != null && options.getLaunchFloatingWindow()) {
+            final Task floatingTask = mLastStartActivityRecord.getTask();
+            if (floatingTask != null && floatingTask.isResizeable()
+                    && mLaunchParams.mWindowingMode == WINDOWING_MODE_FREEFORM
+                    && floatingTask.isActivityTypeStandardOrUndefined()
+                    && floatingTask.getDisplayId() == android.view.Display.DEFAULT_DISPLAY) {
+                if (!floatingTask.isRootTask()) {
+                    floatingTask.reparent(floatingTask.getDisplayArea(), true);
+                }
+                floatingTask.setWindowingMode(WINDOWING_MODE_FREEFORM);
+                floatingTask.setDisablePip(true);
+                final boolean wasFloating = floatingTask.isFloatingWindow();
+                if (options.getLaunchBounds() != null) {
+                    final Rect bounds = new Rect(options.getLaunchBounds());
+                    final Rect stable = new Rect();
+                    floatingTask.getDisplayContent().getStableRect(stable);
+                    bounds.right = bounds.left + Math.min(stable.width(),
+                            Math.max(bounds.width(), floatingTask.mMinWidth));
+                    bounds.bottom = bounds.top + Math.min(stable.height(),
+                            Math.max(bounds.height(), floatingTask.mMinHeight));
+                    bounds.offset(Math.max(stable.left - bounds.left,
+                            Math.min(0, stable.right - bounds.right)),
+                            Math.max(stable.top - bounds.top,
+                            Math.min(0, stable.bottom - bounds.bottom)));
+                    floatingTask.setBounds(bounds);
+                } else if (!wasFloating && !mLaunchParams.mBounds.isEmpty()) {
+                    floatingTask.setBounds(mLaunchParams.mBounds);
+                }
+                if (wasFloating && options.getLaunchBounds() != null) {
+                    floatingTask.setFloatingWindowBounds(new Rect(floatingTask.getBounds()),
+                            floatingTask.getFloatingWindowScale());
+                }
+                floatingTask.setFloatingWindow(true);
+                floatingTask.setForceHidden(Task.FLAG_FORCE_HIDDEN_FOR_TASK_ORG, false);
+                floatingTask.setAlwaysOnTop(true);
+            }
+        }
+
         // Apply setAlwaysOnTop when starting an activity is successful regardless of creating
         // a new Activity or reusing the existing activity.
-        if (options != null && options.getTaskAlwaysOnTop()) {
+        if (options != null && options.getTaskAlwaysOnTop()
+                && (!options.getLaunchFloatingWindow()
+                || mLastStartActivityRecord.getTask().isFloatingWindow())) {
             // Sets always-on-top on the root-task because it only ensures the task be the top
             // among the sibling tasks, but not the parent task (if any).
             // However, do not apply to the created-by-organizer root-tasks because it should be

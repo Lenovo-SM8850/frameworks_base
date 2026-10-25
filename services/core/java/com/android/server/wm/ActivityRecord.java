@@ -7500,6 +7500,9 @@ final class ActivityRecord extends WindowToken {
             }
         }
 
+        if (task.isFloatingWindow() && task.getTopNonFinishingActivity() == this) {
+            task.dispatchTaskInfoChangedIfNeeded(false /* force */);
+        }
         mAtmService.getTaskChangeNotificationController().notifyActivityRequestedOrientationChanged(
                 task.mTaskId, requestedOrientation);
 
@@ -7713,6 +7716,7 @@ final class ActivityRecord extends WindowToken {
         final boolean isFixedOrientationLetterboxAllowed = !getLaunchedFromBubble()
                 && (parentWindowingMode == WINDOWING_MODE_MULTI_WINDOW
                         || parentWindowingMode == WINDOWING_MODE_FULLSCREEN
+                        || (task != null && task.isFloatingWindow())
                         || AppCompatCameraPolicy.isFreeformLetterboxingForCameraAllowed(this)
                         // When starting to switch between PiP and fullscreen, the task is pinned
                         // and the activity is fullscreen. But only allow to apply letterbox if the
@@ -7977,8 +7981,9 @@ final class ActivityRecord extends WindowToken {
         int offsetX = 0;
         if (parentBounds.width() != screenResolvedBoundsWidth) {
             if (screenResolvedBoundsWidth <= parentAppBoundsWidth) {
-                float positionMultiplier = reachabilityOverrides.getHorizontalPositionMultiplier(
-                        newParentConfiguration);
+                float positionMultiplier = task != null && task.isFloatingWindow() ? 0.5f
+                        : reachabilityOverrides.getHorizontalPositionMultiplier(
+                                newParentConfiguration);
                 // If in immersive mode, always align to right and overlap right insets (task bar)
                 // as they are transient and hidden. This removes awkward right spacing.
                 final int appWidth = (int) (parentAppBoundsWidth + navBarInsets.right);
@@ -7998,8 +8003,9 @@ final class ActivityRecord extends WindowToken {
         int offsetY = 0;
         if (parentBoundsHeight != screenResolvedBoundsHeight) {
             if (screenResolvedBoundsHeight <= parentAppBoundsHeight) {
-                float positionMultiplier = reachabilityOverrides.getVerticalPositionMultiplier(
-                        newParentConfiguration);
+                float positionMultiplier = task != null && task.isFloatingWindow() ? 0.5f
+                        : reachabilityOverrides.getVerticalPositionMultiplier(
+                                newParentConfiguration);
                 // If in immersive mode, always align to bottom and overlap bottom insets (nav bar,
                 // task bar) as they are transient and hidden. This removes awkward bottom spacing.
                 final int appHeight = (int) (parentAppBoundsHeight + navBarInsets.bottom);

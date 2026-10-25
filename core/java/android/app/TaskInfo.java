@@ -284,12 +284,66 @@ public class TaskInfo {
     public ActivityInfo topActivityInfo;
 
     /**
+     * The top activity's runtime requested orientation.
+     * @hide
+     */
+    public int topActivityRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+
+    /**
      * Whether this task is resizable. Unlike {@link #resizeMode} (which is what the top activity
      * supports), this is what the system actually uses for resizability based on other policy and
      * developer options.
      * @hide
      */
     public boolean isResizeable;
+
+    /**
+     * Whether this task belongs to the Shell floating layer.
+     * @hide
+     */
+    public boolean isFloatingWindow;
+
+    /**
+     * The presentation scale of a floating task.
+     * @hide
+     */
+    public float floatingWindowScale = 1f;
+
+    /**
+     * The floating position before temporary IME avoidance.
+     * @hide
+     */
+    @NonNull
+    public Point floatingWindowPosition = new Point();
+
+    /**
+     * Returns task bounds in display presentation coordinates. Do not modify the returned bounds.
+     * @hide
+     */
+    @NonNull
+    public Rect getPresentationBounds() {
+        if (!isFloatingWindow) return configuration.windowConfiguration.getBounds();
+        final Rect bounds = new Rect(configuration.windowConfiguration.getBounds());
+        if (isFloatingWindow) {
+            if (positionInParent != null) bounds.offsetTo(positionInParent.x, positionInParent.y);
+            bounds.right = bounds.left + Math.round(bounds.width() * floatingWindowScale);
+            bounds.bottom = bounds.top + Math.round(bounds.height() * floatingWindowScale);
+        }
+        return bounds;
+    }
+
+    /**
+     * Returns floating geometry without temporary IME avoidance.
+     * @hide
+     */
+    @NonNull
+    public Rect getFloatingWindowRestoreBounds() {
+        final Rect bounds = getPresentationBounds();
+        if (isFloatingWindow && positionInParent != null) {
+            bounds.offsetTo(floatingWindowPosition.x, floatingWindowPosition.y);
+        }
+        return bounds;
+    }
 
     /**
      * Minimal width of the task when it's resizeable.
@@ -503,7 +557,11 @@ public class TaskInfo {
         topActivityInfo = other.topActivityInfo != null
                 ? new ActivityInfo(other.topActivityInfo)
                 : null;
+        topActivityRequestedOrientation = other.topActivityRequestedOrientation;
         isResizeable = other.isResizeable;
+        isFloatingWindow = other.isFloatingWindow;
+        floatingWindowScale = other.floatingWindowScale;
+        floatingWindowPosition.set(other.floatingWindowPosition);
         minWidth = other.minWidth;
         minHeight = other.minHeight;
         defaultMinSize = other.defaultMinSize;
@@ -659,6 +717,11 @@ public class TaskInfo {
         }
         return topActivityType == that.topActivityType
                 && isResizeable == that.isResizeable
+                && (!isFloatingWindow
+                    || topActivityRequestedOrientation == that.topActivityRequestedOrientation)
+                && isFloatingWindow == that.isFloatingWindow
+                && floatingWindowScale == that.floatingWindowScale
+                && floatingWindowPosition.equals(that.floatingWindowPosition)
                 && supportsMultiWindow == that.supportsMultiWindow
                 && supportsMultiWindowWithoutConstraints
                 == that.supportsMultiWindowWithoutConstraints
@@ -747,7 +810,11 @@ public class TaskInfo {
         lastParentTaskIdBeforePip = source.readInt();
         displayCutoutInsets = source.readTypedObject(Rect.CREATOR);
         topActivityInfo = source.readTypedObject(ActivityInfo.CREATOR);
+        topActivityRequestedOrientation = source.readInt();
         isResizeable = source.readBoolean();
+        isFloatingWindow = source.readBoolean();
+        floatingWindowScale = source.readFloat();
+        floatingWindowPosition.readFromParcel(source);
         minWidth = source.readInt();
         minHeight = source.readInt();
         defaultMinSize = source.readInt();
@@ -810,7 +877,11 @@ public class TaskInfo {
         dest.writeInt(lastParentTaskIdBeforePip);
         dest.writeTypedObject(displayCutoutInsets, flags);
         dest.writeTypedObject(topActivityInfo, flags);
+        dest.writeInt(topActivityRequestedOrientation);
         dest.writeBoolean(isResizeable);
+        dest.writeBoolean(isFloatingWindow);
+        dest.writeFloat(floatingWindowScale);
+        floatingWindowPosition.writeToParcel(dest, flags);
         dest.writeInt(minWidth);
         dest.writeInt(minHeight);
         dest.writeInt(defaultMinSize);

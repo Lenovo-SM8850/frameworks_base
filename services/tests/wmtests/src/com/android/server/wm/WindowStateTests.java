@@ -1556,6 +1556,31 @@ public class WindowStateTests extends WindowTestsBase {
         assertFalse(notificationShade.needsRelativeLayeringToIme());
     }
 
+    @SetupWindows(addWindows = { W_ACTIVITY })
+    @Test
+    public void testFloatingFrozenInsetsAreMappedOnce() {
+        mAtm.mSupportsFreeformWindowManagement = true;
+        final Task task = mAppWindow.getTask();
+        task.setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM);
+        task.setBounds(new Rect(100, 100, 900, 1300));
+        task.setFloatingWindow(true, false);
+        task.setFloatingWindowPresentation(new android.graphics.Point(200, 300), .5f);
+        final InsetsSource source = new InsetsSource(ID_IME, ime());
+        source.setFrame(0, 1400, 1200, 1920).setVisible(true);
+        mAppWindow.mAboveInsetsState.addSource(source);
+        final Rect expected = new Rect(mAppWindow.getInsetsState().peekSource(ID_IME).getFrame());
+        assertFalse(source.getFrame().equals(expected));
+        mAppWindow.freezeInsetsState();
+        for (int i = 0; i < 3; i++) {
+            assertEquals(expected, mAppWindow.getInsetsState().peekSource(ID_IME).getFrame());
+            assertEquals(expected, mAppWindow.getFrozenInsetsState().peekSource(ID_IME).getFrame());
+        }
+        task.setFloatingWindowPresentation(new android.graphics.Point(200, 400), .5f);
+        assertEquals(expected, mAppWindow.getInsetsState().peekSource(ID_IME).getFrame());
+        mAppWindow.clearFrozenInsetsState();
+        assertFalse(expected.equals(mAppWindow.getInsetsState().peekSource(ID_IME).getFrame()));
+    }
+
     @Test
     public void testSetFreezeInsetsState() {
         final WindowState app = newWindowBuilder("app", TYPE_APPLICATION).build();
@@ -2298,4 +2323,34 @@ public class WindowStateTests extends WindowTestsBase {
         virtualDisplay.getDisplayInfo().ownerUid = getTestSession().mUid + 1;
         assertThat(window.mSession.canCreateSystemApplicationOverlay(window)).isFalse();
     }
+    @SetupWindows(addWindows = { W_ACTIVITY })
+    @Test
+    public void floatingFixedPortraitInLandscapeShape_centersContentAndInputTransform() {
+        mAtm.mSupportsFreeformWindowManagement = true;
+        final Task task = mAppWindow.getTask();
+        task.setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM);
+        task.setFloatingWindow(true, false);
+        task.setBounds(new Rect(100, 100, 1000, 700));
+        task.setFloatingWindowPresentation(new android.graphics.Point(200, 300), .5f);
+        final ActivityRecord activity = mAppWindow.mActivityRecord;
+        activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        final Rect content = activity.getBounds();
+        assertTrue(content.height() >= content.width());
+        assertEquals(task.getBounds().centerX(), content.centerX(), 1);
+        assertEquals(task.getBounds().centerY(), content.centerY(), 1);
+        final android.graphics.Matrix transform = new android.graphics.Matrix();
+        mAppWindow.getTransformationMatrix(new float[9], transform);
+        final float[] point = { 0, 0 };
+        transform.mapPoints(point);
+        assertEquals(200 + (content.left - task.getBounds().left
+                + mAppWindow.mSurfacePosition.x) * .5f, point[0], 1f);
+        assertEquals(300 + (content.top - task.getBounds().top
+                + mAppWindow.mSurfacePosition.y) * .5f, point[1], 1f);
+        final android.graphics.Matrix inverse = new android.graphics.Matrix();
+        assertTrue(transform.invert(inverse));
+        inverse.mapPoints(point);
+        assertEquals(0f, point[0], .01f);
+        assertEquals(0f, point[1], .01f);
+    }
+
 }

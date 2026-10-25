@@ -97,6 +97,59 @@ class DesktopModeLaunchParamsModifier extends DefaultLaunchParamsModifier {
             @NonNull LaunchParamsController.LaunchParams currentParams,
             @NonNull LaunchParamsController.LaunchParams outParams) {
 
+        if ((options != null && options.getLaunchFloatingWindow())
+                || (task != null && task.hasFloatingWindowIdentity())) {
+            final TaskDisplayArea area = mSupervisor.mRootWindowContainer
+                    .getDefaultTaskDisplayArea();
+            if (activity != null && (!activity.isResizeable()
+                    || mDesktopModeCompatPolicy.isTopActivityExemptFromDesktopWindowing(
+                            activity.mActivityComponent, activity.isNoDisplay(),
+                            !activity.occludesParent(), 1, activity.mUserId, activity.info,
+                            activity.getActivityType())
+                    || mDesktopModeCompatPolicy.isPackageLaunchInFullscreen(
+                            activity.mActivityComponent))) {
+                outParams.mPreferredTaskDisplayArea = area;
+                outParams.mWindowingMode = WINDOWING_MODE_FULLSCREEN;
+                return RESULT_DONE;
+            }
+            outParams.mPreferredTaskDisplayArea = area;
+            outParams.mWindowingMode = WINDOWING_MODE_FREEFORM;
+            final Rect stable = new Rect();
+            area.mDisplayContent.getStableRect(stable);
+            final Rect requested = options != null ? options.getLaunchBounds() : null;
+            if (requested != null && !requested.isEmpty()) {
+                outParams.mBounds.set(requested);
+            } else if (task != null && task.hasFloatingWindowIdentity()) {
+                outParams.mBounds.set(task.getBounds());
+            } else {
+                final boolean landscape = stable.width() > stable.height();
+                final int shortEdge = Math.round(Math.max(stable.width(), stable.height()) * .30f);
+                final int longEdge = Math.max(shortEdge,
+                        Math.round(Math.min(stable.width(), stable.height()) * .72f));
+                final int minWidth = layout != null ? Math.max(0, layout.minWidth) : 0;
+                final int minHeight = layout != null ? Math.max(0, layout.minHeight) : 0;
+                final int width = Math.min(stable.width(),
+                        Math.max(minWidth, landscape ? longEdge : shortEdge));
+                final int height = Math.min(stable.height(),
+                        Math.max(minHeight, landscape ? shortEdge : longEdge));
+                outParams.mBounds.set(stable.centerX() - width / 2,
+                        stable.centerY() - height / 2, stable.centerX() + (width + 1) / 2,
+                        stable.centerY() + (height + 1) / 2);
+            }
+            outParams.mBounds.intersect(stable);
+            return RESULT_DONE;
+        }
+
+        if (source != null && source.getTask() != null
+                && source.getTask().hasFloatingWindowIdentity() && source.getTask() != task
+                && (options == null
+                || options.getLaunchWindowingMode() == WINDOWING_MODE_UNDEFINED)) {
+            outParams.mPreferredTaskDisplayArea = mSupervisor.mRootWindowContainer
+                    .getDefaultTaskDisplayArea();
+            outParams.mWindowingMode = WINDOWING_MODE_FULLSCREEN;
+            return RESULT_DONE;
+        }
+
         if (!canEnterDesktopMode(mContext)) {
             appendLog("desktop mode is not enabled, skipping");
             return RESULT_SKIP;
@@ -118,7 +171,8 @@ class DesktopModeLaunchParamsModifier extends DefaultLaunchParamsModifier {
 
         boolean hasLaunchWindowingMode = false;
         final boolean inDesktopMode = suggestedDisplayArea.inFreeformWindowingMode()
-                || suggestedDisplayArea.getTopMostVisibleFreeformActivity() != null;
+                || suggestedDisplayArea.getTask(t -> t.inFreeformWindowingMode()
+                        && !t.hasFloatingWindowIdentity() && t.isVisibleRequested()) != null;
         appendLog("inDesktopMode=" + inDesktopMode);
         if (task == null && (isRequestingFreeformWindowMode(null, options) || inDesktopMode)) {
             if (activity != null) {
@@ -297,7 +351,8 @@ class DesktopModeLaunchParamsModifier extends DefaultLaunchParamsModifier {
         }
 
         ActivityRecord topVisibleFreeformActivity =
-                task.getDisplayContent().getTopMostVisibleFreeformActivity();
+                task.getDisplayContent().getActivity(r -> r.inFreeformWindowingMode()
+                        && !r.getTask().hasFloatingWindowIdentity() && r.isVisibleRequested());
         final Rect inheritedBounds = getInheritedExistingTaskBounds(source,
                 topVisibleFreeformActivity, targetActivity, task);
         if (inheritedBounds != null) {
@@ -336,6 +391,10 @@ class DesktopModeLaunchParamsModifier extends DefaultLaunchParamsModifier {
             @Nullable ActivityRecord source,
             @Nullable ActivityOptions options,
             @NonNull TaskDisplayArea taskDisplayArea) {
+        if (task.hasFloatingWindowIdentity()
+                || (options != null && options.getLaunchFloatingWindow())) {
+            return false;
+        }
         if (isRequestingFreeformWindowMode(task, options)) {
             // It's launching in freeform without any modifications.
             return true;
@@ -358,13 +417,10 @@ class DesktopModeLaunchParamsModifier extends DefaultLaunchParamsModifier {
             return false;
         }
 
-        //  As freeform tasks cannot exist outside of desktop mode, it is safe to assume if
-        //  freeform tasks are visible we are in desktop mode and as a result any launching
-        //  activity will also enter desktop mode. On this same relationship, we can also assume
-        //  if there are not visible freeform tasks but a freeform activity is now launching, it
-        //  will force the device into desktop mode.
+        // Floating tasks do not imply an active desktop session.
         final Task visibleFreeformTask = task.getDisplayContent().getTask(
-                t -> t.inFreeformWindowingMode() && t.isVisibleRequested());
+                t -> t.inFreeformWindowingMode() && !t.hasFloatingWindowIdentity()
+                        && t.isVisibleRequested());
         return visibleFreeformTask != null;
     }
 
@@ -396,6 +452,10 @@ class DesktopModeLaunchParamsModifier extends DefaultLaunchParamsModifier {
             @Nullable ActivityRecord source,
             @Nullable ActivityOptions options,
             @NonNull TaskDisplayArea taskDisplayArea) {
+        if ((task != null && task.hasFloatingWindowIdentity())
+                || (options != null && options.getLaunchFloatingWindow())) {
+            return WINDOWING_MODE_UNDEFINED;
+        }
         if (!DesktopExperienceFlags.ENABLE_DESKTOP_FIRST_POLICY_IN_LPM.isTrue()) {
             return WINDOWING_MODE_UNDEFINED;
         }

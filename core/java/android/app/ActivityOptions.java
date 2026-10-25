@@ -564,6 +564,9 @@ public class ActivityOptions extends ComponentOptions {
     private boolean mApplyActivityFlagsForBubbles;
     private boolean mApplyMultipleTaskFlagForShortcut;
     private boolean mApplyNoUserActionFlagForShortcut;
+    private static final String KEY_LAUNCH_FLOATING_WINDOW =
+            "android.activity.launchFloatingWindow";
+    private boolean mLaunchFloatingWindow;
     private boolean mTaskAlwaysOnTop;
     private boolean mReparentLeafTaskToTda;
     private boolean mTaskOverlay;
@@ -1334,6 +1337,7 @@ public class ActivityOptions extends ComponentOptions {
         mLaunchActivityType = opts.getInt(KEY_LAUNCH_ACTIVITY_TYPE, ACTIVITY_TYPE_UNDEFINED);
         mLaunchTaskId = opts.getInt(KEY_LAUNCH_TASK_ID, -1);
         mPendingIntentLaunchFlags = opts.getInt(KEY_PENDING_INTENT_LAUNCH_FLAGS, 0);
+        mLaunchFloatingWindow = opts.getBoolean(KEY_LAUNCH_FLOATING_WINDOW, false);
         mTaskAlwaysOnTop = opts.getBoolean(KEY_TASK_ALWAYS_ON_TOP, false);
         mReparentLeafTaskToTda = opts.getBoolean(KEY_REPARENT_LEAF_TASK_TO_TDA, false);
         mTaskOverlay = opts.getBoolean(KEY_TASK_OVERLAY, false);
@@ -1940,6 +1944,27 @@ public class ActivityOptions extends ComponentOptions {
     }
 
     /**
+     * Requests a freeform window on the default display outside a desktop session.
+     * Only system and SystemUI callers may use this option.
+     * @hide
+     */
+    public void setLaunchFloatingWindow(boolean floating) {
+        mLaunchFloatingWindow = floating;
+        if (floating) {
+            setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY);
+            setLaunchWindowingMode(WindowConfiguration.WINDOWING_MODE_FREEFORM);
+            setReparentLeafTaskToTda(true);
+            setTaskAlwaysOnTop(true);
+            setLaunchRootTask(null);
+        }
+    }
+
+    /** @hide */
+    public boolean getLaunchFloatingWindow() {
+        return mLaunchFloatingWindow;
+    }
+
+    /**
      * Similar to {@link WindowContainerTransaction#setReparentLeafTaskToTda(boolean)}, requests
      * that the given launch should reparent the leaf task to the ancestor TaskDisplayArea if it
      * is not currently parented there.
@@ -2357,6 +2382,9 @@ public class ActivityOptions extends ComponentOptions {
      * defined in <var>otherOptions</var> replace those in the base options.
      */
     public void update(ActivityOptions otherOptions) {
+        if (otherOptions.mLaunchFloatingWindow) {
+            setLaunchFloatingWindow(true);
+        }
         if (otherOptions.mPackageName != null) {
             mPackageName = otherOptions.mPackageName;
         }
@@ -2512,6 +2540,9 @@ public class ActivityOptions extends ComponentOptions {
         }
         if (mPendingIntentLaunchFlags != 0) {
             b.putInt(KEY_PENDING_INTENT_LAUNCH_FLAGS, mPendingIntentLaunchFlags);
+        }
+        if (mLaunchFloatingWindow) {
+            b.putBoolean(KEY_LAUNCH_FLOATING_WINDOW, true);
         }
         if (mTaskAlwaysOnTop) {
             b.putBoolean(KEY_TASK_ALWAYS_ON_TOP, mTaskAlwaysOnTop);

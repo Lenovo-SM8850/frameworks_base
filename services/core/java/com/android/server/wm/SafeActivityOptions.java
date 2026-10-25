@@ -129,6 +129,7 @@ public class SafeActivityOptions {
                         options.getPendingIntentCreatorBackgroundActivityStartMode())
                 .setRemoteTransition(options.getRemoteTransition());
         cloneOptions.setLaunchWindowingMode(options.getLaunchWindowingMode());
+        cloneOptions.setLaunchFloatingWindow(options.getLaunchFloatingWindow());
         return cloneOptions;
     }
 
@@ -363,7 +364,8 @@ public class SafeActivityOptions {
         }
 
         // If launched from bubble is specified, then ensure that the caller is system or sysui.
-        if ((options.getLaunchedFromBubble() || options.getTaskAlwaysOnTop()
+        if ((options.getLaunchFloatingWindow() || options.getLaunchedFromBubble()
+                || options.getTaskAlwaysOnTop()
                 || options.getLaunchNextToBubble() || options.getReparentLeafTaskToTda())
                 && !isSystemOrSystemUI(callingPid, callingUid)) {
             final String msg = "Permission Denial: starting " + getIntentString(intent)

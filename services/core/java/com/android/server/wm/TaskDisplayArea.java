@@ -1007,6 +1007,10 @@ final class TaskDisplayArea extends DisplayArea<WindowContainer> {
     Task getLaunchRootTask(int windowingMode, int activityType, @Nullable ActivityOptions options,
             @Nullable Task sourceTask, int launchFlags, @Nullable Task candidateTask,
             int originalCallerUid) {
+        if ((options != null && options.getLaunchFloatingWindow())
+                || (candidateTask != null && candidateTask.hasFloatingWindowIdentity())) {
+            return null;
+        }
         // Try to use the launch root task in options if available.
         if (options != null) {
             final Task launchRootTask = Task.fromWindowContainerToken(options.getLaunchRootTask());

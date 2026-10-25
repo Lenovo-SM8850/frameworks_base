@@ -48,6 +48,7 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.ShortcutInfo;
 import android.content.res.Configuration;
 import android.graphics.Insets;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -1253,6 +1254,36 @@ public final class WindowContainerTransaction implements Parcelable {
     }
 
     /**
+     * Marks a task as owned by the Shell floating layer.
+     * @hide
+     */
+    @NonNull
+    public WindowContainerTransaction setFloatingWindow(
+            @NonNull WindowContainerToken container, boolean floating) {
+        final Change change = getOrCreateChange(container.asBinder());
+        change.mChangeMask |= Change.CHANGE_FLOATING_WINDOW;
+        change.mFloatingWindow = floating;
+        return this;
+    }
+
+    /**
+     * Sets floating presentation without changing the app configuration.
+     * @hide
+     */
+    @NonNull
+    public WindowContainerTransaction setFloatingWindowPresentation(
+            @NonNull WindowContainerToken container, @NonNull Point position, float scale) {
+        if (!Float.isFinite(scale) || scale <= 0f || scale > 1f) {
+            throw new IllegalArgumentException("Invalid floating window scale " + scale);
+        }
+        final Change change = getOrCreateChange(container.asBinder());
+        change.mChangeMask |= Change.CHANGE_FLOATING_WINDOW_PRESENTATION;
+        change.mFloatingWindowPosition.set(position);
+        change.mFloatingWindowScale = scale;
+        return this;
+    }
+
+    /**
      * Sets whether a Task or any of its children can enter picture-in-picture.
      * When {@code false}, the container and its children won't be able to enter PiP.
      *
@@ -1855,6 +1886,8 @@ public final class WindowContainerTransaction implements Parcelable {
         public static final int CHANGE_FORCE_EXCLUDED_FROM_RECENTS = 1 << 9;
         public static final int CHANGE_LAUNCH_NEXT_TO_BUBBLE = 1 << 10;
         public static final int CHANGE_DISABLE_PIP = 1 << 11;
+        public static final int CHANGE_FLOATING_WINDOW = 1 << 19;
+        public static final int CHANGE_FLOATING_WINDOW_PRESENTATION = 1 << 20;
         public static final int CHANGE_DISABLE_LAUNCH_ADJACENT = 1 << 12;
         public static final int CHANGE_IS_TASK_MOVE_ALLOWED = 1 << 13;
         public static final int CHANGE_INTERCEPT_BACK_PRESSED = 1 << 14;
@@ -1877,6 +1910,8 @@ public final class WindowContainerTransaction implements Parcelable {
                 CHANGE_FORCE_EXCLUDED_FROM_RECENTS,
                 CHANGE_LAUNCH_NEXT_TO_BUBBLE,
                 CHANGE_DISABLE_PIP,
+                CHANGE_FLOATING_WINDOW,
+                CHANGE_FLOATING_WINDOW_PRESENTATION,
                 CHANGE_DISABLE_LAUNCH_ADJACENT,
                 CHANGE_IS_TASK_MOVE_ALLOWED,
                 CHANGE_INTERCEPT_BACK_PRESSED,
@@ -1896,6 +1931,9 @@ public final class WindowContainerTransaction implements Parcelable {
         private boolean mDragResizing = false;
         private boolean mForceExcludedFromRecents = false;
         private boolean mDisablePip = false;
+        private boolean mFloatingWindow = false;
+        private float mFloatingWindowScale = 1f;
+        private final Point mFloatingWindowPosition = new Point();
         private boolean mDisableLaunchAdjacent = false;
         private boolean mIsTaskMoveAllowed = false;
         private boolean mInterceptBackPressed = false;
@@ -1931,6 +1969,9 @@ public final class WindowContainerTransaction implements Parcelable {
             mForceExcludedFromRecents = in.readBoolean();
             mLaunchNextToBubble = in.readBoolean();
             mDisablePip = in.readBoolean();
+            mFloatingWindow = in.readBoolean();
+            mFloatingWindowScale = in.readFloat();
+            mFloatingWindowPosition.readFromParcel(in);
             mDisableLaunchAdjacent = in.readBoolean();
             mIsTaskMoveAllowed = in.readBoolean();
             mInterceptBackPressed = in.readBoolean();
@@ -1991,6 +2032,13 @@ public final class WindowContainerTransaction implements Parcelable {
             if ((other.mChangeMask & CHANGE_LAUNCH_NEXT_TO_BUBBLE) != 0) {
                 mLaunchNextToBubble = other.mLaunchNextToBubble;
             }
+            if ((other.mChangeMask & CHANGE_FLOATING_WINDOW) != 0) {
+                mFloatingWindow = other.mFloatingWindow;
+            }
+            if ((other.mChangeMask & CHANGE_FLOATING_WINDOW_PRESENTATION) != 0) {
+                mFloatingWindowScale = other.mFloatingWindowScale;
+                mFloatingWindowPosition.set(other.mFloatingWindowPosition);
+            }
             if ((other.mChangeMask & CHANGE_DISABLE_PIP) != 0) {
                 mDisablePip = other.mDisablePip;
             }
@@ -2037,6 +2085,19 @@ public final class WindowContainerTransaction implements Parcelable {
 
         public int getWindowingMode() {
             return mWindowingMode;
+        }
+
+        public float getFloatingWindowScale() {
+            return mFloatingWindowScale;
+        }
+
+        @NonNull
+        public Point getFloatingWindowPosition() {
+            return mFloatingWindowPosition;
+        }
+
+        public boolean getFloatingWindow() {
+            return mFloatingWindow;
         }
 
         public int getActivityWindowingMode() {
@@ -2318,6 +2379,9 @@ public final class WindowContainerTransaction implements Parcelable {
             dest.writeBoolean(mForceExcludedFromRecents);
             dest.writeBoolean(mLaunchNextToBubble);
             dest.writeBoolean(mDisablePip);
+            dest.writeBoolean(mFloatingWindow);
+            dest.writeFloat(mFloatingWindowScale);
+            mFloatingWindowPosition.writeToParcel(dest, flags);
             dest.writeBoolean(mDisableLaunchAdjacent);
             dest.writeBoolean(mIsTaskMoveAllowed);
             dest.writeBoolean(mInterceptBackPressed);
