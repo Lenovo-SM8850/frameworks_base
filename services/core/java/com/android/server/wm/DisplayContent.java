@@ -136,7 +136,6 @@ import static com.android.internal.protolog.WmProtoLogGroups.WM_DEBUG_SCREEN_ON;
 import static com.android.internal.protolog.WmProtoLogGroups.WM_DEBUG_SLEEP_TOKEN;
 import static com.android.internal.protolog.WmProtoLogGroups.WM_SHOW_TRANSACTIONS;
 import static com.android.internal.util.LatencyTracker.ACTION_ROTATE_SCREEN;
-import static com.android.server.display.LMOFreeformDisplayAdapter.UNIQUE_ID_PREFIX;
 import static com.android.server.policy.WindowManagerPolicy.FINISH_LAYOUT_REDO_ANIM;
 import static com.android.server.policy.WindowManagerPolicy.FINISH_LAYOUT_REDO_LAYOUT;
 import static com.android.server.policy.WindowManagerPolicy.FINISH_LAYOUT_REDO_WALLPAPER;
@@ -583,8 +582,6 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
 
     // TODO(multi-display): remove some of the usages.
     boolean isDefaultDisplay;
-
-    private boolean isFreeformDisplay;
 
     /** Save allocating when calculating rects */
     private final Rect mTmpRect = new Rect();
@@ -1290,7 +1287,6 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         mSystemGestureExclusionLimit = mWmService.mConstants.mSystemGestureExclusionLimitDp
                 * mDisplayMetrics.densityDpi / DENSITY_DEFAULT;
         isDefaultDisplay = mDisplayId == DEFAULT_DISPLAY;
-        isFreeformDisplay = mDisplayInfo.uniqueId.startsWith(UNIQUE_ID_PREFIX);
         mInsetsStateController = new InsetsStateController(this);
         initializeDisplayBaseInfo();
         mDisplayFrames = new DisplayFrames(mInsetsStateController.getRawInsetsState(),
@@ -4287,15 +4283,24 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 return false;
             }
 
+            final Task task = w.getTask();
+            int logicalX = x;
+            int logicalY = y;
+            if (task != null && task.isFloatingWindow()) {
+                task.getFloatingWindowBounds(mTmpRect);
+                final float scale = task.getFloatingWindowScale();
+                logicalX = task.getBounds().left + Math.round((x - mTmpRect.left) / scale);
+                logicalY = task.getBounds().top + Math.round((y - mTmpRect.top) / scale);
+            }
             w.getVisibleBounds(mTmpRect);
-            if (!mTmpRect.contains(x, y)) {
+            if (!mTmpRect.contains(logicalX, logicalY)) {
                 return false;
             }
 
             w.getTouchableRegion(mTmpRegion);
 
             final int touchFlags = flags & (FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL);
-            return mTmpRegion.contains(x, y) || touchFlags == 0;
+            return mTmpRegion.contains(logicalX, logicalY) || touchFlags == 0;
         });
 
         return touchedWin;
@@ -4800,7 +4805,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
 
     boolean forceDesktopMode() {
         return ("VNC".equals(mDisplay.getName()) || mWmService.mForceDesktopModeOnExternalDisplays)
-            && !isDefaultDisplay && !isFreeformDisplay && !isPrivate();
+            && !isDefaultDisplay && !isPrivate();
     }
 
     /** @see WindowManagerInternal#onToggleImeRequested */
@@ -6158,7 +6163,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         if (DesktopExperienceFlags.ENABLE_DISPLAY_CONTENT_MODE_MANAGEMENT.isTrue()) {
             return false;
         }
-        if (!mWmService.mForceDesktopModeOnExternalDisplays || isDefaultDisplay || isPrivate() && !isFreeformDisplay) {
+        if (!mWmService.mForceDesktopModeOnExternalDisplays || isDefaultDisplay || isPrivate()) {
             return false;
         }
         if (!isWindowingModeSupported(WINDOWING_MODE_FREEFORM)) {
@@ -6326,6 +6331,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             // Get the touchable region of the window, and intersect with where the screen is still
             // touchable, i.e. touchable regions on top are not covering it yet.
             w.getEffectiveTouchableRegion(touchableRegion);
+            final Task task = w.getTask();
+            if (task != null && task.isFloatingWindow()) {
+                task.mapFloatingWindowRegion(touchableRegion);
+            }
             touchableRegion.op(unhandled, Op.INTERSECT);
 
             if (w.isImplicitlyExcludingAllSystemGestures()) {
@@ -6337,6 +6346,9 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 local.scale(w.mGlobalScale);
                 final Rect frame = w.getWindowFrames().mFrame;
                 local.translate(frame.left, frame.top);
+                if (task != null && task.isFloatingWindow()) {
+                    task.mapFloatingWindowRegion(local);
+                }
 
                 // A window can only exclude system gestures where it is actually touchable
                 local.op(touchableRegion, Op.INTERSECT);

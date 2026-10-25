@@ -141,6 +141,111 @@ public class TaskTests extends WindowTestsBase {
     @Rule
     public TestRule compatChangeRule = new PlatformCompatChangeRule();
 
+    @Test
+    public void floatingScale_defaultsToLargerLogicalLayout() {
+        assertEquals(1f / 1.3f, Task.defaultFloatingWindowScale(new Rect(100, 100, 500, 900),
+                new Rect(0, 0, 1200, 1920)), .0001f);
+    }
+
+    @Test
+    public void floatingScale_clampsLogicalSizeToStableDisplay() {
+        assertEquals(1f / 1.2f, Task.defaultFloatingWindowScale(new Rect(0, 0, 1000, 1000),
+                new Rect(0, 0, 1200, 1920)), .0001f);
+        assertEquals(1f, Task.defaultFloatingWindowScale(new Rect(0, 0, 1200, 1920),
+                new Rect(0, 0, 1200, 1920)), .0001f);
+    }
+
+    @Test
+    public void floatingPresentation_preservesConfigurationBeforeReparent() {
+        mAtm.mSupportsFreeformWindowManagement = true;
+        final Task parent = createTask(mDisplayContent);
+        final Task task = new TaskBuilder(mSupervisor).setParentTask(parent).build();
+        task.setBounds(new Rect(100, 100, 900, 1300));
+        task.setFloatingWindow(true, false);
+        final Configuration before = new Configuration(task.getConfiguration());
+        task.setFloatingWindowPresentation(new Point(200, 300), .75f);
+        assertEquals(0, before.diff(task.getConfiguration()));
+        task.reparent(parent.getDisplayArea(), true);
+        task.setWindowingMode(WINDOWING_MODE_FREEFORM);
+        final TaskInfo info = task.getTaskInfo();
+        assertEquals(.75f, info.floatingWindowScale, .0001f);
+        assertEquals(new Point(200, 300), info.floatingWindowPosition);
+        task.setFloatingWindow(false);
+        assertEquals(1f, task.getTaskInfo().floatingWindowScale, .0001f);
+    }
+
+    private Task createFloatingImeTask() {
+        mAtm.mSupportsFreeformWindowManagement = true;
+        final Task task = createTask(mDisplayContent);
+        task.setWindowingMode(WINDOWING_MODE_FREEFORM);
+        task.setBounds(new Rect(100, 100, 900, 1300));
+        task.setFloatingWindow(true, false);
+        task.setFloatingWindowPresentation(new Point(200, 200), .75f);
+        final WindowState targetWindow = mock(WindowState.class);
+        doReturn(task).when(targetWindow).getTask();
+        final InputTarget target = mock(InputTarget.class);
+        doReturn(targetWindow).when(target).getWindowState();
+        doReturn(target).when(mDisplayContent).getImeInputTarget();
+        Mockito.doAnswer(invocation -> {
+            ((Rect) invocation.getArgument(0)).set(0, 50, 2400, 1600);
+            return null;
+        }).when(mDisplayContent).getStableRect(any(Rect.class));
+        final android.view.InsetsSource imeSource = mDisplayContent.getInsetsStateController()
+                .getImeSourceProvider().getSource();
+        imeSource.setFrame(0, 54, 2400, 1600);
+        imeSource.setVisibleFrame(new Rect(0, 900, 2400, 1600));
+        imeSource.setVisible(true);
+        return task;
+    }
+
+    private void assertFloatingImeTop(Task task, int expected) {
+        task.updateFloatingWindowImeOffset();
+        final Rect visible = new Rect();
+        task.getFloatingWindowBounds(visible);
+        assertEquals(expected, visible.top);
+        assertEquals(new Point(200, 200), task.getTaskInfo().floatingWindowPosition);
+    }
+
+    @Test
+    public void floatingIme_nonOverlappingKeyboardKeepsPosition() {
+        final Task task = createFloatingImeTask();
+        mDisplayContent.getInsetsStateController().getImeSourceProvider().getSource()
+                .setVisibleFrame(new Rect(0, 1200, 2400, 1600));
+        assertFloatingImeTop(task, 200);
+    }
+
+    @Test
+    public void floatingIme_overlapMovesByExactVisibleOverlap() {
+        final Task task = createFloatingImeTask();
+        mDisplayContent.getInsetsStateController().getImeSourceProvider().getSource()
+                .setVisibleFrame(null).setFrame(0, 1000, 2400, 1600);
+        assertFloatingImeTop(task, 100);
+    }
+
+    @Test
+    public void floatingIme_tallWindowClampsToStableTop() {
+        final Task task = createFloatingImeTask();
+        task.setBounds(new Rect(100, 100, 900, 2500));
+        assertFloatingImeTop(task, 50);
+    }
+
+    @Test
+    public void floatingIme_hiddenKeyboardRestoresPosition() {
+        final Task task = createFloatingImeTask();
+        assertFloatingImeTop(task, 50);
+        mDisplayContent.getInsetsStateController().getImeSourceProvider().getSource()
+                .setVisible(false);
+        assertFloatingImeTop(task, 200);
+    }
+
+    @Test
+    public void floatingIme_focusChangeRestoresPosition() {
+        final Task task = createFloatingImeTask();
+        assertFloatingImeTop(task, 50);
+        doReturn(null).when(mDisplayContent).getImeInputTarget();
+        assertFloatingImeTop(task, 200);
+    }
+
     private static final String TASK_TAG = "task";
 
     private Rect mParentBounds;
