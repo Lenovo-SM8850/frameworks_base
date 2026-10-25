@@ -436,7 +436,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             return;
         }
 
-        controller.merge(info, startT, finishT, finishCallback);
+        controller.merge(transition, info, startT, finishT, finishCallback);
     }
 
     @Override
@@ -901,6 +901,9 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 return false;
             }
 
+            for (RecentsMixedHandler mixer : mMixers) {
+                mixer.onRecentsAnimationAccepted(mTransition, info, t);
+            }
             Transitions.TransitionFinishCallback wrappedCallback = finishCB;
             if (addOneOffHandlerLeashes()) {
                 // First create states for each task in the transition capturing the original info.
@@ -1176,8 +1179,14 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          * {@link RecentsController#consumeMerge} or {@link RecentsController#refuseMerge},
          * respectively.
          */
-        @SuppressLint("NewApi")
         void merge(TransitionInfo info, SurfaceControl.Transaction startT,
+                SurfaceControl.Transaction finishT,
+                Transitions.TransitionFinishCallback finishCallback) {
+            merge(null, info, startT, finishT, finishCallback);
+        }
+
+        @SuppressLint("NewApi")
+        void merge(IBinder transition, TransitionInfo info, SurfaceControl.Transaction startT,
                 SurfaceControl.Transaction finishT,
                 Transitions.TransitionFinishCallback finishCallback) {
             if (mFinishCB == null) {
@@ -1268,6 +1277,13 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             }
 
             mMergingInfo = info;
+            for (RecentsMixedHandler mixer : mMixers) {
+                if (transition != null && mixer.shouldAnimateSeparatelyFromRecents(transition)) {
+                    refuseMerge(startT, () -> cancel("split restore has a launcher remote"));
+                    return;
+                }
+            }
+
             ProtoLog.v(ShellProtoLogGroup.WM_SHELL_RECENTS_TRANSITION,
                     "[%d] RecentsController.merge", mInstanceId);
             // Keep all tasks in one list because order matters.
@@ -1863,7 +1879,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
 
             if (mKeyguardLocked && mRecentsTask != null) {
                 if (toHome) wct.reorder(mRecentsTask, true /* toTop */);
-                else wct.restoreTransientOrder(mRecentsTask);
+                else restoreRecentsOrder(wct);
                 // We are manipulating the window hierarchy, which should only be done with the
                 // bookend transition
                 requiresBookendTransition = true;
@@ -1894,7 +1910,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 setCornerRadiusForFreeformTasks(mRecentTasksController.getContext(), t,
                         tasksToShowFrontToBack);
                 if (!mKeyguardLocked && mRecentsTask != null) {
-                    wct.restoreTransientOrder(mRecentsTask);
+                    restoreRecentsOrder(wct);
                 }
                 // We are manipulating the window hierarchy, which should only be done with the
                 // bookend transition
@@ -1916,7 +1932,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                     t.hide(mPausingTasks.get(i).mTaskSurface);
                 }
                 if (!mKeyguardLocked && mRecentsTask != null) {
-                    wct.restoreTransientOrder(mRecentsTask);
+                    restoreRecentsOrder(wct);
                 }
                 // We are manipulating the window hierarchy, which should only be done with the
                 // bookend transition
@@ -2049,6 +2065,33 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 mPendingFinishTransaction = t;
                 onFinishInner(null /* wct */);
             }
+        }
+
+        private void restoreRecentsOrder(WindowContainerTransaction wct) {
+            final TransitionInfo.Change change = mInfo.getChange(mRecentsTask);
+            ActivityManager.RunningTaskInfo task = change != null ? change.getTaskInfo() : null;
+            // A transient Home target can be an unorganized leaf below its organized root.
+            for (int depth = 0; task != null && depth <= mInfo.getChanges().size(); ++depth) {
+                final ActivityManager.RunningTaskInfo organized =
+                        mShellTaskOrganizer.getRunningTaskInfo(task.taskId);
+                if (organized != null) {
+                    wct.restoreTransientOrder(organized.token);
+                    return;
+                }
+                if (!task.hasParentTask()) break;
+                final int parentId = task.parentTaskId;
+                task = mShellTaskOrganizer.getRunningTaskInfo(parentId);
+                if (task == null) {
+                    for (TransitionInfo.Change parent : mInfo.getChanges()) {
+                        if (parent.getTaskInfo() != null
+                                && parent.getTaskInfo().taskId == parentId) {
+                            task = parent.getTaskInfo();
+                            break;
+                        }
+                    }
+                }
+            }
+            Slog.w(TAG, "No organized recents container to restore");
         }
 
         private void rememberFloatingTask(TransitionInfo.Change change) {
@@ -2357,6 +2400,15 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
          * transition and is required to call the associated {@link #startAnimation},
          * {@link #mergeAnimation}, and {@link #onTransitionConsumed} methods.
          */
+        /** Prepares animation targets after all checks that can reject recents have passed. */
+        default void onRecentsAnimationAccepted(IBinder transition, TransitionInfo info,
+                SurfaceControl.Transaction start) {}
+
+        /** Whether an incoming transition must run its own animation after the handoff. */
+        default boolean shouldAnimateSeparatelyFromRecents(IBinder transition) {
+            return false;
+        }
+
         @Nullable
         Consumer<IBinder> handleRecentsRequest(int displayId);
 

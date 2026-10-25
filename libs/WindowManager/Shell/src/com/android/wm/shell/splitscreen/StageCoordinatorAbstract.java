@@ -425,6 +425,15 @@ public abstract class StageCoordinatorAbstract implements SplitLayout.SplitLayou
     /** Call this when starting the open-recents animation while split-screen is active. */
     public abstract void onRecentsInSplitAnimationStart(TransitionInfo info);
 
+    public void onRecentsInSplitAnimationStart(TransitionInfo info,
+            SurfaceControl.Transaction start, SurfaceControl.Transaction finish) {
+        onRecentsInSplitAnimationStart(info);
+    }
+
+    /** Prepares targets after the recents handler has accepted the animation. */
+    public void onRecentsInSplitAnimationAccepted(TransitionInfo info,
+            SurfaceControl.Transaction start) {}
+
     /** Call this when the recents animation canceled during split-screen. */
     public abstract void onRecentsInSplitAnimationCanceled();
 
@@ -447,6 +456,11 @@ public abstract class StageCoordinatorAbstract implements SplitLayout.SplitLayou
 
     /** Call this when the recents animation finishes by doing pair-to-pair switch. */
     public abstract void onRecentsPairToPairAnimationFinish(WindowContainerTransaction finishWct);
+
+    public void onRecentsPairToPairAnimationFinish(WindowContainerTransaction finishWct,
+            SurfaceControl.Transaction finishT) {
+        onRecentsPairToPairAnimationFinish(finishWct);
+    }
 
     abstract void sendStatusToListener(SplitScreen.SplitScreenListener listener);
 

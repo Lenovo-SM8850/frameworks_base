@@ -379,6 +379,16 @@ public class StageTaskListener implements ShellTaskOrganizer.TaskListener {
         t.reparent(sc, findTaskSurface(taskId));
     }
 
+    /** Clears overview transforms when returning to a multi-app group. */
+    void restoreChildSurfaces(SurfaceControl.Transaction t) {
+        for (int i = 0; i < mChildrenLeashes.size(); i++) {
+            final SurfaceControl leash = mChildrenLeashes.valueAt(i);
+            if (!leash.isValid()) continue;
+            t.setPosition(leash, 0, 0).setMatrix(leash, 1, 0, 0, 1)
+                    .setWindowCrop(leash, null).show(leash).setAlpha(leash, 1);
+        }
+    }
+
     private SurfaceControl findTaskSurface(int taskId) {
         if (mRootTaskInfo.taskId == taskId) {
             return mRootLeash;

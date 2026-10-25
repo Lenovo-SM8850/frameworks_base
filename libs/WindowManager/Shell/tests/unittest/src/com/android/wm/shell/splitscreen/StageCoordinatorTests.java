@@ -45,6 +45,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -81,6 +82,7 @@ import android.platform.test.flag.junit.SetFlagsRule;
 import android.view.SurfaceControl;
 import android.window.DisplayAreaInfo;
 import android.window.RemoteTransition;
+import android.window.TransitionRequestInfo;
 import android.window.WindowContainerToken;
 import android.window.WindowContainerTransaction;
 import android.window.WindowContainerTransaction.HierarchyOp;
@@ -870,6 +872,61 @@ public class StageCoordinatorTests extends ShellTestCase {
         verify(mSplitScreenTransitions).startDismissTransition(any(), any(),
                 eq(STAGE_TYPE_UNDEFINED),
                 eq(SplitScreenController.EXIT_REASON_CHILD_TASK_ENTER_BUBBLE));
+    }
+
+    private MultiSplitCoordinator installMultiSplitForRestoreTest() throws Exception {
+        MultiSplitCoordinator multi = mock(MultiSplitCoordinator.class);
+        java.lang.reflect.Field field = StageCoordinator.class.getDeclaredField("mMultiSplit");
+        field.setAccessible(true);
+        field.set(mStageCoordinator, multi);
+        when(multi.isActive()).thenReturn(true);
+        return multi;
+    }
+
+    @Test
+    public void multiSplit_pairRestorePrecedesActiveSessionGuard() throws Exception {
+        MultiSplitCoordinator multi = installMultiSplitForRestoreTest();
+        when(multi.restorePair(1, 2, null, null, null)).thenReturn(true);
+        mStageCoordinator.startTasks(1, null, 2, null, SPLIT_POSITION_TOP_OR_LEFT,
+                SNAP_TO_2_50_50, null, null);
+        verify(multi).restorePair(1, 2, null, null, null);
+        verify(multi, never()).rejectRemote(any());
+    }
+
+    @Test
+    public void multiSplit_invalidatedPairLaunchFallsBackInsteadOfBeingIgnored() throws Exception {
+        MultiSplitCoordinator multi = installMultiSplitForRestoreTest();
+        doAnswer(invocation -> {
+            when(multi.isActive()).thenReturn(false);
+            return true;
+        }).when(multi).preparePairLaunch(any(), eq(mRemoteTransition));
+        mStageCoordinator.startTasks(1, null, 2, null, SPLIT_POSITION_BOTTOM_OR_RIGHT,
+                SNAP_TO_2_50_50, mRemoteTransition, null);
+        verify(multi).restorePair(1, 2, null, null, mRemoteTransition);
+        verify(multi).preparePairLaunch(any(), eq(mRemoteTransition));
+        verify(multi).forgetGroup(1);
+        verify(multi).forgetGroup(2);
+        verify(mSplitScreenTransitions).startEnterTransition(anyInt(), mWctCaptor.capture(),
+                eq(mRemoteTransition), eq(mStageCoordinator), anyInt(), eq(false),
+                eq(SNAP_TO_2_50_50));
+        assertEquals(SPLIT_POSITION_BOTTOM_OR_RIGHT, mStageCoordinator.getSideStagePosition());
+        assertEquals(2, mWctCaptor.getValue().getHierarchyOps().stream().filter(op ->
+                op.getType() == HIERARCHY_OP_TYPE_LAUNCH_TASK).count());
+        assertThat(mWctCaptor.getValue().getHierarchyOps().stream().filter(op ->
+                op.getType() == HIERARCHY_OP_TYPE_LAUNCH_TASK).map(op ->
+                ActivityOptions.fromBundle(op.getLaunchOptions()).getLaunchRootTask()).toList())
+                .containsExactly(mSideStage.mRootTaskInfo.token, mMainStage.mRootTaskInfo.token);
+    }
+
+    @Test
+    public void multiSplit_singleRestorePrecedesActiveRequestDelegation() throws Exception {
+        MultiSplitCoordinator multi = installMultiSplitForRestoreTest();
+        IBinder transition = new Binder();
+        TransitionRequestInfo request = mock(TransitionRequestInfo.class);
+        WindowContainerTransaction restored = new WindowContainerTransaction();
+        when(multi.restoreRequest(transition, request)).thenReturn(restored);
+        assertThat(mStageCoordinator.handleRequest(transition, request)).isSameInstanceAs(restored);
+        verify(multi, never()).handleRequest(any(), any());
     }
 
     @Test

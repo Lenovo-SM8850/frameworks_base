@@ -683,6 +683,23 @@ public class DefaultMixedHandler implements MixedTransitionHandler,
     }
 
     @Override
+    public void onRecentsAnimationAccepted(IBinder transition, TransitionInfo info,
+            SurfaceControl.Transaction start) {
+        for (MixedTransition mixed : mActiveTransitions) {
+            if (mixed.mTransition == transition
+                    && mixed.mType == MixedTransition.TYPE_RECENTS_DURING_SPLIT) {
+                mSplitHandler.onRecentsInSplitAnimationAccepted(info, start);
+                return;
+            }
+        }
+    }
+
+    @Override
+    public boolean shouldAnimateSeparatelyFromRecents(IBinder transition) {
+        return mSplitHandler != null && mSplitHandler.isPendingMultiSplitRestore(transition);
+    }
+
+    @Override
     public Consumer<IBinder> handleRecentsRequest(int displayId) {
         ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
                 " handleRecentsRequest displayId=%d deskActive=%b",

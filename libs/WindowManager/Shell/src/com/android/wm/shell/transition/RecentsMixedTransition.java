@@ -188,13 +188,13 @@ class RecentsMixedTransition extends DefaultMixedHandler.MixedTransition {
                 }
             } else {
                 // notify pair-to-pair recents animation finish
-                mSplitHandler.onRecentsPairToPairAnimationFinish(wct);
+                mSplitHandler.onRecentsPairToPairAnimationFinish(wct, finishTransaction);
             }
             mSplitHandler.onTransitionAnimationComplete();
             finishCallback.onTransitionFinished(wct);
         };
         mInFlightSubAnimations = 1;
-        mSplitHandler.onRecentsInSplitAnimationStart(info);
+        mSplitHandler.onRecentsInSplitAnimationStart(info, startTransaction, finishTransaction);
         final boolean handled = mLeftoversHandler.startAnimation(
                 mTransition, info, startTransaction, finishTransaction, finishCB);
         if (!handled) {
