@@ -93,6 +93,9 @@ public class StageTaskListener implements ShellTaskOrganizer.TaskListener {
 
         void onStageVisibilityChanged(StageTaskListener stageTaskListener);
 
+        /** A cold child may change the root info before its own appeared callback is ready. */
+        default void onRootTaskInfoChanged(StageTaskListener stageTaskListener) {}
+
         void onChildTaskStatusChanged(StageTaskListener stage, int taskId, boolean present,
                 boolean visible);
 
@@ -305,6 +308,7 @@ public class StageTaskListener implements ShellTaskOrganizer.TaskListener {
                 taskInfo.taskId, taskInfo.baseActivity, stageTypeToString(mId), taskInfo.displayId);
         if (mRootTaskInfo.taskId == taskInfo.taskId) {
             mRootTaskInfo = taskInfo;
+            mCallbacks.onRootTaskInfoChanged(this);
         } else if (taskInfo.parentTaskId == mRootTaskInfo.taskId) {
             if (!taskInfo.supportsMultiWindowWithoutConstraints
                     || !ArrayUtils.contains(CONTROLLED_ACTIVITY_TYPES, taskInfo.getActivityType())

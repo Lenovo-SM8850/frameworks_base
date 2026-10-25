@@ -288,6 +288,43 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     }
 
     /** Gets the bounds of the top/left app in screen-based coordinates. */
+    boolean canRotateThreeAppShape() {
+        return mSplitLayoutHandler.canRotateThreeAppShape();
+    }
+
+    void onRotateThreeAppShape() {
+        if (!isCurrentlySwapping()) mSplitLayoutHandler.onRotateThreeAppShape();
+    }
+
+    int getDividerHandleMenuWidth() {
+        return mContext.getResources().getDimensionPixelSize(R.dimen.split_divider_handle_menu_size)
+                * (canRotateThreeAppShape() ? 2 : 1);
+    }
+
+    public float getFirstNonDismissRatio() {
+        return (float) mDividerSnapAlgorithm.getFirstSplitTarget().position
+                / Math.max(1, (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height()) - mDividerSize);
+    }
+
+    public float getLastNonDismissRatio() {
+        return (float) mDividerSnapAlgorithm.getLastSplitTarget().position
+                / Math.max(1, (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height()) - mDividerSize);
+    }
+
+    /** Returns the visible divider thickness used by geometry and drag previews. */
+    public int getDividerSize() {
+        return mDividerSize;
+    }
+
+    /** Returns the fraction of usable branch space before this divider. */
+    public float getBranchRatio() {
+        final int length = mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height();
+        final int before = mIsLeftRightSplit ? getTopLeftBounds().width()
+                : getTopLeftBounds().height();
+        return (float) before / Math.max(1, length - mDividerSize);
+    }
+
+    /** Gets the bounds of the top/left app in screen-based coordinates. */
     public Rect getTopLeftBounds() {
         return mStageBounds.getFirst();
     }
@@ -449,7 +486,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      * Returns the divider position as a fraction from 0 to 1.
      */
     public float getDividerPositionAsFraction() {
-        if (Flags.enableFlexibleTwoAppSplit()) {
+        if (!mIsMultiSplitDivider && Flags.enableFlexibleTwoAppSplit()) {
             return Math.min(1f, Math.max(0f, mIsLeftRightSplit
                     ? (getTopLeftBounds().right + getBottomRightBounds().left) / 2f
                     / getDisplayWidth()
@@ -477,7 +514,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      * offscreen apps.
      */
     public void populateTouchZones() {
-        if (!Flags.enableFlexibleTwoAppSplit()) {
+        if (mIsMultiSplitDivider || !Flags.enableFlexibleTwoAppSplit()) {
             return;
         }
 
@@ -624,7 +661,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
                 (float) (mIsLeftRightSplit ? mRootBounds.width() : mRootBounds.height());
         int estimatedPosition = (int) (length * snapRatio);
 
-        if (Flags.enableFlexibleTwoAppSplit()) {
+        if (!mIsMultiSplitDivider && Flags.enableFlexibleTwoAppSplit()) {
             // If we are able to find an exact match for the previous snapPosition (before
             // rotation), use it. If not, just rely on the position estimate.
             int previousState = mSplitState.get();
@@ -655,6 +692,10 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      */
     private void updateBounds(int position, Rect bounds1, Rect bounds2, Rect dividerBounds,
             boolean setEffectBounds) {
+        if (mIsMultiSplitDivider) {
+            position = Math.max(mDividerSnapAlgorithm.getFirstSplitTarget().position,
+                    Math.min(position, mDividerSnapAlgorithm.getLastSplitTarget().position));
+        }
         dividerBounds.set(mRootBounds);
         bounds1.set(mRootBounds);
         bounds2.set(mRootBounds);
@@ -718,7 +759,9 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
         mInitialized = true;
         mSplitWindowManager.init(this, mInsetsState, false /* isRestoring */, mDesktopState);
         populateTouchZones();
-        mDisplayImeController.addPositionProcessor(mImePositionProcessor);
+        if (!mIsMultiSplitDivider) {
+            mDisplayImeController.addPositionProcessor(mImePositionProcessor);
+        }
     }
 
     /** Releases the surface holding the current {@link DividerView}. */
@@ -764,6 +807,10 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             return;
         }
 
+        if (mIsMultiSplitDivider) {
+            mSplitWindowManager.onInsetsChanged(insetsState);
+            return;
+        }
         mStatusBarHider.onInsetsChanged(insetsState, mRootBounds);
 
         if (mFreezeDividerWindow) {
@@ -889,6 +936,13 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      */
     public void snapToTarget(int currentPosition, SnapTarget snapTarget, int duration,
             Interpolator interpolator) {
+        if (mIsMultiSplitDivider && (snapTarget.snapPosition == SNAP_TO_START_AND_DISMISS
+                || snapTarget.snapPosition == SNAP_TO_END_AND_DISMISS)) {
+            snapToTarget(currentPosition, snapTarget.snapPosition == SNAP_TO_START_AND_DISMISS
+                    ? mDividerSnapAlgorithm.getFirstSplitTarget()
+                    : mDividerSnapAlgorithm.getLastSplitTarget(), duration, interpolator);
+            return;
+        }
         mSplitState.setAnimatingToState(snapTarget.snapPosition);
         switch (snapTarget.snapPosition) {
             case SNAP_TO_START_AND_DISMISS:
@@ -945,7 +999,15 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      */
     public SnapTarget findSnapTarget(int position, float velocity,
             boolean hardDismiss) {
-        return mDividerSnapAlgorithm.calculateSnapTarget(position, velocity, hardDismiss);
+        final SnapTarget target = mDividerSnapAlgorithm.calculateSnapTarget(position, velocity,
+                hardDismiss);
+        if (target == mDividerSnapAlgorithm.getDismissStartTarget()) {
+            return mDividerSnapAlgorithm.getFirstSplitTarget();
+        }
+        if (target == mDividerSnapAlgorithm.getDismissEndTarget()) {
+            return mDividerSnapAlgorithm.getLastSplitTarget();
+        }
+        return target;
     }
 
     /**
@@ -956,14 +1018,15 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     private void updateLayouts() {
         // Update SplitState map
 
-        if (Flags.enableFlexibleTwoAppSplit()) {
+        if (!mIsMultiSplitDivider && Flags.enableFlexibleTwoAppSplit()) {
             mSplitState.populateLayouts(
                     mRootBounds, mDividerSize, mIsLeftRightSplit, mPinnedTaskbarInsets.toRect());
         }
 
         // Get new DividerSnapAlgorithm
 
-        final Rect insets = getDisplayStableInsets(mContext);
+        final Rect insets = mIsMultiSplitDivider ? new Rect()
+                : getDisplayStableInsets(mContext);
 
         // Make split axis insets value same as the larger one to avoid bounds1 and bounds2
         // have difference for avoiding size-compat mode when switching unresizable apps in
@@ -982,7 +1045,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
                 insets,
                 mPinnedTaskbarInsets.toRect(),
                 mIsLeftRightSplit ? DOCKED_LEFT : DOCKED_TOP /* dockSide */,
-                mContext.getDisplay().getDisplayId());
+                mContext.getDisplay().getDisplayId(), false, true, mIsMultiSplitDivider, mFlexibleBranchSide);
     }
 
     /** Fling divider from current position to end or start position then exit */
