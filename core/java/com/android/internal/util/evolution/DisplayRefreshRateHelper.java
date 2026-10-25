@@ -45,7 +45,8 @@ public class DisplayRefreshRateHelper {
         final Display.Mode[] modes = mContext.getDisplay().getSupportedModes();
         for (Display.Mode m : modes) {
             if (m.getPhysicalWidth() == mode.getPhysicalWidth() &&
-                    m.getPhysicalHeight() == mode.getPhysicalHeight()) {
+                    m.getPhysicalHeight() == mode.getPhysicalHeight() &&
+                    m.getRefreshRate() >= DEFAULT_REFRESH_RATE) {
                 mRefreshRateList.add((int) m.getRefreshRate());
             }
         }

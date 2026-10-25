@@ -115,7 +115,8 @@ class RefreshRateTile @Inject constructor(
         val displayManager = mContext.getSystemService(DisplayManager::class.java)
         val display: Display? = displayManager?.getDisplay(Display.DEFAULT_DISPLAY)
         display?.let {
-            val supportedRefreshRates = it.supportedModes.map { mode -> mode.refreshRate }.distinct()
+            val supportedRefreshRates = it.supportedModes.map { mode -> mode.refreshRate }
+                .filter { rate -> rate >= DEFAULT_REFRESH_RATE }.distinct()
             return supportedRefreshRates.size > 1
         }
         return false
@@ -156,6 +157,7 @@ class RefreshRateTile @Inject constructor(
 
     private fun updateMode() {
         val minRate = systemSettings.getFloat(MIN_REFRESH_RATE, DEFAULT_REFRESH_RATE)
+            .coerceAtLeast(DEFAULT_REFRESH_RATE)
         val maxRate = systemSettings.getFloat(PEAK_REFRESH_RATE, defaultPeakRefreshRate)
         logD("minRate = $minRate, maxRate = $maxRate")
 
