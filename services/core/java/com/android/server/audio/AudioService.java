@@ -314,6 +314,9 @@ import com.android.server.pm.pkg.PackageState;
 import com.android.server.utils.EventLogger;
 import com.android.server.wm.ActivityTaskManagerInternal;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 import java.lang.annotation.Retention;
@@ -425,7 +428,14 @@ public class AudioService extends IAudioService.Stub
 
     final Context mContext;
     private final ContentResolver mContentResolver;
+    @GuardedBy("mAppVolumeLock")
     private int mShowAppVolume;
+    private static final String APP_VOLUME_SETTINGS = "app_volume_settings";
+    private final Object mAppVolumeLock = new Object();
+    // AudioFlinger keys these values by package, not user. Keep track of packages to reset
+    // when switching users, including packages without any remaining playback tracks.
+    @GuardedBy("mAppVolumeLock")
+    private final Set<String> mAppVolumePackages = new HashSet<>();
     private final AppOpsManager mAppOps;
 
     /** do not use directly, use getMediaSessionManager() which handles lazy initialization */
@@ -541,6 +551,7 @@ public class AudioService extends IAudioService.Stub
     private static final int MSG_UPDATE_CONTEXTUAL_VOLUMES = 56;
     private static final int MSG_PERSIST_VOLUME_MUTE = 57;
     private static final int MSG_PERSIST_VOLUME_GROUP_MUTE = 58;
+    private static final int MSG_RESTORE_APP_VOLUMES = 59;
 
     /**
      * Messages handled by the {@link SoundDoseHelper}, do not exceed
@@ -2019,6 +2030,26 @@ public class AudioService extends IAudioService.Stub
                 mBroadcastHandlerThread.getThreadHandler(),
                 Context.RECEIVER_EXPORTED);
 
+        IntentFilter appVolumePackageFilter = new IntentFilter();
+        appVolumePackageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        appVolumePackageFilter.addAction(Intent.ACTION_PACKAGE_DATA_CLEARED);
+        appVolumePackageFilter.addDataScheme("package");
+        mContext.registerReceiverAsUser(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent.getData() == null
+                        || intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                    return;
+                }
+                int uid = intent.getIntExtra(Intent.EXTRA_UID, Process.INVALID_UID);
+                if (uid != Process.INVALID_UID) {
+                    removeAppVolumeSettings(intent.getData().getSchemeSpecificPart(),
+                            UserHandle.getUserId(uid));
+                }
+            }
+        }, UserHandle.ALL, appVolumePackageFilter, null, mAudioHandler,
+                Context.RECEIVER_EXPORTED);
+
         SubscriptionManager subscriptionManager = mContext.getSystemService(
                 SubscriptionManager.class);
         if (subscriptionManager == null) {
@@ -2087,6 +2118,7 @@ public class AudioService extends IAudioService.Stub
         setupPermissionListener();
         scheduleLoadSoundEffects();
         mDeviceBroker.onSystemReady();
+        restoreAppVolumes();
 
         if (mContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_HDMI_CEC)) {
             synchronized (mHdmiClientLock) {
@@ -2417,6 +2449,8 @@ public class AudioService extends IAudioService.Stub
         }
 
         onIndicateSystemReady();
+
+        restoreAppVolumes();
 
         // indicate the end of reconfiguration phase to audio HAL
         AudioSystem.setParameters("restarting=false");
@@ -3581,8 +3615,10 @@ public class AudioService extends IAudioService.Stub
 
         updateMasterBalance(cr);
 
-        mShowAppVolume = mSettings.getSystemIntForUser(cr,
-                Settings.System.SHOW_APP_VOLUME, 0, UserHandle.USER_CURRENT);
+        synchronized (mAppVolumeLock) {
+            mShowAppVolume = mSettings.getSystemIntForUser(cr,
+                    Settings.System.SHOW_APP_VOLUME, 0, getCurrentUserIdFromCache());
+        }
 
         // Each stream will read its own persisted settings
 
@@ -12161,6 +12197,10 @@ public class AudioService extends IAudioService.Stub
                     mSoundDoseHelper.handleMessage(msg);
                     break;
 
+                case MSG_RESTORE_APP_VOLUMES:
+                    restoreAppVolumes();
+                    break;
+
                 default:
                     Log.e(TAG, "Unsupported msgId " + msg.what);
             }
@@ -12186,7 +12226,7 @@ public class AudioService extends IAudioService.Stub
             mContentResolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.MASTER_BALANCE), false, this, UserHandle.USER_ALL);
             mContentResolver.registerContentObserver(Settings.System.getUriFor(
-                    Settings.System.SHOW_APP_VOLUME), false, this);
+                    Settings.System.SHOW_APP_VOLUME), false, this, UserHandle.USER_ALL);
 
             mEncodedSurroundMode = mSettings.getGlobalInt(
                     mContentResolver, Settings.Global.ENCODED_SURROUND_OUTPUT,
@@ -12233,13 +12273,34 @@ public class AudioService extends IAudioService.Stub
             }
         }
 
+        @Override
+        public void onChange(boolean selfChange, Collection<Uri> uris, int flags, int userId) {
+            if (userId >= 0 && uris.contains(Settings.System.getUriFor(
+                    Settings.System.SHOW_APP_VOLUME))) {
+                synchronized (mAppVolumeLock) {
+                    if (mSettings.getSystemIntForUser(mContentResolver,
+                            Settings.System.SHOW_APP_VOLUME, 0, userId) == 0) {
+                        if (userId == getCurrentUserIdFromCache()) {
+                            mShowAppVolume = 0;
+                            resetAppVolumes();
+                        } else {
+                            persistAppVolumeSettingsLocked(Collections.emptyMap(), userId);
+                        }
+                    }
+                }
+            }
+            onChange(selfChange);
+        }
+
         private void updateShowAppVolume(ContentResolver cr) {
-            int showAppVolume = mSettings.getSystemIntForUser(cr,
-                    Settings.System.SHOW_APP_VOLUME, 0, UserHandle.USER_CURRENT);
-            if (mShowAppVolume != showAppVolume) {
-                mShowAppVolume = showAppVolume;
-                if (mShowAppVolume == 0) {
-                    resetAppVolumes();
+            synchronized (mAppVolumeLock) {
+                int showAppVolume = mSettings.getSystemIntForUser(cr,
+                        Settings.System.SHOW_APP_VOLUME, 0, getCurrentUserIdFromCache());
+                if (mShowAppVolume != showAppVolume) {
+                    mShowAppVolume = showAppVolume;
+                    if (mShowAppVolume == 0) {
+                        resetAppVolumes();
+                    }
                 }
             }
         }
@@ -12262,14 +12323,177 @@ public class AudioService extends IAudioService.Stub
         }
     }
 
-    private void resetAppVolumes() {
-        ArrayList<AppVolume> volumes = new ArrayList<>();
-        int status = AudioSystem.listAppVolumes(volumes);
-        if (status == AudioSystem.SUCCESS) {
-            for (AppVolume vol : volumes) {
-                AudioSystem.setAppVolume(vol.getPackageName(), 1.0f);
-                AudioSystem.setAppMute(vol.getPackageName(), false);
+    @Override
+    @android.annotation.EnforcePermission(MODIFY_AUDIO_ROUTING)
+    public int setAppVolume(String packageName, float volume, int userId) {
+        super.setAppVolume_enforcePermission();
+        return setAppVolumeSettings(packageName, volume, null, userId);
+    }
+
+    @Override
+    @android.annotation.EnforcePermission(MODIFY_AUDIO_ROUTING)
+    public int setAppMute(String packageName, boolean mute, int userId) {
+        super.setAppMute_enforcePermission();
+        return setAppVolumeSettings(packageName, null, mute, userId);
+    }
+
+    private int setAppVolumeSettings(String packageName, Float volume, Boolean mute, int userId) {
+        if (TextUtils.isEmpty(packageName) || (volume != null && !Float.isFinite(volume))) {
+            return AudioSystem.BAD_VALUE;
+        }
+        userId = ActivityManager.handleIncomingUser(Binder.getCallingPid(), Binder.getCallingUid(),
+                userId, false, false, "setAppVolumeSettings", null);
+        final long identity = Binder.clearCallingIdentity();
+        try {
+            synchronized (mAppVolumeLock) {
+                Map<String, Pair<Float, Boolean>> settings = readAppVolumeSettingsLocked(userId);
+                Pair<Float, Boolean> previous = settings.getOrDefault(packageName,
+                        new Pair<>(1.0f, false));
+                settings.put(packageName, new Pair<>(volume != null ? volume : previous.first,
+                        mute != null ? mute : previous.second));
+                if (!persistAppVolumeSettingsLocked(settings, userId)) {
+                    return AudioSystem.ERROR;
+                }
+                // A background user's settings must not change the foreground user's mixer.
+                if (userId != getCurrentUserIdFromCache()) {
+                    return AudioSystem.SUCCESS;
+                }
+                mAppVolumePackages.add(packageName);
+                int status = volume != null ? AudioSystem.setAppVolume(packageName, volume)
+                        : AudioSystem.setAppMute(packageName, mute);
+                if (status != AudioSystem.SUCCESS) {
+                    scheduleRestoreAppVolumes();
+                }
+                return status;
             }
+        } finally {
+            Binder.restoreCallingIdentity(identity);
+        }
+    }
+
+    @GuardedBy("mAppVolumeLock")
+    private Map<String, Pair<Float, Boolean>> readAppVolumeSettingsLocked(int userId) {
+        Map<String, Pair<Float, Boolean>> settings = new HashMap<>();
+        String value = mSettings.getSecureStringForUser(mContentResolver, APP_VOLUME_SETTINGS, userId);
+        if (TextUtils.isEmpty(value)) {
+            return settings;
+        }
+        try {
+            JSONObject packages = new JSONObject(value);
+            Iterator<String> keys = packages.keys();
+            while (keys.hasNext()) {
+                String packageName = keys.next();
+                try {
+                    JSONObject config = packages.getJSONObject(packageName);
+                    float volume = (float) config.getDouble("volume");
+                    if (!TextUtils.isEmpty(packageName) && Float.isFinite(volume)) {
+                        settings.put(packageName, new Pair<>(volume, config.getBoolean("muted")));
+                    }
+                } catch (JSONException e) {
+                    Log.w(TAG, "Invalid app volume setting for " + packageName, e);
+                }
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Invalid app volume settings for user " + userId, e);
+        }
+        return settings;
+    }
+
+    @GuardedBy("mAppVolumeLock")
+    private boolean persistAppVolumeSettingsLocked(Map<String, Pair<Float, Boolean>> settings,
+            int userId) {
+        JSONObject packages = new JSONObject();
+        try {
+            for (Map.Entry<String, Pair<Float, Boolean>> entry : settings.entrySet()) {
+                Pair<Float, Boolean> config = entry.getValue();
+                packages.put(entry.getKey(), new JSONObject()
+                        .put("volume", config.first).put("muted", config.second));
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Could not encode app volume settings", e);
+            return false;
+        }
+        boolean saved = mSettings.putSecureStringForUser(mContentResolver, APP_VOLUME_SETTINGS,
+                settings.isEmpty() ? null : packages.toString(), userId);
+        if (!saved) {
+            Log.e(TAG, "Could not persist app volume settings for user " + userId);
+        }
+        return saved;
+    }
+
+    private void scheduleRestoreAppVolumes() {
+        sendMsg(mAudioHandler, MSG_RESTORE_APP_VOLUMES, SENDMSG_NOOP, 0, 0, null,
+                INDICATE_SYSTEM_READY_RETRY_DELAY_MS);
+    }
+
+    private void restoreAppVolumes() {
+        synchronized (mAppVolumeLock) {
+            int userId = getCurrentUserIdFromCache();
+            Map<String, Pair<Float, Boolean>> settings = readAppVolumeSettingsLocked(userId);
+            if (mSettings.getSystemIntForUser(mContentResolver, Settings.System.SHOW_APP_VOLUME,
+                    0, userId) == 0) {
+                mAppVolumePackages.addAll(settings.keySet());
+                settings.clear();
+                persistAppVolumeSettingsLocked(settings, userId);
+            }
+            if (AudioSystem.checkAudioFlinger() != AudioSystem.AUDIO_STATUS_OK) {
+                scheduleRestoreAppVolumes();
+                return;
+            }
+            boolean retry = false;
+            // Reset packages left over from the previous user, even if they are not playing.
+            for (String packageName : new HashSet<>(mAppVolumePackages)) {
+                if (!settings.containsKey(packageName)) {
+                    if (applyAppVolumeSettings(packageName, new Pair<>(1.0f, false))) {
+                        mAppVolumePackages.remove(packageName);
+                    } else {
+                        retry = true;
+                    }
+                }
+            }
+            for (Map.Entry<String, Pair<Float, Boolean>> entry : settings.entrySet()) {
+                mAppVolumePackages.add(entry.getKey());
+                if (!applyAppVolumeSettings(entry.getKey(), entry.getValue())) {
+                    retry = true;
+                }
+            }
+            if (retry) {
+                scheduleRestoreAppVolumes();
+            }
+        }
+    }
+
+    private boolean applyAppVolumeSettings(String packageName, Pair<Float, Boolean> config) {
+        int volumeStatus = AudioSystem.setAppVolume(packageName, config.first);
+        int muteStatus = AudioSystem.setAppMute(packageName, config.second);
+        return volumeStatus == AudioSystem.SUCCESS && muteStatus == AudioSystem.SUCCESS;
+    }
+
+    private void removeAppVolumeSettings(String packageName, int userId) {
+        synchronized (mAppVolumeLock) {
+            Map<String, Pair<Float, Boolean>> settings = readAppVolumeSettingsLocked(userId);
+            if (settings.remove(packageName) != null) {
+                persistAppVolumeSettingsLocked(settings, userId);
+            }
+            if (userId == getCurrentUserIdFromCache()) {
+                mAppVolumePackages.add(packageName);
+                restoreAppVolumes();
+            }
+        }
+    }
+
+    private void resetAppVolumes() {
+        synchronized (mAppVolumeLock) {
+            int userId = getCurrentUserIdFromCache();
+            mAppVolumePackages.addAll(readAppVolumeSettingsLocked(userId).keySet());
+            ArrayList<AppVolume> volumes = new ArrayList<>();
+            if (AudioSystem.listAppVolumes(volumes) == AudioSystem.SUCCESS) {
+                for (AppVolume volume : volumes) {
+                    mAppVolumePackages.add(volume.getPackageName());
+                }
+            }
+            persistAppVolumeSettingsLocked(Collections.emptyMap(), userId);
+            restoreAppVolumes();
         }
     }
 
@@ -12445,7 +12669,10 @@ public class AudioService extends IAudioService.Stub
                     mDeviceBroker.postBroadcastBecomingNoisy();
                 }
                 mUserSwitchedReceived = true;
-                mCurrentUserId = getCurrentUserId();
+                synchronized (mAppVolumeLock) {
+                    mCurrentUserId = getCurrentUserId();
+                    restoreAppVolumes();
+                }
                 Slog.w(TAG, "ACTION_USER_SWITCHED CurrentUserId: " + mCurrentUserId);
 
                 if (mSupportsMicPrivacyToggle) {
@@ -14576,6 +14803,15 @@ public class AudioService extends IAudioService.Stub
         dumpStreamStates(pw);
         dumpVolumeGroups(pw);
         dumpRingerMode(pw);
+        synchronized (mAppVolumeLock) {
+            int userId = getCurrentUserIdFromCache();
+            pw.println("## App volumes for user " + userId);
+            for (Map.Entry<String, Pair<Float, Boolean>> entry
+                    : readAppVolumeSettingsLocked(userId).entrySet()) {
+                pw.println("  " + entry.getKey() + ": volume=" + entry.getValue().first
+                        + ", muted=" + entry.getValue().second);
+            }
+        }
 
         pw.println("## Volume events");
         sVolumeLogger.dump(pw); pw.println();
