@@ -151,7 +151,7 @@ public class RemoteTransitionHandler implements Transitions.TransitionHandler {
                 return false;
             }
         }
-        if (pendingRemote == null) {
+        if (pendingRemote == null && !opensFloatingTask(info)) {
             ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS, "Transition doesn't have "
                     + "explicit remote, search filters for match for %s", info);
             // If no explicit remote, search filters until one matches
@@ -227,6 +227,20 @@ public class RemoteTransitionHandler implements Transitions.TransitionHandler {
             mMainExecutor.execute(() -> wrappedCallback.onTransitionFinished(null /* wct */));
         }
         return true;
+    }
+
+    /**
+     * Registered remotes animate freeform launches without the floating presentation scale, so
+     * the window would open larger and then shrink; leave such launches to the Shell handlers.
+     */
+    private static boolean opensFloatingTask(@NonNull TransitionInfo info) {
+        for (TransitionInfo.Change change : info.getChanges()) {
+            if (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow
+                    && TransitionUtil.isOpeningMode(change.getMode())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static SurfaceControl.Transaction copyIfLocal(SurfaceControl.Transaction t,
