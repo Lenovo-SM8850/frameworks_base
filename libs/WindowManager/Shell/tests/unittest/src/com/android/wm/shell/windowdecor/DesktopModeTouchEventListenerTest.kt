@@ -335,6 +335,38 @@ class DesktopModeTouchEventListenerTest : ShellTestCase() {
     private companion object {
         private val TASK_BOUNDS = Rect(200, 200, 800, 600) // 600x400
     }
+
+    @Test
+    fun floatingUpAndCancelAfterDragDisabled_cancelPositionerWithoutCommit() {
+        for (action in listOf(MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL)) {
+            val task = createAppHeaderTask(TASK_BOUNDS).apply { isFloatingWindow = true }
+            val decor = mock<WindowDecorationWrapper>()
+            whenever(decor.taskInfo).thenReturn(task)
+            val positioner = mock<DragPositioningCallback>()
+            whenever(positioner.onDragPositioningStart(any(), any(), any(), any(), any()))
+                .thenReturn(Rect(TASK_BOUNDS))
+            val repository = mock<com.android.wm.shell.desktopmode.data.DesktopRepository>()
+            val repositories = mock<DesktopUserRepositories>()
+            whenever(repositories.getProfile(any())).thenReturn(repository)
+            val listener = DesktopModeTouchEventListener(mContext, task, positioner, { decor },
+                mockDesktopTasksController, mockTaskOperations, mock(), mockWindowDecorationActions,
+                repositories, mockWindowDecorationExclusionTracker, mock(), null, mock(), mock(),
+                { mock() }, null, mock(), mockPinnedLayerController)
+            val view = mock<android.view.View>()
+            whenever(view.id).thenReturn(com.android.wm.shell.R.id.caption_handle)
+            val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 400f, 200f, 0)
+            listener.handleMotionEvent(view, down)
+            whenever(repository.isTaskInFullImmersiveState(task.taskId)).thenReturn(true)
+            val up = MotionEvent.obtain(0, 10, action, 1200f, 0f, 0)
+            listener.handleMotionEvent(view, up)
+            verify(positioner).onDragPositioningCancel()
+            org.mockito.kotlin.verify(positioner, org.mockito.kotlin.never())
+                .onDragPositioningEnd(any(), any(), any())
+            down.recycle()
+            up.recycle()
+        }
+    }
+
     @Test
     fun floatingTopHandle_dragOutsideDesktop_movesLiveWithoutClick() {
         verifyFloatingHandleGesture(com.android.wm.shell.R.id.caption_handle, drag = true)

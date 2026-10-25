@@ -921,11 +921,13 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
     }
 
     void onStartDragging() {
+        mSplitLayoutHandler.onDividerInteractionChanged(true);
         mInteractionJankMonitor.begin(getDividerLeash(), mContext, mHandler,
                 CUJ_SPLIT_SCREEN_RESIZE);
     }
 
     void onDraggingCancelled() {
+        mSplitLayoutHandler.onDividerInteractionChanged(false);
         mInteractionJankMonitor.cancel(CUJ_SPLIT_SCREEN_RESIZE);
     }
 
@@ -1035,6 +1037,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             }
             mInteractionJankMonitor.end(
                     CUJ_SPLIT_SCREEN_RESIZE);
+            mSplitLayoutHandler.onDividerInteractionChanged(false);
             return;
         }
 
@@ -1086,6 +1089,7 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
             }
         });
         mDividerFlingAnimator.start();
+        mSplitLayoutHandler.onDividerInteractionChanged(false);
     }
 
     /** Returns true if a divider fling animation is currently playing. */

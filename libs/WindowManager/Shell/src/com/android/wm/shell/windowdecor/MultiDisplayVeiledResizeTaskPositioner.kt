@@ -41,6 +41,7 @@ import com.android.internal.jank.InteractionJankMonitor
 import com.android.window.flags.Flags
 import com.android.wm.shell.ShellTaskOrganizer
 import com.android.wm.shell.common.DisplayController
+import com.android.wm.shell.common.SurfaceFrameRate
 import com.android.wm.shell.common.MultiDisplayDragMoveBoundsCalculator
 import com.android.wm.shell.common.MultiDisplayDragMoveIndicatorController
 import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.InputMethod
@@ -784,6 +785,27 @@ class MultiDisplayVeiledResizeTaskPositioner(
             Choreographer.getInstance().removeFrameCallback(floatingFrameCallback)
             floatingFramePending = false
         }
+    }
+
+    override fun isDragPositioningCancelled() = floatingDragCancelled
+
+    override fun onDragPositioningCancel() {
+        if (!floatingDragActive) return
+        cancelFloatingDragForTransition()
+        floatingDragActive = false
+        SurfaceFrameRate.setInteracting(this, false)
+    }
+
+    private fun stopFloatingObserver() {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
+        floatingDragActive = false
+        SurfaceFrameRate.setInteracting(this, false)
+        if (floatingObserverRegistered) {
+            transitions.unregisterObserver(this)
+            floatingObserverRegistered = false
+        }
+        windowDecoration.floatingWindowTransitionListener = null
     }
 
     private fun cancelFloatingDragForTransition() {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.android.wm.shell.pinnedlayer.phone
 
+import android.content.ContentResolver
 import android.content.Context
 import android.os.PowerManager
 import android.util.Pair
@@ -30,6 +31,7 @@ import org.mockito.kotlin.whenever
 class FloatingFrameRateControllerTest : ShellTestCase() {
     private class Harness(mini: Boolean = false, supported: Boolean = true) {
         val context = mock<Context>()
+        val resolver = mock<ContentResolver>()
         val organizer = mock<ShellTaskOrganizer>()
         val executor = mock<ShellExecutor>()
         val transaction = mock<SurfaceControl.Transaction>()
@@ -42,6 +44,7 @@ class FloatingFrameRateControllerTest : ShellTestCase() {
         val tasks = mutableMapOf(task.taskId to task)
         val controller: FloatingFrameRateController
         init {
+            whenever(context.contentResolver).thenReturn(resolver)
             whenever(leash.isValid).thenReturn(true)
             whenever(transaction.setFrameRate(any(), any(), any())).thenReturn(transaction)
             whenever(organizer.initialTasks).thenReturn(listOf(Pair(task, leash)))
@@ -119,9 +122,15 @@ class FloatingFrameRateControllerTest : ShellTestCase() {
     @Test fun vote_lowestApplicablePreferenceWins() {
         fun vote(focused: Boolean = true, count: Int = 1, mini: Boolean = false,
             stashed: Boolean = false, thermal: Int = PowerManager.THERMAL_STATUS_NONE,
-            floating: Boolean = true) = FloatingFrameRateController.vote(
-                floating, focused, count, mini, stashed, thermal)
+            floating: Boolean = true, fullscreenGame: Boolean = false) = FloatingFrameRateController.vote(
+                floating, focused, count, mini, stashed, thermal, fullscreenGame)
         assertThat(vote()).isEqualTo(0f)
+        assertThat(vote(fullscreenGame = true)).isEqualTo(60f)
+        assertThat(vote(fullscreenGame = true, mini = true)).isEqualTo(60f)
+        assertThat(vote(fullscreenGame = true, stashed = true)).isEqualTo(30f)
+        assertThat(vote(fullscreenGame = true,
+            thermal = PowerManager.THERMAL_STATUS_MODERATE)).isEqualTo(30f)
+        assertThat(vote(fullscreenGame = true, floating = false)).isEqualTo(0f)
         assertThat(vote(mini = true)).isEqualTo(60f)
         assertThat(vote(focused = false)).isEqualTo(60f)
         assertThat(vote(count = 2)).isEqualTo(60f)
