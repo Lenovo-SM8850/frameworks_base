@@ -70,6 +70,9 @@ public interface SplitScreen {
      */
     int STAGE_TYPE_C = 4;
 
+    /** Fourth position-independent sibling stage. */
+    int STAGE_TYPE_D = 5;
+
     @IntDef(prefix = { "STAGE_TYPE_" }, value = {
             STAGE_TYPE_UNDEFINED,
             STAGE_TYPE_MAIN,
@@ -77,7 +80,8 @@ public interface SplitScreen {
             // Used for flexible split
             STAGE_TYPE_A,
             STAGE_TYPE_B,
-            STAGE_TYPE_C
+            STAGE_TYPE_C,
+            STAGE_TYPE_D
     })
     @interface StageType {}
 
@@ -158,6 +162,7 @@ public interface SplitScreen {
             case STAGE_TYPE_SIDE: return "SIDE";
             case STAGE_TYPE_A: return "STAGE_A";
             case STAGE_TYPE_B: return "STAGE_B";
+            case STAGE_TYPE_D: return "STAGE_D";
             case STAGE_TYPE_C: return "STAGE_C";
             default: return "UNKNOWN(" + stage + ")";
         }

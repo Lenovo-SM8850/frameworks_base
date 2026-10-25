@@ -46,6 +46,7 @@ import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.hasItems;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -309,6 +310,76 @@ public class SplitTransitionTests extends ShellTestCase {
         // Make sure split-screen is now visible
         assertTrue(mStageCoordinator.isSplitScreenVisible());
         assertTrue(testRemote.isCalled());
+    }
+
+    @Test
+    @UiThreadTest
+    public void testLaunchPairWithVisibleTasksUsesOpeningModes() {
+        assertRemotePairModes(TRANSIT_CHANGE, TRANSIT_CHANGE);
+    }
+
+    @Test
+    @UiThreadTest
+    public void testLaunchPairWithOneVisibleTaskPreservesOtherModes() {
+        assertRemotePairModes(TRANSIT_CHANGE, TRANSIT_OPEN);
+    }
+
+    @Test
+    @UiThreadTest
+    public void testLaunchPairWithoutRemotePreservesChangeMode() {
+        final TransitionInfo info = new TransitionInfoBuilder(TRANSIT_TO_FRONT, 0)
+                .addChange(TRANSIT_CHANGE, mMainChild)
+                .addChange(TRANSIT_OPEN, mSideChild)
+                .build();
+        final IBinder transition = mSplitScreenTransitions.startEnterTransition(
+                TRANSIT_TO_FRONT, new WindowContainerTransaction(),
+                null, mStageCoordinator, TRANSIT_SPLIT_SCREEN_PAIR_OPEN, false, SNAP_TO_2_50_50);
+        mMainStage.onTaskAppeared(mMainChild, createMockSurface());
+        mSideStage.onTaskAppeared(mSideChild, createMockSurface());
+
+        assertTrue(mStageCoordinator.startAnimation(transition, info,
+                mock(SurfaceControl.Transaction.class),
+                mock(SurfaceControl.Transaction.class),
+                mock(Transitions.TransitionFinishCallback.class)));
+        assertEquals(TRANSIT_CHANGE, info.getChange(mMainChild.token).getMode());
+        assertEquals(TRANSIT_OPEN, info.getChange(mSideChild.token).getMode());
+    }
+
+    private void assertRemotePairModes(int mainMode, int sideMode) {
+        final TransitionInfo info = new TransitionInfoBuilder(TRANSIT_TO_FRONT, 0)
+                .addChange(mainMode, mMainChild)
+                .addChange(sideMode, mSideChild)
+                .addChange(TRANSIT_CHANGE, mHomeTask)
+                .build();
+        final TestRemoteTransition remote = new TestRemoteTransition() {
+            @Override
+            public void startAnimation(IBinder token, TransitionInfo remoteInfo,
+                    SurfaceControl.Transaction t,
+                    IRemoteTransitionFinishedCallback finishCallback) throws RemoteException {
+                assertEquals(mainMode == TRANSIT_CHANGE ? TRANSIT_TO_FRONT : mainMode,
+                        remoteInfo.getChange(mMainChild.token).getMode());
+                assertEquals(sideMode == TRANSIT_CHANGE ? TRANSIT_TO_FRONT : sideMode,
+                        remoteInfo.getChange(mSideChild.token).getMode());
+                assertEquals(TRANSIT_CHANGE, remoteInfo.getChange(mHomeTask.token).getMode());
+                assertEquals(TRANSIT_TO_FRONT,
+                        remoteInfo.getChange(mMainStage.mRootTaskInfo.token).getMode());
+                assertEquals(TRANSIT_TO_FRONT,
+                        remoteInfo.getChange(mSideStage.mRootTaskInfo.token).getMode());
+                super.startAnimation(token, remoteInfo, t, finishCallback);
+            }
+        };
+        final IBinder transition = mSplitScreenTransitions.startEnterTransition(
+                TRANSIT_TO_FRONT, new WindowContainerTransaction(),
+                new RemoteTransition(remote, "Test"), mStageCoordinator,
+                TRANSIT_SPLIT_SCREEN_PAIR_OPEN, false, SNAP_TO_2_50_50);
+        mMainStage.onTaskAppeared(mMainChild, createMockSurface());
+        mSideStage.onTaskAppeared(mSideChild, createMockSurface());
+
+        assertTrue(mStageCoordinator.startAnimation(transition, info,
+                mock(SurfaceControl.Transaction.class),
+                mock(SurfaceControl.Transaction.class),
+                mock(Transitions.TransitionFinishCallback.class)));
+        assertTrue(remote.isCalled());
     }
 
     @Test

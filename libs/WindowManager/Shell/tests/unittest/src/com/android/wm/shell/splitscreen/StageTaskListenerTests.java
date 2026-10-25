@@ -290,4 +290,13 @@ public final class StageTaskListenerTests extends ShellTestCase {
         assertThat(mStageTaskListener.containsTask(task.taskId)).isFalse();
         verify(mCallbacks).onChildTaskMovedToBubble(mStageTaskListener, task.taskId);
     }
+    @Test
+    public void testInvisibleRootInfoChangeNotifiesColdInsertionObserver() {
+        mRootTask.isVisible = false;
+        mRootTask.baseActivity = new android.content.ComponentName("test", "TranslucentActivity");
+        mStageTaskListener.onTaskInfoChanged(mRootTask);
+        verify(mCallbacks).onRootTaskInfoChanged(mStageTaskListener);
+        verify(mCallbacks, never()).onStageVisibilityChanged(mStageTaskListener);
+    }
+
 }

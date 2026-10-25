@@ -1917,8 +1917,14 @@ class DesktopTasksController(
             cancelDragToDesktop(taskInfo)
             return
         }
+        if (splitScreenController.isTaskInSplitScreen(taskInfo.taskId)) {
+            val splitWct = WindowContainerTransaction()
+            addExitSplitForFloating(splitWct, taskInfo)
+            splitWct.merge(wct, true)
+            dragToDesktopTransitionHandler.finishDragToDesktopTransition(splitWct)
+        } else {
             dragToDesktopTransitionHandler.finishDragToDesktopTransition(wct)
-
+        }
     }
 
     /**
