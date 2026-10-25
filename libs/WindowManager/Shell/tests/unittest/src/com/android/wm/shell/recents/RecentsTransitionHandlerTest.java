@@ -1361,4 +1361,54 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
         assertNewFloatingLaunchFinish(false, TRANSIT_OPEN);
     }
 
+    @Test
+    public void testNewFloatingLaunchDuringRecentsFinishToHome() throws Exception {
+        assertNewFloatingLaunchFinish(true, TRANSIT_OPEN);
+    }
+
+    @Test
+    public void testNewFloatingTaskToFrontDuringRecentsIsLaunch() throws Exception {
+        assertNewFloatingLaunchFinish(false, TRANSIT_TO_FRONT);
+    }
+
+    private void assertNewFloatingLaunchFinish(boolean toHome, int mode) throws Exception {
+        final IBinder transition = startRecentsTransition(false);
+        final Transitions.TransitionFinishCallback finish =
+                mock(Transitions.TransitionFinishCallback.class);
+        final SurfaceControl.Transaction finishT = mock(SurfaceControl.Transaction.class);
+        mRecentsTransitionHandler.setFinishTransactionSupplier(() -> finishT);
+        mRecentsTransitionHandler.startAnimation(transition, createTransitionInfo(),
+                new StubTransaction(), new StubTransaction(), finish);
+        final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                .setUserId(0).setWindowingMode(WINDOWING_MODE_FREEFORM)
+                .setActivityType(ACTIVITY_TYPE_STANDARD)
+                .setTopActivityType(ACTIVITY_TYPE_STANDARD).build();
+        task.isFloatingWindow = true;
+        task.configuration.windowConfiguration.setAlwaysOnTop(true);
+        final SurfaceControl leash = mock(SurfaceControl.class);
+        when(leash.isValid()).thenReturn(true);
+        mShellTaskOrganizer.onTaskAppeared(task, leash);
+        final TransitionInfo incoming = new TransitionInfoBuilder(TRANSIT_OPEN).build();
+        final TransitionInfo.Change change = new TransitionInfo.Change(task.token, leash);
+        change.setTaskInfo(task);
+        change.setMode(mode);
+        incoming.getChanges().add(change);
+        final Transitions.TransitionFinishCallback merged =
+                mock(Transitions.TransitionFinishCallback.class);
+        mRecentsTransitionHandler.mergeAnimation(new Binder(), incoming,
+                new StubTransaction(), new StubTransaction(), transition, merged);
+        verify(merged).onTransitionFinished(any());
+        mRecentsTransitionHandler.findController(transition).finish(toHome, false,
+                mock(IResultReceiver.class));
+        mMainExecutor.flushAll();
+        final ArgumentCaptor<WindowContainerTransaction> wct =
+                ArgumentCaptor.forClass(WindowContainerTransaction.class);
+        verify(finish).onTransitionFinished(wct.capture());
+        assertFalse(wct.getValue().getChanges().get(task.token.asBinder()).getHidden());
+        verify(finishT, org.mockito.Mockito.atLeastOnce()).show(leash);
+        verify(mTransitions, never()).startTransition(eq(TRANSIT_END_RECENTS_TRANSITION),
+                any(), any());
+        assertNull(mRecentsTransitionHandler.findController(transition));
+    }
+
 }
