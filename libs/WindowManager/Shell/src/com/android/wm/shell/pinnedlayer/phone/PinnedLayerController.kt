@@ -394,11 +394,29 @@ class PinnedLayerController(
         pinnedTasks.mapNotNull { shellTaskOrganizer.getRunningTaskInfo(it) }
 
     /** Registers visibility policy after Shell dependencies have been constructed. */
+    @JvmOverloads
     fun configureVisibility(
         shellController: ShellController,
         recentsTransitionHandler: RecentsTransitionHandler,
+        taskStackListener: TaskStackListenerImpl? = null,
     ) {
         recentsVisibilityHandler = recentsTransitionHandler
+        taskStackListener?.addListener(object : TaskStackListenerCallback {
+            override fun onActivityRestartAttempt(task: RunningTaskInfo, homeTaskVisible: Boolean,
+                clearedTask: Boolean, wasVisible: Boolean) {
+                if (keyguardShowing || recentsRunning || overviewShowing ||
+                    task.displayId != DEFAULT_DISPLAY) return
+                val current = shellTaskOrganizer.getRunningTaskInfo(task.taskId) ?: return
+                if (isMini(current) && current.taskId !in minimizedTasks) {
+                    miniInteractions?.restore(current)
+                    return
+                }
+                val wct = WindowContainerTransaction()
+                if (prepareMinimizedTaskRestore(current, wct)) {
+                    transitions.startTransition(TRANSIT_CHANGE, wct, null)
+                }
+            }
+        })
         shellController.addUserChangeListener(object : UserChangeListener {
             override fun onUserChanged(newUserId: Int, userContext: Context) {
                 minimizeHandles?.setUsers(setOf(newUserId))
