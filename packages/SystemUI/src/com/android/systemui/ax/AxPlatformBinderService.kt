@@ -19,8 +19,13 @@ package com.android.systemui.ax
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import com.android.systemui.application.SystemUIApplication
 
 class AxPlatformBinderService : Service() {
 
-    override fun onBind(intent: Intent?): IBinder? = AxPlatformServiceImpl.sBinder
+    override fun onBind(intent: Intent?): IBinder? {
+        // Auto-create can bind here before SystemUIService starts the CoreStartables.
+        (application as SystemUIApplication).startSystemUserServicesIfNeeded()
+        return AxPlatformServiceImpl.sBinder
+    }
 }
