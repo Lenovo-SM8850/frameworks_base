@@ -760,14 +760,18 @@ public final class SplitLayout implements DisplayInsetsController.OnInsetsChange
      */
     private void updateBounds(int position, Rect bounds1, Rect bounds2, Rect dividerBounds,
             boolean setEffectBounds) {
-        if (mIsMultiSplitDivider) {
-            position = Math.max(mDividerSnapAlgorithm.getFirstSplitTarget().position,
-                    Math.min(position, mDividerSnapAlgorithm.getLastSplitTarget().position));
+        DividerView dividerView = mSplitWindowManager.getDividerView();
+        // Only a dragged divider is kept between the split targets, widened to where the drag
+        // started. Positions set by the layout already respect its leaf sizes, and the root of
+        // three equal columns sits before the first two-app target.
+        if (mIsMultiSplitDivider && dividerView != null && dividerView.isMoving()) {
+            position = Math.max(Math.min(mDividerSnapAlgorithm.getFirstSplitTarget().position,
+                    mDividerPosition), Math.min(position, Math.max(
+                    mDividerSnapAlgorithm.getLastSplitTarget().position, mDividerPosition)));
         }
         dividerBounds.set(mRootBounds);
         bounds1.set(mRootBounds);
         bounds2.set(mRootBounds);
-        DividerView dividerView = mSplitWindowManager.getDividerView();
         boolean allowExtendedBounds = (dividerView != null && dividerView.isMoving()) ||
                 mSplitState.currentOrAnimatingToStateWithOffscreenApps();
         if (mIsLeftRightSplit) {
