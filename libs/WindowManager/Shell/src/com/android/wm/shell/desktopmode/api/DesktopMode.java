@@ -113,6 +113,12 @@ public interface DesktopMode {
     /** Check is a specific displayId is in DesktopMode. */
     boolean isDisplayInDesktopMode(int displayId);
 
+    /** Returns whether desktop mode is supported on the given display. */
+    boolean isDesktopModeSupportedOnDisplay(int displayId);
+
+    /** Toggles the desktop session, bringing the current apps into windows when entering. */
+    void toggleDesktopMode(int displayId);
+
     /** Called when requested to toggle peek state in desktop mode. */
     void togglePeek(int displayId);
 }
