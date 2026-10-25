@@ -44,6 +44,10 @@ public interface RecentsTransitionStateListener {
     default void onTransitionFinishedToHome(int displayId) {
     }
 
+    /** Notifies that the final Recents surface transaction has been committed. */
+    default void onTransitionSurfacesCommitted(int displayId) {
+    }
+
     /** Notifies that a Home finish also requested the user-leave hint. */
     default void onHomeGestureFinished(int displayId) {
     }

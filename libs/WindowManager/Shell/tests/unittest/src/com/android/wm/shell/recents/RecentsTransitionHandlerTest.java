@@ -1254,8 +1254,11 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
                 .filter(pair -> pair.first.taskId == task.taskId).findFirst().get().second;
         final Transitions.TransitionFinishCallback finish =
                 mock(Transitions.TransitionFinishCallback.class);
+        final SurfaceControl.Transaction finishT = mock(SurfaceControl.Transaction.class);
+        final RecentsTransitionStateListener state = mock(RecentsTransitionStateListener.class);
+        mRecentsTransitionHandler.addTransitionStateListener(state);
         mRecentsTransitionHandler.startAnimation(transition, info, new StubTransaction(),
-                new StubTransaction(), finish);
+                finishT, finish);
         mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, true);
         mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, false);
         final SurfaceControl.Transaction cleanup = mock(SurfaceControl.Transaction.class);
@@ -1276,6 +1279,12 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
         assertFalse(wct.getValue().getChanges().get(task.token.asBinder()).getHidden());
         verify(cleanup).show(surface);
         verify(cleanup, never()).hide(surface);
+        final ArgumentCaptor<SurfaceControl.TransactionCommittedListener> committed =
+                ArgumentCaptor.forClass(SurfaceControl.TransactionCommittedListener.class);
+        verify(finishT).addTransactionCommittedListener(any(), committed.capture());
+        verify(state, never()).onTransitionSurfacesCommitted(task.displayId);
+        committed.getValue().onTransactionCommitted();
+        verify(state).onTransitionSurfacesCommitted(task.displayId);
     }
 
     @Test
@@ -1337,6 +1346,23 @@ public class RecentsTransitionHandlerTest extends ShellTestCase {
         mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, true);
         mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, false);
         verify(visibility, org.mockito.Mockito.times(1)).show(surface);
+    }
+
+    @Test
+    public void testUnchangedFloatingVisibilityStillReconcilesSurfaces() {
+        final TransitionInfo info = createTransitionInfo();
+        final ActivityManager.RunningTaskInfo task = addVisibleFloatingTask(info);
+        final SurfaceControl surface = mShellTaskOrganizer.getInitialTasks().stream()
+                .filter(pair -> pair.first.taskId == task.taskId).findFirst().get().second;
+        final SurfaceControl.Transaction visibility = mock(SurfaceControl.Transaction.class);
+        mRecentsTransitionHandler.setFinishTransactionSupplier(() -> visibility);
+
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, false);
+        mRecentsTransitionHandler.setFloatingTasksHidden(task.displayId, false);
+
+        verify(visibility, org.mockito.Mockito.times(2)).show(surface);
+        verify(visibility, org.mockito.Mockito.times(2)).setAlpha(surface, 1.f);
+        verify(visibility, org.mockito.Mockito.times(2)).apply();
     }
 
     private ActivityManager.RunningTaskInfo addVisibleFloatingTask(TransitionInfo info) {
