@@ -3173,7 +3173,10 @@ public final class InputMethodManagerService implements IInputMethodManagerImpl.
                 // the back button should be in the default state (as if the IME is not shown).
                 backDisposition = InputMethodService.BACK_DISPOSITION_ADJUST_NOTHING;
             }
-            final boolean showImeSwitcherButton = shouldShowImeSwitcherButtonLocked(userId);
+            final boolean showImeSwitcherButton = shouldShowImeSwitcherButtonLocked(userId)
+                    && (!Flags.imeSwitcherButtonInNavbarSetting()
+                            || InputMethodSettingsRepository.get(userId)
+                                    .isImeSwitcherButtonInNavBarEnabled());
             if (mStatusBarManagerInternal != null) {
                 mStatusBarManagerInternal.setImeWindowStatus(curDisplayId, vis, backDisposition,
                         showImeSwitcherButton);
