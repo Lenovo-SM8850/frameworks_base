@@ -25,6 +25,44 @@ class FloatingWindowGeometryStoreTest {
         }
     }
 
+    @Test fun normalGeometryBelowOldFloor_isRememberedWhenAboveMiniSize() {
+        val store = repository()
+        val normal = Rect(200, 300, 600, 900)
+        store.store("small.normal", 0, 1, normal, stable, 1200, 1920, 320, false, false, .4f)
+        assertThat(store.restore("small.normal", 0, 1, stable, 1200, 1920, 320)!!.bounds)
+            .isEqualTo(normal)
+    }
+
+    @Test fun store_rejectsMiniAndStashByStateEvenAtNormalSize() {
+        val store = repository()
+        store.store("state.app", 0, 1, bounds, stable, 1200, 1920, 320, false, false, .75f)
+        for (state in listOf(FloatingWindowGeometryStore.PresentationState.MINI,
+            FloatingWindowGeometryStore.PresentationState.STASHED)) {
+            store.store("state.app", 0, 1, Rect(100, 200, 900, 1400), stable,
+                1200, 1920, 320, false, false, 1f, state)
+        }
+        store.store("state.app", 0, 1, Rect(-500, 200, 100, 1100), stable,
+            1200, 1920, 320, false, false, .75f)
+        assertThat(store.restore("state.app", 0, 1, stable, 1200, 1920, 320)!!.bounds)
+            .isEqualTo(bounds)
+    }
+
+    @Test fun restore_rejectsPersistedMiniStateAndLegacyMiniGeometry() {
+        val file = File(temporaryFolder.root, "floating_window_geometry_0.json")
+        repository().store("old.app", 0, 1, bounds, stable, 1200, 1920, 320, false, false, .75f)
+        val saved = org.json.JSONObject(file.readText())
+        saved.getJSONObject("old.app:1").put("presentation", "MINI")
+        file.writeText(saved.toString())
+        assertThat(repository().restore("old.app", 0, 1, stable, 1200, 1920, 320)).isNull()
+        saved.getJSONObject("old.app:1").apply {
+            remove("presentation")
+            put("width", .3)
+            put("scale", .45)
+        }
+        file.writeText(saved.toString())
+        assertThat(repository().restore("old.app", 0, 1, stable, 1200, 1920, 320)).isNull()
+    }
+
     @Test fun store_rejectsInvalidScaleWithoutOverwritingGeometry() {
         val store = repository()
         store.store("scaled.app", 0, 1, bounds, stable, 1200, 1920, 320, false, false, .7f)

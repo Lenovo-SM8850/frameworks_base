@@ -46,6 +46,24 @@ class FloatingMiniStateTest {
         assertThat(sized.height()).isEqualTo(1784)
     }
 
+    @Test fun restoreGeometry_isCopiedAndKeptAcrossMiniMovesAndStash() {
+        val state = FloatingMiniState()
+        val normal = Rect(200, 300, 800, 1200)
+        val restore = FloatingMiniState.Restore(normal, logical, .75f)
+        val entry = state.enter(10, 1, restore, Rect(8, 108, 368, 648), .45f)
+        normal.offset(500, 500)
+        entry.bounds.offset(200, 200)
+        entry.edge = FloatingMiniState.Edge.LEFT
+        state.enter(10, 1, FloatingMiniState.Restore(Rect(), Rect(), 1f), Rect(), 1f)
+        assertThat(entry.restore.bounds).isEqualTo(Rect(200, 300, 800, 1200))
+        assertThat(entry.restore.logical).isEqualTo(logical)
+        assertThat(entry.restore.scale).isEqualTo(.75f)
+        assertThat(state.canRemember(10, 1)).isFalse()
+        assertThat(state.canRemember(11, 1)).isTrue()
+        state.remove(10, 1)
+        assertThat(state.canRemember(10, 1)).isTrue()
+    }
+
     @Test fun stashThreshold_hasHysteresisAndKeepsVisibleStripOnHorizontalEdges() {
         assertThat(FloatingMiniState.stashEdge(Rect(-216, 300, 144, 840), stable))
             .isEqualTo(FloatingMiniState.Edge.NONE)
