@@ -274,10 +274,12 @@ class FloatingMiniController(
         }
     }
 
-    fun restore(task: TaskInfo) { restoreExpanded(task) }
+    fun restore(task: TaskInfo) { restore(task, null) }
 
+    /** Prepares an expanded restore in the caller's launch transaction. */
+    fun prepareRestore(task: TaskInfo, wct: WindowContainerTransaction): Boolean = restore(task, wct)
 
-    private fun restoreExpanded(task: TaskInfo): Boolean {
+    private fun restore(task: TaskInfo, wct: WindowContainerTransaction?): Boolean {
         val entry = state.get(task.userId, task.taskId) ?: return false
         val stable = stable(task)
         if (stable.isEmpty) return false
@@ -296,6 +298,17 @@ class FloatingMiniController(
             offsetTo((entry.bounds.exactCenterX() - width() / 2f).roundToInt(),
                 (entry.bounds.exactCenterY() - height() / 2f).roundToInt())
         }.let { FloatingMiniState.clamp(it, stable) }
+        if (wct != null) {
+            cancel(task)
+            clearDrag(task)
+            pendingResize.remove(key(task))
+            state.remove(task.userId, task.taskId)
+            wct.setDragResizing(task.token, false).setBounds(task.token, restore.logical)
+                .setFloatingWindowPresentation(task.token, Point(destination.left, destination.top), scale)
+                .setHidden(task.token, false).reorder(task.token, true)
+            changed(updatedTask(task, destination, scale, restore.logical))
+            return true
+        }
         val drawingTask = if (current.width() != restore.logical.width() ||
             current.height() != restore.logical.height()) {
             val initialScale = entry.bounds.width().toFloat() / restore.logical.width()

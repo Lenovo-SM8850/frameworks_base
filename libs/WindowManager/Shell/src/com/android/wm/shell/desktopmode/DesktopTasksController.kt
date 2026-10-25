@@ -2556,6 +2556,8 @@ class DesktopTasksController(
         taskInfo: RunningTaskInfo,
     ) {
         logV("addMoveTaskToFrontChanges taskId=%d deskId=%s", taskInfo.taskId, deskId?.toString())
+        if (taskInfo.isFloatingWindow &&
+            pinnedLayerController?.prepareMinimizedTaskRestore(taskInfo, wct) == true) return
         // If a task is tiled, another task should be brought to foreground with it so let
         // tiling controller handle the request.
         if (snapController.moveTaskToFrontIfTiled(taskInfo)) {

@@ -141,6 +141,20 @@ class FloatingMiniControllerTest : ShellTestCase() {
         verify(h.transaction, times(2)).setPosition(h.leash, -332f, 108f)
     }
 
+    @Test fun prepareRestore_expandsMiniInCallerTransactionWithoutStartingAnimation() {
+        val h = Harness()
+        val wct = android.window.WindowContainerTransaction()
+        clearInvocations(h.organizer, h.animator)
+        assertThat(h.controller.prepareRestore(h.task, wct)).isTrue()
+        val change = requireNotNull(wct.changes[h.task.token.asBinder()])
+        assertThat(change.configuration.windowConfiguration.bounds)
+            .isEqualTo(Rect(0, 0, 800, 1200))
+        assertThat(change.floatingWindowScale).isEqualTo(.75f)
+        assertThat(h.state.get(h.task.userId, h.task.taskId)).isNull()
+        verify(h.organizer, never()).applyTransaction(any())
+        verify(h.animator, never()).start()
+    }
+
     @Test fun restore_usesCurrentMiniAspectWhenItChangedSinceEntry() {
         val h = Harness()
         h.task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1200, 800))
