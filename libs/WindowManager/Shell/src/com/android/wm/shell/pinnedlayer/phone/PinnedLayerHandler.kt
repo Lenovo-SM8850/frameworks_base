@@ -59,6 +59,7 @@ class PinnedLayerHandler(
 
     private fun onInit() {
         transitions.addHandler(this)
+        desktopTasksController?.setPinnedLayerController(pinnedLayerController)
     }
 
     override fun handleRequest(
@@ -69,7 +70,8 @@ class PinnedLayerHandler(
         val windowingLayerChange = request.windowingLayerChange
 
         if (
-            pinnedLayerController.isNotPinned(triggerTask.taskId) &&
+            !triggerTask.isFloatingWindow &&
+                pinnedLayerController.isNotPinned(triggerTask.taskId) &&
                 !windowingLayerChange.isLayerPinningRequest()
         ) {
             return null
@@ -104,6 +106,7 @@ class PinnedLayerHandler(
                 return null
             }
 
+            desktopTasksController?.addExitSplitForFloating(wct, triggerTask)
             cleanUpDesktopIfNeeded(transition, triggerTask, pinWct)
             wct.merge(pinWct, /* transfer= */ true)
         }
@@ -285,7 +288,8 @@ class PinnedLayerHandler(
 
         // Should accept all the TransitionInfo.Change if there's an unpin transition.
         // Required to properly handle animation for mixed transitions with pip.
-        if (transitions.any { it is ActiveTransition.Unpin }) {
+        if (transitions.any { it is ActiveTransition.Unpin } &&
+            transitions.none { it is ActiveTransition.Unpin && it.taskInfo.isFloatingWindow && !it.minimized }) {
             startTransaction.apply()
             finishCallback.onTransitionFinished(null)
             return true
@@ -313,12 +317,7 @@ class PinnedLayerHandler(
         request: TransitionRequestInfo,
         outWct: WindowContainerTransaction,
     ) {
-        pinnedLayerController.getCurrentPinnedTask()?.let {
-            outWct.merge(
-                pinnedLayerController.unpinTask(transition, it, UnpinStrategy.CLOSE),
-                /* transfer= */ true,
-            )
-        }
+        // Ordinary PiP and floating tasks can coexist on the default display.
     }
 
     /** @return `true` if there is a task that is currently pinned and visible. */
@@ -368,7 +367,7 @@ class PinnedLayerHandler(
     private fun TransitionRequestInfo.isOpeningPinnedRequest(): Boolean {
         val task = triggerTask
         return task != null &&
-            pinnedLayerController.isPinned(task.taskId) &&
+            (task.isFloatingWindow || pinnedLayerController.isPinned(task.taskId)) &&
             TransitionUtil.isOpeningType(type)
     }
 

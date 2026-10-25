@@ -224,16 +224,13 @@ class AppHandleEducationController(
 
     /** Show tooltip that points to windowing image button in app handle menu */
     private suspend fun showWindowingImageButtonTooltip(captionState: CaptionState.AppHandle) {
-        val appInfoPillHeight = getSize(R.dimen.desktop_mode_handle_menu_app_info_pill_height)
         val taskInfo = captionState.runningTaskInfo
         val windowingOptionPillHeight =
             getSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
         val appHandleMenuWidth =
             getSize(R.dimen.desktop_mode_handle_menu_width) +
                 getSize(R.dimen.desktop_mode_handle_menu_pill_spacing_margin)
-        val appHandleMenuMargins =
-            getSize(R.dimen.desktop_mode_handle_menu_margin_top) +
-                getSize(R.dimen.desktop_mode_handle_menu_pill_spacing_margin)
+        val appHandleMenuMargins = getSize(R.dimen.desktop_mode_handle_menu_margin_top)
 
         val appHandleBounds = captionState.globalAppHandleBounds
         val appHandleCenterX = appHandleBounds.left + appHandleBounds.width() / 2
@@ -246,7 +243,6 @@ class AppHandleEducationController(
                 },
                 appHandleBounds.top +
                     appHandleMenuMargins +
-                    appInfoPillHeight +
                     windowingOptionPillHeight / 2,
             )
         // Populate information important to inflate windowing image button education
