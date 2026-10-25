@@ -16,9 +16,6 @@
 
 package android.hardware.display;
 
-import android.os.IBinder;
-import android.view.Surface;
-import com.libremobileos.freeform.ILMOFreeformDisplayCallback;
 import android.annotation.FloatRange;
 import android.annotation.IntDef;
 import android.annotation.Nullable;
