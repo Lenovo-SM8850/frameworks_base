@@ -980,7 +980,7 @@ class PinnedLayerController(
             val keyguardTransition = info.isKeyguardGoingAway ||
                 info.flags and (android.view.WindowManager.KEYGUARD_VISIBILITY_TRANSIT_FLAGS or
                     android.view.WindowManager.TRANSIT_FLAG_KEYGUARD_LOCKED) != 0
-            if (!owned && !policyTransition && 
+            if (!owned && !policyTransition && !keyguardTransition &&
                 task.taskId in visiblePinnedTasks && shouldLeaveFloatingOnBack(task) &&
                 (change.mode == TRANSIT_TO_BACK || change.mode == TRANSIT_CLOSE)) {
                 logV("Leaving floating mode after app departure taskId=%d type=%d mode=%d",
@@ -1024,7 +1024,7 @@ class PinnedLayerController(
                     if (!wct.isEmpty) shellTaskOrganizer.applyTransaction(wct)
                 }
                 if (!restoring && !task.configuration.windowConfiguration.isAlwaysOnTop &&
-                    task.taskId in visiblePinnedTasks && !policyTransition && 
+                    task.taskId in visiblePinnedTasks && !policyTransition && !keyguardTransition &&
                     !keyguardShowing && !recentsRunning && !overviewShowing) {
                     visiblePinnedTasks -= task.taskId
                     minimizedTasks += task.taskId
