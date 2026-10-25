@@ -28,6 +28,7 @@ import android.os.Handler
 import android.os.HandlerExecutor
 import android.os.UserHandle
 import android.os.UserManager
+import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
@@ -44,6 +45,7 @@ import com.android.systemui.broadcast.BroadcastDispatcher
 import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.dagger.qualifiers.Main
 import com.android.systemui.plugins.ActivityStarter
+import com.android.systemui.plugins.statusbar.StatusBarStateController
 import com.android.systemui.res.R
 import com.android.systemui.shade.domain.interactor.ShadeDialogContextInteractor
 import com.android.systemui.statusbar.phone.ComponentSystemUIDialog
@@ -62,6 +64,7 @@ class UsbModePickerDialogDelegate @Inject constructor(
     private val broadcastDispatcher: BroadcastDispatcher,
     private val userManager: UserManager,
     private val keyguardStateController: KeyguardStateController,
+    private val statusBarStateController: StatusBarStateController,
     private val activityStarter: ActivityStarter,
     @Main private val mainHandler: Handler,
 ) : CoreStartable {
@@ -69,6 +72,15 @@ class UsbModePickerDialogDelegate @Inject constructor(
     private var currentDialog: ComponentSystemUIDialog? = null
     private var shownForCurrentSession = false
     private var pendingShow = false
+    private var sessionGeneration = 0L
+    private var deferredGeneration = 0L
+    private val deferredShow = Runnable {
+        if (pendingShow && shownForCurrentSession &&
+            deferredGeneration == sessionGeneration && canShow()) {
+            pendingShow = false
+            showDialog()
+        }
+    }
 
     private val usbManager: UsbManager =
         context.getSystemService(UsbManager::class.java)!!
@@ -87,15 +99,32 @@ class UsbModePickerDialogDelegate @Inject constructor(
 
     private val keyguardCallback = object : KeyguardStateController.Callback {
         override fun onUnlockedChanged() {
-            if (keyguardStateController.isUnlocked && pendingShow) {
-                pendingShow = false
-                mainHandler.postDelayed({ showDialog() }, UNLOCK_SHOW_DELAY_MS)
-            }
+            showPending()
+        }
+    }
+
+    // Do not draw the picker over AOD; show it once the screen is awake instead.
+    private val dozeListener = object : StatusBarStateController.StateListener {
+        override fun onDozingChanged(isDozing: Boolean) {
+            showPending()
+        }
+    }
+
+    private fun canShow() = keyguardStateController.isUnlocked && !statusBarStateController.isDozing &&
+        Settings.Secure.getIntForUser(context.contentResolver, USB_MODE_PICKER_ENABLED,
+            1, UserHandle.USER_CURRENT) != 0
+
+    private fun showPending() {
+        if (pendingShow && canShow()) {
+            deferredGeneration = sessionGeneration
+            mainHandler.removeCallbacks(deferredShow)
+            mainHandler.postDelayed(deferredShow, UNLOCK_SHOW_DELAY_MS)
         }
     }
 
     override fun start() {
         keyguardStateController.addCallback(keyguardCallback)
+        statusBarStateController.addCallback(dozeListener)
 
         broadcastDispatcher.registerReceiver(
             object : BroadcastReceiver() {
@@ -104,14 +133,17 @@ class UsbModePickerDialogDelegate @Inject constructor(
                     if (connected) {
                         val functions = resolveFunctions(intent)
                         if (!shownForCurrentSession) {
+                            sessionGeneration++
                             shownForCurrentSession = true
-                            if (keyguardStateController.isUnlocked) {
+                            if (canShow()) {
                                 showDialog(functions)
                             } else {
                                 pendingShow = true
                             }
                         }
                     } else {
+                        sessionGeneration++
+                        mainHandler.removeCallbacks(deferredShow)
                         shownForCurrentSession = false
                         pendingShow = false
                         dismissDialog()
@@ -127,6 +159,8 @@ class UsbModePickerDialogDelegate @Inject constructor(
     }
 
     private fun showDialog(functions: Long) {
+        if (Settings.Secure.getIntForUser(context.contentResolver, USB_MODE_PICKER_ENABLED,
+                1, UserHandle.USER_CURRENT) == 0) return
         currentDialog?.dismiss()
 
         val modes = buildModeList(functions)
@@ -294,6 +328,7 @@ class UsbModePickerDialogDelegate @Inject constructor(
     }
 
     companion object {
+        private const val USB_MODE_PICKER_ENABLED = "usb_mode_picker_enabled"
         private const val UNLOCK_SHOW_DELAY_MS = 500L
 
         private val USB_MODES = listOf(
