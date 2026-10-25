@@ -27,11 +27,25 @@ class FloatingWindowGeometryStore(
     data class Entry(val bounds: Rect, val manual: Boolean, val landscape: Boolean,
         val scale: Float = FloatingWindowGeometry.DEFAULT_SCALE)
     private val users = mutableMapOf<Int, JSONObject>()
+    private val loadingUsers = mutableSetOf<Int>()
     private val pendingWrites = mutableMapOf<Int, ByteArray>()
     private val writingUsers = mutableSetOf<Int>()
 
     init {
         mainExecutor?.execute { prefetch(ActivityManager.getCurrentUser()) }
+    }
+
+    private fun prefetch(userId: Int) {
+        val owner = mainExecutor ?: return
+        if (users.containsKey(userId) || !loadingUsers.add(userId)) return
+        executor.execute {
+            val snapshot = readUser(userId)
+            owner.execute {
+                loadingUsers.remove(userId)
+                // A fallback read, store or removal takes precedence over the prefetched snapshot.
+                users.getOrPut(userId) { snapshot }
+            }
+        }
     }
 
     private fun user(userId: Int): JSONObject {
@@ -92,19 +106,6 @@ class FloatingWindowGeometryStore(
 
     companion object { private const val TAG = "FloatingGeometryStore" }
 
-    private fun prefetch(userId: Int) {
-        val owner = mainExecutor ?: return
-        if (users.containsKey(userId) || !loadingUsers.add(userId)) return
-        executor.execute {
-            val snapshot = readUser(userId)
-            owner.execute {
-                loadingUsers.remove(userId)
-                // A fallback read, store or removal takes precedence over the prefetched snapshot.
-                users.getOrPut(userId) { snapshot }
-            }
-        }
-    }
-
     fun restore(packageName: String, userId: Int, orientation: Int, stable: Rect,
         displayWidth: Int, displayHeight: Int, density: Int, invalidate: Boolean = true): Entry? {
         if (stable.isEmpty) return null
@@ -136,8 +137,6 @@ class FloatingWindowGeometryStore(
             min(bounds.width(), bounds.height()) <= .3f * min(displayWidth, displayHeight) + 2) return null
         return Entry(bounds, value.optBoolean("manual"), value.optBoolean("landscape"), scale)
     }
-
-    private val loadingUsers = mutableSetOf<Int>()
 
     fun store(packageName: String, userId: Int, orientation: Int, bounds: Rect, stable: Rect,
         displayWidth: Int, displayHeight: Int, density: Int, manual: Boolean, landscape: Boolean,

@@ -16,7 +16,6 @@
 
 package com.android.wm.shell.pinnedlayer.phone
 
-import com.android.wm.shell.R
 import android.app.TaskInfo
 import android.app.WindowConfiguration
 import android.content.Context
