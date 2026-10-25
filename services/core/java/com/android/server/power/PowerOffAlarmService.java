@@ -58,6 +58,9 @@ public class PowerOffAlarmService extends SystemService {
 
     private static final int NOTIFICATION_ID = 0;
 
+    // Power on early enough for the boot to finish before the alarm rings
+    private static final long WAKE_LEAD_MILLIS = 2 * 60 * 1000;
+
     private final Context mContext;
     private AlarmManager mAlarmManager;
     private NotificationManager mNotificationManager;
@@ -159,8 +162,11 @@ public class PowerOffAlarmService extends SystemService {
             Slog.e(TAG, "setPowerOffAlarm: SharedPreferences is null!");
             return;
         }
-        final long time = info.getTriggerTime();
-        Slog.i(TAG, "Set next power off alarm. Time: " + time);
+        final long triggerTime = info.getTriggerTime();
+        final long leadTime = triggerTime - WAKE_LEAD_MILLIS;
+        // An alarm closer than the lead keeps its own time
+        final long time = leadTime > System.currentTimeMillis() ? leadTime : triggerTime;
+        Slog.i(TAG, "Set next power off alarm. Alarm: " + triggerTime + ", wake: " + time);
         mContext.sendBroadcastAsUser(getIntent(ACTION_SET, time), UserHandle.SYSTEM);
         sharedPrefs.edit().putLong(PREF_NEXT_ALARM, time).commit();
     }
