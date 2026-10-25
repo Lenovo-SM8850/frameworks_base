@@ -291,6 +291,35 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun minimize_keepsHdrCap() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        org.mockito.Mockito.clearInvocations(startTransaction, poolTransaction)
+        val transition = mock<IBinder>()
+        pinnedLayerController.unpinTask(transition, task, PinnedLayerController.UnpinStrategy.HIDE)
+
+        pinnedLayerController.onTransitionReady(transition, TransitionInfo(TRANSIT_CHANGE, FLAG_NONE),
+            startTransaction, finishTransaction)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+        verify(startTransaction, never()).setDesiredMaxHdrHeadroom(leash, 0f)
+        verify(poolTransaction, never()).setDesiredMaxHdrHeadroom(any(), any())
+    }
+
+    @Test
+    fun initialFloatingTask_capsRecoveredLeash() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        whenever(shellTaskOrganizer.initialTasks).thenReturn(listOf(android.util.Pair(task, leash)))
+
+        initController()
+
+        verify(poolTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+        verify(poolTransaction).apply()
+    }
+
+    @Test
     fun appearedFloatingTask_capsLeashAndVanishedTaskClearsIt() {
         val task = setupTask().apply { isFloatingWindow = true }
         whenever(leash.isValid).thenReturn(true)
@@ -809,6 +838,14 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun pinTask_unownedFreeform_isNotFloating() {
+        val task = setupTask()
+        shellTaskOrganizer.stub { on { getRunningTaskInfo(task.taskId) } doReturn task }
+
+        assertFalse(pinnedLayerController.isPinned(task.taskId))
+    }
+
+    @Test
     fun pinTask_secondWindow_doesNotRemoveFirst() {
         val first = setupTask(taskId = 201)
         pinTask(first)
@@ -839,6 +876,39 @@ class PinnedLayerControllerTest : ShellTestCase() {
             it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
         })
         assertTrue(pinnedLayerController.isPinned(tasks.first().taskId))
+    }
+
+    @Test
+    fun rotateTask_suppliesMissingStartPresentationBeforeDefaultHandler() {
+        assertRotatePresentation(preserveCoreBounds = false)
+    }
+
+    @Test
+    fun appFinish_clearsSurvivingRecentTaskAfterTransition() {
+        org.mockito.kotlin.doAnswer {
+            it.getArgument<Runnable>(0).run()
+            null
+        }.whenever(transitions).runOnIdle(any())
+        assertAppDepartureLeavesFloating(TRANSIT_CLOSE)
+    }
+
+    @Test
+    fun sleepWakeToBackParticipants_keepFloatingWithoutKeyguardCallback() {
+        for ((id, type) in listOf(201 to android.view.WindowManager.TRANSIT_SLEEP,
+                202 to android.view.WindowManager.TRANSIT_WAKE)) {
+            val task = setupTask(bounds = Rect(100, 200, 900, 800), taskId = id).apply { isFloatingWindow = true }
+            pinTask(task)
+            task.configuration.windowConfiguration.setAlwaysOnTop(false)
+            val info = TransitionInfo(type, FLAG_NONE).apply {
+                addChange(TransitionInfo.Change(task.token, leash).apply {
+                    taskInfo = task
+                    mode = TRANSIT_TO_BACK
+                })
+            }
+            pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+            assertTrue(pinnedLayerController.getPinnedTasks().any { it.taskId == task.taskId })
+        }
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
     }
 
     @Test
@@ -882,6 +952,67 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun pendingIntentLaunch_restoresMinimizedFloatingTaskAndAppliesCapacity() {
+        assertLaunchRestoresMinimizedFloatingTask(TRANSIT_OPEN)
+    }
+
+    @Test
+    fun recentTaskLaunch_restoresMinimizedFloatingTaskAndAppliesCapacity() {
+        assertLaunchRestoresMinimizedFloatingTask(TRANSIT_TO_FRONT)
+    }
+
+    private fun assertLaunchRestoresMinimizedFloatingTask(mode: Int) {
+        val tasks = (301..306).map { setupTask(taskId = it) }
+        tasks.forEach { pinTask(it) }
+        val restored = tasks.first()
+        restored.isFloatingWindow = true
+        restored.configuration.windowConfiguration.setAlwaysOnTop(mode == TRANSIT_OPEN)
+        val info = TransitionInfo(mode, FLAG_NONE)
+        info.addChange(TransitionInfo.Change(restored.token, mock()).apply {
+            taskInfo = restored
+            this.mode = mode
+        })
+
+        pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+
+        val captor = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(captor.capture())
+        val wct = captor.firstValue
+        assertFalse(requireNotNull(wct.changes[restored.token.asBinder()]).hidden)
+        assertTrue(requireNotNull(wct.changes[tasks[1].token.asBinder()]).hidden)
+        assertTrue(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REORDER &&
+                it.container == restored.token.asBinder() && it.toTop
+        })
+        assertTrue(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ALWAYS_ON_TOP &&
+                it.container == restored.token.asBinder() && it.isAlwaysOnTop
+        })
+        assertEquals(restored.taskId, pinnedLayerController.getCurrentPinnedTask()?.taskId)
+        assertTrue(pinnedLayerController.isPinned(tasks[1].taskId))
+    }
+
+    @Test
+    fun keyguardVisibility_hidesAndRestoresFloatingTask() {
+        val task = setupTask(taskId = 201)
+        pinTask(task)
+        whenever(shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)).thenReturn(arrayListOf(task))
+        val shellController = mock<ShellController>()
+        pinnedLayerController.configureVisibility(shellController, mock<RecentsTransitionHandler>())
+        val listener = argumentCaptor<KeyguardChangeListener>()
+        verify(shellController).addKeyguardChangeListener(listener.capture())
+
+        listener.firstValue.onKeyguardVisibilityChanged(true, false, false)
+        listener.firstValue.onKeyguardVisibilityChanged(false, false, false)
+
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer, org.mockito.kotlin.times(2)).applyTransaction(wct.capture())
+        assertTrue(wct.firstValue.changes[task.token.asBinder()]!!.hidden)
+        assertFalse(wct.lastValue.changes[task.token.asBinder()]!!.hidden)
+        assertTrue(pinnedLayerController.isPinned(task.taskId))
+    }
+
+    @Test
     fun overviewVisibility_hidesAndRestoresFloatingTask() {
         val task = setupTask(taskId = 201)
         pinTask(task)
@@ -898,6 +1029,80 @@ class PinnedLayerControllerTest : ShellTestCase() {
         verify(shellTaskOrganizer, org.mockito.kotlin.times(2)).applyTransaction(wct.capture())
         assertTrue(wct.firstValue.changes[task.token.asBinder()]!!.hidden)
         assertFalse(wct.lastValue.changes[task.token.asBinder()]!!.hidden)
+    }
+
+    private fun assertRecentsVisibility(mini: Boolean) {
+        val task = setupTask(taskId = 201).apply { isFloatingWindow = true }
+        pinTask(task)
+        if (mini) {
+            presentationController.miniState.enter(task.userId, task.taskId,
+                FloatingMiniState.Restore(Rect(DEFAULT_TASK_BOUNDS), Rect(DEFAULT_TASK_BOUNDS), 1f),
+                Rect(0, 0, 100, 100), .3f)
+        }
+        val shellController = mock<ShellController>()
+        val recents = mock<RecentsTransitionHandler>()
+        pinnedLayerController.configureVisibility(shellController, recents)
+        val state = argumentCaptor<RecentsTransitionStateListener>()
+        val overview = argumentCaptor<OverviewVisibilityChangeListener>()
+        val keyguard = argumentCaptor<KeyguardChangeListener>()
+        verify(recents).addTransitionStateListener(state.capture())
+        verify(shellController).addOverviewVisibilityChangeListener(overview.capture())
+        verify(shellController).addKeyguardChangeListener(keyguard.capture())
+
+        state.firstValue.onTransitionStateChanged(TRANSITION_STATE_REQUESTED, DEFAULT_DISPLAY)
+        state.firstValue.onTransitionStateChanged(TRANSITION_STATE_ANIMATING, DEFAULT_DISPLAY)
+        overview.firstValue.onOverviewShown(DEFAULT_DISPLAY)
+        overview.firstValue.onOverviewHidden(DEFAULT_DISPLAY)
+        keyguard.firstValue.onKeyguardVisibilityChanged(true, false, false)
+        keyguard.firstValue.onKeyguardVisibilityChanged(false, false, false)
+
+        val transactions = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer, org.mockito.kotlin.times(6))
+            .applyTransaction(transactions.capture())
+        assertEquals(listOf(false, false, true, false, true, false),
+            transactions.allValues.map { it.changes[task.token.asBinder()]!!.hidden })
+        verify(recents, org.mockito.kotlin.times(2)).setFloatingTasksHidden(DEFAULT_DISPLAY, true)
+        verify(recents, org.mockito.kotlin.times(4)).setFloatingTasksHidden(DEFAULT_DISPLAY, false)
+        assertTrue(pinnedLayerController.isPinned(task.taskId))
+    }
+
+    @Test
+    fun recentsHomeFinish_overviewStillVisible_keepsTasksAndHandlesHidden() {
+        val task = setupTask(taskId = 201).apply { isFloatingWindow = true }
+        pinTask(task)
+        val handles = mock<FloatingMinimizeHandles>()
+        PinnedLayerController::class.java.getDeclaredField("minimizeHandles").apply {
+            isAccessible = true
+            set(pinnedLayerController, handles)
+        }
+        val shellController = mock<ShellController>()
+        val recents = mock<RecentsTransitionHandler>()
+        pinnedLayerController.configureVisibility(shellController, recents)
+        val state = argumentCaptor<RecentsTransitionStateListener>()
+        val overview = argumentCaptor<OverviewVisibilityChangeListener>()
+        verify(recents).addTransitionStateListener(state.capture())
+        verify(shellController).addOverviewVisibilityChangeListener(overview.capture())
+        org.mockito.kotlin.doAnswer {
+            it.getArgument<Runnable>(0).run()
+            null
+        }.whenever(transitions).runOnIdle(any())
+        whenever(shellController.isOverviewVisible(DEFAULT_DISPLAY)).thenReturn(true)
+        overview.firstValue.onOverviewShown(DEFAULT_DISPLAY)
+        org.mockito.Mockito.clearInvocations(shellTaskOrganizer, handles, recents)
+
+        state.firstValue.onTransitionFinishedToHome(DEFAULT_DISPLAY)
+
+        val transactions = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(transactions.capture())
+        assertTrue(transactions.firstValue.changes[task.token.asBinder()]!!.hidden)
+        verify(handles).setVisible(false)
+        verify(handles, never()).setVisible(true)
+        verify(recents).setFloatingTasksHidden(DEFAULT_DISPLAY, true)
+
+        whenever(shellController.isOverviewVisible(DEFAULT_DISPLAY)).thenReturn(false)
+        overview.firstValue.onOverviewHidden(DEFAULT_DISPLAY)
+        verify(handles).setVisible(true)
+        verify(recents).setFloatingTasksHidden(DEFAULT_DISPLAY, false)
     }
 
     private fun setupTask(

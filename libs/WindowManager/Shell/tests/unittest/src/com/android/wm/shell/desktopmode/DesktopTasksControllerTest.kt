@@ -3043,6 +3043,24 @@ class DesktopTasksControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun startFloatingIntent_usesWmRequestPathForResolvedTaskPreparation() {
+        val pendingIntent = mock(PendingIntent::class.java)
+        whenever(pendingIntent.isActivity).thenReturn(true)
+        whenever(pendingIntent.creatorUserHandle).thenReturn(UserHandle.of(10))
+        whenever(pendingIntent.intent).thenReturn(Intent())
+        val options = argumentCaptor<Bundle>()
+
+        controller.startFloatingIntent(pendingIntent)
+
+        verify(pendingIntent).send(
+            eq(context), eq(0), anyOrNull(), anyOrNull(), eq(mockHandler), anyOrNull(),
+            options.capture(),
+        )
+        assertThat(ActivityOptions.fromBundle(options.firstValue).launchFloatingWindow).isTrue()
+        verify(transitions, never()).startTransition(anyInt(), any(), anyOrNull())
+    }
+
+    @Test
     fun handleRequest_floatingTask_doesNotActivateOrPopulateDesk() {
         val task = setUpFreeformTask()
         taskRepository.removeTask(task.taskId)

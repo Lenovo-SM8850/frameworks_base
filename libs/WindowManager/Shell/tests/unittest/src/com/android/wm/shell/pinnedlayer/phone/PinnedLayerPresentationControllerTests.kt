@@ -89,72 +89,83 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
-    fun getPinEntryDestinationBounds_taskWithinLimits_noScaling() {
-        // minSize = 220dp * 2.0 = 440px
-        // maxWidth = 1080 * 0.7 = 756px
-        // maxHeight = 1920 * 0.7 = 1344px
-        // Task size (500x600) is within these limits.
-        val task = createTaskInfo(Rect(0, 0, 500, 600))
-
-        val bounds = controller.getPinEntryDestinationBounds(task)
-
-        // Expected position: bottom-right corner considering stable insets
-        // right = 1080 - 0 (inset) - 10 (padding) = 1070
-        // bottom = 1920 - 50 (inset) - 10 (padding) = 1860
-        // left = 1070 - 500 = 570
-        // top = 1860 - 600 = 1260
-        val expected = Rect(570, 1260, 1070, 1860)
-        assertThat(bounds).isEqualTo(expected)
+    fun miniAndStash_doNotOverwriteRememberedNormalGeometry() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.mini", "Main")
+            positionInParent = android.graphics.Point(100, 200)
+            floatingWindowPosition.set(100, 200)
+            userId = 10
+        }
+        val normal = Rect(task.floatingWindowRestoreBounds)
+        controller.rememberBounds(task)
+        val entry = controller.miniState.enter(task.userId, task.taskId,
+            FloatingMiniState.Restore(normal, task.configuration.windowConfiguration.bounds,
+                task.floatingWindowScale), Rect(8, 108, 332, 540), .4f)
+        task.floatingWindowScale = .4f
+        task.positionInParent = android.graphics.Point(8, 108)
+        task.floatingWindowPosition.set(8, 108)
+        controller.rememberBounds(task)
+        entry.edge = FloatingMiniState.Edge.LEFT
+        task.floatingWindowPosition.set(-292, 108)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(normal)
     }
 
     @Test
-    fun getPinEntryDestinationBounds_taskTooSmall_scalesUp() {
-        // minSize = 220dp * 2.0 = 440px
-        // Task size (200x300) is smaller than minSize.
-        val task = createTaskInfo(Rect(0, 0, 200, 300))
-
-        val bounds = controller.getPinEntryDestinationBounds(task)
-
-        // w0=200, h0=300. minScale = max(440/200, 440/300) = 2.2
-        // finalWidth = 200 * 2.2 = 440
-        // finalHeight = 300 * 2.2 = 660
-        // right = 1070, bottom = 1860
-        // left = 1070 - 440 = 630
-        // top = 1860 - 660 = 1200
-        val expected = Rect(630, 1200, 1070, 1860)
-        assertThat(bounds).isEqualTo(expected)
+    fun restart_rebuildsStashAndPreservesRememberedNormalGeometry() {
+        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() },
+            java.util.concurrent.Executor { it.run() })
+        val first = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        val task = createTaskInfo(Rect(0, 0, 800, 1200)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.restart", "Main")
+            floatingWindowScale = .75f
+            floatingWindowPosition.set(100, 200)
+        }
+        val normal = Rect(task.floatingWindowRestoreBounds)
+        first.rememberBounds(task)
+        val restarted = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        task.floatingWindowScale = .405f
+        task.floatingWindowPosition.set(-268, 200)
+        val recovered = requireNotNull(restarted.recoverMini(task))
+        assertThat(recovered.edge).isEqualTo(FloatingMiniState.Edge.LEFT)
+        assertThat(recovered.bounds.right).isEqualTo(56)
+        assertThat(recovered.restore.bounds).isEqualTo(normal)
+        restarted.rememberBounds(task)
+        assertThat(restarted.getPinEntryDestinationBounds(task)).isEqualTo(normal)
     }
 
     @Test
-    fun getPinEntryDestinationBounds_taskTooLarge_scalesDown() {
-        // maxWidth = 1080 * 0.7 = 756px
-        // maxHeight = 1920 * 0.7 = 1344px
-        // Task size (1000x1500) is larger than max size.
-        val task = createTaskInfo(Rect(0, 0, 1000, 1500))
-
-        val bounds = controller.getPinEntryDestinationBounds(task)
-
-        // w0=1000, h0=1500. maxScale = min(756/1000, 1344/1500) = 0.756
-        // finalWidth = 1000 * 0.756 = 756
-        // finalHeight = 1500 * 0.756 = 1134
-        // right = 1070, bottom = 1860
-        // left = 1070 - 756 = 314
-        // top = 1860 - 1134 = 726
-        val expected = Rect(314, 726, 1070, 1860)
-        assertThat(bounds).isEqualTo(expected)
+    fun restart_miniWithoutSavedGeometryGetsOnscreenNormalRestore() {
+        val task = createTaskInfo(Rect(0, 0, 800, 1200)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .405f
+            floatingWindowPosition.set(16, 116)
+        }
+        val recovered = requireNotNull(controller.recoverMini(task))
+        assertThat(recovered.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(Rect(0, 100, 1080, 1870).contains(recovered.restore.bounds)).isTrue()
+        assertThat(recovered.restore.bounds.width()).isGreaterThan(recovered.bounds.width())
+        assertThat(recovered.restore.scale).isEqualTo(FloatingWindowGeometry.DEFAULT_SCALE)
     }
 
     @Test
-    fun getPinEntryDestinationBounds_conflictingConstraints_prioritizesMaxSize() {
-        // Setup a smaller display where min size in px is larger than max size in px
-        whenever(displayLayout.width()).thenReturn(500)
-        whenever(displayLayout.height()).thenReturn(800)
-        whenever(displayLayout.stableInsets()).thenReturn(Rect()) // No insets
+    fun remember_afterRestartRebuildsMiniBeforeStore() {
+        val task = createTaskInfo(Rect(0, 0, 800, 1200)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .405f
+            floatingWindowPosition.set(16, 116)
+        }
+        controller.rememberBounds(task)
+        assertThat(controller.miniState.get(task.userId, task.taskId)).isNotNull()
+    }
 
-        // minSize = 220dp * 2.0 = 440px
-        // maxWidth = 500 * 0.7 = 350px -> Conflict!
-        // maxHeight = 800 * 0.7 = 560px
-        val task = createTaskInfo(Rect(0, 0, 300, 400))
+    @Test
+    fun getPinEntryDestinationBounds_portrait_centeredAndSizedToDisplay() {
+        val bounds = requireNotNull(
+            controller.getPinEntryDestinationBounds(createTaskInfo(Rect(0, 0, 500, 600)))
+        )
 
         assertThat(bounds.width()).isEqualTo(576)
         assertThat(bounds.height()).isEqualTo(777)
@@ -276,7 +287,8 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
 
     @Test
     fun entry_afterRestartUsesCurrentDesktopAspectInsteadOfSavedRotation() {
-        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() })
+        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() },
+            java.util.concurrent.Executor { it.run() })
         val first = PinnedLayerPresentationController(context, displayController, desktopState, store)
         val task = createTaskInfo(Rect(0, 0, 600, 1000)).apply {
             isFloatingWindow = true

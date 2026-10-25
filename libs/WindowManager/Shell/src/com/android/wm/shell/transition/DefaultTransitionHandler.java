@@ -916,6 +916,14 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
         }
     }
 
+    private static boolean isFloatingMinimize(TransitionInfo info, TransitionInfo.Change change) {
+        // Home/overview policy visibility changes must not animate a minimize.
+        return info.getType() == android.view.WindowManager.TRANSIT_TO_BACK
+                && change.getMode() == android.view.WindowManager.TRANSIT_TO_BACK
+                && change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow
+                && !change.getStartFloatingWindowBounds().isEmpty();
+    }
+
     private void endAllAnimations(List<WindowAnimation> animations) {
         for (int i = animations.size() - 1; i >= 0; --i) {
             final WindowAnimation winAnim = animations.get(i);

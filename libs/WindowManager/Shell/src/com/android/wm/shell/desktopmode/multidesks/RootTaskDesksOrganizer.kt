@@ -28,6 +28,7 @@ import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
 import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
 import android.app.WindowConfiguration.windowingModeToString
 import android.content.res.Configuration
+import android.graphics.Rect
 import android.os.Trace
 import android.os.UserHandle
 import android.os.UserManager
@@ -46,8 +47,10 @@ import androidx.core.util.valueIterator
 import com.android.internal.annotations.VisibleForTesting
 import com.android.internal.protolog.ProtoLog
 import com.android.window.flags.Flags
+import com.android.wm.shell.R
 import com.android.wm.shell.RootTaskDisplayAreaOrganizer
 import com.android.wm.shell.ShellTaskOrganizer
+import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.LaunchAdjacentController
 import com.android.wm.shell.desktopmode.createActivityOptionsForStartTask
 import com.android.wm.shell.desktopmode.desktopfirst.isDisplayDesktopFirst
@@ -72,6 +75,8 @@ class RootTaskDesksOrganizer(
     private val launchAdjacentController: LaunchAdjacentController,
     private val rootTaskDisplayAreaOrganizer: RootTaskDisplayAreaOrganizer,
     private val userManager: UserManager? = null,
+    private val displayController: DisplayController? = null,
+    private val expandedFloatingBounds: ((TaskInfo) -> Rect)? = null,
 ) : DesksOrganizer, ShellTaskOrganizer.TaskListener {
 
     private val createDeskRootRequests = mutableListOf<CreateDeskRequest>()
@@ -279,14 +284,27 @@ class RootTaskDesksOrganizer(
                             userId)
                 }
                 .forEach { task ->
-                    val bounds = task.presentationBounds
                     val minimized = !task.configuration.windowConfiguration.isAlwaysOnTop
                     moveTaskToDesk(wct, deskId, task, minimized)
-                    wct.merge(PinnedLayerUtils.getRemovedFromLayerWct(task.token), true)
-                    wct.setHidden(task.token, false)
-                    wct.setBounds(task.token, bounds)
                 }
         }
+    }
+
+    private fun desktopBoundsForFloatingTask(task: TaskInfo, displayId: Int): Rect {
+        val bounds = Rect(expandedFloatingBounds?.invoke(task) ?: task.floatingWindowRestoreBounds)
+        val layout = displayController?.getDisplayLayout(displayId) ?: return bounds
+        val context = rootTaskDisplayAreaOrganizer.getContext(displayId) ?: return bounds
+        val stable = Rect().also { layout.getStableBounds(it) }
+        if (stable.isEmpty) return bounds
+        val minWidth = maxOf(task.minWidth, context.resources.getDimensionPixelSize(
+            R.dimen.desktop_mode_minimum_window_width))
+        val minHeight = maxOf(task.minHeight, context.resources.getDimensionPixelSize(
+            R.dimen.desktop_mode_minimum_window_height))
+        val width = maxOf(bounds.width(), minWidth).coerceAtMost(stable.width())
+        val height = maxOf(bounds.height(), minHeight).coerceAtMost(stable.height())
+        val left = bounds.left.coerceIn(stable.left, stable.right - width)
+        val top = bounds.top.coerceIn(stable.top, stable.bottom - height)
+        return Rect(left, top, left + width, top + height)
     }
 
     override fun deactivateDesk(
@@ -376,8 +394,9 @@ class RootTaskDesksOrganizer(
             wct.startTask(task.taskId, createActivityOptionsForStartTask(deskId, this).toBundle())
         }
         if (task.isFloatingWindow) {
+            val bounds = desktopBoundsForFloatingTask(task, root.taskInfo.displayId)
             wct.merge(PinnedLayerUtils.getRemovedFromLayerWct(task.token), true)
-            wct.setBounds(task.token, task.presentationBounds)
+            wct.setBounds(task.token, bounds)
         }
         wct.setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED)
         if (!minimized) {

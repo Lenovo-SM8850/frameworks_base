@@ -51,6 +51,45 @@ private constructor(
     private val defaultWindowDecor: DefaultWindowDecoration? = null,
     private val captionWindowDecoration: CaptionWindowDecoration? = null,
 ) {
+    var floatingMiniPreviewCancellation: (() -> Unit)? = null
+
+    fun cancelFloatingMiniPreview() { floatingMiniPreviewCancellation?.invoke() }
+
+    private var floatingBottomHandle: FloatingBottomHandle? = null
+    private var floatingTopHandle: FloatingBottomHandle? = null
+    private var floatingMiniInput: FloatingMiniInput? = null
+    private var floatingController: PinnedLayerController? = null
+    private var floatingFocusActive = false
+    private val floatingFocusIndicator = FloatingFocusIndicator { radius, alpha ->
+        defaultWindowDecor?.updateFloatingFocusShadow(radius)
+        desktopWindowDecor?.updateFloatingFocusShadow(radius)
+        floatingBottomHandle?.setFocusAlpha(alpha)
+        floatingTopHandle?.setFocusAlpha(alpha)
+    }
+
+    private fun updateFloatingFocus(task: RunningTaskInfo,
+        finishT: SurfaceControl.Transaction? = null) {
+        val enabled = task.isFloatingWindow && floatingController?.isMini(task) != true &&
+            floatingPreviewSource == null
+        if (!enabled && !floatingFocusActive) return
+        floatingFocusActive = enabled
+        defaultWindowDecor?.floatingFocusEnabled = enabled
+        desktopWindowDecor?.mFloatingFocusEnabled = enabled
+        if (!enabled || !task.isVisible) {
+            floatingFocusIndicator.close()
+            defaultWindowDecor?.updateFloatingFocusShadow(null)
+            desktopWindowDecor?.updateFloatingFocusShadow(null)
+            return
+        }
+        currentDecorWindowContext?.let { floatingFocusIndicator.update(task, it, finishT) }
+    }
+
+    private val miniListener: (android.app.TaskInfo) -> Unit = { info ->
+        if (info.taskId == decorTaskInfo.taskId && info is RunningTaskInfo) {
+            relayout(info, hasGlobalFocus, exclusionRegion)
+        }
+    }
+
     fun setFloatingHandleListener(listener: DesktopModeTouchEventListener) {
         if (captionWindowDecoration == null) {
             floatingController = listener.pinnedLayerController
@@ -279,7 +318,7 @@ private constructor(
         get() =
             when {
                 defaultWindowDecor != null -> requireDefaultWindowDecor().pinnedLayerController
-                desktopWindowDecor != null -> null // Unsupported in this context
+                desktopWindowDecor != null -> floatingController
                 captionWindowDecoration != null -> null // Unsupported in this context
                 else -> error("Expected Non-null default or desktop window decoration")
             }

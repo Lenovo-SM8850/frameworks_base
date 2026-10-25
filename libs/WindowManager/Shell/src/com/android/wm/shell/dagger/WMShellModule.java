@@ -806,10 +806,15 @@ public abstract class WMShellModule {
             @NonNull ShellCommandHandler shellCommandHandler,
             @NonNull ShellTaskOrganizer shellTaskOrganizer,
             @NonNull LaunchAdjacentController launchAdjacentController,
-            @NonNull RootTaskDisplayAreaOrganizer rootTaskDisplayAreaOrganizer) {
+            @NonNull RootTaskDisplayAreaOrganizer rootTaskDisplayAreaOrganizer,
+            @NonNull DisplayController displayController,
+            Lazy<Optional<PinnedLayerController>> pinnedLayerController) {
         return new RootTaskDesksOrganizer(shellInit, shellCommandHandler, shellTaskOrganizer,
                 launchAdjacentController, rootTaskDisplayAreaOrganizer,
-                context.getSystemService(android.os.UserManager.class));
+                context.getSystemService(android.os.UserManager.class), displayController,
+                task -> pinnedLayerController.get()
+                        .map(controller -> controller.getExpandedFloatingBounds(task))
+                        .orElseGet(task::getFloatingWindowRestoreBounds));
     }
 
     @WMSingleton

@@ -1416,7 +1416,7 @@ class DesktopTasksController(
             return null
         }
         desksOrganizer.moveTaskToDesk(wct, deskId, task, minimized = minimized)
-        taskBounds?.let { wct.setBounds(task.token, it) }
+        taskBounds?.takeUnless { task.isFloatingWindow }?.let { wct.setBounds(task.token, it) }
 
         return RunOnTransitStart { transition ->
             desksTransitionObserver.addPendingTransition(
@@ -1961,6 +1961,7 @@ class DesktopTasksController(
     }
 
     fun minimizeTask(taskInfo: RunningTaskInfo, minimizeReason: MinimizeReason) {
+        if (pinnedLayerController?.minimizeTask(taskInfo) == true) return
         val wct = WindowContainerTransaction()
         val taskId = taskInfo.taskId
         val displayId = taskInfo.displayId
@@ -2477,6 +2478,8 @@ class DesktopTasksController(
         taskInfo: RunningTaskInfo,
     ) {
         logV("addMoveTaskToFrontChanges taskId=%d deskId=%s", taskInfo.taskId, deskId?.toString())
+        if (taskInfo.isFloatingWindow &&
+            pinnedLayerController?.prepareMinimizedTaskRestore(taskInfo, wct) == true) return
         // If a task is tiled, another task should be brought to foreground with it so let
         // tiling controller handle the request.
         if (snapController.moveTaskToFrontIfTiled(taskInfo)) {
@@ -2970,7 +2973,7 @@ class DesktopTasksController(
             }
             snapController.removeTaskIfTiled(task.displayId, task.taskId)
             // TODO: b/393977830 and b/397437641 - do not assume that freeform==desktop.
-            if (!task.isFreeform) {
+            if (!task.isFreeform || task.isFloatingWindow) {
                 if (desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(task)) {
                     logW(
                         "addMoveToDisplayChanges: do nothing because the desktop entry points " +
@@ -3863,6 +3866,20 @@ class DesktopTasksController(
         }
     }
 
+    fun createFloatingMiniPreview(task: RunningTaskInfo,
+        taskSurface: SurfaceControl): VisualIndicatorViewContainer? {
+        val display = displayController.getDisplay(task.displayId) ?: return null
+        val layout = displayController.getDisplayLayout(task.displayId) ?: return null
+        val displayContext = displayController.getDisplayContext(task.displayId) ?: return null
+        val builder = SurfaceControl.Builder()
+        rootTaskDisplayAreaOrganizer.attachToDisplayArea(task.displayId, builder)
+        return VisualIndicatorViewContainer(desktopExecutor, mainExecutor, builder, syncQueue,
+            bubbleBoundsProvider = null, snapEventHandler = snapController,
+            inputFlags = android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE).also {
+            it.createView(displayContext, display, layout, task, taskSurface)
+        }
+    }
+
     fun releaseVisualIndicator() {
         visualIndicator?.releaseVisualIndicator()
         visualIndicator = null
@@ -4646,7 +4663,7 @@ class DesktopTasksController(
                 targetDeskId,
                 requestedTaskBounds,
             )
-        if (bounds != null) {
+        if (bounds != null && !task.isFloatingWindow) {
             logV("handleFreeformTaskPlacement decided placement bounds to be %s", bounds)
             wct.setBounds(task.token, bounds)
         }
@@ -5052,7 +5069,9 @@ class DesktopTasksController(
         if (desktopConfig.useDesktopOverrideDensity) {
             wct.setDensityDpi(task.token, desktopConfig.desktopDensityOverride)
         }
-        return taskBounds
+        return if (task.isFloatingWindow) {
+            wct.changes[task.token.asBinder()]?.configuration?.windowConfiguration?.bounds
+        } else taskBounds
     }
 
     /**

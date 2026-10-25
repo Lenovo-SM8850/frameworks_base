@@ -735,7 +735,8 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
     private void updateDragResizeListenerIfNeeded(@Nullable SurfaceControl containerSurface,
             boolean inFullImmersive) {
         final boolean taskPositionChanged = !mTaskInfo.positionInParent.equals(mPositionInParent);
-        if (!isDragResizable(mTaskInfo, inFullImmersive)) {
+        if (!isDragResizable(mTaskInfo, inFullImmersive)
+                || (mPinnedLayerController != null && mPinnedLayerController.isMini(mTaskInfo))) {
             if (taskPositionChanged) {
                 // We still want to track caption bar's exclusion region on a non-resizeable task.
                 updateExclusionRegion(inFullImmersive);

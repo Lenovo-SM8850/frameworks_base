@@ -64,6 +64,60 @@ class FloatingWindowGeometryStore(
         }
     }
 
+    fun store(packageName: String, userId: Int, orientation: Int, bounds: Rect, stable: Rect,
+        displayWidth: Int, displayHeight: Int, density: Int, manual: Boolean, landscape: Boolean,
+        scale: Float = FloatingWindowGeometry.DEFAULT_SCALE,
+        presentationState: PresentationState = PresentationState.NORMAL) {
+        if (presentationState != PresentationState.NORMAL ||
+            bounds.isEmpty || stable.isEmpty || !stable.contains(bounds) || !scale.isFinite() ||
+            scale <= 0f || scale > 1f ||
+            min(bounds.width(), bounds.height()) <= .3f * min(displayWidth, displayHeight) + 2) return
+        val value = JSONObject().put("presentation", presentationState.name).put("left", (bounds.left - stable.left).toDouble() / stable.width())
+            .put("top", (bounds.top - stable.top).toDouble() / stable.height())
+            .put("width", bounds.width().toDouble() / stable.width())
+            .put("height", bounds.height().toDouble() / stable.height())
+            .put("short", min(displayWidth, displayHeight))
+            .put("long", max(displayWidth, displayHeight)).put("density", density)
+            .put("manual", manual).put("landscape", landscape).put("scale", scale.toDouble())
+        val data = user(userId)
+        val key = "$packageName:$orientation"
+        if (data.optJSONObject(key)?.toString() == value.toString()) return
+        data.put(key, value)
+        persist(userId)
+    }
+
+    fun restore(packageName: String, userId: Int, orientation: Int, stable: Rect,
+        displayWidth: Int, displayHeight: Int, density: Int, invalidate: Boolean = true): Entry? {
+        if (stable.isEmpty) return null
+        val key = "$packageName:$orientation"
+        val value = user(userId).optJSONObject(key) ?: return null
+        if (value.optString("presentation", PresentationState.NORMAL.name) !=
+            PresentationState.NORMAL.name) return null
+        if (value.optInt("short") != min(displayWidth, displayHeight) ||
+            value.optInt("long") != max(displayWidth, displayHeight) ||
+            value.optInt("density") != density) {
+            if (invalidate) {
+                user(userId).remove(key)
+                persist(userId)
+            }
+            return null
+        }
+        val x = value.optDouble("left", Double.NaN)
+        val y = value.optDouble("top", Double.NaN)
+        val w = value.optDouble("width", Double.NaN)
+        val h = value.optDouble("height", Double.NaN)
+        if (!x.isFinite() || !y.isFinite() || !w.isFinite() || !h.isFinite() ||
+            x !in 0.0..1.0 || y !in 0.0..1.0 || w <= 0 || h <= 0 || w > 1 || h > 1) return null
+        val left = stable.left + (x * stable.width()).roundToInt()
+        val top = stable.top + (y * stable.height()).roundToInt()
+        val bounds = Rect(left, top, left + (w * stable.width()).roundToInt(),
+            top + (h * stable.height()).roundToInt())
+        val scale = value.optDouble("scale", FloatingWindowGeometry.DEFAULT_SCALE.toDouble()).toFloat()
+        if (!scale.isFinite() || scale <= 0f || scale > 1f || !stable.contains(bounds) ||
+            min(bounds.width(), bounds.height()) <= .3f * min(displayWidth, displayHeight) + 2) return null
+        return Entry(bounds, value.optBoolean("manual"), value.optBoolean("landscape"), scale)
+    }
+
     fun removeUser(userId: Int) {
         users[userId] = JSONObject()
         synchronized(pendingWrites) { pendingWrites.remove(userId) }

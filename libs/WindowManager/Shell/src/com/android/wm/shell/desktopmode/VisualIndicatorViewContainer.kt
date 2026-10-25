@@ -77,7 +77,9 @@ constructor(
     // be accessed from shell main thread. Everything else should be used exclusively
     // from the desktop thread.
     private var indicatorLeash: SurfaceControl? = null
-    private var isReleased = false
+    @Volatile private var isReleased = false
+    private var miniPreview = false
+    private var miniOutline: WindowPreviewOutline? = null
 
     /** Create a fullscreen indicator with no animation */
     @ShellMainThread
@@ -151,6 +153,10 @@ constructor(
 
     private fun showIndicator(taskSurface: SurfaceControl, leash: SurfaceControl) {
         mainExecutor.execute {
+            if (isReleased) {
+                releaseIndicator(leash)
+                return@execute
+            }
             indicatorLeash = leash
             val t = SurfaceControl.Transaction()
             t.show(indicatorLeash)
@@ -338,21 +344,51 @@ constructor(
         }
     }
 
+    /** Shows an exact mini destination using the existing indicator's stroke without its fill. */
+    fun updateMiniPreview(bounds: Rect?, radius: Float) {
+        if (isReleased) return
+        miniPreview = true
+        val target = bounds?.let(::Rect)
+        desktopExecutor.execute {
+            if (isReleased) return@execute
+            val view = indicatorView ?: return@execute
+            if (target != null || miniOutline != null) {
+                val outline = miniOutline ?: WindowPreviewOutline(view).also { miniOutline = it }
+                outline.update(target, radius)
+            } else {
+                view.animate().cancel()
+                view.animate().alpha(0f).setDuration(120).start()
+            }
+        }
+    }
+
     /** Release the indicator and its components when it is no longer needed. */
     @ShellMainThread
     fun releaseVisualIndicator() {
         if (isReleased) return
+        isReleased = true
+        val leash = indicatorLeash
+        indicatorLeash = null
+        releaseIndicator(leash)
+    }
+
+    private fun releaseIndicator(leash: SurfaceControl?) {
         desktopExecutor.execute {
-            indicatorViewHost?.release()
+            indicatorView?.animate()?.cancel()
+            val host = indicatorViewHost
             indicatorViewHost = null
-        }
-        indicatorLeash?.let {
-            val tx = SurfaceControl.Transaction()
-            tx.remove(it)
-            indicatorLeash = null
-            syncQueue.runInSync { transaction: SurfaceControl.Transaction ->
-                transaction.merge(tx)
-                tx.close()
+            indicatorView = null
+            host?.release()
+            mainExecutor.execute {
+                leash?.let {
+                    val tx = SurfaceControl.Transaction()
+                    tx.remove(it)
+                    syncQueue.runInSync { transaction: SurfaceControl.Transaction ->
+                        transaction.merge(tx)
+                        tx.close()
+                        it.release()
+                    }
+                }
             }
         }
         isReleased = true

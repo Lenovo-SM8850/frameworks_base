@@ -26,6 +26,24 @@ object FloatingWindowGeometry {
         return Rect(base).apply { offset(dx, dy) }
     }
 
+    fun entryScale(visible: Rect, stable: Rect): Float {
+        if (visible.isEmpty || stable.isEmpty) return 1f
+        return max(DEFAULT_SCALE, max(visible.width().toFloat() / stable.width(),
+            visible.height().toFloat() / stable.height())).coerceAtMost(1f)
+    }
+
+    /** Fits logical geometry while preserving presentation size and aspect. */
+    fun logicalBounds(visible: Rect, stable: Rect, scale: Float, out: Rect = Rect()): Rect {
+        val width = (visible.width() / scale).roundToInt().coerceIn(1, stable.width())
+        val height = (visible.height() / scale).roundToInt().coerceIn(1, stable.height())
+        val left = visible.left.coerceIn(stable.left, stable.right - width)
+        val top = visible.top.coerceIn(stable.top, stable.bottom - height)
+        return out.apply { set(left, top, left + width, top + height) }
+    }
+
+    data class ScaledResize(val visible: Rect, val logical: Rect, var scale: Float,
+        var commitsBounds: Boolean, var atMinimum: Boolean = false)
+
     fun scaledCorner(start: Rect, logical: Rect, stable: Rect, ctrl: Int,
         dx: Float, dy: Float, minWidth: Int, minHeight: Int,
         out: ScaledResize = ScaledResize(Rect(), Rect(), 1f, false),

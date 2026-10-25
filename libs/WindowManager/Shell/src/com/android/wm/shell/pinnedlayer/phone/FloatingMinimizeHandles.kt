@@ -38,6 +38,9 @@ class FloatingMinimizeHandles(
     private var users = setOf(UserHandle.myUserId())
     private var visible = true
 
+    fun setUsers(userIds: Set<Int>) { users = userIds; update() }
+    fun setVisible(value: Boolean) { visible = value; update() }
+
     fun update() {
         val layout = displayController.getDisplayLayout(DEFAULT_DISPLAY) ?: return
         val stable = Rect().also { layout.getStableBounds(it) }
@@ -72,4 +75,69 @@ class FloatingMinimizeHandles(
         }
     }
 
+    private fun create(task: TaskInfo, size: Int): Handle {
+        val view = ImageView(windowContext)
+        val params = WindowManager.LayoutParams(size, size,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.LEFT
+            token = Binder()
+            setTitle("Floating window handle ${task.taskId}")
+            packageName = context.packageName
+            setTrustedOverlay()
+            privateFlags = privateFlags or WindowManager.LayoutParams.SYSTEM_FLAG_SHOW_FOR_ALL_USERS
+            setFitInsetsTypes(0)
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        }
+        val userContext = context.createContextAsUser(UserHandle.of(task.userId), 0)
+        val info = task.topActivityInfo?.applicationInfo
+        val icon = try { info?.loadIcon(userContext.packageManager) } catch (e: Exception) { null }
+        view.setImageDrawable(icon ?: context.getDrawable(android.R.drawable.sym_def_app_icon))
+        val label = info?.loadLabel(userContext.packageManager) ?: task.baseActivity?.packageName.orEmpty()
+        view.contentDescription = context.getString(R.string.floating_window_restore, label)
+        view.background = GradientDrawable().apply {
+            setColor(context.getColor(android.R.color.system_neutral1_800))
+            cornerRadius = size / 2f
+        }
+        view.elevation = size / 8f
+        view.setPadding(size / 6, size / 6, size / 6, size / 6)
+        view.systemGestureExclusionRects = listOf(Rect(0, 0, size, size))
+        view.isClickable = true
+        view.setOnClickListener { onRestore(task.taskId) }
+        var startX = 0f
+        var startY = 0f
+        var startRight = true
+        var startFraction = .5f
+        var dragging = false
+        val slop = ViewConfiguration.get(windowContext).scaledTouchSlop
+        view.setOnTouchListener { _, event ->
+            val entry = state.entries[task.taskId] ?: return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX; startY = event.rawY
+                    startRight = entry.right; startFraction = entry.fractionY; dragging = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    dragging = dragging || abs(event.rawX - startX) > slop || abs(event.rawY - startY) > slop
+                    if (dragging) {
+                        val layout = displayController.getDisplayLayout(DEFAULT_DISPLAY)
+                        val stable = Rect().also { layout?.getStableBounds(it) }
+                        if (!stable.isEmpty && layout != null) {
+                            state.move(task.taskId, event.rawX >= layout.width() / 2f,
+                                startFraction + (event.rawY - startY) / (stable.height() - size).coerceAtLeast(1))
+                            update()
+                        }
+                    }
+                }
+                MotionEvent.ACTION_UP -> if (!dragging) view.performClick()
+                MotionEvent.ACTION_CANCEL -> { state.move(task.taskId, startRight, startFraction); update() }
+            }
+            true
+        }
+        return Handle(view, params)
+    }
 }

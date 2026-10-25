@@ -158,6 +158,65 @@ class WindowDecoration2Tests : ShellTestCase() {
             }
         }
 
+    @Test
+    fun hiddenFloatingAndMiniRelayout_preservesOutlineWithoutShowingOrCreatingViews() =
+        testScope.runTest {
+            for (scale in listOf(.75f, .25f)) {
+                val task = createFreeformTask().apply {
+                    isVisible = false
+                    isFloatingWindow = true
+                    floatingWindowScale = scale
+                }
+                TestWindowDecoration(task).use { decoration ->
+                    // Hidden tasks can miss every wake transition. Restore the outline in each
+                    // hiding transition, even before a visible relayout has created a context.
+                    for (density in listOf(160, 320)) {
+                        val config = Configuration(task.configuration).apply { densityDpi = density }
+                        val resources = context.createConfigurationContext(config).resources
+                        val surface = decoration.taskSurface
+                        val start = spy(StubTransaction())
+                        val finish = spy(StubTransaction())
+                        finish.setCornerRadius(surface, 0f)
+                        finish.setShadowRadius(surface, 0f)
+                        val cornerId = com.android.wm.shell.shared.R.dimen
+                            .desktop_windowing_freeform_rounded_corner_radius
+                        val shadowId = com.android.wm.shell.R.dimen
+                            .freeform_decor_shadow_focused_thickness
+                        val result = decoration.relayout(
+                            WindowDecoration2.RelayoutParams(
+                                runningTaskInfo = task,
+                                captionType = CaptionController.CaptionType.NO_CAPTION,
+                                cornerRadiusId = cornerId,
+                                shadowRadiusId = shadowId,
+                                windowDecorConfig = config,
+                                inSyncWithTransition = true,
+                                shouldUpdateTaskSurfaceOutline = true,
+                            ),
+                            start, finish, WindowContainerTransaction(), null,
+                        )
+
+                        val order = inOrder(finish)
+                        order.verify(finish).setCornerRadius(surface, 0f)
+                        order.verify(finish).setShadowRadius(surface, 0f)
+                        order.verify(finish).setShadowRadius(surface,
+                            resources.getDimensionPixelSize(shadowId) / scale)
+                        order.verify(finish).setCornerRadius(surface,
+                            resources.getDimensionPixelSize(cornerId) / scale)
+                        verify(start).setShadowRadius(surface,
+                            resources.getDimensionPixelSize(shadowId) / scale)
+                        verify(start).setCornerRadius(surface,
+                            resources.getDimensionPixelSize(cornerId) / scale)
+                        verify(start, never()).show(any())
+                        verify(finish, never()).show(any())
+                        verify(finish, never()).setWindowCrop(any(), any<Int>(), any<Int>())
+                        assertThat(result).isNull()
+                        assertThat(decoration.captionController).isNull()
+                        assertThat(decoration.hasDecorationSurface).isFalse()
+                    }
+                }
+            }
+        }
+
     private fun WindowContainerTransaction.assertAddInsetsSource(token: WindowContainerToken) {
         assertThat(
                 hierarchyOps.any { op ->

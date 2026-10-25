@@ -87,7 +87,8 @@ object PinnedLayerModule {
         desktopUserRepositories: Optional<DesktopUserRepositories>,
     ): Optional<PinnedLayerHandler> {
         if (PinnedLayerFlags.isPinnedLayerEnabled()) {
-            pinnedLayerController.get().configureVisibility(shellController, recentsTransitionHandler)
+            pinnedLayerController.get().configureVisibility(
+                shellController, recentsTransitionHandler, taskStackListener)
             val powerManager = context.getSystemService(PowerManager::class.java)
             val keyguardManager = context.getSystemService(KeyguardManager::class.java)
             val pinned = pinnedLayerController.get()
@@ -206,7 +207,7 @@ object PinnedLayerModule {
                     presentationController =
                         PinnedLayerPresentationController(context, displayController, desktopState,
                             com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometryStore(
-                                context.filesDir, backgroundExecutor)),
+                                context.filesDir, backgroundExecutor, mainExecutor)),
                     windowDragTransitionHandler = windowDragTransitionHandler,
                     windowRepositionAnimationHandler = windowRepositionAnimationHandler,
                     windowRepositionAnimator = windowRepositionAnimator,
