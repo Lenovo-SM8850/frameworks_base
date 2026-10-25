@@ -2095,10 +2095,16 @@ public class ApplicationPackageManager extends PackageManager {
         if (resId != 0) {
             try {
                 final Resources r = getResourcesForApplication(appInfo);
-                final Drawable dr = isIcon
-                        ? r.getDrawableForDensityCapped(
-                                resId, /* density= */ 0, /* theme= */ null)
-                        : r.getDrawable(resId, null);
+                final Drawable dr;
+                com.android.internal.appearance.AppIconResolver.beginRawLoad();
+                try {
+                    dr = isIcon
+                            ? r.getDrawableForDensityCapped(
+                                    resId, /* density= */ 0, /* theme= */ null)
+                            : r.getDrawableForDensityRaw(resId, 0, null);
+                } finally {
+                    com.android.internal.appearance.AppIconResolver.endRawLoad();
+                }
                 if (dr != null) {
                     putCachedIcon(name, dr);
                 }
@@ -2400,6 +2406,7 @@ public class ApplicationPackageManager extends PackageManager {
                 LocaleConfig lc = new LocaleConfig(app, r);
                 r.setLocaleConfig(lc);
             }
+            com.android.internal.appearance.AppIconResolver.registerResources(r, app);
             return r;
         }
         throw new NameNotFoundException("Unable to open " + app.publicSourceDir);
@@ -2456,6 +2463,14 @@ public class ApplicationPackageManager extends PackageManager {
     @Override
     public void removeOnPermissionsChangeListener(OnPermissionsChangedListener listener) {
         getPermissionManager().removeOnPermissionsChangeListener(listener);
+    }
+
+    /**
+     * Drop presentation caches after an app icon appearance change.
+     * @hide
+     */
+    public static void invalidateAppIconCache() {
+        configurationChanged();
     }
 
     @UnsupportedAppUsage
@@ -3834,6 +3849,20 @@ public class ApplicationPackageManager extends PackageManager {
             return UserIcons.getDefaultUserIcon(
                     mContext.getResources(), targetUserId, /* light= */ false);
         }
+        // Exact identity must survive the raw resource load, including fallback recursion.
+        com.android.internal.appearance.AppIconResolver.beginRawLoad();
+        Drawable dr;
+        try {
+            dr = loadUnbadgedItemIconRaw(itemInfo, appInfo);
+        } finally {
+            com.android.internal.appearance.AppIconResolver.endRawLoad();
+        }
+        if (itemInfo.isArchived) return dr;
+        return com.android.internal.appearance.AppIconResolver.resolveItem(
+                mContext, itemInfo, appInfo, dr);
+    }
+
+    private Drawable loadUnbadgedItemIconRaw(PackageItemInfo itemInfo, ApplicationInfo appInfo) {
         Drawable dr = null;
         if (itemInfo.packageName != null) {
             if (itemInfo.isArchived) {
@@ -3844,7 +3873,7 @@ public class ApplicationPackageManager extends PackageManager {
             }
         }
         if (dr == null && itemInfo != appInfo && appInfo != null) {
-            dr = loadUnbadgedItemIcon(appInfo, appInfo);
+            dr = loadUnbadgedItemIconRaw(appInfo, appInfo);
         }
         if (dr == null) {
             dr = itemInfo.loadDefaultIcon(this);
