@@ -1286,8 +1286,9 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         relayoutParams.mWindowDecorConfig = windowDecorConfig;
 
         if (desktopConfig.useRoundedCorners()) {
-            relayoutParams.mCornerRadiusId = shouldIgnoreCornerRadius ? Resources.ID_NULL :
-                    getCornerRadiusId(relayoutParams.mLayoutResId);
+            // Floating tasks are not Recents targets, so decoration still owns their outline.
+            relayoutParams.mCornerRadiusId = shouldIgnoreCornerRadius && !taskInfo.isFloatingWindow
+                    ? Resources.ID_NULL : getCornerRadiusId(relayoutParams.mLayoutResId);
         }
         // Set opaque background for all freeform tasks to prevent freeform tasks below
         // from being visible if freeform task window above is translucent.

@@ -164,6 +164,52 @@ class WindowDecoration2Tests : ShellTestCase() {
         }
 
     @Test
+    fun floatingAndMiniRelayout_restoresScaledSurfaceStateAfterCoreFinishReset() =
+        testScope.runTest {
+            for (scale in listOf(.75f, .25f)) {
+                val task = createFreeformTask().apply {
+                    isVisible = true
+                    isFloatingWindow = true
+                    floatingWindowScale = scale
+                }
+                TestWindowDecoration(task).use { decoration ->
+                    val surface = decoration.taskSurface
+                    val start = spy(StubTransaction())
+                    val finish = spy(StubTransaction())
+                    finish.setCornerRadius(surface, 0f)
+                    finish.setShadowRadius(surface, 0f)
+                    val cornerId = com.android.wm.shell.shared.R.dimen
+                        .desktop_windowing_freeform_rounded_corner_radius
+                    val shadowId = com.android.wm.shell.R.dimen.freeform_decor_shadow_focused_thickness
+                    decoration.relayout(
+                        WindowDecoration2.RelayoutParams(
+                            runningTaskInfo = task,
+                            captionType = CaptionController.CaptionType.NO_CAPTION,
+                            cornerRadiusId = cornerId,
+                            shadowRadiusId = shadowId,
+                            inSyncWithTransition = true,
+                            setTaskVisibilityPositionAndCrop = true,
+                        ),
+                        start, finish, WindowContainerTransaction(), null,
+                    )
+
+                    val resources = decoration.decorWindowContext.resources
+                    val order = inOrder(finish)
+                    order.verify(finish).setCornerRadius(surface, 0f)
+                    order.verify(finish).setShadowRadius(surface, 0f)
+                    order.verify(finish).setMatrix(surface, scale, 0f, 0f, scale)
+                    val logical = task.configuration.windowConfiguration.bounds
+                    order.verify(finish).setWindowCrop(surface,
+                        logical.width(), logical.height())
+                    order.verify(finish).setShadowRadius(surface,
+                        resources.getDimensionPixelSize(shadowId) / scale)
+                    order.verify(finish).setCornerRadius(surface,
+                        resources.getDimensionPixelSize(cornerId) / scale)
+                }
+            }
+        }
+
+    @Test
     fun hiddenFloatingAndMiniRelayout_preservesOutlineWithoutShowingOrCreatingViews() =
         testScope.runTest {
             for (scale in listOf(.75f, .25f)) {

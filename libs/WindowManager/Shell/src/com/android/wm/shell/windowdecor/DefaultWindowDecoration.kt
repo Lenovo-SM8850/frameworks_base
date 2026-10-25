@@ -617,8 +617,12 @@ constructor(
             isInsetSource = isInsetSource && !taskInfo.isFloatingWindow,
             insetSourceFlags = insetSourceFlags,
             displayExclusionRegion = Region.obtain(displayExclusionRegion),
-            shadowRadiusId = getShadowRadiusId(captionType, hasGlobalFocus),
-            cornerRadiusId = getCornerRadiusId(captionType, shouldIgnoreCornerRadius),
+            shadowRadiusId = if (floatingFocusEnabled)
+                FloatingFocusIndicator.shadowRadiusId(taskInfo.isFocused)
+                else getShadowRadiusId(captionType, hasGlobalFocus),
+            // Floating tasks are not Recents targets, so decoration still owns their outline.
+            cornerRadiusId = getCornerRadiusId(
+                captionType, shouldIgnoreCornerRadius && !taskInfo.isFloatingWindow),
             borderSettingsId = getBorderSettingsId(captionType, taskInfo, hasGlobalFocus),
             boxShadowSettingsIds = if (floatingFocusEnabled) null
                 else getShadowSettingsIds(captionType, hasGlobalFocus),
