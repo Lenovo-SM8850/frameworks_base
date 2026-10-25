@@ -1237,6 +1237,23 @@ class PinnedLayerController(
 
     private var recentsVisibilityHandler: RecentsTransitionHandler? = null
 
+    fun beginMiniDrag(task: TaskInfo): Rect = miniInteractions?.beginDrag(task) ?: task.presentationBounds
+
+    fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect) {
+        miniInteractions?.onDragEnded(task, start, end)
+    }
+
+    fun endMiniTap(task: TaskInfo) { miniInteractions?.endTap(task) }
+
+    fun getMiniStashTarget(task: TaskInfo, bounds: Rect): FloatingMiniState.Edge =
+        miniInteractions?.getStashTarget(task, bounds) ?: FloatingMiniState.Edge.NONE
+
+    fun isMiniAnimating(task: TaskInfo): Boolean = miniInteractions?.isAnimating(task) == true
+
+    fun moveMini(task: TaskInfo, bounds: Rect) { miniInteractions?.move(task, bounds) }
+
+    fun removeMiniListener(listener: (TaskInfo) -> Unit) { miniListeners -= listener }
+
     fun tidyFloatingWindows(tasks: List<TaskInfo>) {
         if (keyguardShowing || recentsRunning || overviewShowing) return
         miniInteractions?.tidy(tasks.filter {
@@ -1247,6 +1264,12 @@ class PinnedLayerController(
 
     fun getMiniDragTarget(task: TaskInfo, start: Rect, end: Rect) =
         miniInteractions?.getDragTarget(task, start, end)
+
+    fun isMiniStashed(task: TaskInfo): Boolean = miniInteractions?.isStashed(task) == true
+
+    fun restoreMini(task: TaskInfo) {
+        if (isMiniStashed(task)) miniInteractions?.unstash(task) else miniInteractions?.restore(task)
+    }
 
     fun enterMiniAfterResize(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,
         bounds: Rect, scale: Float) {
