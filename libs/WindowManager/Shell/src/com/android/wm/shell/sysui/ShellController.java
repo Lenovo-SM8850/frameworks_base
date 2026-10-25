@@ -26,7 +26,15 @@ import static android.content.pm.ActivityInfo.CONFIG_UI_MODE;
 import static com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_INIT;
 import static com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_SYSUI_EVENTS;
 
+import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.ActivityTaskManager;
+import android.app.WindowConfiguration;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+import java.util.function.BiPredicate;
+import com.android.wm.shell.shared.sidebar.SidebarLaunchPolicy;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.UserInfo;
@@ -94,6 +102,12 @@ public class ShellController {
     private int mUserId;
     private Context mUserContext;
     private List<UserInfo> mProfiles;
+    private BiPredicate<Intent, Integer> mSidebarPendingSplitLauncher = (intent, display) -> false;
+
+    public void setSidebarPendingSplitLauncher(BiPredicate<Intent, Integer> launcher) {
+        mSidebarPendingSplitLauncher = launcher;
+    }
+
     private SparseBooleanArray mDisplayToOverviewVisibleMap = new SparseBooleanArray();
 
     private OnInsetsChangedListener mInsetsChangeListener = new OnInsetsChangedListener() {
@@ -155,6 +169,41 @@ public class ShellController {
         final int currentUserId = ActivityManager.getCurrentUser();
         updateCurrentUser(currentUserId, getOrCreateUserContext(currentUserId));
         updateProfiles(getUserProfiles(currentUserId));
+        mContext.registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!isOrderedBroadcast()) return;
+                final PendingResult result = goAsync();
+                final int displayId = intent.getIntExtra(SidebarLaunchPolicy.EXTRA_DISPLAY_ID, -1);
+                mMainExecutor.execute(() -> {
+                    int code = Activity.RESULT_CANCELED;
+                    try {
+                        if (displayId >= 0 && mSidebarPendingSplitLauncher.test(intent, displayId)) {
+                            code = Activity.RESULT_FIRST_USER;
+                        } else if (displayId >= 0 && !isOverviewVisible(displayId)) {
+                            for (ActivityManager.RunningTaskInfo task :
+                                    ActivityTaskManager.getInstance().getTasks(100, false)) {
+                                if (task.displayId != displayId || !task.isVisible
+                                        || task.isFloatingWindow || task.getWindowingMode()
+                                                == WindowConfiguration.WINDOWING_MODE_PINNED) {
+                                    continue;
+                                }
+                                if (task.getActivityType() == WindowConfiguration.ACTIVITY_TYPE_HOME) {
+                                    code = Activity.RESULT_OK;
+                                }
+                                break;
+                            }
+                        }
+                    } catch (RuntimeException ignored) {
+                        // An unavailable task snapshot preserves the existing floating behavior.
+                    } finally {
+                        result.setResultCode(code);
+                        result.finish();
+                    }
+                });
+            }
+        }, new IntentFilter(SidebarLaunchPolicy.ACTION_QUERY_HOME),
+                android.Manifest.permission.INTERNAL_SYSTEM_WINDOW, null, Context.RECEIVER_EXPORTED);
     }
 
     private void onInit() {
