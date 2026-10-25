@@ -752,7 +752,6 @@ public class ThemeOverlayController implements CoreStartable, Dumpable {
         if (!TextUtils.isEmpty(overlayPackageJson)) {
             try {
                 JSONObject object = new JSONObject(overlayPackageJson);
-                mContrast = object.optDouble("_contrast_level", 0.0);
                 mChromaBoost = object.optDouble("_chroma_boost", 0.0);
                 mIsFidelityEnabled = object.optBoolean("_fidelity_enabled", false);
                 mChromaAccent1 = object.optDouble("_chroma_accent1", 0.0);
@@ -1077,7 +1076,6 @@ public class ThemeOverlayController implements CoreStartable, Dumpable {
             try {
                 JSONObject object = new JSONObject(overlayPackageJson);
                 
-                mContrast = object.optDouble("_contrast_level", 0.0);
                 mChromaBoost = object.optDouble("_chroma_boost", 0.0);
 
                 for (String category : ThemeOverlayApplier.THEME_CATEGORIES) {
