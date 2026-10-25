@@ -46,6 +46,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -191,6 +192,25 @@ class DefaultWindowDecorationTests : ShellTestCase() {
         val relayoutParams = decoration.getRelayoutParams(task)
 
         assertTrue(relayoutParams.isCaptionVisible)
+    }
+
+    @Test
+    fun recentsRunning_floatingAndMiniKeepOutlineResources() {
+        for (scale in listOf(.75f, .25f)) {
+            val task = WindowDecorationTestHelper.createAppHeaderTask().apply {
+                isFloatingWindow = true
+                floatingWindowScale = scale
+            }
+            val decoration = setUpWindowDecoration(task)
+            val normal = decoration.getRelayoutParams(task)
+            val recents = decoration.getRelayoutParams(task, shouldIgnoreCornerRadius = true)
+
+            assertEquals(com.android.wm.shell.shared.R.dimen
+                .desktop_windowing_freeform_rounded_corner_radius, recents.cornerRadiusId)
+            assertEquals(normal.cornerRadiusId, recents.cornerRadiusId)
+            assertEquals(normal.shadowRadiusId, recents.shadowRadiusId)
+            assertEquals(normal.boxShadowSettingsIds?.toList(), recents.boxShadowSettingsIds?.toList())
+        }
     }
 
     @Test

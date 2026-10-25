@@ -693,8 +693,17 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         // Pass the current global focus status to avoid updates outside of a ShellTransition.
         decoration.relayout(
                 taskInfo, decoration.getHasGlobalFocus(), decoration.getExclusionRegion());
-        mActivityOrientationChangeHandler.ifPresent(handler ->
-                handler.handleActivityOrientationChange(oldTaskInfo, taskInfo));
+        if (!taskInfo.isFloatingWindow) {
+            mActivityOrientationChangeHandler.ifPresent(handler ->
+                    handler.handleActivityOrientationChange(oldTaskInfo, taskInfo));
+        }
+    }
+
+    @Override
+    public void onBackOnTaskRoot(RunningTaskInfo taskInfo) {
+        if (mPinnedLayerController != null && taskInfo.isFloatingWindow) {
+            mPinnedLayerController.onFloatingTaskRootBack(taskInfo);
+        }
     }
 
     @Override

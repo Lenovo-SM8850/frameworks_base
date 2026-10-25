@@ -44,5 +44,7 @@ sealed class ActiveTransition {
      *
      * @property taskInfo a [TaskInfo] that current transition going to pin.
      */
-    data class Unpin(override val taskInfo: TaskInfo) : ActiveTransition()
+    data class Unpin(override val taskInfo: TaskInfo, val minimized: Boolean = false,
+        val exitFloating: Boolean = false) :
+        ActiveTransition()
 }

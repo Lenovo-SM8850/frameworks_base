@@ -156,6 +156,7 @@ class PinnedLayerHandlerTests : ShellTestCase() {
                 desktopTasksController,
             )
         whenever(presentationController.isTaskSupportedForPinning(any())).thenReturn(true)
+        whenever(presentationController.miniState).thenReturn(FloatingMiniState())
         whenever(desktopUserRepositories.getProfile(USER_ID_0)).thenReturn(desktopRepository)
 
         // Setup default display with a desk containing one desktop window that'll be pinned.

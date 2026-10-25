@@ -55,6 +55,7 @@ import static org.mockito.Mockito.when;
 import android.annotation.NonNull;
 import android.app.ActivityManager;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Insets;
@@ -268,6 +269,81 @@ public class WindowDecorationTests extends ShellTestCase {
         verify(mMockSurfaceControlViewHostFactory, never()).create(any(), any(), any());
 
         assertNull(mRelayoutResult.mRootView);
+    }
+
+    @Test
+    public void testCutoutAvoidance_surfaceAndReportedCaptionMoveTogether() {
+        final Display display = mock(Display.class);
+        doAnswer(invocation -> {
+            final android.view.DisplayInfo info = invocation.getArgument(0);
+            info.uniqueId = "test";
+            info.displayCutout = new android.view.DisplayCutout(
+                    android.graphics.Insets.of(0, 88, 0, 0), null,
+                    new Rect(766, 20, 834, 88), null, null);
+            return true;
+        }).when(display).getDisplayInfo(any());
+        doReturn(display).when(mMockDisplayController).getDisplay(Display.DEFAULT_DISPLAY);
+        final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                .setDisplayId(Display.DEFAULT_DISPLAY).setBounds(new Rect(0, 0, 1600, 2560))
+                .setPositionInParent(0, 0).setVisible(true)
+                .setWindowingMode(WINDOWING_MODE_FULLSCREEN).build();
+        final TestWindowDecoration decor = createWindowDecoration(task);
+        mRelayoutParams.mIsCaptionVisible = true;
+        decor.relayout(task, true);
+        assertThat(mRelayoutResult.mCaptionY).isEqualTo(88);
+        verify(mMockSurfaceControlStartT).setPosition(mMockCaptionSurface,
+                mRelayoutResult.mCaptionX, 88);
+    }
+
+    @Test
+    public void testHiddenFloatingAndMini_preserveOutlineWithoutShowingOrCreatingViews() {
+        for (float scale : new float[]{.75f, .25f}) {
+            final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                    .setDisplayId(Display.DEFAULT_DISPLAY)
+                    .setBounds(TASK_BOUNDS)
+                    .setVisible(false)
+                    .setWindowingMode(WINDOWING_MODE_FREEFORM)
+                    .build();
+            task.isFloatingWindow = true;
+            task.floatingWindowScale = scale;
+            final TestWindowDecoration decor = createWindowDecoration(task);
+            mRelayoutParams.mInSyncWithTransition = true;
+            mRelayoutParams.mSetTaskVisibilityPositionAndCrop = false;
+            mRelayoutParams.mCornerRadiusId = R.dimen.test_freeform_corner_radius;
+            mRelayoutParams.mShadowRadiusId = R.dimen.test_freeform_shadow_radius;
+            for (int density : new int[]{160, 320}) {
+                final Configuration config = new Configuration(task.configuration);
+                config.densityDpi = density;
+                mRelayoutParams.mWindowDecorConfig = config;
+                final Resources resources = mContext.createConfigurationContext(config).getResources();
+                clearInvocations(mMockSurfaceControlStartT, mMockSurfaceControlFinishT);
+                mMockSurfaceControlFinishT.setCornerRadius(mMockTaskSurface, 0f);
+                mMockSurfaceControlFinishT.setShadowRadius(mMockTaskSurface, 0f);
+
+                decor.relayout(task, false /* hasGlobalFocus */);
+
+                final InOrder order = inOrder(mMockSurfaceControlFinishT);
+                order.verify(mMockSurfaceControlFinishT).setCornerRadius(mMockTaskSurface, 0f);
+                order.verify(mMockSurfaceControlFinishT).setShadowRadius(mMockTaskSurface, 0f);
+                order.verify(mMockSurfaceControlFinishT).setShadowRadius(mMockTaskSurface,
+                        resources.getDimensionPixelSize(mRelayoutParams.mShadowRadiusId) / scale);
+                order.verify(mMockSurfaceControlFinishT).setCornerRadius(mMockTaskSurface,
+                        resources.getDimensionPixelSize(mRelayoutParams.mCornerRadiusId) / scale);
+                verify(mMockSurfaceControlStartT).setShadowRadius(mMockTaskSurface,
+                        resources.getDimensionPixelSize(mRelayoutParams.mShadowRadiusId) / scale);
+                verify(mMockSurfaceControlStartT).setCornerRadius(mMockTaskSurface,
+                        resources.getDimensionPixelSize(mRelayoutParams.mCornerRadiusId) / scale);
+                if (Flags.enableFreeformBoxShadowsV2()) {
+                    verify(mMockSurfaceControlFinishT).setBorderSettings(eq(mMockTaskSurface), any());
+                    verify(mMockSurfaceControlFinishT).setBoxShadowSettings(eq(mMockTaskSurface), any());
+                }
+                verify(mMockSurfaceControlStartT, never()).show(any());
+                verify(mMockSurfaceControlFinishT, never()).show(any());
+                verify(mMockSurfaceControlFinishT, never()).setWindowCrop(any(), anyInt(), anyInt());
+                assertNull(mRelayoutResult.mRootView);
+                assertNull(decor.mDecorationContainerSurface);
+            }
+        }
     }
 
     @Test

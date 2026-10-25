@@ -124,6 +124,41 @@ public final class FreeformTaskListenerTests extends ShellTestCase {
     }
 
     @Test
+    public void floatingRootBack_interceptedAfterAppNavigationForKeyAndGesture() {
+        final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                .setWindowingMode(WINDOWING_MODE_FREEFORM).build();
+        task.isFloatingWindow = true;
+        mFreeformTaskListener.onTaskAppeared(task, mMockSurfaceControl);
+        verify(mTaskOrganizer).setInterceptBackPressedOnTaskRoot(task.token, true);
+
+        mFreeformTaskListener.onBackOnTaskRoot(task, true, true, false);
+        mFreeformTaskListener.onBackOnTaskRoot(task, true, false, false);
+        mFreeformTaskListener.onBackOnTaskRoot(task, false, false, false);
+
+        verify(mWindowDecorViewModel, org.mockito.Mockito.times(3)).onBackOnTaskRoot(task);
+    }
+
+    @Test
+    public void normalRootBack_doesNotUseFloatingExit() {
+        final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                .setWindowingMode(WINDOWING_MODE_FULLSCREEN).build();
+        mFreeformTaskListener.onBackOnTaskRoot(task, true, true, false);
+        verify(mWindowDecorViewModel, never()).onBackOnTaskRoot(any());
+    }
+
+    @Test
+    public void leavingFloatingFreeform_clearsRootBackInterception() {
+        final ActivityManager.RunningTaskInfo task = new TestRunningTaskInfoBuilder()
+                .setWindowingMode(WINDOWING_MODE_FREEFORM).build();
+        task.isFloatingWindow = true;
+        mFreeformTaskListener.onTaskAppeared(task, mMockSurfaceControl);
+        final ActivityManager.RunningTaskInfo normal = new ActivityManager.RunningTaskInfo(task);
+        normal.isFloatingWindow = false;
+        mFreeformTaskListener.onTaskInfoChanged(normal);
+        verify(mTaskOrganizer).setInterceptBackPressedOnTaskRoot(task.token, false);
+    }
+
+    @Test
     public void onTaskAppeared_useTransitionObserver_noopInRepository() {
         ActivityManager.RunningTaskInfo task =
                 new TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FREEFORM).build();

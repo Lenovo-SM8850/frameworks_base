@@ -295,6 +295,16 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         }
 
         if (!mTaskInfo.isVisible) {
+            if (mTaskInfo.isFloatingWindow) {
+                // Core resets the outline even when a transition hides the task. Preserve
+                // decoration ownership in its finish transaction before skipping the views.
+                final Context outlineContext = mContext.createConfigurationContext(
+                        params.mWindowDecorConfig != null ? params.mWindowDecorConfig
+                                : mTaskInfo.configuration);
+                outlineContext.setTheme(mContext.getThemeResId());
+                loadTaskSurfaceOutline(params, outlineContext, outResult);
+                updateTaskSurfaceOutline(params, startT, finishT, outResult);
+            }
             releaseViews(wct);
             if (params.mSetTaskVisibilityPositionAndCrop) {
                 finishT.hide(mTaskSurface);
@@ -604,6 +614,27 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         }
 
         updateTaskSurfaceOutline(params, startT, finishT, outResult);
+    }
+
+    private void loadTaskSurfaceOutline(RelayoutParams params, Context context,
+            RelayoutResult<T> outResult) {
+        final Resources resources = context.getResources();
+        if (params.mBorderSettingsId != Resources.ID_NULL) {
+            outResult.mBorderSettings = BoxShadowHelper.getBorderSettings(context,
+                    params.mBorderSettingsId);
+        }
+
+        if (params.mBoxShadowSettingsIds != null) {
+            outResult.mBoxShadowSettings = BoxShadowHelper.getBoxShadowSettings(context,
+                    params.mBoxShadowSettingsIds);
+        }
+
+        outResult.mCornerRadius = params.mCornerRadiusId == Resources.ID_NULL
+                ? INVALID_CORNER_RADIUS : loadDimensionPixelSize(resources,
+                params.mCornerRadiusId);
+        outResult.mShadowRadius = params.mShadowRadiusId == Resources.ID_NULL
+                ? INVALID_SHADOW_RADIUS : loadDimensionPixelSize(resources,
+                params.mShadowRadiusId);
     }
 
     private void updateTaskSurfaceOutline(

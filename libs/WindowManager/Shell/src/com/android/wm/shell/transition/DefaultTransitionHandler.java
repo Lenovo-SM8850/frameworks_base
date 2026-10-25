@@ -1037,6 +1037,16 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
                 != (change.getEndAbsBounds().width() > change.getEndAbsBounds().height()));
     }
 
+    static boolean isFloatingExit(TransitionInfo.Change change) {
+        if (change.getTaskInfo() == null || change.getStartFloatingWindowBounds().isEmpty()) {
+            return false;
+        }
+        return change.getMode() == android.view.WindowManager.TRANSIT_CLOSE
+                || (change.getMode() == android.view.WindowManager.TRANSIT_TO_BACK
+                        && !change.getTaskInfo().isFloatingWindow)
+                || (change.getMode() == TRANSIT_CHANGE && !change.getTaskInfo().isFloatingWindow);
+    }
+
     private static boolean isFloatingChange(TransitionInfo.Change change) {
         return !change.getStartFloatingWindowBounds().isEmpty()
                 || (change.getTaskInfo() != null && change.getTaskInfo().isFloatingWindow);
