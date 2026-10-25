@@ -24,6 +24,9 @@ class FakeSecureSettingsRepository : SecureSettingsRepository {
 
     private val settings = MutableStateFlow<Map<String, String?>>(mutableMapOf())
 
+    override fun stringSetting(name: String): Flow<String?> =
+        stringSetting(name, null)
+
     override fun intSetting(name: String, defaultValue: Int): Flow<Int> {
         return settings
             .map { it.getOrDefault(name, defaultValue.toString()) }
