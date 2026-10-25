@@ -314,6 +314,65 @@ class HandleMenuTest : ShellTestCase() {
     }
 
     @Test
+    fun windowingPill_fullscreenTask_showsFloatingAndHidesDesktop() {
+        val root = LayoutInflater.from(context)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+        val pill = root.requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.desktopModeCompatPolicy = mock()
+        pill.initialize(mock(), mock(), true, {})
+        val task = TestRunningTaskInfoBuilder()
+            .setDisplayId(DEFAULT_DISPLAY)
+            .setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
+            .build()
+
+        pill.bind(task, false)
+
+        assertThat(pill.requireViewById<View>(R.id.floating_button).visibility)
+            .isEqualTo(View.VISIBLE)
+        assertThat(pill.requireViewById<View>(R.id.desktop_button).visibility)
+            .isEqualTo(View.GONE)
+        assertThat(pill.requireViewById<View>(R.id.floating_button).contentDescription.toString())
+            .isEqualTo("Floating window")
+    }
+
+    @Test
+    fun windowingPill_blockedTask_hidesEntry() {
+        val root = LayoutInflater.from(context)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+        val pill = root.requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.desktopModeCompatPolicy = mock()
+        val task = TestRunningTaskInfoBuilder()
+            .setDisplayId(DEFAULT_DISPLAY)
+            .setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
+            .build()
+        whenever(pill.desktopModeCompatPolicy.shouldDisableDesktopEntryPoints(task)).thenReturn(true)
+        pill.initialize(mock(), mock(), true, {})
+
+        pill.bind(task, false)
+
+        assertThat(pill.requireViewById<View>(R.id.floating_button).visibility).isEqualTo(View.GONE)
+    }
+
+    @Test
+    fun windowingPill_floatingTask_hidesEntry() {
+        val root = LayoutInflater.from(context)
+            .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+        val pill = root.requireViewById<WindowingPillView>(R.id.windowing_pill)
+        pill.desktopModeCompatPolicy = mock()
+        pill.initialize(mock(), mock(), true, {})
+        val task = TestRunningTaskInfoBuilder()
+            .setDisplayId(DEFAULT_DISPLAY)
+            .setWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM)
+            .build()
+        task.isFloatingWindow = true
+
+        pill.bind(task, false)
+
+        assertThat(pill.requireViewById<View>(R.id.floating_button).visibility)
+            .isEqualTo(View.GONE)
+    }
+
+    @Test
     fun testWindowingPill_shownWhenConfigured() = runTest {
         createTaskInfo(WINDOWING_MODE_FREEFORM)
         handleMenu = createAndShowHandleMenu(shouldShowWindowingPill = true)
@@ -500,6 +559,31 @@ class HandleMenuTest : ShellTestCase() {
             "com.android.window.flags.enable_non_default_display_split_bugfix"
     }
 
+
+    @Test
+    fun windowingPill_fullscreenHasFullscreenSplitAndFloat_usesExistingAction() {
+        val actions = org.mockito.kotlin.mock<WindowDecorationActions>()
+        val pill = WindowingPillView(mContext, mock())
+        pill.initialize(actions, mockDesktopModeUiEventLogger, false) {}
+        pill.desktopModeCompatPolicy = mock()
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        task.displayId = 0
+        task.isResizeable = true
+        pill.bind(task, false)
+        val button = pill.requireViewById<View>(R.id.floating_button)
+        val params = button.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        assertEquals(R.id.split_screen_button, params.startToEnd)
+        assertEquals(R.id.desktop_button, params.endToStart)
+        assertEquals(View.VISIBLE, button.visibility)
+        assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.fullscreen_button).visibility)
+        button.performClick()
+        org.mockito.kotlin.verify(actions).onToFloat(task.taskId)
+        task.isFloatingWindow = true
+        pill.bind(task, false)
+        assertEquals(View.GONE, button.visibility)
+        assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.fullscreen_button).visibility)
+    }
+
     @Test
     fun windowingPill_remainingDescriptionsHaveNoFormatPlaceholder() {
         val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
@@ -542,6 +626,30 @@ class HandleMenuTest : ShellTestCase() {
         task.isFloatingWindow = true
         pill.bind(task, false)
         assertEquals(View.GONE, pill.requireViewById<View>(R.id.floating_button).visibility)
+    }
+
+    @Test fun rotate_onlyFloatingAndIncludesFixedOrientationApps() {
+        val resources = org.mockito.kotlin.spy(mContext.resources)
+        val context = org.mockito.kotlin.spy(mContext)
+        org.mockito.kotlin.doReturn(resources).whenever(context).resources
+        org.mockito.kotlin.doReturn(android.R.string.ok).whenever(resources)
+            .getIdentifier("accessibility_rotate_button", "string", "com.android.systemui")
+        val task = TestRunningTaskInfoBuilder().setWindowingMode(WINDOWING_MODE_FULLSCREEN).build()
+        val pill = WindowingPillView(context, mock())
+        pill.initialize(mock(), mock(), false) {}
+        listOf(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LOCKED,
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE).forEach {
+            task.topActivityRequestedOrientation = it
+            task.isFloatingWindow = false
+            pill.bind(task, false)
+            assertEquals(View.GONE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
+            task.isFloatingWindow = true
+            pill.bind(task, false)
+            assertEquals(View.VISIBLE, pill.requireViewById<View>(R.id.rotate_window_button).visibility)
+        }
     }
 
     @Test fun addBelowRow_rechecksDestinationAndDispatchesSharedAction() = runTest {
