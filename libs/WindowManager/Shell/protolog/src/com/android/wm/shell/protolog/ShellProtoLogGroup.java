@@ -48,7 +48,8 @@ public enum ShellProtoLogGroup implements IProtoLogGroup {
     WM_SHELL_SPLIT_SCREEN(Consts.ENABLE_DEBUG, true, Consts.TAG_WM_SPLIT_SCREEN),
     WM_SHELL_SYSUI_EVENTS(Consts.ENABLE_DEBUG, false, Consts.TAG_WM_SHELL),
     WM_SHELL_DESKTOP_MODE(Consts.ENABLE_DEBUG, true, Consts.TAG_WM_DESKTOP_MODE),
-    WM_SHELL_WINDOW_DECORATION(Consts.ENABLE_DEBUG, true, Consts.TAG_WM_WINDOW_DECORATION),
+    // Logs every caption relayout; enable at runtime when needed
+    WM_SHELL_WINDOW_DECORATION(Consts.ENABLE_DEBUG, false, Consts.TAG_WM_WINDOW_DECORATION),
     WM_SHELL_FLOATING_APPS(Consts.ENABLE_DEBUG, false, Consts.TAG_WM_SHELL),
     WM_SHELL_FOLDABLE(Consts.ENABLE_DEBUG, false, Consts.TAG_WM_SHELL),
     WM_SHELL_BUBBLES_NOISY(Consts.ENABLE_DEBUG, false, Consts.TAG_WM_BUBBLES),
