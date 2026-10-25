@@ -149,6 +149,39 @@ class MultiSplitCoordinator(
         const val INSERTION_PROBE_MS = 100L
     }
 
+    fun dump(pw: PrintWriter, prefix: String) {
+        pw.println("${prefix}MultiSplitCoordinator: active=$isActive capacity=${host.capacity()} " +
+            "busy=$isBusy imeTop=$imeTop keyguard=$keyguard revision=$revision")
+        pw.println("$prefix  pending=$pending transitions=${runningTransitions.size} " +
+            "interacting=$interacting spares=${spare.count { it.mHasRootTask && it in attached }}")
+        pw.println("$prefix  belowSlot=$lastBelowRejection insertion=$lastInsertRejection")
+        insertion?.let {
+            pw.println("$prefix  awaitingStage=${it.stage.mRootTaskInfo?.taskId} leaf=${it.leaf.value} " +
+                "task=${it.taskId} transitionFinished=${it.finished} failure=${it.failure} " +
+                "remainingMs=${it.deadline - SystemClock.uptimeMillis()}")
+        }
+        pw.println("$prefix  retiredStages=${retiredStages.map { it.mRootTaskInfo?.taskId }}")
+        val model = layout ?: pairModel() ?: return
+        val rectangles = bounds(model)?.leaves
+        model.getLeaves().forEach { leaf ->
+            val task = organizer.getRunningTaskInfo(leaf.taskId)
+            pw.println("$prefix  leaf=${leaf.id.value} task=${leaf.taskId} " +
+                "bounds=${rectangles?.get(leaf.id)} min=${task?.minWidth}x${task?.minHeight} " +
+                "columns=${model.isThreeColumns} columnGroup=${model.threeColumnGroup} " +
+                "columnPairFirst=${model.columnPairFirst}")
+        }
+    }
+
+    val isActive: Boolean get() = layout != null
+    val isBusy: Boolean get() = keyguard || insertion != null || pending != null ||
+        runningTransitions.isNotEmpty() || interacting ||
+        dividers.values.any { it.isCurrentlyDividerFlinging } ||
+        (isActive && stages.values.any { it.childCount == 0 })
+    val isVisible: Boolean get() = isActive && visible &&
+        stages.values.any { it.mRootTaskInfo?.isVisible == true }
+    val activeStages: List<StageTaskListener> get() = stages.values.toList()
+    val isLeftRightSplit: Boolean get() = layout?.root?.orientation == Orientation.LEFT_RIGHT
+
     fun getBranchBounds(first: Rect, second: Rect) {
         val model = layout ?: return
         val rectangles = bounds(model)?.leaves ?: return
@@ -2081,41 +2114,4 @@ class MultiSplitCoordinator(
         pending = null
         revision++
     }
-
-    val isActive: Boolean get() = layout != null
-
-    val isBusy: Boolean get() = keyguard || insertion != null || pending != null ||
-        runningTransitions.isNotEmpty() || interacting ||
-        dividers.values.any { it.isCurrentlyDividerFlinging } ||
-        (isActive && stages.values.any { it.childCount == 0 })
-
-    val isVisible: Boolean get() = isActive && visible &&
-        stages.values.any { it.mRootTaskInfo?.isVisible == true }
-
-    val isLeftRightSplit: Boolean get() = layout?.root?.orientation == Orientation.LEFT_RIGHT
-
-    fun dump(pw: PrintWriter, prefix: String) {
-        pw.println("${prefix}MultiSplitCoordinator: active=$isActive capacity=${host.capacity()} " +
-            "busy=$isBusy imeTop=$imeTop keyguard=$keyguard revision=$revision")
-        pw.println("$prefix  pending=$pending transitions=${runningTransitions.size} " +
-            "interacting=$interacting spares=${spare.count { it.mHasRootTask && it in attached }}")
-        pw.println("$prefix  belowSlot=$lastBelowRejection insertion=$lastInsertRejection")
-        insertion?.let {
-            pw.println("$prefix  awaitingStage=${it.stage.mRootTaskInfo?.taskId} leaf=${it.leaf.value} " +
-                "task=${it.taskId} transitionFinished=${it.finished} failure=${it.failure} " +
-                "remainingMs=${it.deadline - SystemClock.uptimeMillis()}")
-        }
-        pw.println("$prefix  retiredStages=${retiredStages.map { it.mRootTaskInfo?.taskId }}")
-        val model = layout ?: pairModel() ?: return
-        val rectangles = bounds(model)?.leaves
-        model.getLeaves().forEach { leaf ->
-            val task = organizer.getRunningTaskInfo(leaf.taskId)
-            pw.println("$prefix  leaf=${leaf.id.value} task=${leaf.taskId} " +
-                "bounds=${rectangles?.get(leaf.id)} min=${task?.minWidth}x${task?.minHeight} " +
-                "columns=${model.isThreeColumns} columnGroup=${model.threeColumnGroup} " +
-                "columnPairFirst=${model.columnPairFirst}")
-        }
-    }
-
-    val activeStages: List<StageTaskListener> get() = stages.values.toList()
 }
