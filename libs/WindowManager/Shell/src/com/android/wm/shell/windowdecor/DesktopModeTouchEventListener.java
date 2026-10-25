@@ -172,6 +172,7 @@ public class DesktopModeTouchEventListener
         final int id = view.getId();
         if (id == R.id.back_button) return "back_button";
         if (id == R.id.caption_handle) return "caption_handle";
+        if (id == R.id.floating_bottom_handle) return "floating_bottom_handle";
         if (id == R.id.close_window) return "close_window";
         if (id == R.id.desktop_mode_caption) return "desktop_mode_caption";
         if (id == R.id.maximize_window) return "maximize_window";
@@ -199,7 +200,8 @@ public class DesktopModeTouchEventListener
             mWindowDecorationActions.onClose(decoration.getTaskInfo());
         } else if (id == R.id.back_button) {
             mTaskOperations.injectBackKey(decoration.getTaskInfo().displayId);
-        } else if (id == R.id.caption_handle || id == R.id.open_menu_button) {
+        } else if (id == R.id.caption_handle || id == R.id.floating_bottom_handle
+                || id == R.id.open_menu_button) {
             if (id == R.id.caption_handle && !decoration.getTaskInfo().isFreeform()) {
                 // Clicking the App Handle.
                 mDesktopModeUiEventLogger.log(decoration.getTaskInfo(),
@@ -261,7 +263,8 @@ public class DesktopModeTouchEventListener
         WdLog.motionEventLogD(TAG, mTaskId, "%s(%s) isTouchscreen=%b longClickDisabled=%b",
                 tag, viewName, touchscreenSource, mLongClickDisabled);
 
-        if (id != R.id.caption_handle && id != R.id.desktop_mode_caption
+        if (id != R.id.caption_handle && id != R.id.floating_bottom_handle
+                && id != R.id.desktop_mode_caption
                 && id != R.id.open_menu_button && id != R.id.close_window
                 && id != R.id.maximize_window && id != R.id.minimize_window) {
             WdLog.motionEventLogD(TAG, mTaskId, "%s(%s) unsupported view, ignoring", tag,

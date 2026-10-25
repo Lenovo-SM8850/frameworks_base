@@ -86,4 +86,7 @@ public interface DragPositioningCallback {
      * @return the final bounds for the dragged task
      */
     Rect onDragPositioningEnd(int displayId, float x, float y);
+
+    /** Cancels an active drag without committing a release action. */
+    default void onDragPositioningCancel() {}
 }

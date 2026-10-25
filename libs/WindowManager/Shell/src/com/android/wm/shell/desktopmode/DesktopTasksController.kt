@@ -16,6 +16,8 @@
 
 package com.android.wm.shell.desktopmode
 
+import android.app.ActivityTaskManager
+import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import android.annotation.UserIdInt
 import android.app.ActivityManager
 import android.app.ActivityManager.RecentTaskInfo
@@ -288,6 +290,7 @@ class DesktopTasksController(
     RemoteCallable<DesktopTasksController>,
     DragAndDropController.DragAndDropListener,
     UserChangeListener {
+
 
     private var visualIndicator: DesktopModeVisualIndicator? = null
 
@@ -7222,5 +7225,27 @@ class DesktopTasksController(
     enum class SnapPosition {
         RIGHT,
         LEFT,
+    }
+
+    fun originalFloatingAspect(task: TaskInfo): Float =
+        pinnedLayerController?.originalFloatingAspect(task)
+            ?: task.configuration.windowConfiguration.bounds.let {
+                it.width().toFloat() / it.height().coerceAtLeast(1)
+            }
+
+    private var pinnedLayerController: PinnedLayerController? = null
+
+    fun createFloatingMiniPreview(task: RunningTaskInfo,
+        taskSurface: SurfaceControl): VisualIndicatorViewContainer? {
+        val display = displayController.getDisplay(task.displayId) ?: return null
+        val layout = displayController.getDisplayLayout(task.displayId) ?: return null
+        val displayContext = displayController.getDisplayContext(task.displayId) ?: return null
+        val builder = SurfaceControl.Builder()
+        rootTaskDisplayAreaOrganizer.attachToDisplayArea(task.displayId, builder)
+        return VisualIndicatorViewContainer(desktopExecutor, mainExecutor, builder, syncQueue,
+            bubbleBoundsProvider = null, snapEventHandler = snapController,
+            inputFlags = android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE).also {
+            it.createView(displayContext, display, layout, task, taskSurface)
+        }
     }
 }

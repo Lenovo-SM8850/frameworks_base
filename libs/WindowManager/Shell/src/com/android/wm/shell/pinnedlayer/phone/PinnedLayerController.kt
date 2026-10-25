@@ -78,6 +78,7 @@ class PinnedLayerController(
     private val pinnedTasks = mutableSetOf<Int>()
     private var currentPinnedTaskId: Int? = null
 
+
     private val pinnedTasksListeners = mutableSetOf<PinnedTasksListener>()
 
     // Stores pin layer transitions that are in progress.
@@ -580,6 +581,18 @@ class PinnedLayerController(
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
     }
+
+    fun originalFloatingAspect(task: TaskInfo): Float = presentationController.originalAspect(task)
+
+    fun getMiniDragTarget(task: TaskInfo, start: Rect, end: Rect) =
+        miniInteractions?.getDragTarget(task, start, end)
+
+    fun enterMiniAfterResize(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,
+        bounds: Rect, scale: Float) {
+        miniInteractions?.enterAfterResize(task, restore, logical, restoreScale, bounds, scale)
+    }
+
+    private var miniInteractions: FloatingMiniController? = null
     fun isMini(task: TaskInfo): Boolean =
         presentationController.miniState.get(task.userId, task.taskId) != null
 

@@ -188,6 +188,7 @@ public class WindowDecorationTests extends ShellTestCase {
 
     @Before
     public void setUp() {
+        when(mMockTaskSurface.isValid()).thenReturn(true);
         mMockSurfaceControlStartT = createMockSurfaceControlTransaction();
         mMockSurfaceControlFinishT = createMockSurfaceControlTransaction();
         mMockSurfaceControlAddWindowT = createMockSurfaceControlTransaction();
@@ -224,6 +225,24 @@ public class WindowDecorationTests extends ShellTestCase {
             ((Runnable) invocation.getArgument(0)).run();
             return null;
         }).when(mMockBGExecutor).execute(any());
+    }
+
+    @Test
+    public void updateTaskSurface_releasedSurfaceSkipsTransactions() throws Exception {
+        final TestWindowDecoration decor = createWindowDecoration(
+                new TestRunningTaskInfoBuilder().setVisible(true).build());
+        when(mMockTaskSurface.isValid()).thenReturn(false);
+        final java.lang.reflect.Method update = WindowDecoration.class.getDeclaredMethod(
+                "updateTaskSurface", WindowDecoration.RelayoutParams.class,
+                SurfaceControl.Transaction.class, SurfaceControl.Transaction.class,
+                WindowDecoration.RelayoutResult.class);
+        update.setAccessible(true);
+
+        update.invoke(decor, mRelayoutParams, mMockSurfaceControlStartT,
+                mMockSurfaceControlFinishT, mRelayoutResult);
+
+        org.mockito.Mockito.verifyNoInteractions(
+                mMockSurfaceControlStartT, mMockSurfaceControlFinishT);
     }
 
     @Test

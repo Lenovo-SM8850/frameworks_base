@@ -498,4 +498,10 @@ constructor(
         /** The icon is a child of the veil container layer and goes in front of the background. */
         private const val VEIL_ICON_LAYER = 1
     }
+
+    fun updateParentScale(t: SurfaceControl.Transaction, scale: Float) {
+        val veil = veilSurface ?: return
+        val inverse = 1f / scale
+        t.setMatrix(veil, inverse, 0f, 0f, inverse)
+    }
 }
