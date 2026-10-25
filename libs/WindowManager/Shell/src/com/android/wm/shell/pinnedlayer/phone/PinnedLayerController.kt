@@ -210,6 +210,43 @@ class PinnedLayerController(
             }
         })
     }
+
+    private fun addMinimizeHandle(task: TaskInfo, right: Boolean = true) {
+        val bounds = task.floatingWindowRestoreBounds
+        minimizeState.minimize(task.taskId, task.userId, bounds, right, .5f)
+        minimizeHandles?.update()
+    }
+
+    private fun removeMinimizeHandle(taskId: Int) {
+        minimizeState.remove(taskId)
+        minimizeHandles?.update()
+    }
+
+    private fun restoreMinimizedTask(taskId: Int) {
+        if (keyguardShowing || recentsRunning || overviewShowing) return
+        val task = shellTaskOrganizer.getRunningTaskInfo(taskId) ?: run {
+            removeMinimizeHandle(taskId)
+            return
+        }
+        val entry = minimizeState.entries[taskId] ?: return
+        if (!task.isFloatingWindow) { removeMinimizeHandle(taskId); return }
+        val mini = presentationController.miniState.get(task.userId, task.taskId)
+        val bounds = mini?.let { Rect(it.bounds) }
+            ?: presentationController.clampToDisplay(task, entry.bounds) ?: return
+        val wct = WindowContainerTransaction()
+        minimizeOldestIfNeeded(task, wct)
+        minimizedTasks -= taskId
+        visiblePinnedTasks += taskId
+        currentPinnedTaskId = taskId
+        removeMinimizeHandle(taskId)
+        wct.merge(getLayerPinnedWct(task.token), true)
+        if (mini != null) {
+            wct.setFloatingWindowPresentation(task.token,
+                android.graphics.Point(bounds.left, bounds.top), mini.scale)
+        } else presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
+        wct.setHidden(task.token, false).reorder(task.token, true)
+        transitions.startTransition(TRANSIT_CHANGE, wct, null)
+    }
     private var keyguardShowing = false
     private var recentsRunning = false
     private var overviewShowing = false
@@ -1243,43 +1280,6 @@ class PinnedLayerController(
         fun onPinnedTasksAdded(taskInfo: TaskInfo)
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
-    }
-
-    private fun addMinimizeHandle(task: TaskInfo, right: Boolean = true) {
-        val bounds = task.floatingWindowRestoreBounds
-        minimizeState.minimize(task.taskId, task.userId, bounds, right, .5f)
-        minimizeHandles?.update()
-    }
-
-    private fun removeMinimizeHandle(taskId: Int) {
-        minimizeState.remove(taskId)
-        minimizeHandles?.update()
-    }
-
-    private fun restoreMinimizedTask(taskId: Int) {
-        if (keyguardShowing || recentsRunning || overviewShowing) return
-        val task = shellTaskOrganizer.getRunningTaskInfo(taskId) ?: run {
-            removeMinimizeHandle(taskId)
-            return
-        }
-        val entry = minimizeState.entries[taskId] ?: return
-        if (!task.isFloatingWindow) { removeMinimizeHandle(taskId); return }
-        val mini = presentationController.miniState.get(task.userId, task.taskId)
-        val bounds = mini?.let { Rect(it.bounds) }
-            ?: presentationController.clampToDisplay(task, entry.bounds) ?: return
-        val wct = WindowContainerTransaction()
-        minimizeOldestIfNeeded(task, wct)
-        minimizedTasks -= taskId
-        visiblePinnedTasks += taskId
-        currentPinnedTaskId = taskId
-        removeMinimizeHandle(taskId)
-        wct.merge(getLayerPinnedWct(task.token), true)
-        if (mini != null) {
-            wct.setFloatingWindowPresentation(task.token,
-                android.graphics.Point(bounds.left, bounds.top), mini.scale)
-        } else presentationController.applyPresentation(task, bounds, wct, task.floatingWindowScale)
-        wct.setHidden(task.token, false).reorder(task.token, true)
-        transitions.startTransition(TRANSIT_CHANGE, wct, null)
     }
 
     fun tidyFloatingWindows(tasks: List<TaskInfo>) {
