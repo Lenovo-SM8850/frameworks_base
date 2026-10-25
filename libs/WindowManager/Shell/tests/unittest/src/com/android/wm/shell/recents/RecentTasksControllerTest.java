@@ -99,6 +99,14 @@ import org.mockito.MockitoAnnotations;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import com.android.wm.shell.splitscreen.MultiSplitGroupRepository;
+import com.android.wm.shell.splitscreen.MultiSplitLayout;
+import com.android.wm.shell.splitscreen.MultiSplitLayout.Leaf;
+import com.android.wm.shell.splitscreen.MultiSplitLayout.LeafId;
+import com.android.wm.shell.splitscreen.MultiSplitLayout.Split;
+import com.android.wm.shell.splitscreen.MultiSplitLayout.DividerId;
+import com.android.wm.shell.splitscreen.MultiSplitLayout.Orientation;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -988,6 +996,103 @@ public class RecentTasksControllerTest extends ShellTestCase {
     /**
      * Helper to create a task with a given task id.
      */
+    private void saveFourAppGroup() {
+        MultiSplitLayout layout = new MultiSplitLayout(new Split(new DividerId(0),
+                Orientation.LEFT_RIGHT, 0.5f,
+                new Split(new DividerId(1), Orientation.TOP_BOTTOM, 0.4f,
+                        new Leaf(new LeafId(0), 1), new Leaf(new LeafId(1), 2)),
+                new Split(new DividerId(2), Orientation.TOP_BOTTOM, 0.6f,
+                        new Leaf(new LeafId(2), 3), new Leaf(new LeafId(3), 4))));
+        List<RunningTaskInfo> members = new ArrayList<>();
+        for (int id = 1; id <= 4; id++) {
+            RunningTaskInfo task = new RunningTaskInfo();
+            task.taskId = id;
+            members.add(task);
+        }
+        mRecentTasksController.getMultiSplitGroups().save(layout,
+                Map.of(new LeafId(0), 101, new LeafId(1), 102,
+                        new LeafId(2), 103, new LeafId(3), 104),
+                members, new Rect(0, 0, 3200, 2400), 8);
+    }
+
+    private void assertMultiSplitProjection() {
+        mRecentTasksController.onVisibleTasksChanged(List.of(makeRunningTaskInfo(1),
+                makeRunningTaskInfo(2), makeRunningTaskInfo(3), makeRunningTaskInfo(4)));
+        saveFourAppGroup();
+        List<RecentTaskInfo> tasks = List.of(makeTaskInfo(4), makeTaskInfo(3),
+                makeTaskInfo(2), makeTaskInfo(1));
+        List<GroupedTaskInfo> projected = mRecentTasksController.generateList(tasks, "test");
+        assertThat(projected).hasSize(3);
+        assertThat(projected.stream().filter(g -> g.getType() == TYPE_SPLIT).count()).isEqualTo(1);
+        assertThat(projected.stream().filter(g -> g.getType() == TYPE_FULLSCREEN).count())
+                .isEqualTo(2);
+        GroupedTaskInfo pair = projected.stream().filter(g -> g.getType() == TYPE_SPLIT)
+                .findFirst().get();
+        assertThat(pair.getTaskInfo1().taskId).isEqualTo(1);
+        assertThat(pair.getTaskInfo2().taskId).isEqualTo(3);
+        for (int id = 1; id <= 4; id++) {
+            assertThat(mRecentTasksController.getSplitBoundsForTaskId(id))
+                    .isSameInstanceAs(pair.getSplitBounds());
+        }
+    }
+
+    @Test
+    @DisableFlags(com.android.wm.shell.Flags.FLAG_ENABLE_SHELL_TOP_TASK_TRACKING)
+    public void multiSplit_projectsPairAndSingles() {
+        assertMultiSplitProjection();
+    }
+
+    @Test
+    @EnableFlags(com.android.wm.shell.Flags.FLAG_ENABLE_SHELL_TOP_TASK_TRACKING)
+    public void multiSplit_neverUsesMixedWrapper() {
+        assertMultiSplitProjection();
+    }
+
+    @Test
+    public void multiSplit_partialVisibleListKeepsBackgroundMembershipButProjectsSingles() {
+        saveFourAppGroup();
+        List<GroupedTaskInfo> projected = mRecentTasksController.generateList(
+                List.of(makeRunningTaskInfo(1), makeRunningTaskInfo(3)), "visibleTasksChanged");
+        assertThat(projected).hasSize(2);
+        assertThat(projected.stream().allMatch(g -> g.getType() == TYPE_FULLSCREEN)).isTrue();
+        assertThat(mRecentTasksController.getMultiSplitGroups().get(4)).isNotNull();
+    }
+
+    @Test
+    public void multiSplit_threeMembersProjectOnePairAndOneSingle() {
+        saveFourAppGroup();
+        MultiSplitGroupRepository.Group group = mRecentTasksController.getMultiSplitGroups().get(1);
+        List<RunningTaskInfo> members = new ArrayList<>();
+        for (int id : new int[] {1, 3, 4}) {
+            RunningTaskInfo task = new RunningTaskInfo();
+            task.taskId = id;
+            members.add(task);
+        }
+        mRecentTasksController.getMultiSplitGroups().save(group.getLayout().remove(new LeafId(1)),
+                Map.of(new LeafId(0), 101, new LeafId(2), 103, new LeafId(3), 104),
+                members, new Rect(0, 0, 3200, 2400), 8);
+        List<GroupedTaskInfo> projected = mRecentTasksController.generateList(
+                List.of(makeTaskInfo(1), makeTaskInfo(3), makeTaskInfo(4)), "test");
+        assertThat(projected).hasSize(2);
+        assertThat(projected.get(0).getType()).isEqualTo(TYPE_SPLIT);
+        assertThat(projected.get(0).getTaskInfoList()).hasSize(2);
+        assertThat(projected.get(1).getType()).isEqualTo(TYPE_FULLSCREEN);
+        assertThat(projected.get(1).getTaskInfo1().taskId).isEqualTo(4);
+    }
+
+    @Test
+    public void multiSplit_taskRemovalInvalidatesProjection() {
+        saveFourAppGroup();
+        RunningTaskInfo removed = new RunningTaskInfo();
+        removed.taskId = 2;
+        mRecentTasksController.onTaskRemoved(removed);
+        List<GroupedTaskInfo> projected = mRecentTasksController.generateList(
+                List.of(makeTaskInfo(1), makeTaskInfo(3), makeTaskInfo(4)), "test");
+        assertThat(projected).hasSize(3);
+        assertThat(projected.stream().allMatch(g -> g.getType() == TYPE_FULLSCREEN)).isTrue();
+        assertThat(mRecentTasksController.getSplitBoundsForTaskId(3)).isNull();
+    }
+
     private RecentTaskInfo makeTaskInfo(int taskId) {
         RecentTaskInfo info = new RecentTaskInfo();
         info.taskId = taskId;

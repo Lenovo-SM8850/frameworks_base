@@ -35,11 +35,15 @@ import com.android.internal.protolog.ProtoLog;
 import com.android.wm.shell.common.ShellExecutor;
 import com.android.wm.shell.protolog.ShellProtoLogGroup;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Handler that forwards to a RemoteTransition. It is designed for one-shot use to attach a
  * specific remote animation to a specific transition.
  */
 public class OneShotRemoteHandler implements Transitions.TransitionHandler {
+            private final AtomicBoolean mFinished = new AtomicBoolean();
+
     private final ShellExecutor mMainExecutor;
     private final TransitionLeashManager mTransitionLeashManager;
 
@@ -248,6 +252,7 @@ public class OneShotRemoteHandler implements Transitions.TransitionHandler {
             @Override
             public void onTransitionFinished(WindowContainerTransaction wct,
                     SurfaceControl.Transaction sct) {
+                if (!mFinished.compareAndSet(false, true)) return;
                 ProtoLog.v(ShellProtoLogGroup.WM_SHELL_TRANSITIONS,
                         "Finished one-shot remote transition %s for (#%d).", mRemote,
                         info.getDebugId());
