@@ -150,6 +150,72 @@ class PinnedLayerControllerTest : ShellTestCase() {
             )
     }
 
+    private fun splitPane(id: Int) = setupTask(taskId = id).apply {
+        parentTaskId = 1000
+        isVisible = true
+        isVisibleRequested = true
+        configuration.windowConfiguration.setActivityType(WindowConfiguration.ACTIVITY_TYPE_STANDARD)
+        configuration.windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW)
+    }
+
+    @Test fun floatingEntrySharesBudgetWithThreeSplitPanesAndMinimizesOldestOnSixth() {
+        val panes = (101..103).map { splitPane(it) }
+        whenever(shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)).thenReturn(ArrayList(panes))
+        val first = setupTask(taskId = 201)
+        val second = setupTask(taskId = 202)
+        pinTask(first)
+        pinTask(second)
+        val next = setupTask(taskId = 203)
+        val wct = requireNotNull(pinnedLayerController.pinTask(mock(), next, null))
+        assertTrue(wct.changes[first.token.asBinder()]?.hidden == true)
+        assertFalse(wct.changes[second.token.asBinder()]?.hidden == true)
+        assertFalse(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REMOVE_TASK
+        })
+    }
+
+    @Test fun splitEntryAndAddReconcileThroughTransitionObserver() {
+        assertSplitTransitionCapacity(TRANSIT_OPEN)
+    }
+
+    @Test fun recentsGroupRestoreReconcilesThroughTransitionObserver() {
+        assertSplitTransitionCapacity(TRANSIT_TO_FRONT)
+    }
+
+    @Test fun splitResizeReconcilesThroughTransitionObserver() {
+        assertSplitTransitionCapacity(TRANSIT_CHANGE)
+    }
+
+    private fun assertSplitTransitionCapacity(mode: Int) {
+        val floats = (201..205).map { setupTask(taskId = it) }
+        floats.forEach { pinTask(it) }
+        whenever(shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)).thenReturn(arrayListOf())
+        val panes = (101..103).map { splitPane(it) }
+        val info = TransitionInfo(mode, FLAG_NONE)
+        panes.forEach { task ->
+            info.addChange(TransitionInfo.Change(task.token, mock()).apply {
+                taskInfo = task
+                this.mode = mode
+            })
+        }
+        org.mockito.Mockito.clearInvocations(shellTaskOrganizer)
+        pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+        val captor = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(captor.capture())
+        floats.take(3).forEach { assertTrue(captor.firstValue.changes[it.token.asBinder()]?.hidden == true) }
+        floats.drop(3).forEach { assertFalse(captor.firstValue.changes[it.token.asBinder()]?.hidden == true) }
+    }
+
+    @Test fun splitToFloatingDoesNotCountTheIncomingTaskTwice() {
+        val panes = (101..104).map { splitPane(it) }
+        whenever(shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)).thenReturn(ArrayList(panes))
+        val first = setupTask(taskId = 201)
+        pinTask(first)
+        val incoming = panes.last()
+        val wct = requireNotNull(pinnedLayerController.pinTask(mock(), incoming, null))
+        assertFalse(wct.changes[first.token.asBinder()]?.hidden == true)
+    }
+
     @Test
     fun floatingEnter_capsTaskLeashInStartTransaction() {
         val task = setupTask().apply { isFloatingWindow = true }
