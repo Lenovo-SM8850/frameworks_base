@@ -748,4 +748,10 @@
     <dimen name="desktop_mode_layout_menu_pill_spacing_margin">2dp</dimen>
     <!-- The radius of the layout menu pill menu corners. -->
     <dimen name="desktop_mode_layout_menu_pill_corner_radius">26dp</dimen>
+
+    <!-- Slim handle shown on a floating window. -->
+    <dimen name="floating_handle_touch_width">56dp</dimen>
+    <dimen name="floating_handle_touch_height">24dp</dimen>
+    <dimen name="floating_handle_pill_width">32dp</dimen>
+    <dimen name="floating_handle_pill_height">4dp</dimen>
 </resources>

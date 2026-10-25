@@ -802,4 +802,9 @@ public class DesktopModeTouchEventListener
     private boolean isPinned(ActivityManager.RunningTaskInfo taskInfo) {
         return mPinnedLayerController != null && mPinnedLayerController.isPinned(taskInfo.taskId);
     }
+
+    @Nullable
+    public PinnedLayerController getPinnedLayerController() {
+        return mPinnedLayerController;
+    }
 }
