@@ -580,4 +580,7 @@ class PinnedLayerController(
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
     }
+    fun isMini(task: TaskInfo): Boolean =
+        presentationController.miniState.get(task.userId, task.taskId) != null
+
 }
