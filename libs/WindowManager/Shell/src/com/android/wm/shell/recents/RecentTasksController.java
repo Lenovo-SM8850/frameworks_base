@@ -146,6 +146,7 @@ public class RecentTasksController implements TaskStackListenerCallback,
     private final Map<Integer, TaskInfo> mVisibleTasksMap = new HashMap<>();
 
     // Temporary vars used in `generateList()`
+    private final Set<MultiSplitGroupRepository.Group> mTmpMultiSplitGroups = new HashSet<>();
     private final Map<Integer, TaskInfo> mTmpRemaining = new HashMap<>();
     private final Map<Integer, Desk> mTmpDesks = new HashMap<>();
 
@@ -282,7 +283,9 @@ public class RecentTasksController implements TaskStackListenerCallback,
 
         // We could do extra verification of requiring both taskIds of a pair and verifying that
         // the same split bounds object is returned... but meh. Seems unnecessary.
-        SplitBounds splitBounds = mTaskSplitBoundsMap.get(taskId);
+        final MultiSplitGroupRepository.Group group = mMultiSplitGroups.get(taskId);
+        SplitBounds splitBounds = group != null ? group.getSplitBounds()
+                : mTaskSplitBoundsMap.get(taskId);
         if (splitBounds != null) {
             ProtoLog.v(ShellProtoLogGroup.WM_SHELL_SPLIT_SCREEN,
                     "getSplitBoundsForTaskId: taskId=%d splitBoundsTasks=[%d, %d]", taskId,
@@ -330,6 +333,7 @@ public class RecentTasksController implements TaskStackListenerCallback,
      */
     @Override
     public void onRecentTaskRemovedForAddTask(int taskId) {
+        mMultiSplitGroups.remove(taskId);
         mDesktopUserRepositories.ifPresent(
                 desktopUserRepositories -> desktopUserRepositories.getCurrent().removeTask(taskId));
     }
@@ -343,6 +347,7 @@ public class RecentTasksController implements TaskStackListenerCallback,
 
     public void onTaskRemoved(RunningTaskInfo taskInfo) {
         // Remove any split pairs associated with this task
+        mMultiSplitGroups.remove(taskInfo.taskId);
         removeSplitPair(taskInfo.taskId);
         notifyRunningTaskVanished(taskInfo);
         if (!enableShellTopTaskTracking()) {
@@ -655,6 +660,14 @@ public class RecentTasksController implements TaskStackListenerCallback,
             String reason) {
         ProtoLog.v(WM_SHELL_RECENT_TASKS, "generateList(%s)", reason);
 
+        mMultiSplitGroups.validatePresent(new ArrayList<TaskInfo>(tasks));
+        mTmpMultiSplitGroups.clear();
+        for (TaskInfo task : tasks) {
+            final MultiSplitGroupRepository.Group group = mMultiSplitGroups.get(task.taskId);
+            if (group != null && group.matches(new ArrayList<TaskInfo>(tasks))) {
+                mTmpMultiSplitGroups.add(group);
+            }
+        }
         initializeDesksMap();
 
         if (tasks.isEmpty() && mTmpDesks.isEmpty()) {
@@ -688,6 +701,14 @@ public class RecentTasksController implements TaskStackListenerCallback,
                 // Skip and update the list if we are excluding this task
                 ProtoLog.v(WM_SHELL_RECENT_TASKS, "Excluding task: %d", taskId);
                 mTmpRemaining.remove(taskId);
+                continue;
+            }
+
+            if (mMultiSplitGroups.get(taskId) != null) {
+                if (!extractAndAddSplitGroupedTask(taskInfo, mTmpRemaining, groupedTasks)) {
+                    groupedTasks.add(GroupedTaskInfo.forFullscreenTasks(taskInfo));
+                    mTmpRemaining.remove(taskId);
+                }
                 continue;
             }
 
@@ -837,6 +858,19 @@ public class RecentTasksController implements TaskStackListenerCallback,
     private boolean extractAndAddSplitGroupedTask(@NonNull TaskInfo taskInfo,
             @NonNull Map<Integer, TaskInfo> remainingTasks,
             @NonNull ArrayList<GroupedTaskInfo> tasksOut) {
+        final MultiSplitGroupRepository.Group group = mMultiSplitGroups.get(taskInfo.taskId);
+        if (group != null) {
+            if (!mTmpMultiSplitGroups.contains(group)) return false;
+            final int first = group.getFirstRepresentative();
+            final int second = group.getSecondRepresentative();
+            if (taskInfo.taskId != first && taskInfo.taskId != second) return false;
+            if (!remainingTasks.containsKey(first) || !remainingTasks.containsKey(second)) {
+                return false;
+            }
+            tasksOut.add(GroupedTaskInfo.forSplitTasks(remainingTasks.remove(first),
+                    remainingTasks.remove(second), group.getSplitBounds()));
+            return true;
+        }
         final int pairedTaskId = mSplitTasks.get(taskInfo.taskId, INVALID_TASK_ID);
         if (pairedTaskId == INVALID_TASK_ID || !remainingTasks.containsKey(pairedTaskId)) {
             return false;
