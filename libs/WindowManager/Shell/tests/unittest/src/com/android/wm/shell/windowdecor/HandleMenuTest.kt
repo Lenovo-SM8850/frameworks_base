@@ -265,6 +265,8 @@ class HandleMenuTest : ShellTestCase() {
     @DisableFlags(FLAG_ENABLE_NON_DEFAULT_DISPLAY_SPLIT_BUGFIX)
     fun splitButton_onDefaultDisplay_flagOff_isVisible() = runTest {
         createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        whenever(splitScreenController.canEnterSplitScreen(mockDesktopWindowDecoration.mTaskInfo))
+            .thenReturn(true)
         val handleMenu = createAndShowHandleMenu()
 
         val handleMenuView =
@@ -291,6 +293,8 @@ class HandleMenuTest : ShellTestCase() {
     @EnableFlags(FLAG_ENABLE_NON_DEFAULT_DISPLAY_SPLIT_BUGFIX)
     fun splitButton_onExternalDisplay_flagOn_isVisible() = runTest {
         createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = EXTERNAL_DISPLAY_ID)
+        whenever(splitScreenController.canEnterSplitScreen(mockDesktopWindowDecoration.mTaskInfo))
+            .thenReturn(true)
         val handleMenu = createAndShowHandleMenu()
 
         val handleMenuView =
@@ -304,6 +308,8 @@ class HandleMenuTest : ShellTestCase() {
     @EnableFlags(FLAG_ENABLE_NON_DEFAULT_DISPLAY_SPLIT_BUGFIX)
     fun splitButton_onDefaultDisplay_flagOn_isVisible() = runTest {
         createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        whenever(splitScreenController.canEnterSplitScreen(mockDesktopWindowDecoration.mTaskInfo))
+            .thenReturn(true)
         val handleMenu = createAndShowHandleMenu()
 
         val handleMenuView =
@@ -678,6 +684,25 @@ class HandleMenuTest : ShellTestCase() {
         assertEquals(View.VISIBLE, split.visibility)
     }
 
+    @Test fun splitButton_fullscreenFollowsSharedEligibility() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(splitScreenController.canEnterSplitScreen(task)).thenReturn(false)
+        handleMenu = createAndShowHandleMenu()
+        val split = handleMenu.handleMenuView!!.windowingPillView
+            .requireViewById<View>(R.id.split_screen_button)
+        assertEquals(View.GONE, split.visibility)
+
+        whenever(splitScreenController.canEnterSplitScreen(task)).thenReturn(true)
+        handleMenu.handleMenuView!!.bind(task, true)
+        assertEquals(View.VISIBLE, split.visibility)
+
+        task.isFloatingWindow = true
+        whenever(splitScreenController.canEnterSplitScreen(task)).thenReturn(false)
+        handleMenu.handleMenuView!!.bind(task, true)
+        assertEquals(View.GONE, split.visibility)
+    }
+
     @Test fun desktopFloat_requiresActiveDeskAndNeverShowsForFloatingTask() {
         val actions = mock<WindowDecorationActions>()
         val task = TestRunningTaskInfoBuilder().setWindowingMode(
@@ -755,6 +780,30 @@ class HandleMenuTest : ShellTestCase() {
         assertEquals(mContext.getString(R.string.split_picker_add_to_side), button.textView.text.toString())
         button.performClick()
         org.mockito.kotlin.verify(mockWindowDecorationActions).onAddSplitBelow(task.taskId)
+    }
+
+    @Test fun replaceRowUsesExistingPickerActionAndRechecksTheLeaf() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(splitScreenController.isTaskInSplitScreenForeground(task.taskId)).thenReturn(true)
+        val bounds = Rect(0, 0, 1280, 800)
+        val occupied = SplitScreenController.AppDragSlot(0, 2, bounds, bounds, true, 2, false, 7)
+        whenever(splitScreenController.getReplaceSplitSlot(task.taskId)).thenReturn(occupied)
+        whenever(splitScreenController.getAddBelowSlot(task.taskId)).thenReturn(null)
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.rootView
+        val button = root.requireViewById<HandleMenuActionButton>(R.id.split_replace_button)
+        assertEquals(View.VISIBLE, button.visibility)
+        assertEquals(View.GONE, root.requireViewById<View>(R.id.split_add_button).visibility)
+        assertEquals(mContext.getString(R.string.handle_menu_replace_app), button.textView.text.toString())
+        button.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onReplaceSplitApp(task.taskId)
+        whenever(splitScreenController.getReplaceSplitSlot(task.taskId)).thenReturn(null)
+        button.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions, org.mockito.kotlin.times(1))
+            .onReplaceSplitApp(task.taskId)
+        handleMenu.handleMenuView!!.bind(task, true)
+        assertEquals(View.GONE, button.visibility)
     }
 
 }

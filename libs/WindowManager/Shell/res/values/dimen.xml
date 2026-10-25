@@ -753,4 +753,30 @@
     <dimen name="desktop_mode_layout_menu_pill_spacing_margin">2dp</dimen>
     <!-- The radius of the layout menu pill menu corners. -->
     <dimen name="desktop_mode_layout_menu_pill_corner_radius">26dp</dimen>
+
+    <!-- Split app picker panel. -->
+    <dimen name="split_picker_max_width">480dp</dimen>
+    <dimen name="split_picker_max_height">560dp</dimen>
+    <dimen name="split_picker_corner_radius">28dp</dimen>
+    <dimen name="split_picker_elevation">8dp</dimen>
+    <dimen name="split_picker_padding">16dp</dimen>
+    <dimen name="split_picker_padding_top">12dp</dimen>
+    <dimen name="split_picker_touch_target">48dp</dimen>
+    <dimen name="split_picker_button_padding">12dp</dimen>
+    <dimen name="split_picker_button_corner_radius">24dp</dimen>
+    <dimen name="split_picker_search_height">56dp</dimen>
+    <dimen name="split_picker_search_corner_radius">28dp</dimen>
+    <dimen name="split_picker_search_padding">16dp</dimen>
+    <dimen name="split_picker_search_icon_padding">12dp</dimen>
+    <dimen name="split_picker_section_padding_top">16dp</dimen>
+    <dimen name="split_picker_section_padding_bottom">8dp</dimen>
+    <dimen name="split_picker_cell_min_width">104dp</dimen>
+    <dimen name="split_picker_cell_min_height">104dp</dimen>
+    <dimen name="split_picker_cell_padding_horizontal">4dp</dimen>
+    <dimen name="split_picker_cell_padding_vertical">8dp</dimen>
+    <dimen name="split_picker_cell_corner_radius">16dp</dimen>
+    <dimen name="split_picker_app_icon_size">40dp</dimen>
+    <dimen name="split_picker_app_icon_label_gap">4dp</dimen>
+    <!-- Opacity of the apps that cannot take the destination. -->
+    <item name="split_picker_disabled_alpha" format="float" type="dimen">0.38</item>
 </resources>

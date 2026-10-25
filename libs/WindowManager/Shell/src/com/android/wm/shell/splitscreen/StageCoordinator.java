@@ -2512,6 +2512,57 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 getSideStagePosition(), mSideStage.getTopChildTaskUid(), isLeftRightSplit());
     }
 
+    boolean isMultiSplitActive() {
+        return mMultiSplit != null && mMultiSplit.isActive();
+    }
+
+    java.util.List<Integer> getSplitLeafTaskIds() {
+        if (!isSplitScreenVisible()) return java.util.Collections.emptyList();
+        return isMultiSplitActive()
+                ? mMultiSplit.getActiveStages().stream().map(StageTaskListener::getTopChildTaskId)
+                        .filter(id -> id >= 0).toList()
+                : java.util.Arrays.asList(getTaskId(SPLIT_POSITION_TOP_OR_LEFT),
+                        getTaskId(SPLIT_POSITION_BOTTOM_OR_RIGHT)).stream()
+                        .filter(id -> id >= 0).toList();
+    }
+
+    @Nullable
+    SplitScreenController.AppDragSlot getAddBelowSlot(int taskId) {
+        return mMultiSplit == null ? null : mMultiSplit.getBelowSlot(taskId, canMutateSplit());
+    }
+
+    @Nullable
+    SplitScreenController.AppDragSlot getAddBelowSlotForValidation(int taskId) {
+        return mMultiSplit == null ? null : mMultiSplit.getBelowSlotForValidation(taskId);
+    }
+
+    @Nullable
+    SplitScreenController.AppDragSlot getReplaceSplitSlot(int taskId) {
+        if (isMultiSplitActive()) return mMultiSplit.getReplacementSlot(taskId);
+        final int position = getSplitPosition(taskId);
+        if (position == SPLIT_POSITION_UNDEFINED || !isSplitScreenVisible()) return null;
+        final Rect bounds = new Rect(position == SPLIT_POSITION_TOP_OR_LEFT
+                ? mSplitLayout.getTopLeftBounds() : mSplitLayout.getBottomRightBounds());
+        final Rect hit = new Rect(bounds);
+        if (bounds.isEmpty() || !hit.intersect(mSplitLayout.getRootBounds())) return null;
+        return new SplitScreenController.AppDragSlot(position,
+                enableFlexibleSplit() ? (position == SPLIT_POSITION_TOP_OR_LEFT
+                        ? SPLIT_INDEX_0 : SPLIT_INDEX_1) : SPLIT_INDEX_UNDEFINED,
+                bounds, hit, true);
+    }
+
+    void replacePairTask(TaskInfo task, SplitScreenController.AppDragSlot slot) {
+        WindowContainerTransaction wct = new WindowContainerTransaction();
+        if (task.isFloatingWindow && task.token != null) {
+            wct.merge(com.android.wm.shell.pinnedlayer.phone.PinnedLayerUtils.INSTANCE
+                    .getRemovedFromLayerWct(task.token), true);
+            wct.setWindowingMode(task.token, WINDOWING_MODE_UNDEFINED).setBounds(task.token, new Rect());
+        }
+        // Existing pair entry owns replacement eviction and transition bookkeeping.
+        if (!wct.isEmpty()) mTaskOrganizer.applyTransaction(wct);
+        startTask(task.taskId, slot.position, null, null, slot.index);
+    }
+
     boolean startTaskInSplitSlot(TaskInfo task, SplitScreenController.AppDragSlot slot) {
         return mMultiSplit != null && mMultiSplit.startTask(task, slot);
     }
@@ -3497,6 +3548,7 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * @return true if stage bounds actually .
      */
     private boolean updateWindowBounds(SplitLayout layout, WindowContainerTransaction wct) {
+        if (isMultiSplitActive()) return mMultiSplit.updateTaskBounds(wct);
         final StageTaskListener topLeftStage;
         final StageTaskListener bottomRightStage;
         if (enableFlexibleSplit()) {

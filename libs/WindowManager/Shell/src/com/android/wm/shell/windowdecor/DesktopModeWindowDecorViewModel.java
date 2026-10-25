@@ -1060,7 +1060,7 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             return;
         }
 
-        int displayId = decoration.getTaskInfo().displayId;
+        int displayId = taskInfo.displayId;
         final int orientation = mDisplayController.getDisplayContext(displayId).getResources()
                 .getConfiguration().orientation;
 
@@ -1068,8 +1068,8 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         // Set leftOrTop as False to split to the right in landscape mode.
         boolean leftOrTop = orientation == Configuration.ORIENTATION_PORTRAIT;
 
-        mDesktopTasksController.requestSplit(decoration.getTaskInfo(), leftOrTop);
-        mDesktopModeUiEventLogger.log(decoration.getTaskInfo(),
+        mDesktopTasksController.requestSplit(taskInfo, leftOrTop);
+        mDesktopModeUiEventLogger.log(taskInfo,
                 DesktopUiEventEnum.DESKTOP_WINDOW_APP_HANDLE_MENU_TAP_TO_SPLIT_SCREEN);
     }
 

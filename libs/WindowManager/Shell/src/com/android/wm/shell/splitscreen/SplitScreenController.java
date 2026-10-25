@@ -31,6 +31,8 @@ import static com.android.wm.shell.common.split.SplitScreenUtils.isValidToSplit;
 import static com.android.wm.shell.common.split.SplitScreenUtils.reverseSplitPosition;
 import static com.android.wm.shell.common.split.SplitScreenUtils.splitFailureMessage;
 import static com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_SPLIT_SCREEN;
+import static com.android.wm.shell.shared.split.SplitScreenConstants.CONTROLLED_ACTIVITY_TYPES;
+import static com.android.wm.shell.shared.split.SplitScreenConstants.CONTROLLED_WINDOWING_MODES_WHEN_ACTIVE;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.KEY_EXTRA_WIDGET_INTENT;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_INDEX_0;
 import static com.android.wm.shell.shared.split.SplitScreenConstants.SPLIT_INDEX_1;
@@ -78,6 +80,7 @@ import androidx.annotation.Nullable;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.logging.InstanceId;
 import com.android.internal.protolog.ProtoLog;
+import com.android.internal.util.ArrayUtils;
 import com.android.launcher3.icons.IconProvider;
 import com.android.wm.shell.Flags;
 import com.android.wm.shell.R;
@@ -496,6 +499,32 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
     }
 
     private SplitPickerController mSplitPicker;
+
+    public void showReplaceSplitPicker(int taskId, Executor backgroundExecutor) {
+        showSplitPicker(taskId, backgroundExecutor, true);
+    }
+
+    public void showAddBelowPicker(int taskId, Executor backgroundExecutor) {
+        showSplitPicker(taskId, backgroundExecutor, false);
+    }
+
+    private void showSplitPicker(int taskId, Executor backgroundExecutor, boolean replace) {
+        mMainExecutor.execute(() -> {
+            if (mSplitPicker == null) {
+                mSplitPicker = new SplitPickerController(mContext, this, mTaskOrganizer,
+                        mDisplayController, mTransitions, mMainExecutor, mMainHandler,
+                        backgroundExecutor);
+            }
+            mSplitPicker.show(taskId, replace);
+        });
+    }
+
+    /** The live picker or launcher split-select owns the pending destination, never the sidebar. */
+    public AppDragSlot getPendingSidebarSplitSlot(int displayId) {
+        final AppDragSlot picker = mSplitPicker == null ? null : mSplitPicker.pendingSidebarSlot(displayId);
+        if (picker != null) return picker;
+        return mStageCoordinator.getPendingSidebarSplitSlot(displayId);
+    }
 
     public boolean isSplitScreenFocused() {
         return mStageCoordinator.isSplitScreenFocused();
