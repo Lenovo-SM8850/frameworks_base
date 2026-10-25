@@ -4520,6 +4520,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             onLastFocusedTaskDisplayAreaChanged(newFocus.getDisplayArea());
         }
         if (mFocusedApp == newFocus) {
+            // A focused task can change windowing mode without changing its activity.
+            mDisplayRotation.onFocusedAppChanged();
             return false;
         }
         ProtoLog.i(WM_DEBUG_FOCUS_LIGHT, "setFocusedApp %s displayId=%d Callers=%s",
@@ -4544,6 +4546,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             }
         }
         getInputMonitor().setFocusedAppLw(newFocus);
+        mDisplayRotation.onFocusedAppChanged();
         return true;
     }
 
