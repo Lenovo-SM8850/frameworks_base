@@ -41,6 +41,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var dragging = false
     private var blockedGesture = false
     private var touchGesture = false
+    private val stashFeedback = FloatingTargetFeedback()
 
     fun cancelTargetFeedback() {
         stashFeedback.reset()
@@ -246,6 +247,4 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
         // Finish the input callback before disposing its receiver and rendering surface.
         if (inputDispatchDepth != 0) handler.post(release) else release.run()
     }
-
-    private val stashFeedback = FloatingTargetFeedback()
 }

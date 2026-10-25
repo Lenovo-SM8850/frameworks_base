@@ -126,6 +126,30 @@ class FloatingMiniController(
     data class DragTarget(val bounds: Rect, val scale: Float, val radius: Float,
         val corner: FloatingMiniState.Corner? = null)
 
+    fun getStashTarget(task: TaskInfo, bounds: Rect): FloatingMiniState.Edge {
+        if (state.get(task.userId, task.taskId) == null) return FloatingMiniState.Edge.NONE
+        val stable = stable(task)
+        return if (stable.isEmpty) FloatingMiniState.Edge.NONE else
+            FloatingMiniState.stashEdge(bounds, stable)
+    }
+
+    private fun occupiedMiniBounds(task: TaskInfo): List<Rect> =
+        organizer.getRunningTasks(task.displayId).mapNotNull { other ->
+            if ((other.taskId == task.taskId && other.userId == task.userId) ||
+                other.displayId != task.displayId || !other.isFloatingWindow || !other.isVisible) null
+            else state.get(other.userId, other.taskId)?.takeIf {
+                it.edge == FloatingMiniState.Edge.NONE
+            }?.bounds?.let(::Rect)
+        }
+
+    private fun avoidMiniOverlap(task: TaskInfo, bounds: Rect, stable: Rect, margin: Int): Rect {
+        val occupied = occupiedMiniBounds(task)
+        val spaced = Rect(bounds).apply { inset(-margin, -margin) }
+        if (occupied.none { Rect.intersects(spaced, it) }) return bounds
+        return FloatingMiniState.tidyBounds(bounds, bounds, stable, margin, occupied,
+            nearest = true) ?: bounds
+    }
+
     fun getDragTarget(task: TaskInfo, start: Rect, end: Rect): DragTarget? {
         if (!task.isFloatingWindow || start == end || task.taskId !in leashes) return null
         val entry = state.get(task.userId, task.taskId)
@@ -199,6 +223,22 @@ class FloatingMiniController(
             (bounds.height() / scale).roundToInt())
         val current = task.configuration.windowConfiguration.bounds
         if (expected != Pair(current.width(), current.height())) pendingResize[key(task)] = expected
+        changed(task)
+    }
+
+    fun isStashed(task: TaskInfo): Boolean = state.get(task.userId, task.taskId)?.edge
+        ?.let { it != FloatingMiniState.Edge.NONE } == true
+
+    fun unstash(task: TaskInfo) {
+        val entry = state.get(task.userId, task.taskId) ?: return
+        if (!isStashed(task)) return
+        val stable = stable(task)
+        if (stable.isEmpty) return
+        val margin = (8 * density(task)).toInt()
+        val destination = avoidMiniOverlap(task,
+            FloatingMiniState.clamp(entry.bounds, stable, margin), stable, margin)
+        entry.edge = FloatingMiniState.Edge.NONE
+        animate(task, Rect(entry.bounds), entry.scale, destination, entry.scale)
         changed(task)
     }
 
@@ -494,46 +534,6 @@ class FloatingMiniController(
         })
         animation.start()
     }
-
-    fun getStashTarget(task: TaskInfo, bounds: Rect): FloatingMiniState.Edge {
-        if (state.get(task.userId, task.taskId) == null) return FloatingMiniState.Edge.NONE
-        val stable = stable(task)
-        return if (stable.isEmpty) FloatingMiniState.Edge.NONE else
-            FloatingMiniState.stashEdge(bounds, stable)
-    }
-
-    private fun occupiedMiniBounds(task: TaskInfo): List<Rect> =
-        organizer.getRunningTasks(task.displayId).mapNotNull { other ->
-            if ((other.taskId == task.taskId && other.userId == task.userId) ||
-                other.displayId != task.displayId || !other.isFloatingWindow || !other.isVisible) null
-            else state.get(other.userId, other.taskId)?.takeIf {
-                it.edge == FloatingMiniState.Edge.NONE
-            }?.bounds?.let(::Rect)
-        }
-
-    private fun avoidMiniOverlap(task: TaskInfo, bounds: Rect, stable: Rect, margin: Int): Rect {
-        val occupied = occupiedMiniBounds(task)
-        val spaced = Rect(bounds).apply { inset(-margin, -margin) }
-        if (occupied.none { Rect.intersects(spaced, it) }) return bounds
-        return FloatingMiniState.tidyBounds(bounds, bounds, stable, margin, occupied,
-            nearest = true) ?: bounds
-    }
-
-    fun unstash(task: TaskInfo) {
-        val entry = state.get(task.userId, task.taskId) ?: return
-        if (!isStashed(task)) return
-        val stable = stable(task)
-        if (stable.isEmpty) return
-        val margin = (8 * density(task)).toInt()
-        val destination = avoidMiniOverlap(task,
-            FloatingMiniState.clamp(entry.bounds, stable, margin), stable, margin)
-        entry.edge = FloatingMiniState.Edge.NONE
-        animate(task, Rect(entry.bounds), entry.scale, destination, entry.scale)
-        changed(task)
-    }
-
-    fun isStashed(task: TaskInfo): Boolean = state.get(task.userId, task.taskId)?.edge
-        ?.let { it != FloatingMiniState.Edge.NONE } == true
 
     fun tidy(tasks: List<TaskInfo>) {
         val visible = tasks.filter { it.isFloatingWindow && it.isVisible }
