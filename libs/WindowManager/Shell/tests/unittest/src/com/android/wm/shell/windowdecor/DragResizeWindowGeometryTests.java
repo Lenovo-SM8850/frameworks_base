@@ -364,4 +364,30 @@ public class DragResizeWindowGeometryTests extends ShellTestCase {
                             : CTRL_TYPE_UNDEFINED);
         }
     }
+    @Test
+    public void floatingVisibleSizes_onlySmallCornerSquaresResize() {
+        for (Size size : List.of(new Size(659, 1055), new Size(360, 540), new Size(1055, 659))) {
+            final DragResizeWindowGeometry geometry = new DragResizeWindowGeometry(24, size,
+                    16, 4, 72, 80, DragResizeWindowGeometry.DisabledEdge.NONE, true);
+            for (float fraction : new float[] { .2f, .5f, .8f }) {
+                assertThat(geometry.isEdgeMove(geometry.calculateCtrlType(true, true,
+                        fraction * size.getWidth(), 1))).isTrue();
+                assertThat(geometry.isEdgeMove(geometry.calculateCtrlType(true, true,
+                        fraction * size.getWidth(), size.getHeight() - 1))).isTrue();
+                assertThat(geometry.isEdgeMove(geometry.calculateCtrlType(true, true,
+                        1, fraction * size.getHeight()))).isTrue();
+                assertThat(geometry.isEdgeMove(geometry.calculateCtrlType(true, true,
+                        size.getWidth() - 1, fraction * size.getHeight()))).isTrue();
+            }
+            assertThat(geometry.calculateCtrlType(true, true, 1, 1))
+                    .isEqualTo(CTRL_TYPE_LEFT | CTRL_TYPE_TOP);
+            assertThat(geometry.calculateCtrlType(true, true, size.getWidth() - 1, 1))
+                    .isEqualTo(CTRL_TYPE_RIGHT | CTRL_TYPE_TOP);
+            assertThat(geometry.calculateCtrlType(true, true, 1, size.getHeight() - 1))
+                    .isEqualTo(CTRL_TYPE_LEFT | CTRL_TYPE_BOTTOM);
+            assertThat(geometry.calculateCtrlType(true, true, size.getWidth() - 1, size.getHeight() - 1))
+                    .isEqualTo(CTRL_TYPE_RIGHT | CTRL_TYPE_BOTTOM);
+        }
+    }
+
 }
