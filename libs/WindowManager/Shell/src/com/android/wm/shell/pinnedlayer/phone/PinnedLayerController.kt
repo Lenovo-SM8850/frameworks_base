@@ -135,6 +135,14 @@ class PinnedLayerController(
             it.taskId in visiblePinnedTasks && it.taskId !in minimizedTasks && !isMini(it)
     }
 
+    fun tidyFloatingWindows(tasks: List<TaskInfo>) {
+        if (keyguardShowing || recentsRunning || overviewShowing) return
+        miniInteractions?.tidy(tasks.filter {
+            it.displayId == DEFAULT_DISPLAY && it.isFloatingWindow && it.isVisible &&
+                it.taskId in visiblePinnedTasks && it.taskId !in minimizedTasks
+        })
+    }
+
     fun getMiniDragTarget(task: TaskInfo, start: Rect, end: Rect) =
         miniInteractions?.getDragTarget(task, start, end)
 
@@ -1297,13 +1305,5 @@ class PinnedLayerController(
         fun onPinnedTasksAdded(taskInfo: TaskInfo)
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
-    }
-
-    fun tidyFloatingWindows(tasks: List<TaskInfo>) {
-        if (keyguardShowing || recentsRunning || overviewShowing) return
-        miniInteractions?.tidy(tasks.filter {
-            it.displayId == DEFAULT_DISPLAY && it.isFloatingWindow && it.isVisible &&
-                it.taskId in visiblePinnedTasks && it.taskId !in minimizedTasks
-        })
     }
 }
