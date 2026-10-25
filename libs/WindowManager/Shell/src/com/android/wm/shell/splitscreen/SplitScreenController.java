@@ -1492,4 +1492,59 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
                     (controller) -> controller.switchSplitPosition("remoteCall"));
         }
     }
+
+    /** Keeps surviving multi-app leaves in split when one task moves to floating. */
+    public boolean prepareSplitLeafToFloating(int taskId, WindowContainerTransaction wct) {
+        return mStageCoordinator.prepareSplitLeafToFloating(taskId, wct);
+    }
+
+    /** Visible leaf-app occupancy, excluding stage history and non-standard/floating tasks. */
+    public int getOccupiedSplitSlots(int displayId) {
+        return mStageCoordinator.getOccupiedSplitSlots(displayId);
+    }
+
+    /** A coordinator-owned insertion/replacement slot with exact final task bounds. */
+    public static final class AppDragSlot {
+        public final int position;
+        public final int index;
+        public final Rect bounds;
+        public final Rect hitBounds;
+        public final boolean occupied;
+        public final int leafId;
+        public final boolean newTaskFirst;
+        public final int layoutVersion;
+        public final boolean splitBelow;
+        public final boolean threeColumns;
+
+        public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied) {
+            this(position, index, bounds, hitBounds, occupied, -1, false, -1);
+        }
+
+        public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied,
+                int leafId, boolean newTaskFirst, int layoutVersion) {
+            this(position, index, bounds, hitBounds, occupied, leafId, newTaskFirst,
+                    layoutVersion, false);
+        }
+
+        public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied,
+                int leafId, boolean newTaskFirst, int layoutVersion, boolean splitBelow) {
+            this(position, index, bounds, hitBounds, occupied, leafId, newTaskFirst,
+                    layoutVersion, splitBelow, false);
+        }
+
+        public AppDragSlot(int position, int index, Rect bounds, Rect hitBounds, boolean occupied,
+                int leafId, boolean newTaskFirst, int layoutVersion, boolean splitBelow,
+                boolean threeColumns) {
+            this.threeColumns = threeColumns;
+            this.splitBelow = splitBelow;
+            this.leafId = leafId;
+            this.newTaskFirst = newTaskFirst;
+            this.layoutVersion = layoutVersion;
+            this.position = position;
+            this.index = index;
+            this.bounds = new Rect(bounds);
+            this.hitBounds = new Rect(hitBounds);
+            this.occupied = occupied;
+        }
+    }
 }

@@ -16,15 +16,32 @@
 
 package com.android.wm.shell.splitscreen
 
+import android.content.res.Resources
+
 /**
  * The LayoutPolicy is a dedicated component responsible for validating the rules of a layout.
  * Its purpose is to answer the question, "Is this proposed layout state valid?" This includes
  * checking for constraints like the maximum number of apps, minimum window sizes, or
  * device-specific restrictions.
  *
- * NOTE: This is a placeholder class for now, ignore.
+ * Multi-app feasibility uses the existing minimum-size resource. Legacy snap-point selection
+ * below remains a placeholder.
  */
 class LayoutPolicy {
+
+    /** Reuses the minimum used by the existing split divider snap policy, in pixels. */
+    fun getMinimumLeafSize(resources: Resources): Int =
+        resources.getDimensionPixelSize(
+            com.android.internal.R.dimen.default_minimal_size_resizable_task
+        )
+
+    /** Checks every leaf in both axes without imposing additional per-activity resize rules. */
+    fun isFeasible(bounds: MultiSplitLayout.Bounds, minimumLeafSize: Int): Boolean {
+        require(minimumLeafSize >= 0)
+        return bounds.leaves.values.all {
+            !it.isEmpty && it.width() >= minimumLeafSize && it.height() >= minimumLeafSize
+        }
+    }
 
     /**
      * Gets the list of available proportional snap points for a given pair of nodes. This is where

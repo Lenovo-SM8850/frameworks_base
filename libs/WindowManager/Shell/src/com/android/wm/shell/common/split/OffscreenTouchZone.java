@@ -81,7 +81,7 @@ public class OffscreenTouchZone {
      *                  screen edge.
      * @param runnable The function to run when the touch zone is tapped.
      */
-    OffscreenTouchZone(boolean isTopLeft, Runnable runnable) {
+    public OffscreenTouchZone(boolean isTopLeft, Runnable runnable) {
         mIsTopLeft = isTopLeft;
         mOnClickRunnable = runnable;
     }
@@ -97,7 +97,7 @@ public class OffscreenTouchZone {
     }
 
     /** Releases the touch zone when it's no longer needed. */
-    void release(SurfaceControl.Transaction t) {
+    public void release(SurfaceControl.Transaction t) {
         if (mInterceptLayer != null) {
             mInterceptLayer.release();
             mInterceptLayer = null;
