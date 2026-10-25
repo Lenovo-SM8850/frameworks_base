@@ -207,4 +207,5 @@
     <string name="config_gameControlsIntentReceiverPackage" translatable="false"/>
     <string name="config_gameControlsIntentAction" translatable="false"/>
     <string name="config_gameControlsOptOutMetadataKey" translatable="false"/>
+    <bool name="config_enableMultiAppSplit">false</bool>
 </resources>
