@@ -98,6 +98,7 @@ public class DozeTriggers implements DozeMachine.Part {
     private final DozeHost mDozeHost;
     private final AmbientDisplayConfiguration mConfig;
     private final DozeParameters mDozeParameters;
+    private final DozeAodTimeout mAodTimeout;
     private final AsyncSensorManager mSensorManager;
     private final WakeLock mWakeLock;
     private final boolean mAllowPulseTriggers;
@@ -215,11 +216,12 @@ public class DozeTriggers implements DozeMachine.Part {
             KeyguardStateController keyguardStateController,
             DevicePostureController devicePostureController,
             UserTracker userTracker,
-            SelectedUserInteractor selectedUserInteractor) {
+            SelectedUserInteractor selectedUserInteractor, DozeAodTimeout aodTimeout) {
         mContext = context;
         mDozeHost = dozeHost;
         mConfig = config;
         mDozeParameters = dozeParameters;
+        mAodTimeout = aodTimeout;
         mSensorManager = sensorManager;
         mWakeLock = wakeLock;
         mAllowPulseTriggers = true;
@@ -271,6 +273,10 @@ public class DozeTriggers implements DozeMachine.Part {
             runIfNotNull(onPulseSuppressedListener);
             mDozeLog.tracePulseDropped("dozeSuppressed");
             return;
+        }
+        // An accepted notification takes over an already visible charging pulse.
+        if (mMachine.getState() == State.DOZE_PULSING) {
+            mAodTimeout.cancelChargingPulse();
         }
         requestPulse(DozeLog.PULSE_REASON_NOTIFICATION, false /* performedProxCheck */,
                 onPulseSuppressedListener);
@@ -755,6 +761,11 @@ public class DozeTriggers implements DozeMachine.Part {
                 if (DozeMachine.DEBUG) Log.d(TAG, "Received pulse intent");
                 requestPulse(DozeLog.PULSE_REASON_INTENT, false, /* performedProxCheck */
                         null /* onPulseSuppressedListener */);
+            } else if (Intent.ACTION_POWER_CONNECTED.equals(intent.getAction())
+                    && mAodTimeout.startChargingPulse()) {
+                // Use the notification pulse lifecycle; the session controller ends it.
+                requestPulse(DozeLog.PULSE_REASON_NOTIFICATION, false /* performedProxCheck */,
+                        mAodTimeout::cancelChargingPulse);
             }
         }
 
@@ -763,6 +774,10 @@ public class DozeTriggers implements DozeMachine.Part {
                 return;
             }
             IntentFilter filter = new IntentFilter(PULSE_ACTION);
+            if (mContext.getResources().getInteger(
+                    com.android.systemui.res.R.integer.config_dozeAodTimeoutMillis) > 0) {
+                filter.addAction(Intent.ACTION_POWER_CONNECTED);
+            }
             broadcastDispatcher.registerReceiver(this, filter);
             mRegistered = true;
         }

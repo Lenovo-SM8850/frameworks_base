@@ -108,6 +108,7 @@ public final class DozeServiceHost implements DozeHost {
     private final HeadsUpManager mHeadsUpManager;
     private final BatteryController mBatteryController;
     private final ScrimController mScrimController;
+    private final ScrimController mAodScrimController;
     private final Lazy<BiometricUnlockController> mBiometricUnlockControllerLazy;
     private final Lazy<AssistManager> mAssistManagerLazy;
     private final DozeScrimController mDozeScrimController;
@@ -163,6 +164,16 @@ public final class DozeServiceHost implements DozeHost {
         mHeadsUpManager = headsUpManager;
         mBatteryController = batteryController;
         mScrimController = SceneContainerFlag.isEnabled() ? null : scrimController.get();
+        mAodScrimController = context.getResources().getInteger(
+                com.android.systemui.res.R.integer.config_dozeAodTimeoutMillis) > 0
+                ? mScrimController : null;
+        if (mAodScrimController != null) {
+            mAodScrimController.setAodScrimReadyListener(() -> {
+                for (Callback callback : mCallbacks) {
+                    callback.onAodScrimReady();
+                }
+            });
+        }
         mBiometricUnlockControllerLazy = biometricUnlockControllerLazy;
         mAssistManagerLazy = assistManagerLazy;
         mDozeScrimController = dozeScrimController;
@@ -252,6 +263,11 @@ public final class DozeServiceHost implements DozeHost {
         return mPulsing;
     }
 
+
+    @Override
+    public boolean isAodScrimReady() {
+        return mAodScrimController != null && mAodScrimController.isAodScrimReady();
+    }
 
     @Override
     public void addCallback(@NonNull Callback callback) {
