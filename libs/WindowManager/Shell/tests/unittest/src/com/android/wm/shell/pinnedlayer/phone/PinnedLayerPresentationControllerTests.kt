@@ -40,9 +40,10 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mock
+import org.mockito.Mockito.`when` as whenever
 import org.mockito.Mockito.any
 import org.mockito.Mockito.anyInt
-import org.mockito.Mockito.`when` as whenever
+import org.mockito.Mockito.doAnswer
 
 /**
  * Unit tests against [PinnedLayerPresentationController]
@@ -78,10 +79,10 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         whenever(displayLayout.width()).thenReturn(1080)
         whenever(displayLayout.height()).thenReturn(1920)
         whenever(displayLayout.stableInsets()).thenReturn(Rect(0, 100, 0, 50))
-        whenever(displayLayout.getStableBounds(any())).thenAnswer {
+        doAnswer {
             val outRect = it.getArgument<Rect>(0)
             outRect.set(0, 100, 1080, 1870) // incl. insets
-        }
+        }.`when`(displayLayout).getStableBounds(any())
         whenever(desktopState.isDesktopModeSupportedOnDisplay(anyInt())).thenReturn(true)
 
         controller = PinnedLayerPresentationController(context, displayController, desktopState)
@@ -155,20 +156,216 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         // maxHeight = 800 * 0.7 = 560px
         val task = createTaskInfo(Rect(0, 0, 300, 400))
 
-        val bounds = controller.getPinEntryDestinationBounds(task)
+        assertThat(bounds.width()).isEqualTo(576)
+        assertThat(bounds.height()).isEqualTo(777)
+        assertThat(bounds.centerX()).isEqualTo(540)
+        assertThat(bounds.centerY()).isEqualTo(985)
+    }
 
-        // w0=300, h0=400
-        // minScale = max(440/300, 440/400) = 1.466
-        // maxScale = min(350/300, 560/400) = 1.166
-        // minScale > maxScale, so scale should be maxScale.
-        // finalWidth = 300 * 1.166... = 350
-        // finalHeight = 400 * 1.166... = 466
-        // right = 500 - 0 (inset) - 10 (padding) = 490
-        // bottom = 800 - 0 (inset) - 10 (padding) = 790
-        // left = 490 - 350 = 140
-        // top = 790 - 466 = 324
-        val expected = Rect(140, 324, 490, 790)
-        assertThat(bounds).isEqualTo(expected)
+    @Test
+    fun getPinEntryDestinationBounds_respectsAppMinimumSize() {
+        val task = createTaskInfo(Rect(0, 0, 500, 600))
+        task.minWidth = 800
+        task.minHeight = 900
+        task.isFloatingWindow = true
+        task.floatingWindowScale = 1f
+
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+
+        assertThat(bounds.width()).isAtLeast(800)
+        assertThat(bounds.height()).isAtLeast(900)
+        assertThat(Rect(0, 100, 1080, 1870).contains(bounds)).isTrue()
+    }
+
+    @Test
+    fun getPinEntryDestinationBounds_remembersPackageAndUser() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000))
+        task.baseActivity = android.content.ComponentName("test.floating", "Main")
+        task.isFloatingWindow = true
+        task.userId = 10
+        task.floatingWindowScale = 1f
+        task.positionInParent = android.graphics.Point(100, 200)
+        task.floatingWindowPosition.set(100, 200)
+        controller.rememberBounds(task)
+
+        assertThat(controller.getPinEntryDestinationBounds(task))
+            .isEqualTo(Rect(100, 200, 700, 1000))
+        task.userId = 11
+        // Another user's launch has no existing floating presentation to restore.
+        task.isFloatingWindow = false
+        assertThat(controller.getPinEntryDestinationBounds(task))
+            .isNotEqualTo(Rect(100, 200, 700, 1000))
+    }
+
+    @Test
+    fun getPinEntryDestinationBounds_landscape_usesSeparateGeometry() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000))
+        task.baseActivity = android.content.ComponentName("test.floating", "Main")
+        task.isFloatingWindow = true
+        controller.rememberBounds(task)
+        whenever(displayLayout.width()).thenReturn(1920)
+        whenever(displayLayout.height()).thenReturn(1080)
+        doAnswer {
+            it.getArgument<Rect>(0).set(0, 100, 1920, 1030)
+        }.`when`(displayLayout).getStableBounds(any())
+
+        val landscapeTask = createTaskInfo(Rect()).apply {
+            baseActivity = task.baseActivity
+            isFloatingWindow = true
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(landscapeTask))
+
+        assertThat(bounds.width()).isEqualTo(777)
+        assertThat(bounds.height()).isEqualTo(576)
+        assertThat(bounds.centerX()).isEqualTo(960)
+    }
+
+    @Test
+    fun rememberedManualBounds_acceptSmallRoundingDifferences() {
+        val task = createTaskInfo(Rect(100, 200, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.geometry", "Main")
+            minWidth = 10
+            minHeight = 10
+        }
+        controller.setManualOrientation(task, true, Rect(200, 300, 900, 900))
+        val actual = Rect(201, 301, 901, 901)
+        task.configuration.windowConfiguration.setBounds(actual)
+        task.floatingWindowScale = 1f
+        task.positionInParent = android.graphics.Point(actual.left, actual.top)
+        task.floatingWindowPosition.set(actual.left, actual.top)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(actual)
+    }
+
+    @Test
+    fun rememberedManualBounds_mismatchedCallbackDoesNotBlockLaterGeometry() {
+        val task = createTaskInfo(Rect(100, 200, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.geometry", "Main")
+            minWidth = 10
+            minHeight = 10
+        }
+        controller.setManualOrientation(task, true, Rect(200, 300, 900, 900))
+        controller.rememberBounds(task)
+        val actual = Rect(200, 400, 800, 1400)
+        task.configuration.windowConfiguration.setBounds(actual)
+        task.floatingWindowScale = 1f
+        task.positionInParent = android.graphics.Point(actual.left, actual.top)
+        task.floatingWindowPosition.set(actual.left, actual.top)
+        controller.rememberBounds(task)
+        assertThat(controller.getPinEntryDestinationBounds(task)).isEqualTo(actual)
+    }
+
+    @Test
+    fun entry_ignoresSavedManualRotationAndUsesCurrentFullscreenAspect() {
+        val task = createTaskInfo(Rect(0, 0, 1000, 600)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.entry", "Main")
+            minWidth = 1
+            minHeight = 1
+        }
+        controller.setManualOrientation(task, true, Rect(100, 200, 1000, 800))
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 600, 1000))
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(.6f)
+        assertThat(controller.getManualRotationBounds(task)).isNull()
+    }
+
+    @Test
+    fun entry_afterRestartUsesCurrentDesktopAspectInsteadOfSavedRotation() {
+        val store = FloatingWindowGeometryStore({ null }, java.util.concurrent.Executor { it.run() })
+        val first = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        val task = createTaskInfo(Rect(0, 0, 600, 1000)).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.entry", "Main")
+            minWidth = 1
+            minHeight = 1
+        }
+        first.setManualOrientation(task, false, Rect(100, 200, 700, 1200))
+        val restarted = PinnedLayerPresentationController(context, displayController, desktopState, store)
+        task.isFloatingWindow = false
+        task.configuration.windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_FREEFORM)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1000, 600))
+        task.configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val bounds = requireNotNull(restarted.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(1000f / 600)
+    }
+
+    @Test
+    fun entry_usesLetterboxedAppFrameInsteadOfFullscreenTaskAspect() {
+        val task = createTaskInfo(Rect(0, 0, 1920, 1080)).apply {
+            configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            topActivityMainWindowFrame = Rect(600, 0, 1320, 1080)
+            minWidth = 1
+            minHeight = 1
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(2f / 3)
+    }
+
+    @Test
+    fun entry_usesLetterboxBoundsWhenMainWindowMatchesActivityBounds() {
+        val task = createTaskInfo(Rect(0, 0, 1920, 1080)).apply {
+            configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            appCompatTaskInfo.topActivityLetterboxBounds = Rect(600, 0, 1320, 1080)
+            minWidth = 1
+            minHeight = 1
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(2f / 3)
+    }
+
+    @Test
+    fun entry_usesFullscreenBoundsWhenOrientationMetadataIsUnavailable() {
+        val task = createTaskInfo(Rect(0, 0, 1000, 600)).apply {
+            configuration.windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
+            minWidth = 1
+            minHeight = 1
+        }
+        val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.002f).of(1000f / 600)
+    }
+
+    private fun setRealPortraitDisplay() {
+        val info = android.view.DisplayInfo().apply {
+            logicalWidth = 1080
+            logicalHeight = 1920
+            logicalDensityDpi = 320
+            rotation = android.view.Surface.ROTATION_0
+        }
+        val layout = DisplayLayout(info, context.resources, false, false)
+        whenever(displayController.getDisplayLayout(Display.DEFAULT_DISPLAY)).thenReturn(layout)
+    }
+
+    @Test
+    fun deviceRotation_unflippedWindowFollowsDeviceAndKeepsArea() {
+        setRealPortraitDisplay()
+        val initial = Rect(100, 200, 500, 1000)
+        val task = createTaskInfo(initial).apply { isFloatingWindow = true }
+        val rotated = requireNotNull(controller.getRotationBounds(task,
+            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_90))
+        assertThat(rotated.width()).isGreaterThan(rotated.height())
+        assertThat(kotlin.math.abs(rotated.width() * rotated.height() - 320000)).isLessThan(1500)
+        assertThat(Rect(0, 0, 1920, 1080).contains(rotated)).isTrue()
+    }
+
+    @Test
+    fun deviceRotation_manualPortraitChoiceStaysPortrait() {
+        setRealPortraitDisplay()
+        val initial = Rect(100, 200, 500, 1000)
+        val task = createTaskInfo(initial).apply {
+            isFloatingWindow = true
+            baseActivity = android.content.ComponentName("test.rotation", "Main")
+        }
+        controller.setManualOrientation(task, false, initial)
+        val rotated = requireNotNull(controller.getRotationBounds(task,
+            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_90))
+        assertThat(rotated.width()).isLessThan(rotated.height())
+        assertThat(kotlin.math.abs(rotated.width() * rotated.height() - 320000)).isLessThan(1500)
+        assertThat(Rect(0, 0, 1920, 1080).contains(rotated)).isTrue()
     }
 
     @Test
@@ -192,12 +389,12 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
-    fun getPinEntryDestinationBounds_invalidTaskBounds_returnsNull() {
+    fun getPinEntryDestinationBounds_emptySourceBounds_usesDisplayDefault() {
         val task = createTaskInfo(Rect(0, 0, 0, 100)) // Zero width
 
         val bounds = controller.getPinEntryDestinationBounds(task)
 
-        assertThat(bounds).isNull()
+        assertThat(bounds).isNotNull()
     }
 
     @Test
@@ -211,13 +408,13 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
     }
 
     @Test
-    fun isTaskSupportedForPinning_notFreeform_returnsFalse() {
+    fun isTaskSupportedForPinning_fullscreen_returnsTrue() {
         val task =
             TestRunningTaskInfoBuilder()
                 .setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN)
                 .build()
 
-        assertThat(controller.isTaskSupportedForPinning(task)).isFalse()
+        assertThat(controller.isTaskSupportedForPinning(task)).isTrue()
     }
 
     @Test
@@ -460,6 +657,28 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(newBounds).isEqualTo(task.configuration.windowConfiguration.bounds)
     }
 
+    @Test
+    fun isTaskSupportedForPinning_split_returnsTrue() {
+        val task = TestRunningTaskInfoBuilder()
+            .setWindowingMode(WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW).build()
+        assertThat(controller.isTaskSupportedForPinning(task)).isTrue()
+    }
+
+    @Test
+    fun isTaskSupportedForPinning_nonResizable_returnsFalse() {
+        val task = TestRunningTaskInfoBuilder()
+            .setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN).build()
+        task.isResizeable = false
+        assertThat(controller.isTaskSupportedForPinning(task)).isFalse()
+    }
+
+    @Test
+    fun isTaskSupportedForPinning_secondaryDisplay_returnsFalse() {
+        val task = TestRunningTaskInfoBuilder().setDisplayId(1)
+            .setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN).build()
+        assertThat(controller.isTaskSupportedForPinning(task)).isFalse()
+    }
+
     private fun createTaskInfo(bounds: Rect, taskId: Int = 44): TaskInfo {
         return TestRunningTaskInfoBuilder()
             .setTaskId(taskId)
@@ -470,4 +689,149 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
 
     private fun requestLocation(bounds: Rect, displayId: Int = Display.DEFAULT_DISPLAY) =
         TransitionRequestInfo.RequestedLocation(displayId, bounds)
+    @Test
+    fun newFloatingEntry_usesCurrentDisplayOrientationEvenWithProvisionalBounds() {
+        whenever(displayLayout.width()).thenReturn(1920)
+        whenever(displayLayout.height()).thenReturn(1080)
+        doAnswer {
+            it.getArgument<Rect>(0).set(0, 50, 1920, 1030)
+        }.`when`(displayLayout).getStableBounds(any())
+        val task = createTaskInfo(Rect(0, 0, 600, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        val entry = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(entry.width()).isGreaterThan(entry.height())
+        assertThat(controller.entryScale(task)).isWithin(.001f).of(.75f)
+    }
+
+    @Test
+    fun newFloatingEntry_respectsFixedPortraitOnLandscapeDisplay() {
+        whenever(displayLayout.width()).thenReturn(1920)
+        whenever(displayLayout.height()).thenReturn(1080)
+        doAnswer {
+            it.getArgument<Rect>(0).set(0, 50, 1920, 1030)
+        }.`when`(displayLayout).getStableBounds(any())
+        val task = createTaskInfo(Rect(0, 0, 600, 900)).apply {
+            isFloatingWindow = true
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        val entry = requireNotNull(controller.getPinEntryDestinationBounds(task))
+        assertThat(entry.height()).isGreaterThan(entry.width())
+    }
+
+    @Test
+    fun rotateMenu_keepsScaleAndRecordsManualChoice() {
+        val task = createTaskInfo(Rect(0, 0, 600, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        val bounds = requireNotNull(controller.getManualRotationBounds(task))
+        assertThat(bounds.width()).isGreaterThan(bounds.height())
+        controller.setManualOrientation(task, true, bounds)
+        val wct = android.window.WindowContainerTransaction()
+        controller.applyPresentation(task, bounds, wct, task.floatingWindowScale)
+        assertThat(wct.changes[task.token.asBinder()]!!.floatingWindowScale).isEqualTo(.75f)
+        task.topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        assertThat(controller.getManualRotationBounds(task)).isNotNull()
+    }
+
+    @Test
+    fun fixedApp_manualShapeOverridesRequestAndSurvivesDeviceRotation() {
+        setRealPortraitDisplay()
+        val task = createTaskInfo(Rect(100, 200, 700, 1100)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        val visible = requireNotNull(controller.getManualRotationBounds(task))
+        assertThat(visible.width()).isGreaterThan(visible.height())
+        controller.setManualOrientation(task, true, visible)
+        val wct = android.window.WindowContainerTransaction()
+        controller.applyPresentation(task, visible, wct, task.floatingWindowScale)
+        val change = requireNotNull(wct.changes[task.token.asBinder()])
+        assertThat(change.floatingWindowScale).isEqualTo(.75f)
+        task.configuration.windowConfiguration.setBounds(change.configuration.windowConfiguration.bounds)
+        task.floatingWindowPosition.set(visible.left, visible.top)
+        val rotated = requireNotNull(controller.getRotationBounds(task,
+            android.view.Surface.ROTATION_0, android.view.Surface.ROTATION_90))
+        assertThat(rotated.width()).isGreaterThan(rotated.height())
+    }
+
+    @Test
+    fun sidebarHover_preservesEntryScaleAndClampsDropPointToStableBounds() {
+        val task = createTaskInfo(Rect(0, 0, 500, 800)).apply {
+            baseActivity = android.content.ComponentName("test.sidebar", "Main")
+            userId = 10
+        }
+        val info = android.content.pm.ActivityInfo()
+        val scale = controller.entryScale(task)
+        val entry = requireNotNull(controller.calculateAppEntry(task.baseActivity!!, 10,
+            Display.DEFAULT_DISPLAY, info, task, 5000, -1000))
+        assertThat(Rect(0, 100, 1080, 1870).contains(entry.bounds)).isTrue()
+        assertThat(entry.bounds.right).isEqualTo(1080)
+        assertThat(entry.bounds.top).isEqualTo(100)
+        assertThat(controller.entryScale(task)).isEqualTo(scale)
+        val again = requireNotNull(controller.calculateAppEntry(task.baseActivity!!, 10,
+            Display.DEFAULT_DISPLAY, info, task, 5000, -1000))
+        assertThat(again).isEqualTo(entry)
+    }
+
+    @Test
+    fun sidebarHover_reusedFloatingTaskKeepsActualBoundsAndScale() {
+        val task = createTaskInfo(Rect(100, 200, 700, 1000)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .8f
+            floatingWindowPosition.set(100, 200)
+            baseActivity = android.content.ComponentName("test.sidebar", "Main")
+            userId = 10
+        }
+        val entry = requireNotNull(controller.calculateAppEntry(task.baseActivity!!, 10,
+            Display.DEFAULT_DISPLAY, android.content.pm.ActivityInfo(), task, 900, 1600))
+        assertThat(entry.bounds).isEqualTo(task.floatingWindowRestoreBounds)
+        assertThat(entry.scale).isEqualTo(.8f)
+        assertThat(controller.entryScale(task)).isEqualTo(.8f)
+    }
+
+    @Test fun customRatio_fullscreenAndSplitEntryUseCurrentAspect() {
+        for (mode in listOf(WindowConfiguration.WINDOWING_MODE_FULLSCREEN,
+            WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW)) {
+            val task = createTaskInfo(Rect(100, 200, 900, 800)).apply {
+                isFloatingWindow = true
+                baseActivity = android.content.ComponentName("test.ratio.$mode", "Main")
+                minWidth = 1
+                minHeight = 1
+                floatingWindowScale = .75f
+                floatingWindowPosition.set(100, 200)
+            }
+            controller.rememberBounds(task)
+            controller.forgetTask(task.taskId)
+            task.isFloatingWindow = false
+            task.configuration.windowConfiguration.setWindowingMode(mode)
+            task.configuration.windowConfiguration.setBounds(Rect(0, 0, 960, 540))
+            task.configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
+            assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.005f).of(16f / 9f)
+        }
+    }
+
+    @Test fun originalAspect_survivesPresetResizeAndMiniButForgetsOnExit() {
+        val task = createTaskInfo(Rect(100, 100, 1700, 1000)).apply {
+            isFloatingWindow = true
+        }
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(16f / 9f)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 1300, 1000))
+        task.floatingWindowScale = .3f
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(16f / 9f)
+        task.floatingWindowScale = .75f
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(16f / 9f)
+        controller.forgetTask(task.taskId)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1600, 1000))
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(1.6f)
+        task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1000, 1600))
+        assertThat(controller.originalAspect(task)).isWithin(.001f).of(.625f)
+    }
+
 }

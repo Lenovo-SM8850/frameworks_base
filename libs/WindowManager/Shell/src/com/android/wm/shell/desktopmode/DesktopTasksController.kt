@@ -288,6 +288,12 @@ class DesktopTasksController(
     RemoteCallable<DesktopTasksController>,
     DragAndDropController.DragAndDropListener,
     UserChangeListener {
+    fun originalFloatingAspect(task: TaskInfo): Float =
+        pinnedLayerController?.originalFloatingAspect(task)
+            ?: task.configuration.windowConfiguration.bounds.let {
+                it.width().toFloat() / it.height().coerceAtLeast(1)
+            }
+
 
     private var visualIndicator: DesktopModeVisualIndicator? = null
 

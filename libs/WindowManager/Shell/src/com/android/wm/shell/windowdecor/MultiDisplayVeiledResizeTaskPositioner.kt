@@ -15,20 +15,27 @@
  */
 package com.android.wm.shell.windowdecor
 
+import android.app.ActivityManager.RunningTaskInfo
 import android.graphics.PointF
+import com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometry
+import kotlin.math.max
+import kotlin.math.roundToInt
 import android.graphics.Rect
 import android.hardware.display.DisplayTopology
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.view.Choreographer
+import android.view.DisplayInfo
 import android.view.Surface
 import android.view.SurfaceControl
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.window.DesktopExperienceFlags
 import android.window.TransitionInfo
 import android.window.TransitionRequestInfo
 import android.window.WindowContainerTransaction
+import com.android.internal.annotations.VisibleForTesting
 import com.android.internal.jank.Cuj
 import com.android.internal.jank.InteractionJankMonitor
 import com.android.window.flags.Flags
@@ -96,6 +103,44 @@ class MultiDisplayVeiledResizeTaskPositioner(
     @Surface.Rotation private var rotation = 0
     private var startDisplayId = 0
     private var hasMoved = false
+    private val floatingLogicalBounds = Rect()
+    private var floatingAspectSnap = FloatingWindowGeometry.AspectSnapState(1f, 1f)
+    private var floatingNaturalWidth = 1
+    private var floatingNaturalHeight = 1
+    private var floatingStartScale = 1f
+    private var floatingMinimumScale = .5f
+    private var floatingMinimumVisibleSize = 0
+    private var floatingMinWidth = 1
+    private var floatingMinHeight = 1
+    private val floatingBaseBounds = Rect()
+    private var floatingPreviewActive = false
+    private var floatingDragActive = false
+    private var floatingDragCancelled = false
+    private var floatingObserverRegistered = false
+    private var pendingFloatingTransition: IBinder? = null
+    private var pendingFloatingChange: TransitionInfo.Change? = null
+    private val floatingResizeScratch = FloatingWindowGeometry.ScaledResize(Rect(), Rect(), 1f, false)
+    private val floatingPreviewBounds = Rect()
+    private var floatingPreviewScale = 1f
+    private var floatingPreviewVeiled = false
+    private val floatingAppliedBounds = Rect()
+    private var floatingAppliedScale = Float.NaN
+    private var floatingAppliedVeiled = false
+    private var floatingFramePending = false
+    private var floatingPreviewTransaction: SurfaceControl.Transaction? = null
+    private var lastFloatingX = Float.NaN
+    private var lastFloatingY = Float.NaN
+    private var floatingMovePending = false
+    private var floatingEdgeMove = false
+    private val miniPreview = FloatingMiniPreview(desktopTasksController::createFloatingMiniPreview)
+    private var miniPreviewCancelled = false
+    private val resizeFeedback = FloatingTargetFeedback()
+    private var allowFloatingFeedback = false
+    private val floatingFrameCallback = Choreographer.FrameCallback {
+        if (floatingMovePending) flushFloatingMove() else flushFloatingResizePreview()
+    }
+    private var closing = false
+    private var floatingResize: FloatingWindowGeometry.ScaledResize? = null
     private val displayIds = mutableSetOf<Int>()
     private var hasMovedTaskSurfaceOffScreen = false
     private var resizeTrigger = ResizeTrigger.UNKNOWN_RESIZE_TRIGGER
@@ -140,12 +185,59 @@ class MultiDisplayVeiledResizeTaskPositioner(
         y: Float,
         inputMethodType: Int,
     ): Rect {
-        this.ctrlType = ctrlType
+        miniPreview.close()
+        miniPreviewCancelled = false
+        resizeFeedback.reset()
+        allowFloatingFeedback = true
+        windowDecoration.floatingMiniPreviewCancellation = ::onDragPositioningCancel
+        floatingEdgeMove = windowDecoration.taskInfo.isFloatingWindow &&
+            Integer.bitCount(ctrlType) == 1
+        this.ctrlType = if (floatingEdgeMove) DragPositioningCallback.CTRL_TYPE_UNDEFINED else ctrlType
         startDisplayId = displayId
         hasMovedTaskSurfaceOffScreen = false
-        taskBoundsAtDragStart.set(
-            windowDecoration.taskInfo.configuration.windowConfiguration.bounds
-        )
+        val task = windowDecoration.taskInfo
+        floatingDragActive = task.isFloatingWindow
+        if (floatingDragActive) SurfaceFrameRate.setInteracting(this, true)
+        floatingLogicalBounds.set(task.configuration.windowConfiguration.bounds)
+        floatingStartScale = task.floatingWindowScale
+        if (task.isFloatingWindow) {
+            val current = floatingLogicalBounds.width().toFloat() /
+                floatingLogicalBounds.height().coerceAtLeast(1)
+            val original = desktopTasksController.originalFloatingAspect(task).takeIf { it > 0f }
+                ?: current
+            floatingAspectSnap = FloatingWindowGeometry.AspectSnapState(original, current)
+            val info = DisplayInfo()
+            val display = displayController.getDisplay(task.displayId)
+            val layout = displayController.getDisplayLayout(task.displayId)
+            if (display?.getDisplayInfo(info) == true) {
+                floatingNaturalWidth = info.naturalWidth
+                floatingNaturalHeight = info.naturalHeight
+            } else {
+                floatingNaturalWidth = layout?.width() ?: 1
+                floatingNaturalHeight = layout?.height() ?: 1
+            }
+        }
+        floatingBaseBounds.set(task.floatingWindowRestoreBounds)
+        floatingResize = null
+        pendingFloatingChange = null
+        floatingDragCancelled = false
+        lastFloatingX = Float.NaN
+        lastFloatingY = Float.NaN
+        floatingAppliedScale = Float.NaN
+        taskBoundsAtDragStart.set(task.presentationBounds)
+        if (task.isFloatingWindow) {
+            if (!floatingObserverRegistered) {
+                transitions.registerObserver(this)
+                floatingObserverRegistered = true
+            }
+            windowDecoration.floatingWindowTransitionListener = ::cancelFloatingDragForTransition
+            if (isResizing) {
+                val (minWidth, minHeight) = floatingMinimums()
+                floatingMinWidth = minWidth
+                floatingMinHeight = minHeight
+                taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
+            }
+        }
         logD(
             TAG,
             windowDecoration.taskInfo.taskId,
@@ -159,7 +251,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
             taskBoundsAtDragStart,
         )
 
-        if (DesktopExperienceFlags.ENABLE_BOUNDS_RESTORING_ON_DRAG_EXIT.isTrue) {
+        if (!windowDecoration.taskInfo.isFloatingWindow &&
+            DesktopExperienceFlags.ENABLE_BOUNDS_RESTORING_ON_DRAG_EXIT.isTrue) {
             desktopRepository = desktopUserRepositories.getProfile(windowDecoration.taskInfo.userId)
             shouldRestoreBoundsOnMove =
                 desktopRepository.hasBoundsBeforeSnapOrMaximize(windowDecoration.taskInfo)
@@ -263,7 +356,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
             } else {
                 windowDecoration.updateResizeVeil(repositionTaskBounds)
                 // Remove the stored previous bounds if user manually resizes the window.
-                if (DesktopExperienceFlags.ENABLE_BOUNDS_RESTORING_ON_DRAG_EXIT.isTrue) {
+                if (!windowDecoration.taskInfo.isFloatingWindow &&
+            DesktopExperienceFlags.ENABLE_BOUNDS_RESTORING_ON_DRAG_EXIT.isTrue) {
                     desktopRepository.removeBoundsBeforeSnapOrMaximize(
                         windowDecoration.taskInfo.taskId
                     )
@@ -401,6 +495,27 @@ class MultiDisplayVeiledResizeTaskPositioner(
             x,
             y,
         )
+        if (floatingDragCancelled) {
+            ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+            taskBoundsAtDragStart.setEmpty()
+            return Rect(repositionTaskBounds)
+        }
+        if (windowDecoration.taskInfo.isFloatingWindow) {
+            if (isResizing) return endFloatingResize(x, y)
+            cancelFloatingFrame()
+            DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
+                taskBoundsAtDragStart, repositionStartPoint, x, y)
+            if (floatingEdgeMove) {
+                windowDecoration.pinnedLayerController?.onDragEnded(windowDecoration.taskSurface,
+                    windowDecoration.taskInfo, Rect(taskBoundsAtDragStart), repositionTaskBounds, displayId)
+                floatingEdgeMove = false
+            }
+            taskBoundsAtDragStart.setEmpty()
+            ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+            stopFloatingObserver()
+            interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
+            return Rect(repositionTaskBounds)
+        }
         val delta = DragPositioningCallbackUtility.calculateDelta(x, y, repositionStartPoint)
         if (isResizing) {
             val boundsChanged = taskBoundsAtDragStart != repositionTaskBounds
@@ -529,6 +644,202 @@ class MultiDisplayVeiledResizeTaskPositioner(
         displayController.removeDisplayWindowListener(this)
     }
 
+    private fun moveFloatingResize(x: Float, y: Float): Rect {
+        if (x == lastFloatingX && y == lastFloatingY) return Rect(repositionTaskBounds)
+        lastFloatingX = x
+        lastFloatingY = y
+        val dx = x - repositionStartPoint.x
+        val dy = y - repositionStartPoint.y
+        val result = FloatingWindowGeometry.presetCorner(taskBoundsAtDragStart,
+            floatingLogicalBounds, stableBounds, ctrlType, dx, dy,
+            floatingMinWidth, floatingMinHeight, floatingMinimumScale, floatingMinimumVisibleSize,
+            windowDecoration.taskInfo.topActivityInfo?.minAspectRatio ?: 0f,
+            windowDecoration.taskInfo.topActivityInfo?.maxAspectRatio ?: 0f,
+            kotlin.math.ceil(windowDecoration.decorWindowContext.resources.displayMetrics.density)
+                .toInt(), floatingResizeScratch, floatingNaturalWidth, floatingNaturalHeight,
+            floatingAspectSnap,
+            ViewConfiguration.get(windowDecoration.decorWindowContext).scaledTouchSlop.toFloat())
+        floatingResize = result
+        val entersMini = result.atMinimum && (result.visible != taskBoundsAtDragStart ||
+            result.scale < floatingStartScale - .001f || result.commitsBounds)
+        resizeFeedback.update(if (entersMini) true else null,
+            allowFloatingFeedback && inputMethod == InputMethod.TOUCH,
+            windowDecoration::performFloatingTargetHapticFeedback)
+        previewFloatingResize(result.visible, if (result.commitsBounds) 1f else result.scale,
+            result.commitsBounds)
+        repositionTaskBounds.set(result.visible)
+        return Rect(repositionTaskBounds)
+    }
+
+    private fun previewFloatingResize(bounds: Rect, scale: Float, veiled: Boolean = false) {
+        if (floatingDragCancelled || closing) return
+        if (floatingPreviewActive && floatingPreviewBounds == bounds &&
+            floatingPreviewScale == scale && floatingPreviewVeiled == veiled) return
+        floatingPreviewBounds.set(bounds)
+        floatingPreviewScale = scale
+        floatingPreviewVeiled = veiled
+        floatingPreviewActive = true
+        if (!floatingFramePending) {
+            floatingFramePending = true
+            Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
+        }
+    }
+
+    @VisibleForTesting
+    fun flushFloatingResizePreview() {
+        if (!floatingFramePending) return
+        Choreographer.getInstance().removeFrameCallback(floatingFrameCallback)
+        floatingFramePending = false
+        if (floatingDragCancelled || closing) return
+        if (floatingAppliedBounds == floatingPreviewBounds &&
+            floatingAppliedScale == floatingPreviewScale &&
+            floatingAppliedVeiled == floatingPreviewVeiled) return
+        floatingAppliedBounds.set(floatingPreviewBounds)
+        floatingAppliedScale = floatingPreviewScale
+        floatingAppliedVeiled = floatingPreviewVeiled
+        val t = floatingPreviewTransaction ?: transactionSupplier().also {
+            floatingPreviewTransaction = it
+        }
+        windowDecoration.updateFloatingWindowPreview(floatingPreviewBounds, floatingPreviewScale, t)
+        t.setFrameTimeline(Choreographer.getInstance().vsyncId).apply()
+        if (floatingPreviewVeiled) {
+            if (!isResizingOrAnimatingResize) {
+                dragEventListeners.forEach { it.onDragMove(windowDecoration.taskInfo.taskId) }
+                windowDecoration.showResizeVeil(floatingPreviewBounds)
+                isResizingOrAnimatingResize = true
+            } else windowDecoration.updateResizeVeil(floatingPreviewBounds)
+        } else resetVeilIfVisible()
+    }
+
+    private fun flushFloatingMove() {
+        if (!floatingMovePending) return
+        floatingMovePending = false
+        if (!miniPreviewCancelled) {
+            miniPreview.update(windowDecoration.taskInfo, windowDecoration.taskSurface,
+                windowDecoration.pinnedLayerController?.getMiniDragTarget(windowDecoration.taskInfo,
+                    taskBoundsAtDragStart, repositionTaskBounds))
+        }
+        val t = floatingPreviewTransaction ?: transactionSupplier().also { floatingPreviewTransaction = it }
+        t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
+            repositionTaskBounds.top.toFloat())
+            .setFrameTimeline(Choreographer.getInstance().vsyncId).apply()
+    }
+
+    private fun cancelFloatingDragForTransition() {
+        allowFloatingFeedback = false
+        resizeFeedback.reset()
+        miniPreview.close()
+        miniPreviewCancelled = true
+        cancelFloatingFrame()
+        floatingPreviewActive = false
+        windowDecoration.finishFloatingWindowPreview()
+        resetVeilIfVisible()
+        if (pendingFloatingTransition == null) {
+            floatingDragCancelled = true
+            repositionTaskBounds.set(windowDecoration.taskInfo.presentationBounds)
+            if (!isResizing && windowDecoration.taskSurface.isValid) {
+                transactionSupplier().use { t ->
+                    t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
+                        repositionTaskBounds.top.toFloat()).apply()
+                }
+            }
+            floatingResize = null
+            taskOrganizer.applyTransaction(WindowContainerTransaction()
+                .setDragResizing(windowDecoration.taskInfo.token, false))
+            stopFloatingObserver()
+            interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_RESIZE_WINDOW)
+            interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
+        }
+    }
+
+    private fun restoreFloatingDecorations(task: RunningTaskInfo,
+        startT: SurfaceControl.Transaction, finishT: SurfaceControl.Transaction) {
+        cancelFloatingFrame()
+        windowDecoration.finishFloatingWindowPreview()
+        floatingPreviewActive = false
+        windowDecoration.relayout(task, startT, finishT, false, false,
+            windowDecoration.hasGlobalFocus, windowDecoration.exclusionRegion, true, null)
+        windowDecoration.updateFloatingWindowChildScale(startT, task.floatingWindowScale)
+        windowDecoration.updateFloatingWindowChildScale(finishT, task.floatingWindowScale)
+    }
+
+    private fun baseResizeBounds(visible: Rect): Rect = Rect(visible).apply {
+        offset(floatingBaseBounds.left - taskBoundsAtDragStart.left,
+            floatingBaseBounds.top - taskBoundsAtDragStart.top)
+        offsetTo(left.coerceIn(stableBounds.left, stableBounds.right - width()),
+            top.coerceIn(stableBounds.top, stableBounds.bottom - height()))
+    }
+
+    private fun endFloatingResize(x: Float, y: Float): Rect {
+        if (x != lastFloatingX || y != lastFloatingY) moveFloatingResize(x, y)
+        flushFloatingResizePreview()
+        val task = windowDecoration.taskInfo
+        floatingResize?.let { result ->
+            val base = baseResizeBounds(result.visible)
+            if (result.atMinimum && (result.visible != taskBoundsAtDragStart ||
+                result.scale < floatingStartScale - .001f || result.commitsBounds)) {
+                val ratioChanged = kotlin.math.abs(result.logical.width().toFloat() /
+                    result.logical.height() - floatingLogicalBounds.width().toFloat() /
+                    floatingLogicalBounds.height()) > .001f
+                val restoreLogical = if (ratioChanged) result.logical else floatingLogicalBounds
+                val restore = Rect(floatingBaseBounds.left, floatingBaseBounds.top,
+                    floatingBaseBounds.left + (restoreLogical.width() * floatingStartScale).roundToInt(),
+                    floatingBaseBounds.top + (restoreLogical.height() * floatingStartScale).roundToInt())
+                restore.offsetTo(restore.left.coerceIn(stableBounds.left, stableBounds.right - restore.width()),
+                    restore.top.coerceIn(stableBounds.top, stableBounds.bottom - restore.height()))
+                windowDecoration.pinnedLayerController?.enterMiniAfterResize(task,
+                    restore, Rect(restoreLogical), floatingStartScale, base, result.scale)
+            }
+            val wct = WindowContainerTransaction().setDragResizing(task.token, false)
+                .setFloatingWindowPresentation(task.token,
+                    android.graphics.Point(base.left, base.top), result.scale)
+            if (result.commitsBounds) {
+                val logical = Rect(result.logical).apply {
+                    offsetTo(base.left.coerceIn(stableBounds.left, stableBounds.right - width()),
+                        base.top.coerceIn(stableBounds.top, stableBounds.bottom - height()))
+                }
+                wct.setBounds(task.token, logical)
+                pendingFloatingTransition =
+                    transitions.startTransition(WindowManager.TRANSIT_CHANGE, wct, this)
+            } else {
+                windowDecoration.finishFloatingWindowPreview()
+                floatingPreviewActive = false
+                taskOrganizer.applyTransaction(wct)
+                stopFloatingObserver()
+                interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_RESIZE_WINDOW)
+            }
+            dragEventListeners.forEach { it.onDragResizeEnded(task.taskId, resizeTrigger, inputMethod, result.visible) }
+            repositionTaskBounds.set(result.visible)
+            ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+            taskBoundsAtDragStart.setEmpty()
+            floatingResize = null
+            return Rect(repositionTaskBounds)
+        }
+        taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, false))
+        stopFloatingObserver()
+        taskBoundsAtDragStart.setEmpty()
+        ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+        return Rect(repositionTaskBounds)
+    }
+
+    private fun restoreFloatingPresentation() {
+        cancelFloatingFrame()
+        stopFloatingObserver()
+        val task = windowDecoration.taskInfo
+        if (!task.isFloatingWindow) return
+        if (floatingPreviewActive) {
+            transactionSupplier().use {
+                if (closing) windowDecoration.cancelFloatingWindowPreview(it)
+                else windowDecoration.updateFloatingWindowPreview(task.presentationBounds,
+                    task.floatingWindowScale, it)
+                it.apply()
+            }
+            windowDecoration.finishFloatingWindowPreview()
+            floatingPreviewActive = false
+        }
+        taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, false))
+    }
+
     private fun resetVeilIfVisible() {
         if (isResizingOrAnimatingResize) {
             windowDecoration.hideResizeVeil()
@@ -577,6 +888,14 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 // Ignore non-task (e.g., display, activity) changes.
                 continue
             }
+            if (change.taskInfo!!.isFloatingWindow) {
+                if (change.taskInfo!!.taskId == windowDecoration.taskInfo.taskId) {
+                    restoreFloatingDecorations(change.taskInfo!!, startTransaction, finishTransaction)
+                }
+                Transitions.applyFloatingWindowTransform(change, startTransaction)
+                Transitions.applyFloatingWindowTransform(change, finishTransaction)
+                continue
+            }
             val sc = change.leash
             val endBounds = change.endAbsBounds
             val endPosition = change.endRelOffset
@@ -588,6 +907,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 .setPosition(sc, endPosition.x.toFloat(), endPosition.y.toFloat())
         }
 
+        pendingFloatingTransition = null
+        pendingFloatingChange = null
+        stopFloatingObserver()
         startTransaction.apply()
         resetVeilIfVisible()
         ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
@@ -605,10 +927,76 @@ class MultiDisplayVeiledResizeTaskPositioner(
         startTransaction: SurfaceControl.Transaction,
         finishTransaction: SurfaceControl.Transaction,
     ) {
+        if (floatingObserverRegistered) {
+            val floatingChange = info.changes.firstOrNull {
+                it.taskInfo?.taskId == windowDecoration.taskInfo.taskId
+            }
+            if (transition == pendingFloatingTransition) {
+                pendingFloatingChange = floatingChange
+                if (floatingChange?.taskInfo != null) {
+                    restoreFloatingDecorations(floatingChange.taskInfo!!,
+                        startTransaction, finishTransaction)
+                }
+            } else if (floatingChange != null &&
+                (floatingDragActive || floatingPreviewActive || floatingFramePending)) {
+                if (isFloatingFocusOnlyChange(info, floatingChange)) {
+                    // Handle DOWN may focus the task after the drag has already started.
+                    finishTransaction.addTransactionCommittedListener({ command ->
+                        handler.post(command)
+                    }) {
+                        if (!closing && floatingDragActive && !floatingDragCancelled &&
+                            !floatingMovePending) {
+                            floatingMovePending = true
+                            Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
+                        }
+                    }
+                    return
+                }
+                cancelFloatingDragForTransition()
+                restoreFloatingDecorations(floatingChange.taskInfo!!,
+                    startTransaction, finishTransaction)
+            }
+        }
         if (transition == pendingResizeTransition) {
             pendingResizeTransition = null
             transitions.unregisterObserver(this)
         }
+    }
+
+    override fun onTransitionConsumed(transition: IBinder, aborted: Boolean,
+        finishTransaction: SurfaceControl.Transaction?) {
+        if (transition != pendingFloatingTransition) return
+        val change = pendingFloatingChange
+        val task = change?.taskInfo ?: windowDecoration.taskInfo
+        transactionSupplier().use { t ->
+            restoreFloatingDecorations(task, t, finishTransaction ?: t)
+            // Only restore task position in the finish transaction, after remote reparenting.
+            if (finishTransaction != null) {
+                if (change != null) Transitions.applyFloatingWindowTransform(change, finishTransaction)
+                else {
+                    val bounds = task.presentationBounds
+                    val logical = task.configuration.windowConfiguration.bounds
+                    finishTransaction.setMatrix(windowDecoration.taskSurface,
+                        task.floatingWindowScale, 0f, 0f, task.floatingWindowScale)
+                        .setPosition(windowDecoration.taskSurface,
+                            bounds.left.toFloat(), bounds.top.toFloat())
+                        .setWindowCrop(windowDecoration.taskSurface, logical.width(), logical.height())
+                }
+            }
+            if (task.isFloatingWindow) {
+                val logical = task.configuration.windowConfiguration.bounds
+                t.setMatrix(windowDecoration.taskSurface,
+                    task.floatingWindowScale, 0f, 0f, task.floatingWindowScale)
+                    .setWindowCrop(windowDecoration.taskSurface, logical.width(), logical.height())
+            }
+            t.apply()
+        }
+        pendingFloatingTransition = null
+        pendingFloatingChange = null
+        stopFloatingObserver()
+        resetVeilIfVisible()
+        ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+        interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_RESIZE_WINDOW)
     }
 
     /**
@@ -622,7 +1010,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
         return null
     }
 
-    override fun isResizingOrAnimating() = isResizingOrAnimatingResize
+    override fun isResizingOrAnimating() = isResizingOrAnimatingResize || floatingPreviewActive ||
+        floatingFramePending || pendingFloatingTransition != null
 
     override fun addDragEventListener(
         dragEventListener: DragPositioningCallbackUtility.DragEventListener
