@@ -307,6 +307,24 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun minimize_keepsHdrCap() {
+        val task = setupTask().apply { isFloatingWindow = true }
+        whenever(leash.isValid).thenReturn(true)
+        hdrTransition(task)
+        org.mockito.Mockito.clearInvocations(startTransaction, poolTransaction)
+        val transition = mock<IBinder>()
+        pinnedLayerController.unpinTask(transition, task, PinnedLayerController.UnpinStrategy.HIDE)
+
+        pinnedLayerController.onTransitionReady(transition, TransitionInfo(TRANSIT_CHANGE, FLAG_NONE),
+            startTransaction, finishTransaction)
+
+        verify(startTransaction).setDesiredMaxHdrHeadroom(leash, 1.0f)
+        verify(startTransaction).setTrustedOverlay(leash, true)
+        verify(startTransaction, never()).setDesiredMaxHdrHeadroom(leash, 0f)
+        verify(poolTransaction, never()).setDesiredMaxHdrHeadroom(any(), any())
+    }
+
+    @Test
     fun initialFloatingTask_capsRecoveredLeash() {
         val task = setupTask().apply { isFloatingWindow = true }
         whenever(leash.isValid).thenReturn(true)
@@ -954,6 +972,47 @@ class PinnedLayerControllerTest : ShellTestCase() {
             it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REPARENT &&
                 it.container == tasks.first().token.asBinder() && it.toTop
         })
+    }
+
+    @Test
+    fun pendingIntentLaunch_restoresMinimizedFloatingTaskAndAppliesCapacity() {
+        assertLaunchRestoresMinimizedFloatingTask(TRANSIT_OPEN)
+    }
+
+    @Test
+    fun recentTaskLaunch_restoresMinimizedFloatingTaskAndAppliesCapacity() {
+        assertLaunchRestoresMinimizedFloatingTask(TRANSIT_TO_FRONT)
+    }
+
+    private fun assertLaunchRestoresMinimizedFloatingTask(mode: Int) {
+        val tasks = (301..306).map { setupTask(taskId = it) }
+        tasks.forEach { pinTask(it) }
+        val restored = tasks.first()
+        restored.isFloatingWindow = true
+        restored.configuration.windowConfiguration.setAlwaysOnTop(mode == TRANSIT_OPEN)
+        val info = TransitionInfo(mode, FLAG_NONE)
+        info.addChange(TransitionInfo.Change(restored.token, mock()).apply {
+            taskInfo = restored
+            this.mode = mode
+        })
+
+        pinnedLayerController.onTransitionReady(mock(), info, startTransaction, finishTransaction)
+
+        val captor = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(captor.capture())
+        val wct = captor.firstValue
+        assertFalse(requireNotNull(wct.changes[restored.token.asBinder()]).hidden)
+        assertTrue(requireNotNull(wct.changes[tasks[1].token.asBinder()]).hidden)
+        assertTrue(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_REORDER &&
+                it.container == restored.token.asBinder() && it.toTop
+        })
+        assertTrue(wct.hierarchyOps.any {
+            it.type == WindowContainerTransaction.HierarchyOp.HIERARCHY_OP_TYPE_SET_ALWAYS_ON_TOP &&
+                it.container == restored.token.asBinder() && it.isAlwaysOnTop
+        })
+        assertEquals(restored.taskId, pinnedLayerController.getCurrentPinnedTask()?.taskId)
+        assertTrue(pinnedLayerController.isPinned(tasks[1].taskId))
     }
 
     @Test

@@ -36,6 +36,9 @@ class FloatingMinimizeHandles(
     private var users = setOf(UserHandle.myUserId())
     private var visible = true
 
+    fun setUsers(userIds: Set<Int>) { users = userIds; update() }
+    fun setVisible(value: Boolean) { visible = value; update() }
+
     fun update() {
         val layout = displayController.getDisplayLayout(DEFAULT_DISPLAY) ?: return
         val stable = Rect().also { layout.getStableBounds(it) }
@@ -69,7 +72,6 @@ class FloatingMinimizeHandles(
             }
         }
     }
-
 
     private fun create(task: TaskInfo, size: Int): Handle {
         val view = ImageView(windowContext)
@@ -135,8 +137,4 @@ class FloatingMinimizeHandles(
         }
         return Handle(view, params)
     }
-
-    fun setUsers(userIds: Set<Int>) { users = userIds; update() }
-
-    fun setVisible(value: Boolean) { visible = value; update() }
 }
