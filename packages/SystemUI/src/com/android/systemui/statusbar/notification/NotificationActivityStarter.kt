@@ -37,6 +37,15 @@ interface NotificationActivityStarter {
     /** Called when the user clicks on the surface of a notification. */
     fun onNotificationClicked(entry: NotificationEntry, row: ExpandableNotificationRow)
 
+    /** Called when the user chooses to open a notification in a floating window. */
+    fun onNotificationFloatingWindowClicked(entry: NotificationEntry, row: ExpandableNotificationRow)
+
+    /** Called when the user chooses to open a notification in split screen. */
+    fun onNotificationSplitScreenClicked(entry: NotificationEntry, row: ExpandableNotificationRow)
+
+    /** Whether the default display has a Shell split-screen implementation. */
+    fun isSplitScreenSupported(): Boolean = false
+
     /** Called when the user clicks on a button in the notification guts which fires an intent. */
     fun startNotificationGutsIntent(intent: Intent, appUid: Int, row: ExpandableNotificationRow)
 
