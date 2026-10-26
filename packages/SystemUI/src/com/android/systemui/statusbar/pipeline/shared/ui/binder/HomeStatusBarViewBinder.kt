@@ -101,6 +101,8 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
         val gradientAngle: Float = DEFAULT_GRADIENT_ANGLE.toFloat(),
         val gradientMaskText: Boolean = false,
         val gradientColorMode: Int = ClockChipGradientDrawable.COLOR_MODE_AUTO,
+        /** The status bar lyrics cover the centre clock. */
+        val lyricsCoverCenterClock: Boolean = false,
         /** Current Material accent pair, used by auto mode and as custom-mode fallback. */
         val accentColors: Pair<Int, Int> = 0 to 0,
     )
@@ -141,7 +143,9 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
 
         val leftSideArea: View =
             view.requireViewById(R.id.status_bar_start_side_except_heads_up)
-        val centeredArea: View? = view.findViewById(R.id.centered_area)
+        // The clock state below decides the visibility of the centre clock, so the lyrics only
+        // tell it that they cover it.
+        val lyricsCoverCenterClock = MutableStateFlow(false)
         val lyricView =
             object : LyricViewController(view.context, view) {
                 private var isNotificationIconsVisible = true
@@ -153,17 +157,19 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
                         return
                     }
                     leftSideArea.hide(View.INVISIBLE, animate)
-                    centeredArea?.hide(View.INVISIBLE, animate)
+                    // Lyrics can reach the centre clock, but the Dynamic Island in the centred
+                    // area stays: the lyrics end before it.
+                    lyricsCoverCenterClock.value = true
                     this.view.show(animate)
                 }
 
                 override fun hideLyricView(animate: Boolean) {
                     this.view.hide(View.INVISIBLE, animate)
+                    lyricsCoverCenterClock.value = false
                     // Only restore these views if nothing else needs them hidden right now.
                     // Otherwise we'd fight the HUN or chip logic for the same region.
                     if (isNotificationIconsVisible && !hideForHun) {
                         leftSideArea.show(animate)
-                        centeredArea?.show(animate)
                     }
                 }
 
@@ -436,6 +442,12 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
 
                 if (!ClockModernization.isEnabled) {
                     launch {
+                        lyricsCoverCenterClock.collect { covered ->
+                            clockState.update { it.copy(lyricsCoverCenterClock = covered) }
+                        }
+                    }
+
+                    launch {
                         combine(
                                 viewModel.isClockVisible,
                                 viewModel.hideStartSideContentForHeadsUp,
@@ -501,7 +513,17 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
                             rightClock?.visibility = View.GONE
 
                             // Show only the active one
-                            activeClock?.adjustVisibility(finalVisibility)
+                            activeClock?.adjustVisibility(
+                                if (
+                                    state.lyricsCoverCenterClock &&
+                                        activeClock === centerClock &&
+                                        finalVisibility.visibility == View.VISIBLE
+                                ) {
+                                    finalVisibility.copy(visibility = View.INVISIBLE)
+                                } else {
+                                    finalVisibility
+                                }
+                            )
 
                             // Only touch chip UI when needed. Compare resolved colours so auto
                             // mode only re-applies when the accent actually changes.

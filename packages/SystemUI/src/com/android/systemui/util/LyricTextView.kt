@@ -56,19 +56,27 @@ class LyricTextView @JvmOverloads constructor(
         if (text != null) {
             this.text = text.toString()
             textRtl = Bidi.getBaseDirection(this.text) == Bidi.RTL
-            if (textRtl) {
-                paint.textAlign = Paint.Align.RIGHT
-                offset = -1
-            } else {
-                paint.textAlign = Paint.Align.LEFT
-                offset = if (View.LAYOUT_DIRECTION_RTL == layoutDirection) -1 else 0
-            }
+            paint.textAlign = if (textRtl) Paint.Align.RIGHT else Paint.Align.LEFT
+            resetOffset()
             textWidth = paint.measureText(this.text).toInt()
             postInvalidate()
             postDelayed(startScrollRunnable, START_SCROLL_DELAY.toLong())
         } else {
             this.text = null
         }
+    }
+
+    // The view narrows when the island appears, so a finished scroll has to run again.
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w == oldw || oldw == 0 || text == null) return
+        stopScroll()
+        resetOffset()
+        postDelayed(startScrollRunnable, START_SCROLL_DELAY.toLong())
+    }
+
+    private fun resetOffset() {
+        offset = if (textRtl || View.LAYOUT_DIRECTION_RTL == layoutDirection) -1 else 0
     }
 
     override fun setTextColor(color: Int) {
