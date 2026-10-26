@@ -497,6 +497,8 @@ public class ScreenDecorations implements
     private void startOnScreenDecorationsThread() {
         Trace.beginSection("ScreenDecorations#startOnScreenDecorationsThread");
         mContext.getDisplay().getDisplayInfo(mDisplayInfo);
+        DisplayCutoutBaseView.updateDisplayCutoutForDecorations(
+                mContext.getResources(), mDisplayInfo);
         mRotation = mDisplayInfo.rotation;
         mDisplaySize.x = mDisplayInfo.getNaturalWidth();
         mDisplaySize.y = mDisplayInfo.getNaturalHeight();
@@ -519,6 +521,8 @@ public class ScreenDecorations implements
             @Override
             public void onDisplayChanged(int displayId) {
                 mContext.getDisplay().getDisplayInfo(mDisplayInfo);
+                DisplayCutoutBaseView.updateDisplayCutoutForDecorations(
+                        mContext.getResources(), mDisplayInfo);
                 final int newRotation = mDisplayInfo.rotation;
                 if ((mOverlays != null || mScreenDecorHwcWindow != null)
                         && (mRotation != newRotation
@@ -1108,6 +1112,8 @@ public class ScreenDecorations implements
     @VisibleForTesting
     float getPhysicalPixelDisplaySizeRatio() {
         mContext.getDisplay().getDisplayInfo(mDisplayInfo);
+        DisplayCutoutBaseView.updateDisplayCutoutForDecorations(
+                mContext.getResources(), mDisplayInfo);
         final Display.Mode maxDisplayMode =
                 DisplayUtils.getMaximumResolutionDisplayMode(mDisplayInfo.supportedModes);
         if (maxDisplayMode == null) {
@@ -1128,6 +1134,8 @@ public class ScreenDecorations implements
         mExecutor.execute(() -> {
             Trace.beginSection("ScreenDecorations#onConfigurationChanged");
             mContext.getDisplay().getDisplayInfo(mDisplayInfo);
+            DisplayCutoutBaseView.updateDisplayCutoutForDecorations(
+                    mContext.getResources(), mDisplayInfo);
             if (displaySizeChanged(mDisplaySize, mDisplayInfo)) {
                 // We expect the display change event to happen first, but in this case, we received
                 // onConfigurationChanged first.
@@ -1238,6 +1246,8 @@ public class ScreenDecorations implements
                         + ", but was " + Thread.currentThread());
 
         mContext.getDisplay().getDisplayInfo(mDisplayInfo);
+        DisplayCutoutBaseView.updateDisplayCutoutForDecorations(
+                mContext.getResources(), mDisplayInfo);
         final int newRotation = mDisplayInfo.rotation;
         if (mRotation != newRotation) {
             mDotViewController.setNewRotation(newRotation);
@@ -1453,6 +1463,8 @@ public class ScreenDecorations implements
             mPosition = getBoundPositionFromRotation(mInitialPosition, mRotation);
             requestLayout();
             getDisplay().getDisplayInfo(displayInfo);
+            DisplayCutoutBaseView.updateDisplayCutoutForDecorations(
+                    getContext().getResources(), displayInfo);
             mBounds.clear();
             mBoundingRect.setEmpty();
             cutoutPath.reset();

@@ -432,6 +432,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
     private Point mPhysicalDisplaySize;
 
     DisplayCutout mInitialDisplayCutout;
+    private final boolean mHideDisplayCutoutInLandscape;
     private final RotationCache<DisplayCutout, WmDisplayCutout> mDisplayCutoutCache
             = new RotationCache<>(this::calculateDisplayCutoutForRotationUncached);
     boolean mIgnoreDisplayCutout;
@@ -1288,6 +1289,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 * mDisplayMetrics.densityDpi / DENSITY_DEFAULT;
         isDefaultDisplay = mDisplayId == DEFAULT_DISPLAY;
         mInsetsStateController = new InsetsStateController(this);
+        mHideDisplayCutoutInLandscape = mWmService.mContext.getResources().getBoolean(
+                R.bool.config_hideDisplayCutoutInLandscape);
         initializeDisplayBaseInfo();
         mDisplayFrames = new DisplayFrames(mInsetsStateController.getRawInsetsState(),
                 mDisplayInfo, calculateDisplayCutoutForRotation(mDisplayInfo.rotation),
@@ -2741,6 +2744,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
     }
 
     DisplayCutout calculateDisplayCutoutForRotation(int rotation) {
+        if (mHideDisplayCutoutInLandscape && mDisplayInfo.type == Display.TYPE_INTERNAL
+                && (rotation == ROTATION_90 || rotation == ROTATION_270)) {
+            return DisplayCutout.NO_CUTOUT;
+        }
         return mDisplayCutoutCache.getOrCompute(
                 mIsSizeForced ? mBaseDisplayCutout : mInitialDisplayCutout, rotation)
                         .getDisplayCutout();
