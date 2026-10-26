@@ -4510,6 +4510,7 @@
   <java-symbol type="array" name="config_mainBuiltInDisplayCutoutSideOverride" />
   <java-symbol type="drawable" name="messaging_user" />
   <java-symbol type="bool" name="config_fillMainBuiltInDisplayCutout" />
+  <java-symbol type="bool" name="config_hideDisplayCutoutInLandscape" />
   <java-symbol type="drawable" name="ic_logout" />
 
   <java-symbol type="bool" name="config_enableIdleScreenBrightnessMode" />

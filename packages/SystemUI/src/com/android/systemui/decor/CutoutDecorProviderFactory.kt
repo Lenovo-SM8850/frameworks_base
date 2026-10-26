@@ -21,6 +21,7 @@ import android.util.Log
 import android.view.Display
 import android.view.DisplayCutout
 import android.view.DisplayInfo
+import com.android.systemui.DisplayCutoutBaseView.Companion.updateDisplayCutoutForDecorations
 
 class CutoutDecorProviderFactory(private val res: Resources, private val display: Display?) :
     DecorProviderFactory {
@@ -31,6 +32,7 @@ class CutoutDecorProviderFactory(private val res: Resources, private val display
         get() {
             display?.getDisplayInfo(displayInfo)
                 ?: run { Log.w(TAG, "display is null, can't update displayInfo") }
+            updateDisplayCutoutForDecorations(res, displayInfo)
             return DisplayCutout.getFillBuiltInDisplayCutout(res, displayInfo.uniqueId)
         }
 
