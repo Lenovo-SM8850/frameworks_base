@@ -30,6 +30,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.android.keyguard.KeyguardUpdateMonitor
+import com.android.systemui.DisplayCutoutBaseView.Companion.updateDisplayCutoutForDecorations
 import com.android.systemui.FaceScanningOverlay
 import com.android.systemui.biometrics.AuthController
 import com.android.systemui.biometrics.data.repository.FacePropertyRepository
@@ -75,6 +76,7 @@ constructor(
             // update display info
             display?.getDisplayInfo(displayInfo)
                 ?: run { Log.w(TAG, "display is null, can't update displayInfo") }
+            updateDisplayCutoutForDecorations(context.resources, displayInfo)
             return DisplayCutout.getFillBuiltInDisplayCutout(
                 context.resources,
                 displayInfo.uniqueId,

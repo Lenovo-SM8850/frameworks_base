@@ -1176,6 +1176,24 @@ public final class DisplayCutout {
     }
 
     /**
+     * Reconstructs the physical resource cutout in the display's current rotation.
+     * Callers retain responsibility for fill and mask policy.
+     * @hide
+     */
+    @Nullable
+    public static DisplayCutout fromResourcesForDisplay(Resources resources, DisplayInfo info) {
+        final int width = info.getNaturalWidth();
+        final int height = info.getNaturalHeight();
+        final Display.Mode mode = android.util.DisplayUtils.getMaximumResolutionDisplayMode(
+                info.supportedModes);
+        final DisplayCutout cutout = fromResourcesRectApproximation(resources, info.uniqueId,
+                mode != null ? mode.getPhysicalWidth() : width,
+                mode != null ? mode.getPhysicalHeight() : height, width, height);
+        return cutout != null
+                ? cutout.getRotated(width, height, Surface.ROTATION_0, info.rotation) : null;
+    }
+
+    /**
      * Creates the display cutout according to
      * @android:string/config_mainBuiltInDisplayCutoutRectApproximation, which is the closest
      * rectangle-base approximation of the cutout.
