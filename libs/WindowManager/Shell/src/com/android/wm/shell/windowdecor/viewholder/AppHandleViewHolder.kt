@@ -54,6 +54,7 @@ import com.android.wm.shell.desktopmode.DesktopTasksController
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_WINDOW_DECORATION
 import com.android.wm.shell.shared.bubbles.BubbleFlagHelper
+import com.android.wm.shell.shared.handles.DynamicIslandTouchRegion
 import com.android.wm.shell.transition.FocusTransitionObserver
 import com.android.wm.shell.windowdecor.HandleMenuController
 import com.android.wm.shell.windowdecor.WindowDecorLinearLayout
@@ -260,10 +261,22 @@ class AppHandleViewHolder(
         // Caption handle is located within the status bar region, meaning the
         // DisplayPolicy will attempt to transfer this input to status bar if it's
         // a swipe down. Pilfer here to keep the gesture in handle alone.
+        // A gesture that starts on the Dynamic Island is left to the status bar under this spy
+        // window, since the island is drawn over the handle.
+        var gestureOnIsland = false
         view.setOnTouchListener { v, event ->
             if (event.actionMasked == ACTION_DOWN) {
-                inputManager.pilferPointers(v.viewRootImpl.inputToken)
+                gestureOnIsland =
+                    DynamicIslandTouchRegion.contains(
+                        v.display.displayId,
+                        event.rawX.toInt(),
+                        event.rawY.toInt(),
+                    )
+                if (!gestureOnIsland) {
+                    inputManager.pilferPointers(v.viewRootImpl.inputToken)
+                }
             }
+            if (gestureOnIsland) return@setOnTouchListener false
             captionHandle.dispatchTouchEvent(event)
             return@setOnTouchListener true
         }

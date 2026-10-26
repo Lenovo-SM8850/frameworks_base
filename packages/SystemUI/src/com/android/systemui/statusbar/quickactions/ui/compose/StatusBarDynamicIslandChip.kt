@@ -16,7 +16,9 @@
 
 package com.android.systemui.statusbar.quickactions.ui.compose
 
+import android.content.Context
 import android.view.DisplayCutout
+import android.view.DisplayInfo
 import android.view.View
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
@@ -71,8 +73,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.android.internal.policy.SystemBarUtils
 import com.android.systemui.common.shared.model.Icon as IconModel
 import com.android.systemui.common.ui.compose.Icon
+import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.ScreenRecordPopupModel
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
@@ -82,6 +86,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /** Single centered status bar capsule styled like a compact dynamic island. */
@@ -175,7 +180,7 @@ fun StatusBarDynamicIslandChip(
         modifier =
             modifier
                 .then(boundsModifier)
-                .defaultMinSize(minHeight = 32.dp * heightScale)
+                .defaultMinSize(minHeight = maxOf(32.dp * heightScale, cutoutSpec.minimumHeight))
                 .widthIn(
                     min = if (isStartAnchored) startGap else (compactWidth ?: 0.dp),
                     max = (compactWidth ?: (CompactIslandMaxWidth * widthScale)) + startGap,
@@ -347,7 +352,7 @@ private fun UtilityStatusIslandChip(
                     scaleX = collapseState.scale
                     if (isStartAnchored) transformOrigin = TransformOrigin(0f, 0.5f)
                 }
-                .defaultMinSize(minHeight = 32.dp * heightScale)
+                .defaultMinSize(minHeight = maxOf(32.dp * heightScale, cutoutSpec.minimumHeight))
                 .then(
                     if (isStartAnchored) Modifier else Modifier.width(connectedIslandWidth)
                 )
@@ -473,6 +478,9 @@ data class DynamicIslandCutoutSpec(
     val embeddedGapWidth: Dp,
     val horizontalOffset: Dp,
     val anchor: DynamicIslandAnchor = DynamicIslandAnchor.CENTER,
+    val verticalCenter: Dp? = null,
+    val minimumHeight: Dp = 0.dp,
+    val maximumBottom: Dp? = null,
 )
 
 private val DynamicIslandHoleSidePadding = 4.dp
@@ -509,26 +517,80 @@ private fun startAnchoredGapFor(cutout: android.graphics.Rect, density: Float): 
     return (gapPx / density).dp
 }
 
+/**
+ * A hole on a non-top edge, reduced to what the top-edge case needs: its [extentPx] along its own
+ * edge and the span ([insetStartPx]..[insetEndPx]) it covers measured inwards from that edge.
+ */
+private data class DynamicIslandEdgeHole(
+    val extentPx: Int,
+    val insetStartPx: Int,
+    val insetEndPx: Int,
+)
+
 private data class DynamicIslandCutoutSnapshot(
     val topCutout: android.graphics.Rect?,
+    val edgeHole: DynamicIslandEdgeHole?,
     val windowWidthPx: Int,
     val isRtl: Boolean,
+    val windowBottomPx: Int,
 )
 
 private fun readDynamicIslandCutoutSnapshot(view: View): DynamicIslandCutoutSnapshot {
     val displayCutout = view.rootWindowInsets?.displayCutout ?: view.display?.cutout
     val topCutout = displayCutout?.dynamicIslandHoleRect()
+    val maxBounds = view.resources.configuration.windowConfiguration.maxBounds
     val windowWidthPx =
         when {
             view.rootView.width > 0 -> view.rootView.width
             view.width > 0 -> view.width
-            else -> view.resources.configuration.windowConfiguration.maxBounds.width()
+            else -> maxBounds.width()
         }
     return DynamicIslandCutoutSnapshot(
         topCutout = topCutout,
+        edgeHole =
+            if (topCutout == null) {
+                displayCutout?.dynamicIslandEdgeHole(windowWidthPx, maxBounds.height())
+                    ?: view.physicalDisplayCutout()?.let { physical ->
+                        physical.dynamicIslandHoleRect()?.let { hole ->
+                            DynamicIslandEdgeHole(hole.width(), hole.top, hole.bottom)
+                        } ?: physical.dynamicIslandEdgeHole(windowWidthPx, maxBounds.height())
+                    }
+            } else {
+                null
+            },
         windowWidthPx = windowWidthPx,
         isRtl = view.layoutDirection == View.LAYOUT_DIRECTION_RTL,
+        windowBottomPx =
+            SystemBarUtils.getStatusBarHeight(view.context).let { statusBarHeight ->
+                statusBarHeight + dynamicIslandWindowOverflowPx(view.context, statusBarHeight)
+            },
     )
+}
+
+// The framework may hide the cutout in some rotations, while the resources still describe it.
+private fun View.physicalDisplayCutout(): DisplayCutout? {
+    val display = display ?: return null
+    val info = DisplayInfo().also { display.getDisplayInfo(it) }
+    return DisplayCutout.fromResourcesForDisplay(resources, info)
+}
+
+/**
+ * How far the status bar window reaches below a status bar of [statusBarHeight] so the island can
+ * wrap the camera hole at its own inset in every rotation, including ones with a lower status bar.
+ */
+fun dynamicIslandWindowOverflowPx(context: Context, statusBarHeight: Int): Int {
+    val overflow =
+        context.resources.getDimensionPixelSize(R.dimen.status_bar_window_island_overflow)
+    val display = runCatching { context.display }.getOrNull() ?: return overflow
+    val info = DisplayInfo().also { display.getDisplayInfo(it) }
+    val cutout = DisplayCutout.fromResourcesForDisplay(context.resources, info) ?: return overflow
+    val maxBounds = context.resources.configuration.windowConfiguration.maxBounds
+    val holeEndInset =
+        cutout.dynamicIslandHoleRect()?.bottom
+            ?: cutout.dynamicIslandEdgeHole(maxBounds.width(), maxBounds.height())?.insetEndPx
+            ?: return overflow
+    val padding = DynamicIslandHoleSidePadding.value * context.resources.displayMetrics.density
+    return max(overflow, holeEndInset + padding.roundToInt() - statusBarHeight)
 }
 
 @Composable
@@ -548,15 +610,33 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
     }
 
     val topCutout = snapshot.topCutout
+    val edgeHole = snapshot.edgeHole
     val rootWidthPx = snapshot.windowWidthPx
 
     return with(density) {
-        if (topCutout == null || rootWidthPx <= 0) {
+        if ((topCutout == null && edgeHole == null) || rootWidthPx <= 0) {
             DynamicIslandCutoutSpec(
                 embeddedGapWidth = DynamicIslandEmbeddedGapFallbackWidth,
                 horizontalOffset = 0.dp,
             )
         } else {
+            // Wrap the hole with padding; the status bar window overflows the status bar
+            // so that the island can reach below it.
+            val holePaddingPx = DynamicIslandHoleSidePadding.toPx()
+            val holeStartInsetPx = topCutout?.top ?: edgeHole!!.insetStartPx
+            val holeEndInsetPx = topCutout?.bottom ?: edgeHole!!.insetEndPx
+            val islandTopPx = (holeStartInsetPx - holePaddingPx).coerceAtLeast(0f)
+            val islandBottomPx = holeEndInsetPx + holePaddingPx
+            if (topCutout == null) {
+                // The hole is on another edge: keep its size and inset, stay horizontally centred.
+                return@with DynamicIslandCutoutSpec(
+                    embeddedGapWidth = embeddedGapFor(edgeHole!!.extentPx, this.density),
+                    horizontalOffset = 0.dp,
+                    verticalCenter = ((islandTopPx + islandBottomPx) / 2f).toDp(),
+                    minimumHeight = (islandBottomPx - islandTopPx).toDp(),
+                    maximumBottom = snapshot.windowBottomPx.toDp(),
+                )
+            }
             val anchor =
                 resolveDynamicIslandAnchor(topCutout.exactCenterX(), rootWidthPx, snapshot.isRtl)
             val fraction = topCutout.exactCenterX() / rootWidthPx
@@ -578,6 +658,9 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
                     },
                 horizontalOffset = horizontalOffsetDp,
                 anchor = anchor,
+                verticalCenter = ((islandTopPx + islandBottomPx) / 2f).toDp(),
+                minimumHeight = (islandBottomPx - islandTopPx).toDp(),
+                maximumBottom = snapshot.windowBottomPx.toDp(),
             )
         }
     }
@@ -588,6 +671,13 @@ private fun DisplayCutout.topBoundingRectOrNull() =
 
 fun DisplayCutout.dynamicIslandHoleRect(): android.graphics.Rect? {
     val boundingRect = topBoundingRectOrNull() ?: return null
+    return holeRectWithin(boundingRect)
+}
+
+/** The hole's own bounds when the cutout path is known, otherwise [boundingRect]. */
+private fun DisplayCutout.holeRectWithin(
+    boundingRect: android.graphics.Rect
+): android.graphics.Rect {
     val path = cutoutPath ?: return android.graphics.Rect(boundingRect)
     val pathBounds = android.graphics.RectF()
     path.computeBounds(pathBounds, true)
@@ -599,6 +689,38 @@ fun DisplayCutout.dynamicIslandHoleRect(): android.graphics.Rect? {
     } else {
         android.graphics.Rect(boundingRect)
     }
+}
+
+/**
+ * Describes the hole on the left, right or bottom edge, whichever the cutout has, as its extent
+ * along that edge and its inset from it. These are the values the top-edge hole yields as its
+ * width and its top and bottom.
+ */
+private fun DisplayCutout.dynamicIslandEdgeHole(
+    displayWidthPx: Int,
+    displayHeightPx: Int,
+): DynamicIslandEdgeHole? {
+    getBoundingRectLeft().takeUnless { it.isEmpty }?.let { rect ->
+        val hole = holeRectWithin(rect)
+        return DynamicIslandEdgeHole(hole.height(), hole.left, hole.right)
+    }
+    getBoundingRectRight().takeUnless { it.isEmpty }?.let { rect ->
+        val hole = holeRectWithin(rect)
+        return DynamicIslandEdgeHole(
+            hole.height(),
+            displayWidthPx - hole.right,
+            displayWidthPx - hole.left,
+        )
+    }
+    getBoundingRectBottom().takeUnless { it.isEmpty }?.let { rect ->
+        val hole = holeRectWithin(rect)
+        return DynamicIslandEdgeHole(
+            hole.width(),
+            displayHeightPx - hole.bottom,
+            displayHeightPx - hole.top,
+        )
+    }
+    return null
 }
 
 private fun PopupContentModel.isUtilityStatusContent(): Boolean {

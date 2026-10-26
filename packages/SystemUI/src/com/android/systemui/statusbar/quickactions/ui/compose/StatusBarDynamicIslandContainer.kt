@@ -27,9 +27,11 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,13 +40,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipId
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import kotlin.math.abs
 
 /** Phone-only centered dynamic island that pages through active popup chips. */
@@ -58,6 +63,9 @@ fun StatusBarDynamicIslandContainer(
     modifier: Modifier = Modifier,
 ) {
     val cutoutSpec = rememberDynamicIslandCutoutSpec()
+    val view = LocalView.current
+    val density = LocalDensity.current
+    var verticalOffset by remember(cutoutSpec.verticalCenter) { mutableIntStateOf(0) }
     var selectedChipId by remember { mutableStateOf<QuickActionChipId?>(null) }
     var popupAnchorChip by remember { mutableStateOf<QuickActionChipModel.PopupChip?>(null) }
     var popupVisible by remember { mutableStateOf(false) }
@@ -128,20 +136,42 @@ fun StatusBarDynamicIslandContainer(
     Box(
         modifier =
             modifier
+                // The cutout may need a taller island than a short status bar, e.g. in landscape.
+                .wrapContentHeight(unbounded = true)
                 .padding(
                     start = if (cutoutSpec.anchor == DynamicIslandAnchor.START) 0.dp else 8.dp,
                     end = 8.dp,
                 )
-                .offset(x = cutoutSpec.horizontalOffset)
+                .offset {
+                    IntOffset(with(density) { cutoutSpec.horizontalOffset.roundToPx() }, verticalOffset)
+                }
                 .onGloballyPositioned { coordinates ->
+                    cutoutSpec.verticalCenter?.let { center ->
+                        val location = IntArray(2)
+                        view.rootView.getLocationOnScreen(location)
+                        val unshiftedTop =
+                            coordinates.positionInWindow().y + location[1] - verticalOffset
+                        val unshiftedCenter = unshiftedTop + coordinates.size.height / 2f
+                        val desired = with(density) { center.toPx() } - unshiftedCenter
+                        // Never push the island below the status bar window, which clips it.
+                        val maxOffset =
+                            cutoutSpec.maximumBottom?.let { bottom ->
+                                with(density) { bottom.toPx() } - unshiftedTop -
+                                    coordinates.size.height
+                            } ?: desired
+                        verticalOffset =
+                            desired.coerceAtMost(maxOffset).coerceAtLeast(-unshiftedTop)
+                                .roundToInt()
+                    }
                     if (selectedChip != null) {
-                        val b = coordinates.boundsInWindow()
+                        // Unclipped, since the island may extend below its host views.
+                        val p = coordinates.positionInWindow()
                         onIslandBoundsChanged(
                             android.graphics.Rect(
-                                b.left.toInt(),
-                                b.top.toInt(),
-                                b.right.toInt(),
-                                b.bottom.toInt(),
+                                p.x.toInt(),
+                                p.y.toInt(),
+                                (p.x + coordinates.size.width).toInt(),
+                                (p.y + coordinates.size.height).toInt(),
                             )
                         )
                     } else {

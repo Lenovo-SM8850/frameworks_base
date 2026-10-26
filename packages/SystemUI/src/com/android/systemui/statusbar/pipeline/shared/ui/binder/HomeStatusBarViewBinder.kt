@@ -135,11 +135,11 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
 
         val leftSideArea: View =
             view.requireViewById(R.id.status_bar_start_side_except_heads_up)
-        val centeredArea: View? = view.findViewById(R.id.centered_area)
         val lyricView =
             object : LyricViewController(view.context, view) {
                 private var isNotificationIconsVisible = true
                 private var hideForHun = false
+                private var hidCenterClock = false
 
                 override fun showLyricView(animate: Boolean) {
                     if (!isNotificationIconsVisible || hideForHun) {
@@ -147,7 +147,12 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
                         return
                     }
                     leftSideArea.hide(View.INVISIBLE, animate)
-                    centeredArea?.hide(View.INVISIBLE, animate)
+                    // Lyrics can reach the centre clock, but the Dynamic Island in the centred
+                    // area stays: the lyrics end before it.
+                    if (centerClock?.visibility == View.VISIBLE) {
+                        centerClock.hide(View.INVISIBLE, animate)
+                        hidCenterClock = true
+                    }
                     this.view.show(animate)
                 }
 
@@ -157,7 +162,10 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
                     // Otherwise we'd fight the HUN or chip logic for the same region.
                     if (isNotificationIconsVisible && !hideForHun) {
                         leftSideArea.show(animate)
-                        centeredArea?.show(animate)
+                        if (hidCenterClock) {
+                            centerClock?.show(animate)
+                            hidCenterClock = false
+                        }
                     }
                 }
 

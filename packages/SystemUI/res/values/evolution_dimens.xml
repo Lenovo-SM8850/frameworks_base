@@ -46,4 +46,7 @@
 
     <!-- Biometric view -->
     <dimen name="biometric_indicator_above_margin_bottom">8dp</dimen>
+
+    <!-- Status bar window space below the status bar for the Dynamic Island to wrap the cutout -->
+    <dimen name="status_bar_window_island_overflow">8dp</dimen>
 </resources>

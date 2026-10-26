@@ -32,6 +32,7 @@ import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.Region;
 import android.os.Binder;
 import android.os.RemoteException;
 import android.os.Trace;
@@ -44,6 +45,7 @@ import android.view.InsetsFrameProvider;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 
@@ -59,9 +61,11 @@ import com.android.systemui.res.R;
 import com.android.systemui.statusbar.data.repository.StatusBarConfigurationController;
 import com.android.systemui.statusbar.layout.StatusBarContentInsetsProvider;
 import com.android.systemui.statusbar.policy.ConfigurationController;
+import com.android.systemui.statusbar.quickactions.ui.compose.StatusBarDynamicIslandChipKt;
 import com.android.systemui.statusbar.window.StatusBarWindowModule.InternalWindowViewInflater;
 import com.android.systemui.unfold.UnfoldTransitionProgressProvider;
 import com.android.systemui.unfold.util.JankMonitorTransitionProgressListener;
+import com.android.wm.shell.shared.handles.DynamicIslandTouchRegion;
 
 import dagger.assisted.Assisted;
 import dagger.assisted.AssistedFactory;
@@ -95,6 +99,26 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
     private WindowManager.LayoutParams mLp;
     private final WindowManager.LayoutParams mLpChanged;
     private final Binder mInsetsSourceOwner = new Binder();
+    private final Rect mIslandBounds = new Rect();
+
+    // The window reaches below the status bar so the Dynamic Island can wrap the cutout; only the
+    // status bar itself and the island take touches there. PhoneStatusBarView already sets the
+    // status bar region without the app handles, which the view root unions with this one, so
+    // add only the island here.
+    private final ViewTreeObserver.OnComputeInternalInsetsListener mOverflowTouchableInsets =
+            new ViewTreeObserver.OnComputeInternalInsetsListener() {
+                @Override
+                public void onComputeInternalInsets(ViewTreeObserver.InternalInsetsInfo info) {
+                    int overflow = getIslandOverflow(mBarHeight);
+                    if (mCurrentState.mIsLaunchAnimationRunning || overflow == 0) return;
+                    info.setTouchableInsets(
+                            ViewTreeObserver.InternalInsetsInfo.TOUCHABLE_INSETS_REGION);
+                    info.touchableRegion.setEmpty();
+                    if (DynamicIslandTouchRegion.getBounds(mDisplayId, mIslandBounds)) {
+                        info.touchableRegion.op(mIslandBounds, Region.Op.UNION);
+                    }
+                }
+            };
 
     private final ConfigurationController.ConfigurationListener mConfigurationListener =
             new ConfigurationController.ConfigurationListener() {
@@ -185,6 +209,8 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
                     e);
         }
         mStatusBarConfigurationController.addCallback(mConfigurationListener);
+        mStatusBarWindowView.getViewTreeObserver()
+                .addOnComputeInternalInsetsListener(mOverflowTouchableInsets);
         refreshStatusBarHeight();
         mLpChanged.copyFrom(mLp);
 
@@ -208,6 +234,8 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
             Log.e(TAG, "Failed to remove View from WindowManager. View was not attached", e);
         }
         mStatusBarConfigurationController.removeCallback(mConfigurationListener);
+        mStatusBarWindowView.getViewTreeObserver()
+                .removeOnComputeInternalInsetsListener(mOverflowTouchableInsets);
     }
 
     @Override
@@ -249,6 +277,11 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
                 });
     }
 
+    /** Space of the window below a status bar of the given height, outside the status bar insets. */
+    private int getIslandOverflow(int barHeight) {
+        return StatusBarDynamicIslandChipKt.dynamicIslandWindowOverflowPx(mContext, barHeight);
+    }
+
     private WindowManager.LayoutParams getBarLayoutParams(int rotation) {
         WindowManager.LayoutParams lp = getBarLayoutParamsForRotation(rotation);
         lp.paramsForRotation = new WindowManager.LayoutParams[4];
@@ -262,7 +295,7 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
         int height = SystemBarUtils.getStatusBarHeightForRotation(mContext, rotation);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
-                height,
+                height + getIslandOverflow(height),
                 WindowManager.LayoutParams.TYPE_STATUS_BAR,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS,
@@ -368,12 +401,13 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
     }
 
     private void applyHeight(State state) {
-        mLpChanged.height =
-                state.mIsLaunchAnimationRunning ? ViewGroup.LayoutParams.MATCH_PARENT : mBarHeight;
+        mLpChanged.height = state.mIsLaunchAnimationRunning
+                ? ViewGroup.LayoutParams.MATCH_PARENT
+                : mBarHeight + getIslandOverflow(mBarHeight);
         for (int rot = Surface.ROTATION_0; rot <= Surface.ROTATION_270; rot++) {
             int height = SystemBarUtils.getStatusBarHeightForRotation(mContext, rot);
-            mLpChanged.paramsForRotation[rot].height =
-                    state.mIsLaunchAnimationRunning ? ViewGroup.LayoutParams.MATCH_PARENT : height;
+            mLpChanged.paramsForRotation[rot].height = state.mIsLaunchAnimationRunning
+                    ? ViewGroup.LayoutParams.MATCH_PARENT : height + getIslandOverflow(height);
             // The status bar height could change at runtime if one display has a cutout while
             // another doesn't (like some foldables). It could also change when using debug cutouts.
             // So, we need to re-fetch the height and re-apply it to the insets each time to avoid
