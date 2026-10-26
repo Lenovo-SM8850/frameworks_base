@@ -421,6 +421,7 @@ fun StatusBarRoot(
 
                 var islandExpanded = false
                 var lastIslandBoundsReported = Rect()
+                val lyricContainer: View? = phoneStatusBarView.findViewById(R.id.lyric_container)
                 var islandExpandedHandler: (Boolean) -> Unit = {}
 
                 fun publishIslandBounds() {
@@ -431,6 +432,7 @@ fun StatusBarRoot(
                         overlapDotParentRef,
                         effective,
                     )
+                    lyricContainer?.keepClearOfIsland(effective)
                 }
 
                 // Edge holding the camera. Anything but TOP means the island is docked to a side
@@ -514,6 +516,10 @@ fun StatusBarRoot(
                         }
                     }
                 centeredArea.addView(composeView)
+                // Padding set during this layout pass would not resize the lyric text.
+                lyricContainer?.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                    v.post { v.keepClearOfIsland(lastIslandBoundsReported) }
+                }
 
                 // Same island, in its own window, for a camera on the left or right edge.
                 val sideEdgeHost =
@@ -1205,6 +1211,20 @@ private fun bindRegionSamplingViewModel(
             awaitCancellation()
         }
     }
+}
+
+/** Ends the status bar lyrics before the Dynamic Island, whose bounds are in window coordinates. */
+private fun View.keepClearOfIsland(islandInWindow: Rect) {
+    val location = IntArray(2)
+    getLocationInWindow(location)
+    val overlap =
+        when {
+            islandInWindow.isEmpty || width == 0 -> 0
+            layoutDirection == View.LAYOUT_DIRECTION_RTL -> islandInWindow.right - location[0]
+            else -> location[0] + width - islandInWindow.left
+        }.coerceAtLeast(0)
+    val end = resources.getDimensionPixelSize(R.dimen.lyric_padding_end) + overlap
+    if (end != paddingEnd) setPaddingRelative(paddingStart, paddingTop, end, paddingBottom)
 }
 
 /**
