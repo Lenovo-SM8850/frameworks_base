@@ -984,6 +984,8 @@ class MultiSplitCoordinator(
         wct.reparentTasks(target.mRootTaskInfo.token, null, null, null, false)
         val opts = ActivityOptions.fromBundle(options ?: ActivityOptions.makeBasic().toBundle())
         opts.setLaunchRootTask(target.mRootTaskInfo.token)
+        opts.setLaunchWindowingMode(android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW)
+        opts.setLaunchFloatingWindow(false)
         opts.setLaunchDisplayId(host.rootInfo()!!.displayId)
         opts.setDisallowEnterPictureInPictureWhileLaunching(true)
         opts.setPendingIntentBackgroundActivityStartMode(

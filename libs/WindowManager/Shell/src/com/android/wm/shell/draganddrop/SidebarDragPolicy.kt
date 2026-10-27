@@ -120,7 +120,9 @@ class SidebarDragPolicy(
         val activeSplit = split?.isSplitScreenVisible == true
         val capacity = split?.getSplitCapacity(displayId) ?: 0
         val occupied = split?.getOccupiedSplitSlots(displayId) ?: 0
-        val slots = split?.getAppDragSlots(displayId).orEmpty()
+        val slots = if (!sidebarSource && activeSplit && occupied > 2) {
+            split?.splitLeafTaskIds.orEmpty().mapNotNull { split?.getReplaceSplitSlot(it) }
+        } else split?.getAppDragSlots(displayId).orEmpty()
         val allowed = slots.filter { slot ->
             val companion = if (activeSplit) running.firstOrNull {
                 it.displayId == displayId && it.isVisible && it.userId == app.user.identifier &&
@@ -150,7 +152,8 @@ class SidebarDragPolicy(
             return Destination(Rect(it.bounds), slot = it, pendingSplit = true)
         }
         val slot = resolveSplitSlot(state.front, app.supportsSplit, state.systemAllowsSplit,
-            state.activeSplit, state.occupied, state.capacity, state.slots, x, y)
+            state.activeSplit, state.occupied, state.capacity, state.slots, x, y,
+            replaceOccupied = !sidebarSource && state.activeSplit && state.occupied > 2)
         if (slot != null && slot in state.allowedSlots) {
             return Destination(Rect(slot.bounds), slot = slot)
         }
@@ -286,8 +289,10 @@ class SidebarDragPolicy(
         destination.slot?.let { slot ->
             val controller = split ?: return false
             // Use a fresh options bundle: floating flags never enter a split transaction.
-            if (app.taskId >= 0) {
-                val task = tasks.getTasks(100, false).firstOrNull { it.taskId == app.taskId } ?: return false
+            val floatingTask = snapshot?.existing?.takeIf { it.isFloatingWindow && slot.leafId >= 0 }
+            if (app.taskId >= 0 || floatingTask != null) {
+                val task = floatingTask ?: tasks.getTasks(100, false)
+                    .firstOrNull { it.taskId == app.taskId } ?: return false
                 if (slot.leafId >= 0) return controller.startTaskInSplitSlot(task, slot)
                 controller.startTask(app.taskId, slot.position, options.toBundle(), null)
                 return true
@@ -375,7 +380,8 @@ class SidebarDragPolicy(
         @com.android.internal.annotations.VisibleForTesting
         fun resolveSplitSlot(front: RunningTaskInfo?, incomingSupportsSplit: Boolean,
             systemAllowsSplit: Boolean, active: Boolean, occupied: Int, capacity: Int,
-            slots: List<AppDragSlot>, x: Int, y: Int): AppDragSlot? {
+            slots: List<AppDragSlot>, x: Int, y: Int,
+            replaceOccupied: Boolean = false): AppDragSlot? {
             if (!systemAllowsSplit || !incomingSupportsSplit || capacity <= 0 || slots.isEmpty())
                 return null
             if (!active && (front?.activityType != ACTIVITY_TYPE_STANDARD ||
@@ -383,6 +389,7 @@ class SidebarDragPolicy(
                 return null
             val valid = slots.filter { !it.bounds.isEmpty }
             if (!active) return valid.firstOrNull { it.hitBounds.contains(x, y) }
+            if (replaceOccupied) return valid.firstOrNull { it.occupied && it.hitBounds.contains(x, y) }
             // The coordinator supplies only feasible insertion candidates for this exact layout.
             // Occupied leaves are replacement targets, never evidence of spare capacity.
             return valid.firstOrNull { !it.occupied && it.hitBounds.contains(x, y) }
