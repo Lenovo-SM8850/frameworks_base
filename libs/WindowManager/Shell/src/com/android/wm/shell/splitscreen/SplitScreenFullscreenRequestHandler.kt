@@ -66,6 +66,9 @@ class SplitScreenFullscreenRequestHandler(
         if (!stageCoordinator.isSplitActive()) return null
         if (!stageCoordinator.isSplitScreenVisible()) return null
         if (!stageCoordinator.isTaskOnSplitDisplay(task)) return null
+        if (stageCoordinator is StageCoordinator && stageCoordinator.isMultiSplitActive()) {
+            return EnterResult.Failed(RESULT_FAILED_NOT_SUPPORTED, this)
+        }
         @StageType val stageType: Int = stageCoordinator.getCurrentStageTypeOfTask(task.taskId)
         @SplitPosition val position: Int = stageCoordinator.getSplitPosition(task.taskId)
         @SnapPosition val snapPosition: Int = stageCoordinator.calculateCurrentSnapPosition()

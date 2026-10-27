@@ -921,6 +921,10 @@ class DesktopTasksController(
         userId: Int = shellController.currentUserId,
         transitionSource: DesktopModeTransitionSource,
     ) {
+        getFocusedMultitaskingTask(displayId)?.let {
+            fullscreenMultitaskingTask(it)
+            return
+        }
         getFocusedDesktopTask(displayId = displayId, userId = userId)?.let {
             // Desktop -> Fullscreen.
             moveDesktopTaskToFullscreen(it, displayId, transitionSource)
@@ -965,6 +969,25 @@ class DesktopTasksController(
                     allFocusedTasks.size,
                 )
         }
+    }
+
+    /** Resolves the focused leaf before counting its focused ancestor containers. */
+    fun getFocusedMultitaskingTask(displayId: Int): RunningTaskInfo? {
+        val leaves = splitScreenController.splitLeafTaskIds.takeIf { it.size > 2 }.orEmpty()
+        fun eligible(task: RunningTaskInfo): Boolean = task.displayId == displayId &&
+            (task.isFloatingWindow || task.taskId in leaves)
+        val focused = shellTaskOrganizer.getRunningTaskInfo(
+            focusTransitionObserver.getFocusedTaskIdOnDisplay(displayId))
+        if (focused != null && eligible(focused)) return focused
+        return shellTaskOrganizer.getRunningTasks(displayId).firstOrNull {
+            it.isFocused && eligible(it)
+        }
+    }
+
+    private fun fullscreenMultitaskingTask(task: RunningTaskInfo) {
+        if (task.isFloatingWindow) pinnedLayerController?.maximizeTask(task)
+        else splitScreenController.moveTaskToFullscreen(task.taskId,
+            SplitScreenController.EXIT_REASON_FULLSCREEN_SHORTCUT)
     }
 
     /**
@@ -2526,6 +2549,10 @@ class DesktopTasksController(
         userId: Int = shellController.currentUserId,
         transitionSource: DesktopModeTransitionSource,
     ) {
+        getFocusedMultitaskingTask(displayId)?.let {
+            fullscreenMultitaskingTask(it)
+            return
+        }
         getFocusedDesktopTask(displayId = displayId, userId = userId)?.let {
             moveDesktopTaskToFullscreen(it, displayId, transitionSource)
         }
@@ -6436,7 +6463,8 @@ class DesktopTasksController(
         userId: Int = shellController.currentUserId,
         leftOrTop: Boolean,
     ) {
-        getFocusedDesktopTask(displayId, userId)?.let { requestSplit(it, leftOrTop) }
+        val task = getFocusedMultitaskingTask(displayId) ?: getFocusedDesktopTask(displayId, userId)
+        task?.let { requestSplit(it, leftOrTop) }
     }
 
     private fun getFocusedDesktopTask(displayId: Int, userId: Int): RunningTaskInfo? {
@@ -6457,6 +6485,15 @@ class DesktopTasksController(
      */
     @JvmOverloads
     fun requestSplit(taskInfo: RunningTaskInfo, leftOrTop: Boolean = false) {
+        if (splitScreenController.splitLeafTaskIds.size > 2 &&
+            splitScreenController.isTaskInSplitScreen(taskInfo.taskId)) {
+            val position = if (leftOrTop) SPLIT_POSITION_TOP_OR_LEFT
+                else SPLIT_POSITION_BOTTOM_OR_RIGHT
+            if (splitScreenController.getSplitPosition(taskInfo.taskId) != position) {
+                splitScreenController.swapSplitTask(taskInfo.taskId)
+            }
+            return
+        }
         val pending = pendingSplitSelect
         if (pending != null) {
             if (pending.secondTaskId != INVALID_TASK_ID) return
@@ -6482,6 +6519,11 @@ class DesktopTasksController(
                 )
             }
             // Never send a nested enterSplitSelect to Launcher for a Shell-owned selection.
+            return
+        }
+        if (taskInfo.isFloatingWindow && (splitScreenController.isSplitScreenVisible ||
+            splitScreenController.hasFloatingSplitCompanion(taskInfo))) {
+            splitScreenController.moveFloatingTaskToSplit(taskInfo.taskId)
             return
         }
         requestNewSplitSelect(taskInfo, leftOrTop)
