@@ -25,16 +25,34 @@ class FloatingMiniState {
     fun canRemember(userId: Int, taskId: Int) = get(userId, taskId) == null
 
     companion object {
-        fun corner(bounds: Rect, stable: Rect, threshold: Int): Corner? {
-            val left = bounds.left <= stable.left + threshold
-            val right = bounds.right >= stable.right - threshold
-            val top = bounds.top <= stable.top + threshold
-            val bottom = bounds.bottom >= stable.bottom - threshold
+        fun corner(bounds: Rect, stable: Rect, threshold: Int): Corner? = corner(
+            bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(),
+            bounds.bottom.toFloat(), stable, threshold)
+
+        /** Large expanded windows must carry an inward reference into the corner zone. */
+        fun dragCorner(bounds: Rect, stable: Rect, threshold: Int): Corner? {
+            if (bounds.isEmpty || stable.isEmpty) return null
+            val coverage = bounds.width().toFloat() * bounds.height() /
+                stable.width() / stable.height()
+            // Keep small windows unchanged; half-display windows use the halfway point.
+            val inward = ((coverage - .2f) / .6f).coerceIn(0f, 1f)
+            val dx = bounds.width() * inward / 2f
+            val dy = bounds.height() * inward / 2f
+            return corner(bounds.left + dx, bounds.top + dy, bounds.right - dx,
+                bounds.bottom - dy, stable, threshold)
+        }
+
+        private fun corner(left: Float, top: Float, right: Float, bottom: Float,
+            stable: Rect, threshold: Int): Corner? {
+            val atLeft = left <= stable.left + threshold
+            val atRight = right >= stable.right - threshold
+            val atTop = top <= stable.top + threshold
+            val atBottom = bottom >= stable.bottom - threshold
             return when {
-                left && top -> Corner.TOP_LEFT
-                right && top -> Corner.TOP_RIGHT
-                left && bottom -> Corner.BOTTOM_LEFT
-                right && bottom -> Corner.BOTTOM_RIGHT
+                atLeft && atTop -> Corner.TOP_LEFT
+                atRight && atTop -> Corner.TOP_RIGHT
+                atLeft && atBottom -> Corner.BOTTOM_LEFT
+                atRight && atBottom -> Corner.BOTTOM_RIGHT
                 else -> null
             }
         }

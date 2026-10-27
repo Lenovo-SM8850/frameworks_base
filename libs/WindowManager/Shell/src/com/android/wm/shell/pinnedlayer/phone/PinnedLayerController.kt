@@ -126,6 +126,13 @@ class PinnedLayerController(
     fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect) {
         miniInteractions?.onDragEnded(task, start, end)
     }
+    fun flingMiniToCorner(task: TaskInfo, start: Rect, end: Rect, displayId: Int,
+        release: android.graphics.PointF, velocity: android.graphics.PointF): Boolean =
+        !keyguardShowing && !recentsRunning && !overviewShowing &&
+            displayId == task.displayId && isMini(task) &&
+            miniInteractions?.flingToCorner(task, start, end,
+                release.x, release.y, velocity.x, velocity.y) == true
+
     fun enterMiniAfterResize(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,
         bounds: Rect, scale: Float) {
         miniInteractions?.enterAfterResize(task, restore, logical, restoreScale, bounds, scale)
@@ -910,6 +917,44 @@ class PinnedLayerController(
         transitions.startTransition(TRANSIT_CHANGE, wct, null)
     }
 
+    private fun finishFloatingMove(leash: SurfaceControl, taskInfo: TaskInfo,
+        dragStartBounds: Rect, dragEndBounds: Rect): Boolean {
+        val base = taskInfo.floatingWindowRestoreBounds
+        val moved = FloatingWindowGeometry.movedBaseBounds(base, dragStartBounds, dragEndBounds)
+            ?: return true
+        val destination = presentationController.clampToDisplay(taskInfo, moved) ?: base
+        // Clamp the visible leash immediately, as well as its committed presentation.
+        val visibleTop = destination.top + taskInfo.presentationBounds.top - base.top
+        val t = transactionPool.acquire()
+        t.setPosition(leash, destination.left.toFloat(), visibleTop.toFloat()).apply()
+        transactionPool.release(t)
+        dragEndBounds.offsetTo(destination.left, visibleTop)
+        shellTaskOrganizer.applyTransaction(WindowContainerTransaction()
+            .setFloatingWindowPresentation(taskInfo.token,
+                android.graphics.Point(destination.left, destination.top), taskInfo.floatingWindowScale))
+        return true
+    }
+
+    /** Handles expanded floating captions; other releases use the ordinary drag handler. */
+    @JvmOverloads
+    fun onCaptionDragEnded(leash: SurfaceControl, taskInfo: TaskInfo,
+        dragStartBounds: Rect, dragEndBounds: Rect, displayId: Int,
+        release: android.graphics.PointF, velocity: android.graphics.PointF,
+        pointerTravel: android.graphics.PointF? = null): Boolean {
+        if (!taskInfo.isFloatingWindow || isMini(taskInfo)) return false
+        if (!keyguardShowing && !recentsRunning && !overviewShowing &&
+            displayId == taskInfo.displayId &&
+            miniInteractions?.flingToCorner(taskInfo, dragStartBounds, dragEndBounds,
+                release.x, release.y, velocity.x, velocity.y) == true) return true
+        val travel = pointerTravel ?: android.graphics.PointF(
+            (dragEndBounds.left - dragStartBounds.left).toFloat(),
+            (dragEndBounds.top - dragStartBounds.top).toFloat())
+        if (miniInteractions?.onDragEnded(taskInfo, dragStartBounds, dragEndBounds, travel) == true) {
+            return true
+        }
+        return finishFloatingMove(leash, taskInfo, dragStartBounds, dragEndBounds)
+    }
+
     /**
      * Handles drag end event for the given [TaskInfo].
      *
@@ -938,20 +983,7 @@ class PinnedLayerController(
             if (miniInteractions?.onDragEnded(taskInfo, dragStartBounds, dragEndBounds) == true) {
                 return true
             }
-            val base = taskInfo.floatingWindowRestoreBounds
-            val moved = FloatingWindowGeometry.movedBaseBounds(base, dragStartBounds, dragEndBounds)
-                ?: return true
-            val destination = presentationController.clampToDisplay(taskInfo, moved) ?: base
-            // Clamp the visible leash immediately, as well as its committed presentation.
-            val visibleTop = destination.top + taskInfo.presentationBounds.top - base.top
-            val t = transactionPool.acquire()
-            t.setPosition(leash, destination.left.toFloat(), visibleTop.toFloat()).apply()
-            transactionPool.release(t)
-            dragEndBounds.offsetTo(destination.left, visibleTop)
-            shellTaskOrganizer.applyTransaction(WindowContainerTransaction()
-                .setFloatingWindowPresentation(taskInfo.token,
-                    android.graphics.Point(destination.left, destination.top), taskInfo.floatingWindowScale))
-            return true
+            return finishFloatingMove(leash, taskInfo, dragStartBounds, dragEndBounds)
         }
         val isCrossDisplayDrag = taskInfo.displayId != displayId
         if (

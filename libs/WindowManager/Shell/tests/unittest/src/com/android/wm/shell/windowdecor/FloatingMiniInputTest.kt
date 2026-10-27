@@ -132,6 +132,61 @@ class FloatingMiniInputTest : ShellTestCase() {
     }
 
 
+    @Test fun fling_tracksDisplayCoordinatesAndEndsOwnershipBeforeRelayout() {
+        val view = view()
+        val time = SystemClock.uptimeMillis()
+        org.mockito.kotlin.doAnswer {
+            input.close()
+            true
+        }.whenever(controller).flingMiniToCorner(org.mockito.kotlin.eq(task),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+        for (index in 0..4) {
+            val action = when (index) {
+                0 -> MotionEvent.ACTION_DOWN
+                4 -> MotionEvent.ACTION_UP
+                else -> MotionEvent.ACTION_MOVE
+            }
+            // The input surface follows the pointer: local coordinates stay fixed.
+            MotionEvent.obtain(time, time + index * 10, action,
+                500f - index * 50, 700f - index * 50, 0).also {
+                it.setLocation(20f, 20f)
+                view.dispatchTouchEvent(it)
+                it.recycle()
+            }
+        }
+        val release = org.mockito.kotlin.argumentCaptor<android.graphics.PointF>()
+        val velocity = org.mockito.kotlin.argumentCaptor<android.graphics.PointF>()
+        verify(controller).flingMiniToCorner(org.mockito.kotlin.eq(task),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            release.capture(), velocity.capture())
+        org.junit.Assert.assertEquals(300f, release.firstValue.x, .1f)
+        org.junit.Assert.assertEquals(500f, release.firstValue.y, .1f)
+        org.junit.Assert.assertTrue(velocity.firstValue.x < -1000f)
+        org.junit.Assert.assertTrue(velocity.firstValue.y < -1000f)
+        verify(controller, never()).endMiniTap(task)
+        verify(controller, never()).endMiniDrag(org.mockito.kotlin.eq(task),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+    }
+
+    @Test fun cancelledDrag_doesNotFling() {
+        val view = view()
+        val time = SystemClock.uptimeMillis()
+        listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_CANCEL)
+            .forEachIndexed { index, action ->
+                MotionEvent.obtain(time, time + index * 10, action,
+                    500f - index * 100, 700f - index * 100, 0).also {
+                    view.dispatchTouchEvent(it)
+                    it.recycle()
+                }
+            }
+        verify(controller, never()).flingMiniToCorner(org.mockito.kotlin.eq(task),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+        verify(controller).endMiniDrag(org.mockito.kotlin.eq(task),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+    }
+
     @Test fun stashFeedback_rearmsAndResetsOnTransitionCancelAndClose() {
         val view = org.mockito.kotlin.spy(view())
         whenever(view.isAttachedToWindow).thenReturn(true)

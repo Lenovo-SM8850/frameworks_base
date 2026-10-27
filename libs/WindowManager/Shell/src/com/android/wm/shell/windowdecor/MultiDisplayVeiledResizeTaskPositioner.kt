@@ -539,15 +539,18 @@ class MultiDisplayVeiledResizeTaskPositioner(
             cancelFloatingFrame()
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
-            if (floatingEdgeMove) {
-                windowDecoration.pinnedLayerController?.onDragEnded(windowDecoration.taskSurface,
-                    windowDecoration.taskInfo, Rect(taskBoundsAtDragStart), repositionTaskBounds, displayId)
-                floatingEdgeMove = false
-            }
+            val edgeMove = floatingEdgeMove
+            val startBounds = Rect(taskBoundsAtDragStart)
+            floatingEdgeMove = false
             taskBoundsAtDragStart.setEmpty()
             ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
             stopFloatingObserver()
+            resetVeilIfVisible()
             interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
+            if (edgeMove) {
+                windowDecoration.pinnedLayerController?.onDragEnded(windowDecoration.taskSurface,
+                    windowDecoration.taskInfo, startBounds, repositionTaskBounds, displayId)
+            }
             return Rect(repositionTaskBounds)
         }
         val delta = DragPositioningCallbackUtility.calculateDelta(x, y, repositionStartPoint)

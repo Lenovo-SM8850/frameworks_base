@@ -5,6 +5,7 @@ import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.PointF
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
@@ -13,6 +14,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.SurfaceControl
 import android.view.SurfaceControlViewHost
+import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
@@ -38,6 +40,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var moved = Rect()
     private var downX = 0f
     private var downY = 0f
+    private var velocityTracker: VelocityTracker? = null
     private var dragging = false
     private var blockedGesture = false
     private var touchGesture = false
@@ -162,6 +165,9 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                     if (event.actionMasked == MotionEvent.ACTION_DOWN) taps.onTouchEvent(event)
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
+                            velocityTracker?.recycle()
+                            velocityTracker = VelocityTracker.obtain()
+                            trackVelocity(event)
                             gestureActive = true
                             start = controller.beginMiniDrag(current)
                             stashFeedback.update(controller.getMiniStashTarget(current, start).takeUnless {
@@ -174,6 +180,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                         }
                         MotionEvent.ACTION_MOVE -> {
                             if (!gestureActive) return@setOnTouchListener true
+                            trackVelocity(event)
                             val dx = event.rawX - downX
                             val dy = event.rawY - downY
                             val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -200,9 +207,26 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                         MotionEvent.ACTION_UP -> {
                             cancelTargetFeedback()
                             if (!gestureActive) return@setOnTouchListener true
+                            trackVelocity(event)
+                            val velocity = PointF()
+                            velocityTracker?.let {
+                                it.computeCurrentVelocity(1000,
+                                    ViewConfiguration.get(context).scaledMaximumFlingVelocity.toFloat())
+                                val pointerId = event.getPointerId(0)
+                                velocity.set(it.getXVelocity(pointerId), it.getYVelocity(pointerId))
+                            }
+                            velocityTracker?.recycle()
+                            velocityTracker = null
+                            // Finish input ownership before docking can synchronously relayout.
                             gestureActive = false
-                            if (dragging) controller.endMiniDrag(current, start, moved)
-                            else {
+                            val wasDragging = dragging
+                            dragging = false
+                            if (wasDragging) {
+                                if (!controller.flingMiniToCorner(current, start, moved, event.displayId,
+                                        PointF(event.rawX, event.rawY), velocity)) {
+                                    controller.endMiniDrag(current, start, moved)
+                                }
+                            } else {
                                 controller.endMiniTap(current)
                                 taps.onTouchEvent(event)
                             }
@@ -211,6 +235,9 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             cancelTargetFeedback()
                             if (!gestureActive) return@setOnTouchListener true
                             gestureActive = false
+                            dragging = false
+                            velocityTracker?.recycle()
+                            velocityTracker = null
                             taps.onTouchEvent(event)
                             controller.endMiniDrag(current, start, start)
                         }
@@ -220,8 +247,18 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
             }
     }
 
+    private fun trackVelocity(event: MotionEvent) {
+        val raw = MotionEvent.obtain(event)
+        raw.offsetLocation(event.rawX - event.x, event.rawY - event.y)
+        velocityTracker?.addMovement(raw)
+        raw.recycle()
+    }
+
     override fun close() {
         cancelTargetFeedback()
+        velocityTracker?.recycle()
+        velocityTracker = null
+        dragging = false
         val oldHost = host
         val oldSurface = surface
         val oldTask = task

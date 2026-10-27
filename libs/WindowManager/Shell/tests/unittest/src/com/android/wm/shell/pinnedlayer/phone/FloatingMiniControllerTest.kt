@@ -108,6 +108,166 @@ class FloatingMiniControllerTest : ShellTestCase() {
         }
     }
 
+    @Test fun captionDrag_shortLargeWindowNudgeDoesNotEnterMini() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.configuration.windowConfiguration.setBounds(Rect(0, 0, 2242, 1401))
+        h.task.floatingWindowScale = 1f
+        h.task.floatingWindowPosition.set(179, 73)
+        whenever(h.layout.width()).thenReturn(2560)
+        whenever(h.layout.height()).thenReturn(1600)
+        doAnswer { it.getArgument<Rect>(0).set(0, 0, 2560, 1600); null }
+            .whenever(h.layout).getStableBounds(any())
+        val start = Rect(179, 73, 2421, 1474)
+        val end = Rect(329, 183, 2571, 1584)
+        assertThat(h.controller.getDragTarget(h.task, start, end)).isNull()
+
+        assertThat(h.controller.onDragEnded(h.task, start, end,
+            android.graphics.PointF(150f, 110f))).isFalse()
+
+        assertThat(h.state.get(h.task.userId, h.task.taskId)).isNull()
+        verify(h.animator, never()).start()
+    }
+
+    @Test fun captionDrag_mediumWindowEntersBottomCornersIncludingClampedTravel() {
+        for (right in listOf(false, true)) {
+            for (clamped in listOf(false, true)) {
+                val h = Harness()
+                h.state.remove(h.task.userId, h.task.taskId)
+                h.task.floatingWindowScale = .75f
+                h.task.floatingWindowPosition.set(100, 200)
+                val end = if (right) Rect(600, 1000, 1200, 1900)
+                    else Rect(0, 1000, 600, 1900)
+                val start = if (clamped) Rect(end) else Rect(100, 200, 700, 1100)
+                h.task.floatingWindowPosition.set(start.left, start.top)
+                val travel = android.graphics.PointF(if (right) 500f else -100f, 800f)
+
+                assertThat(h.controller.onDragEnded(h.task, start, end, travel)).isTrue()
+
+                assertThat(h.state.get(h.task.userId, h.task.taskId)).isNotNull()
+                verify(h.animator).start()
+                h.animatorListener.onAnimationEnd(h.animator)
+            }
+        }
+    }
+
+    @Test fun flingRestore_leavesExpandedGeometryAvailableForCornerResize() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.floatingWindowScale = .75f
+        h.task.floatingWindowPosition.set(100, 200)
+        val start = Rect(h.task.presentationBounds)
+        assertThat(h.controller.flingToCorner(h.task, start, start,
+            400f, 650f, 0f, -2000f)).isFalse()
+        assertThat(h.controller.flingToCorner(h.task, start, start,
+            1100f, 1800f, -1000f, -1000f)).isFalse()
+        assertThat(h.controller.flingToCorner(h.task, start, start,
+            400f, 650f, -2000f, -2000f)).isTrue()
+        h.animatorListener.onAnimationEnd(h.animator)
+        h.controller.restore(h.task)
+        h.animatorListener.onAnimationEnd(h.animator)
+        val restored = h.changes.last()
+        assertThat(h.state.get(h.task.userId, h.task.taskId)).isNull()
+        assertThat(restored.floatingWindowScale).isEqualTo(.75f)
+        val resized = FloatingWindowGeometry.presetCorner(restored.presentationBounds,
+            restored.configuration.windowConfiguration.bounds, Rect(0, 100, 1200, 1900),
+            com.android.wm.shell.windowdecor.DragPositioningCallback.CTRL_TYPE_RIGHT or
+                com.android.wm.shell.windowdecor.DragPositioningCallback.CTRL_TYPE_BOTTOM,
+            100f, 150f, 100, 100)
+        assertThat(resized.visible).isNotEqualTo(restored.presentationBounds)
+    }
+
+    @Test fun largeCaptionDrag_previewAndReleaseUseTheSameInwardReference() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1000, 1200))
+        h.task.floatingWindowScale = 1f
+        h.task.floatingWindowPosition.set(100, 300)
+        val start = Rect(h.task.presentationBounds)
+        val early = Rect(200, 700, 1200, 1900)
+        assertThat(h.controller.getDragTarget(h.task, start, early)).isNull()
+        assertThat(h.controller.onDragEnded(h.task, start, early,
+            android.graphics.PointF(100f, 400f))).isFalse()
+        val end = Rect(500, 1100, 1500, 2300)
+        val preview = requireNotNull(h.controller.getDragTarget(h.task, start, end))
+        assertThat(h.controller.onDragEnded(h.task, start, end,
+            android.graphics.PointF(400f, 800f))).isTrue()
+        assertThat(requireNotNull(h.state.get(h.task.userId, h.task.taskId)).bounds)
+            .isEqualTo(preview.bounds)
+    }
+
+    @Test fun miniFling_eachCornerPreservesMiniSizeScaleAndRestoreState() {
+        for (corner in FloatingMiniState.Corner.values()) {
+            val h = Harness()
+            val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+            val restore = entry.restore
+            val end = Rect(400, 700, 760, 1240)
+            val left = corner == FloatingMiniState.Corner.TOP_LEFT ||
+                corner == FloatingMiniState.Corner.BOTTOM_LEFT
+            val top = corner == FloatingMiniState.Corner.TOP_LEFT ||
+                corner == FloatingMiniState.Corner.TOP_RIGHT
+            h.controller.beginDrag(h.task)
+            h.controller.move(h.task, end)
+            assertThat(h.controller.flingToCorner(h.task, h.task.presentationBounds, end,
+                600f, 1000f, if (left) -10000f else 10000f,
+                if (top) -10000f else 10000f)).isTrue()
+            h.animatorListener.onAnimationEnd(h.animator)
+            assertThat(h.state.get(h.task.userId, h.task.taskId)).isSameInstanceAs(entry)
+            assertThat(entry.restore).isSameInstanceAs(restore)
+            assertThat(entry.restore.bounds).isEqualTo(h.normal)
+            assertThat(entry.scale).isEqualTo(.45f)
+            assertThat(entry.bounds).isEqualTo(FloatingMiniState.snap(end,
+                Rect(0, 100, 1200, 1900), corner, 8))
+            assertThat(entry.bounds.width()).isEqualTo(end.width())
+            assertThat(entry.bounds.height()).isEqualTo(end.height())
+            assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+            assertThat(h.changes.last().configuration.windowConfiguration.bounds)
+                .isEqualTo(Rect(0, 0, 800, 1200))
+        }
+    }
+
+    @Test fun miniFling_slowReleaseFallsBackToExistingStashHandling() {
+        val h = Harness()
+        val end = Rect(-217, 200, 143, 740)
+        assertThat(h.controller.flingToCorner(h.task, h.task.presentationBounds, end,
+            0f, 200f, -100f, -100f)).isFalse()
+        verify(h.animator, never()).start()
+        h.controller.onDragEnded(h.task, h.task.presentationBounds, end)
+        h.animatorListener.onAnimationEnd(h.animator)
+        assertThat(requireNotNull(h.state.get(h.task.userId, h.task.taskId)).edge)
+            .isEqualTo(FloatingMiniState.Edge.LEFT)
+    }
+
+    @Test fun miniFling_reservesCornerAndCascadesVerticallyLeavingStashedMiniUntouched() {
+        for (top in listOf(true, false)) {
+            val h = Harness()
+            val entries = (0..2).map { index ->
+                val bounds = if (top) Rect(8, 108 + index * 548, 368, 648 + index * 548)
+                    else Rect(8, 1352 - index * 548, 368, 1892 - index * 548)
+                val other = TestRunningTaskInfoBuilder().setTaskId(100 + index)
+                    .setDisplayId(0).build().apply { isFloatingWindow = true; isVisible = true }
+                val entry = h.state.enter(other.userId, other.taskId,
+                    FloatingMiniState.Restore(h.normal, Rect(0, 0, 800, 1200), .75f),
+                    bounds, .45f)
+                if (index == 2) entry.edge = FloatingMiniState.Edge.LEFT
+                other to entry
+            }
+            whenever(h.organizer.getRunningTasks(0)).thenReturn(
+                arrayListOf(h.task, *entries.map { it.first }.toTypedArray()))
+            doAnswer { h.animatorListener.onAnimationEnd(h.animator); null }
+                .whenever(h.animator).start()
+            val stashed = Rect(entries[2].second.bounds)
+            val end = Rect(400, 700, 760, 1240)
+            assertThat(h.controller.flingToCorner(h.task, h.task.presentationBounds, end,
+                600f, 1000f, -10000f, if (top) -10000f else 10000f)).isTrue()
+            assertThat(entries[0].second.bounds.top).isEqualTo(if (top) 656 else 804)
+            assertThat(entries[1].second.bounds.top).isEqualTo(if (top) 1204 else 256)
+            assertThat(entries[2].second.bounds).isEqualTo(stashed)
+            assertThat(entries[2].second.edge).isEqualTo(FloatingMiniState.Edge.LEFT)
+            entries.forEach { h.state.remove(it.first.userId, it.first.taskId) }
+        }
+    }
+
     @Test fun prepareRestore_expandsMiniInCallerTransactionWithoutStartingAnimation() {
         val h = Harness()
         val wct = android.window.WindowContainerTransaction()
