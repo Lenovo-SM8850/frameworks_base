@@ -137,6 +137,23 @@ public class GameGestureLockControllerTest {
         assertEquals(GameGestureLock.BLOCK, mController.begin(GameGestureLock.HOME, 0, 7, down + 700));
     }
 
+    @Test public void confirmedRevealBypassesShadeGatesUntilBarHides() {
+        initialize();
+        mController.setStatusBarVisible(0, false);
+        long down = SystemClock.uptimeMillis();
+        assertTrue(mController.recognize(GameGestureLock.REVEAL, 0, 7, down));
+        mController.end(GameGestureLock.REVEAL, 0, 7, down, down + 100, false);
+        assertFalse(mController.recognize(GameGestureLock.REVEAL, 0, 7, down + 350));
+        assertEquals(GameGestureLock.INACTIVE, mController.begin(GameGestureLock.SHADE, 0, 7, down + 360));
+        assertEquals(GameGestureLock.BLOCK, mController.begin(GameGestureLock.HOME, 0, 7, down + 360));
+        assertTrue(mController.isActive(0));
+        mController.setStatusBarVisible(0, true);
+        mController.setStatusBarVisible(1, false);
+        assertEquals(GameGestureLock.INACTIVE, mController.begin(GameGestureLock.SHADE, 0, 7, down + 600));
+        mController.setStatusBarVisible(0, false);
+        assertEquals(GameGestureLock.BLOCK, mController.begin(GameGestureLock.SHADE, 0, 7, down + 900));
+        assertEquals(GameGestureLock.BLOCK, mController.begin(GameGestureLock.REVEAL, 0, 7, down + 900));
+    }
 
     @Test public void sessionRotationKeepsLockAndClearsConfirmations() {
         initialize();

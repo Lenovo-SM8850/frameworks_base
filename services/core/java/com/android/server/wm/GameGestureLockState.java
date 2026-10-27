@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.android.server.wm;
 
+import static android.view.GameGestureLock.REVEAL;
+import static android.view.GameGestureLock.SHADE;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -10,6 +13,10 @@ final class GameGestureLockState {
     static final long MAX_REPEAT_MS = 2000;
     private final long[] mCompleted = {-1, -1, -1, -1, -1};
     private final Map<String, Attempt> mStreams = new HashMap<>();
+    private boolean mStatusBarVisible;
+    private boolean mShadeUnlocked;
+    private boolean mRevealSeenVisible;
+    private long mRevealDown;
 
     private static final class Attempt {
         final int kind;
@@ -22,8 +29,7 @@ final class GameGestureLockState {
         Attempt(int kind) { this.kind = kind; }
     }
 
-    // Only identical kinds are equivalent. Home and Recents deliberately use the same kind.
-    // Different actions recognized on one physical stream need independent confirmations.
+    // Confirmations are per kind; a confirmed reveal separately grants shade access.
     private String key(int kind, int device, long down) { return kind + ":" + device + ":" + down; }
     private boolean ready(int kind, long down) {
         long end = mCompleted[kind];
@@ -36,7 +42,10 @@ final class GameGestureLockState {
         if (attempt != null) return attempt.allowed;
         if (mStreams.size() >= 160) mStreams.entrySet().removeIf(e -> e.getValue().ended);
         attempt = new Attempt(kind);
-        if (ready(kind, down)) {
+        if ((kind == SHADE
+                || kind == REVEAL && mStatusBarVisible) && isShadeUnlocked(down)) {
+            attempt.allowed = true;
+        } else if (ready(kind, down)) {
             attempt.reservedEnd = mCompleted[kind];
             mCompleted[kind] = -1;
             attempt.allowed = true;
@@ -50,6 +59,12 @@ final class GameGestureLockState {
         Attempt attempt = mStreams.get(key(kind, device, down));
         if (!attempt.recognized) {
             attempt.recognized = true;
+            if (kind == REVEAL && attempt.allowed && !attempt.cancelled) {
+                mShadeUnlocked = true;
+                mRevealSeenVisible = mStatusBarVisible;
+                mRevealDown = down;
+                mCompleted[SHADE] = -1;
+            }
             if (attempt.allowed && mCompleted[kind] == attempt.reservedEnd) mCompleted[kind] = -1;
             if (attempt.ended) complete(attempt, down);
         }
@@ -78,7 +93,30 @@ final class GameGestureLockState {
         return true;
     }
 
+    boolean isStatusBarVisible() { return mStatusBarVisible; }
+
+    boolean isShadeUnlocked() { return mShadeUnlocked; }
+
+    boolean isShadeUnlocked(long down) {
+        if (mShadeUnlocked && !mRevealSeenVisible && down - mRevealDown > MAX_REPEAT_MS) {
+            mShadeUnlocked = false;
+        }
+        return mShadeUnlocked;
+    }
+
+    void setStatusBarVisible(boolean visible) {
+        mStatusBarVisible = visible;
+        if (visible && mShadeUnlocked) mRevealSeenVisible = true;
+        if (!visible && mRevealSeenVisible) {
+            mShadeUnlocked = false;
+            mRevealSeenVisible = false;
+            mCompleted[SHADE] = -1;
+        }
+    }
+
     void reset() {
+        mShadeUnlocked = false;
+        mRevealSeenVisible = false;
         java.util.Arrays.fill(mCompleted, -1);
         mStreams.clear();
     }

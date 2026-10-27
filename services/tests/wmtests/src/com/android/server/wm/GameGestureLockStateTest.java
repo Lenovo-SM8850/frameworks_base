@@ -28,6 +28,68 @@ public class GameGestureLockStateTest {
         assertTrue(mState.end(kind, 0, down, end, false));
     }
 
+    private void reveal() {
+        first(REVEAL, 1000, 1100);
+        assertTrue(mState.begin(REVEAL, 0, 1350));
+        assertFalse(mState.recognize(REVEAL, 0, 1350));
+    }
+
+    @Test public void confirmedRevealAllowsShadeOnSameAndLaterStreamsUntilHidden() {
+        reveal();
+        assertTrue(mState.begin(GameGestureLock.SHADE, 0, 1350));
+        assertFalse(mState.recognize(GameGestureLock.SHADE, 0, 1350));
+        mState.setStatusBarVisible(true);
+        assertTrue(mState.begin(GameGestureLock.SHADE, 1, 5000));
+        assertFalse(mState.recognize(GameGestureLock.SHADE, 1, 5000));
+        assertTrue(mState.begin(REVEAL, 0, 5100));
+        assertFalse(mState.recognize(REVEAL, 0, 5100));
+        assertFalse(mState.begin(HOME, 0, 5000));
+        assertFalse(mState.begin(BACK, 0, 5000));
+        mState.setStatusBarVisible(false);
+        assertFalse(mState.begin(GameGestureLock.SHADE, 0, 6000));
+        assertFalse(mState.begin(REVEAL, 0, 6000));
+    }
+
+    @Test public void pendingRevealSurvivesHiddenSnapshotUntilBarBecomesVisible() {
+        reveal();
+        mState.setStatusBarVisible(false);
+        assertTrue(mState.isShadeUnlocked());
+        mState.setStatusBarVisible(true);
+        mState.setStatusBarVisible(false);
+        assertFalse(mState.isShadeUnlocked());
+        // A late second observer of the same reveal must not reopen the dismissed bar.
+        assertFalse(mState.recognize(REVEAL, 0, 1350));
+        assertFalse(mState.isShadeUnlocked());
+    }
+
+    @Test public void revealThatNeverShowsCannotLeaveShadeUnlocked() {
+        reveal();
+        mState.setStatusBarVisible(false);
+        assertFalse(mState.begin(GameGestureLock.SHADE, 0, 3351));
+        assertFalse(mState.isShadeUnlocked());
+    }
+
+    @Test public void firstOrUnrecognizedOrCancelledRevealDoesNotUnlockShade() {
+        first(REVEAL, 1000, 1100);
+        assertFalse(mState.isShadeUnlocked());
+        assertTrue(mState.begin(REVEAL, 0, 1350));
+        mState.setStatusBarVisible(true);
+        assertFalse(mState.isShadeUnlocked());
+        mState.end(REVEAL, 0, 1350, 1450, true);
+        assertFalse(mState.recognize(REVEAL, 0, 1350));
+        assertFalse(mState.isShadeUnlocked());
+    }
+
+    @Test public void resetRevokesRevealedShadeAndVisibleBarAloneDoesNotUnlock() {
+        reveal();
+        mState.setStatusBarVisible(true);
+        mState.reset();
+        assertFalse(mState.isShadeUnlocked());
+        assertFalse(mState.begin(GameGestureLock.SHADE, 0, 1700));
+        mState.setStatusBarVisible(true);
+        assertFalse(mState.isShadeUnlocked());
+    }
+
     @Test public void threeButtonNavigationRevealsAlwaysBypassConfirmation() {
         // Bottom in portrait, right in landscape, left in seascape. Bar visibility must not matter.
         for (int edge = 2; edge <= 4; edge++) {
