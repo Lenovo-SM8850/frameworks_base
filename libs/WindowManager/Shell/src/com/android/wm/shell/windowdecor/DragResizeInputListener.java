@@ -540,9 +540,21 @@ class DragResizeInputListener implements AutoCloseable {
             mConsumeBatchEventScheduled = true;
         }
 
+        private boolean mInInputEvent;
+        private boolean mDisposePending;
+
         @Override
         public void onInputEvent(InputEvent inputEvent) {
-            finishInputEvent(inputEvent, handleInputEvent(inputEvent));
+            mInInputEvent = true;
+            try {
+                finishInputEvent(inputEvent, handleInputEvent(inputEvent));
+            } finally {
+                mInInputEvent = false;
+                if (mDisposePending) {
+                    mDisposePending = false;
+                    dispose();
+                }
+            }
         }
 
         boolean isHandlingEvents() {
@@ -762,6 +774,10 @@ class DragResizeInputListener implements AutoCloseable {
 
         @Override
         public void dispose() {
+            if (mInInputEvent) {
+                mDisposePending = true;
+                return;
+            }
             super.dispose();
             if (mOnDisposed != null) {
                 mOnDisposed.run();

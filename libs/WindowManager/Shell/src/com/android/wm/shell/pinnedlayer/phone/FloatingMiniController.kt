@@ -150,15 +150,23 @@ class FloatingMiniController(
             nearest = true) ?: bounds
     }
 
-    fun getDragTarget(task: TaskInfo, start: Rect, end: Rect): DragTarget? {
-        if (!task.isFloatingWindow || start == end || task.taskId !in leashes) return null
+    fun getDragTarget(task: TaskInfo, start: Rect, end: Rect): DragTarget? =
+        getDragTarget(task, start, end, false)
+
+    private fun getDragTarget(task: TaskInfo, start: Rect, end: Rect,
+        allowUnmoved: Boolean): DragTarget? {
+        if (!task.isFloatingWindow || (!allowUnmoved && start == end) ||
+            task.taskId !in leashes) return null
         val entry = state.get(task.userId, task.taskId)
         if (entry != null && (entry.edge != FloatingMiniState.Edge.NONE ||
             getStashTarget(task, end) != FloatingMiniState.Edge.NONE)) return null
         val stable = stable(task)
         if (stable.isEmpty) return null
         val margin = (8 * density(task)).toInt()
-        val corner = FloatingMiniState.corner(end, stable, (48 * density(task)).toInt()) ?: return null
+        val threshold = (48 * density(task)).toInt()
+        val corner = if (entry == null) FloatingMiniState.dragCorner(end, stable, threshold)
+            else FloatingMiniState.corner(end, stable, threshold)
+        if (corner == null) return null
         val scale = entry?.scale ?: minimum(task, stable)
         val sized = if (entry == null) FloatingMiniState.sized(
             task.configuration.windowConfiguration.bounds, scale, end.left, end.top) else Rect(end)
@@ -171,7 +179,84 @@ class FloatingMiniController(
         return DragTarget(bounds, scale, radius, corner)
     }
 
-    fun onDragEnded(task: TaskInfo, start: Rect, end: Rect): Boolean {
+    private fun hasCornerTravel(dx: Float, dy: Float, stable: Rect,
+        corner: FloatingMiniState.Corner?): Boolean {
+        if (!dx.isFinite() || !dy.isFinite()) return false
+        val travel = when (corner) {
+            FloatingMiniState.Corner.TOP_LEFT -> -dx - dy
+            FloatingMiniState.Corner.TOP_RIGHT -> dx - dy
+            FloatingMiniState.Corner.BOTTOM_LEFT -> -dx + dy
+            FloatingMiniState.Corner.BOTTOM_RIGHT -> dx + dy
+            null -> return false
+        }
+        return travel >= min(stable.width(), stable.height()) / 4f
+    }
+
+    /** Docks expanded or mini windows using the same pointer fling and corner reservation. */
+    fun flingToCorner(task: TaskInfo, start: Rect, end: Rect,
+        releaseX: Float, releaseY: Float, velocityX: Float, velocityY: Float): Boolean {
+        if (!task.isFloatingWindow || task.taskId !in leashes) return false
+        val entry = state.get(task.userId, task.taskId)
+        if (entry != null && entry.edge != FloatingMiniState.Edge.NONE) return false
+        val stable = stable(task)
+        val corner = FloatingMiniFling.corner(stable, density(task),
+            releaseX, releaseY, velocityX, velocityY) ?: return false
+        val top = corner == FloatingMiniState.Corner.TOP_LEFT ||
+            corner == FloatingMiniState.Corner.TOP_RIGHT
+        val margin = (8 * density(task)).toInt()
+        val scale = entry?.scale ?: minimum(task, stable)
+        val sized = if (entry != null) Rect(end) else FloatingMiniState.sized(
+            task.configuration.windowConfiguration.bounds, scale, 0, 0)
+        val destination = FloatingMiniState.snap(sized, stable, corner, margin)
+        val plans = mutableListOf<Triple<TaskInfo, Rect, Float>>()
+        val occupied = mutableListOf(destination)
+        val others = organizer.getRunningTasks(task.displayId).mapNotNull { other ->
+            if (other.taskId == task.taskId || !other.isFloatingWindow || !other.isVisible) {
+                return@mapNotNull null
+            }
+            val entry = state.get(other.userId, other.taskId) ?: return@mapNotNull null
+            if (entry.edge != FloatingMiniState.Edge.NONE) return@mapNotNull null
+            val motion = animations[key(other)]
+            Triple(other, Rect(motion?.target ?: entry.bounds), motion?.scale ?: entry.scale)
+        }.sortedBy { if (top) it.second.top else -it.second.bottom }
+        for ((other, bounds, otherScale) in others) {
+            val moved = Rect(bounds)
+            while (true) {
+                val spaced = Rect(moved).apply { inset(-margin, -margin) }
+                val collisions = occupied.filter { Rect.intersects(spaced, it) }
+                if (collisions.isEmpty()) break
+                moved.offsetTo(moved.left, if (top) collisions.maxOf { it.bottom } + margin
+                    else collisions.minOf { it.top } - margin - moved.height())
+                // Leave the ordinary move intact if this edge cannot fit another mini.
+                if (moved.top < stable.top + margin || moved.bottom > stable.bottom - margin) {
+                    return false
+                }
+            }
+            occupied.add(moved)
+            if (moved != bounds) plans.add(Triple(other, moved, otherScale))
+        }
+        clearDrag(task)
+        plans.forEach { (other, bounds, otherScale) ->
+            val entry = state.get(other.userId, other.taskId) ?: return@forEach
+            animate(other, Rect(entry.bounds), entry.scale, bounds, otherScale)
+            changed(other)
+        }
+        if (entry != null) {
+            animate(task, end, entry.scale, destination, entry.scale)
+            changed(task)
+        } else {
+            val restore = FloatingWindowGeometry.movedBaseBounds(
+                task.floatingWindowRestoreBounds, start, end) ?: task.floatingWindowRestoreBounds
+            enter(task, FloatingMiniState.clamp(restore, stable),
+                task.configuration.windowConfiguration.bounds, task.floatingWindowScale,
+                end, task.floatingWindowScale, destination, scale)
+        }
+        return true
+    }
+
+    @JvmOverloads
+    fun onDragEnded(task: TaskInfo, start: Rect, end: Rect,
+        captionTravel: android.graphics.PointF? = null): Boolean {
         clearDrag(task)
         if (task.taskId !in leashes) return false
         val stable = stable(task)
@@ -180,7 +265,9 @@ class FloatingMiniController(
         val margin = (8 * density(task)).toInt()
         val corner = FloatingMiniState.corner(end, stable, (48 * density(task)).toInt())
         if (entry == null) {
-            val target = getDragTarget(task, start, end) ?: return false
+            val target = getDragTarget(task, start, end, captionTravel != null) ?: return false
+            if (captionTravel != null && !hasCornerTravel(
+                    captionTravel.x, captionTravel.y, stable, target.corner)) return false
             val restore = FloatingWindowGeometry.movedBaseBounds(
                 task.floatingWindowRestoreBounds, start, end) ?: task.floatingWindowRestoreBounds
             enter(task, FloatingMiniState.clamp(restore, stable),

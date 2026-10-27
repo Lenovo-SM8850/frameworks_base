@@ -519,6 +519,29 @@ class PinnedLayerControllerTest : ShellTestCase() {
     }
 
     @Test
+    fun floatingDragEnded_releasedLeashStillCommitsPresentation() {
+        val task = setupTask(bounds = Rect(100, 100, 900, 900)).apply {
+            isFloatingWindow = true
+            floatingWindowScale = .75f
+            floatingWindowPosition.set(100, 300)
+            positionInParent = android.graphics.Point(100, 120)
+        }
+        pinTask(task)
+        whenever(leash.isValid).thenReturn(false)
+        org.mockito.Mockito.clearInvocations(poolTransaction, shellTaskOrganizer)
+        val start = task.presentationBounds
+        val end = Rect(start).apply { offset(60, 80) }
+
+        assertTrue(pinnedLayerController.onDragEnded(leash, task, start, end))
+
+        verify(poolTransaction, never()).setPosition(any(), any(), any())
+        val wct = argumentCaptor<WindowContainerTransaction>()
+        verify(shellTaskOrganizer).applyTransaction(wct.capture())
+        assertEquals(android.graphics.Point(160, 380),
+            wct.firstValue.changes[task.token.asBinder()]!!.floatingWindowPosition)
+    }
+
+    @Test
     fun floatingDragEnded_preservesPreImeBasePosition() {
         val task = setupTask(bounds = Rect(100, 100, 900, 900)).apply {
             isFloatingWindow = true
