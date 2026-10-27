@@ -38,4 +38,6 @@ import com.android.systemui.media.controls.shared.model.MediaAction
         val packageName: String? = null,
         val lyrics: String? = null,
         val syncedLyrics: String? = null,
+        /** Ends the session, or pauses it when the session can't be stopped. */
+        val stop: (() -> Unit)? = null,
 )

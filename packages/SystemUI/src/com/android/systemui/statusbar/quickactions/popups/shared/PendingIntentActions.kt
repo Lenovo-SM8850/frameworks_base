@@ -22,6 +22,7 @@ import com.android.systemui.ActivityIntentHelper
 import com.android.systemui.plugins.ActivityStarter
 import com.android.systemui.statusbar.NotificationLockscreenUserManager
 import com.android.systemui.statusbar.policy.KeyguardStateController
+import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 
 fun PendingIntent?.toActivityLaunchAction(
     activityStarter: ActivityStarter,
@@ -49,6 +50,20 @@ fun PendingIntent?.toActivityLaunchAction(
             }
         }
     }
+}
+
+/** An action chip that sends this intent, or null without one. */
+fun PendingIntent?.toSendPopupAction(
+    label: String,
+    emphasized: Boolean = false,
+): PopupActionModel? {
+    val action = toSendAction() ?: return null
+    return PopupActionModel(
+        label = label,
+        onClick = action,
+        emphasized = emphasized,
+        launchesApp = this?.isActivity == true,
+    )
 }
 
 fun PendingIntent?.toSendAction(): (() -> Unit)? {

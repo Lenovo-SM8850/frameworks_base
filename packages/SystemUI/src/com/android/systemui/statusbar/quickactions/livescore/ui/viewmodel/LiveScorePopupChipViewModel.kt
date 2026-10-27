@@ -30,6 +30,7 @@ import com.android.systemui.statusbar.notification.shared.ActiveNotificationMode
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.quickactions.livescore.shared.model.LiveScoreChipModel
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.PopupItemDismissal
 import com.android.systemui.statusbar.quickactions.popups.shared.toActivityLaunchAction
 import com.android.systemui.statusbar.quickactions.popups.ui.viewmodel.StatusBarPopupChipViewModel
 import com.android.systemui.statusbar.quickactions.shared.model.ChipContent
@@ -53,6 +54,8 @@ constructor(
     private val lockscreenUserManager: NotificationLockscreenUserManager,
     private val keyguardStateController: KeyguardStateController,
 ) : StatusBarPopupChipViewModel, HydratedActivatable() {
+
+    private val dismissal = PopupItemDismissal()
 
     override val chip: QuickActionChipModel by
         combine(
@@ -81,6 +84,7 @@ constructor(
                 )
             )
         }
+        .let(dismissal::filterDismissed)
         .hydratedStateOf(
             traceName = "chip",
             initialValue = QuickActionChipModel.Hidden(QuickActionChipId.LiveScore),
@@ -111,6 +115,7 @@ constructor(
             colors = ChipColors.DynamicIsland,
             contentDescription = contentDescription,
             popupContent = PopupContentModel.LiveScore(model),
+            dismissKey = model.key,
         )
     }
 

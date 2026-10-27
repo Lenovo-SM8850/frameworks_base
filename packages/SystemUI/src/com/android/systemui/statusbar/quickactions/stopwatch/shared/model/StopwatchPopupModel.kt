@@ -29,4 +29,6 @@ data class StopwatchPopupModel(
     val elapsedTimeText: String?,
     val onOpen: (() -> Unit)?,
     val actions: List<PopupActionModel> = emptyList(),
+    /** The key of the notification behind the stopwatch. */
+    val key: String = "",
 )

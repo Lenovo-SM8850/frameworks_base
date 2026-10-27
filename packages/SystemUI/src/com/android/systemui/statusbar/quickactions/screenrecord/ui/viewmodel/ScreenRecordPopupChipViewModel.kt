@@ -29,6 +29,7 @@ import com.android.systemui.statusbar.chips.screenrecord.domain.model.ScreenReco
 import com.android.systemui.statusbar.quickactions.popups.ui.viewmodel.StatusBarPopupChipViewModel
 import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.ScreenRecordPopupModel
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.PopupItemDismissal
 import com.android.systemui.statusbar.quickactions.shared.model.ChipContent
 import com.android.systemui.statusbar.quickactions.shared.model.ChipIcon
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
@@ -80,9 +81,12 @@ constructor(
                 }
             }
 
+    private val dismissal = PopupItemDismissal()
+
     override val chip: QuickActionChipModel by
         popupModel
             .map { model -> toPopupChipModel(model) }
+            .let(dismissal::filterDismissed)
             .combine(
                 DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
                     context,
@@ -126,6 +130,7 @@ constructor(
             colors = ChipColors.DynamicIslandAlert,
             contentDescription = recordingDescription,
             popupContent = PopupContentModel.ScreenRecord(model),
+            dismissKey = QuickActionChipId.ScreenRecord,
         )
     }
 

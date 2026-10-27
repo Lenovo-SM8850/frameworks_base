@@ -35,9 +35,7 @@ import com.android.systemui.statusbar.notification.collection.notifcollection.No
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.policy.NextAlarmController
 import com.android.systemui.statusbar.quickactions.alarm.shared.model.AlarmPopupModel
-import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 import com.android.systemui.statusbar.quickactions.popups.shared.toActivityLaunchAction
-import com.android.systemui.statusbar.quickactions.popups.shared.toSendAction
 import com.android.systemui.statusbar.quickactions.popups.ui.viewmodel.StatusBarPopupChipViewModel
 import com.android.systemui.statusbar.quickactions.shared.model.ChipContent
 import com.android.systemui.statusbar.quickactions.shared.model.ChipIcon
@@ -48,6 +46,8 @@ import com.android.systemui.statusbar.quickactions.ui.compose.ChipColors
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.PopupItemDismissal
+import com.android.systemui.statusbar.quickactions.popups.shared.toSendPopupAction
 import java.util.Locale
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
@@ -66,6 +66,8 @@ constructor(
     private val lockscreenUserManager: NotificationLockscreenUserManager,
     private val keyguardStateController: KeyguardStateController,
 ) : StatusBarPopupChipViewModel, HydratedActivatable() {
+
+    private val dismissal = PopupItemDismissal()
 
     override val chip: QuickActionChipModel by
         callbackFlow<AlarmPopupState> {
@@ -106,6 +108,7 @@ constructor(
                 }
             }
             .map(::toPopupChipModel)
+            .let(dismissal::filterDismissed)
             .combine(
                 DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
                     context,
@@ -167,17 +170,14 @@ constructor(
                 dayText = dayText,
                 onOpen = onOpen,
                 actions =
-                    buildList {
-                        activeNotification?.snoozeAction()?.toSendAction()?.let {
-                            add(
-                                PopupActionModel(
-                                    context.getString(R.string.dynamic_island_action_snooze),
-                                    it,
-                                    emphasized = true,
-                                )
+                    listOfNotNull(
+                        activeNotification
+                            ?.snoozeAction()
+                            .toSendPopupAction(
+                                context.getString(R.string.dynamic_island_action_snooze),
+                                emphasized = true,
                             )
-                        }
-                    },
+                    ),
             )
         val contentDescription =
             alarm?.let {
@@ -206,6 +206,7 @@ constructor(
             colors = ChipColors.DynamicIsland,
             contentDescription = contentDescription,
             popupContent = PopupContentModel.Alarm(model),
+            dismissKey = alarm?.triggerTime to activeNotification?.sbn?.key,
         )
     }
 

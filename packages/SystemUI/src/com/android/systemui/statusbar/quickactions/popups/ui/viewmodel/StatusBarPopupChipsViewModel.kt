@@ -173,15 +173,23 @@ constructor(
                 val isShown =
                     (chip.chipId == currentActiveQuickActionId) ||
                         (chip.chipId == currentShownPopupChipId)
+                val hidePopup = {
+                    if (currentShownPopupChipId == chip.chipId) {
+                        currentShownPopupChipId = null
+                    }
+                    quickActionsInteractor.close()
+                }
                 chip.copy(
                     isPopupShown = isShown,
                     showPopup = { currentShownPopupChipId = chip.chipId },
-                    hidePopup = {
-                        if (currentShownPopupChipId == chip.chipId) {
-                            currentShownPopupChipId = null
-                        }
-                        quickActionsInteractor.close()
-                    },
+                    hidePopup = hidePopup,
+                    onDismissed =
+                        chip.onDismissed?.let { dismiss ->
+                            {
+                                dismiss()
+                                hidePopup()
+                            }
+                        },
                     togglePopup = { _, anchorBounds ->
                         chip.popupViewModelFactory?.let { factory ->
                             quickActionsInteractor.toggle(

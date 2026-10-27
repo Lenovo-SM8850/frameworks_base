@@ -21,4 +21,6 @@ data class PopupActionModel(
     val label: String,
     val onClick: () -> Unit,
     val emphasized: Boolean = false,
+    /** Whether [onClick] opens an app, in which case the popup closes along with it. */
+    val launchesApp: Boolean = false,
 )

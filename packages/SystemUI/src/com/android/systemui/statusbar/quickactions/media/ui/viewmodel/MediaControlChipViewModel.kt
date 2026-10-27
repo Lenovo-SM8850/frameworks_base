@@ -32,6 +32,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.ChipColors
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import java.util.Locale
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 
@@ -45,12 +46,33 @@ constructor(
     mediaControlChipInteractor: MediaControlChipInteractor,
 ) : StatusBarPopupChipViewModel, HydratedActivatable() {
 
+    // Some apps keep their notification and session after a stop, so a dismissed session stays
+    // hidden until it plays again or another app takes over.
+    private data class DismissedSession(val packageName: String?, val stoppedSinceDismiss: Boolean)
+
+    private val dismissedSession = MutableStateFlow<DismissedSession?>(null)
+
     override val chip: QuickActionChipModel by
         combine(
             mediaControlChipInteractor.mediaControlChipModel,
             mediaControlChipInteractor.mediaUseWaveform,
-        ) { model, useWaveform ->
-            toPopupChipModel(model, useWaveform)
+            dismissedSession,
+        ) { model, useWaveform, dismissed ->
+            if (dismissed != null) {
+                when {
+                    model == null || model.packageName != dismissed.packageName ->
+                        dismissedSession.value = null
+                    model.isPlaying && dismissed.stoppedSinceDismiss ->
+                        dismissedSession.value = null
+                    !model.isPlaying && !dismissed.stoppedSinceDismiss ->
+                        dismissedSession.value = dismissed.copy(stoppedSinceDismiss = true)
+                }
+            }
+            if (dismissedSession.value != null) {
+                QuickActionChipModel.Hidden(QuickActionChipId.MediaControl)
+            } else {
+                toPopupChipModel(model, useWaveform)
+            }
         }
             .hydratedStateOf(
                 traceName = "chip",
@@ -83,6 +105,10 @@ constructor(
             colors = ChipColors.DynamicIsland,
             contentDescription = contentDescription,
             popupContent = PopupContentModel.Media(model, useWaveform),
+            onDismissed = {
+                dismissedSession.value = DismissedSession(model.packageName, !model.isPlaying)
+                model.stop?.invoke()
+            },
         )
     }
 

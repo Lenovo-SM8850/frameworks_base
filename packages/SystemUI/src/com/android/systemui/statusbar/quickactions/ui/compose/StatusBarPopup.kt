@@ -20,22 +20,29 @@ import android.view.ViewTreeObserver
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,9 +50,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Density
@@ -68,14 +78,25 @@ import com.android.systemui.statusbar.quickactions.shared.model.PopupContentMode
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.stopwatch.ui.compose.StopwatchPopup
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.POPUP_COLOR_MODE_BLUR
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.sign
+
+/** Room beside the popup card that lets a swiped card slide before the window clips it. */
+private val SwipeSlackMax = 96.dp
+private val PopupMaxWidth = 400.dp
+private val PopupPadding = 8.dp
+private val SwipeFlingVelocity = 600.dp
+private val SwipeFlingMinDistance = 16.dp
 
 /**
  * Displays a popup in the status bar area. The offset is calculated to draw the popup below the
  * status bar. When [chipBoundsInScreen] is provided, the popup grows out of the chip's on-screen
  * position and aspect ratio with an independent-axis squish animation, rather than a generic
- * uniform scale-in.
+ * uniform scale-in. Swiping the card sideways dismisses the item it shows, see
+ * [QuickActionChipModel.PopupChip.onDismissed].
  */
 @Composable
 fun StatusBarPopup(
@@ -84,6 +105,12 @@ fun StatusBarPopup(
     chipBoundsInScreen: Rect? = null,
 ) {
     val density = Density(LocalContext.current)
+    val currentChip by rememberUpdatedState(viewModel)
+    val hidePopupAction = remember { { currentChip.hidePopup() } }
+    val swipeSlack =
+        ((LocalConfiguration.current.screenWidthDp - (PopupMaxWidth + PopupPadding * 2).value) / 2f)
+            .coerceIn(0f, SwipeSlackMax.value)
+            .dp
     val yOffsetPx =
         with(density) {
             LocalContext.current.resources
@@ -161,8 +188,45 @@ fun StatusBarPopup(
         val colorMode = rememberPopupColorMode()
         val skipMotionOnDismiss = colorMode == POPUP_COLOR_MODE_BLUR
 
+        var swipeX by remember { mutableFloatStateOf(0f) }
+        var swipeJob by remember { mutableStateOf<Job?>(null) }
+        val swipeScope = rememberCoroutineScope()
+        val swipeDismissible = viewModel.onDismissed != null
+        val fadeDistancePx = with(density) { maxOf(swipeSlack + PopupPadding, 64.dp).toPx() }
+        val dismissThresholdPx = fadeDistancePx * 0.6f
+        val flingVelocityPx = with(density) { SwipeFlingVelocity.toPx() }
+        val flingMinDistancePx = with(density) { SwipeFlingMinDistance.toPx() }
+
+        fun settleSwipe(target: Float, dismiss: Boolean) {
+            swipeJob?.cancel()
+            swipeJob =
+                swipeScope.launch {
+                    animate(
+                        initialValue = swipeX,
+                        targetValue = target,
+                        animationSpec =
+                            if (dismiss) {
+                                tween(160)
+                            } else {
+                                spring(
+                                    dampingRatio = 0.75f,
+                                    stiffness = Spring.StiffnessMediumLow,
+                                )
+                            },
+                    ) { value, _ ->
+                        swipeX = value
+                    }
+                    if (dismiss) {
+                        currentChip.onDismissed?.invoke()
+                        currentChip.hidePopup()
+                    }
+                }
+        }
+
         LaunchedEffect(isVisible) {
             if (isVisible) {
+                swipeJob?.cancel()
+                swipeX = 0f
                 scaleX.snapTo(initialScaleFromChip.x)
                 scaleY.snapTo(initialScaleFromChip.y)
                 alpha.snapTo(0f)
@@ -264,55 +328,105 @@ fun StatusBarPopup(
             }
         }
 
-        AnimatedVisibility(
-            visible = isVisible,
-            enter = fadeIn(animationSpec = tween(60)),
-            exit = fadeOut(animationSpec = tween(160)),
-        ) {
-            Box(
-                modifier =
-                    Modifier.padding(8.dp)
-                        .wrapContentSize()
-                        .onGloballyPositioned { coordinates ->
-                            popupBoundsInScreen = coordinates.boundsInScreen(popupView)
-                        }
-                        .graphicsLayer {
-                            this.scaleX = scaleX.value
-                            this.scaleY = scaleY.value
-                            this.alpha = alpha.value
-                            this.translationY = translationY.value
-                            this.transformOrigin = transformOrigin
-                        }
+        // A tap on the room beside the card counts as a tap outside of it.
+        Box(modifier = Modifier.pointerInput(Unit) { detectTapGestures { hidePopupAction() } }) {
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = fadeIn(animationSpec = tween(60)),
+                exit = fadeOut(animationSpec = tween(160)),
             ) {
-                when (val popupContent = viewModel.popupContent) {
-                    is PopupContentModel.Media -> {
-                        val model = popupContent.model
-                        val useWaveform = popupContent.useWaveform
-                        val hasLyrics =
-                            !model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank()
-                        if (hasLyrics) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                MediaControlPopup(model = model, useWaveform = useWaveform)
-                                LyricsCard(model = model)
+                Box(
+                    modifier =
+                        Modifier.padding(
+                                horizontal = PopupPadding + swipeSlack,
+                                vertical = PopupPadding,
+                            )
+                            .wrapContentSize()
+                            .onGloballyPositioned { coordinates ->
+                                popupBoundsInScreen = coordinates.boundsInScreen(popupView)
                             }
-                        } else {
-                            MediaControlPopup(model = model, useWaveform = useWaveform)
-                        }
+                            // Keeps taps on blank parts of the card from closing the popup.
+                            .pointerInput(Unit) { detectTapGestures {} }
+                            .pointerInput(swipeDismissible) {
+                                if (!swipeDismissible) return@pointerInput
+                                val velocityTracker = VelocityTracker()
+                                detectHorizontalDragGestures(
+                                    onDragStart = {
+                                        swipeJob?.cancel()
+                                        velocityTracker.resetTracking()
+                                    },
+                                    onDragEnd = {
+                                        val velocity = velocityTracker.calculateVelocity().x
+                                        val flung =
+                                            abs(velocity) > flingVelocityPx &&
+                                                abs(swipeX) > flingMinDistancePx &&
+                                                sign(velocity) == sign(swipeX)
+                                        if (abs(swipeX) >= dismissThresholdPx || flung) {
+                                            settleSwipe(
+                                                sign(swipeX) * fadeDistancePx,
+                                                dismiss = true,
+                                            )
+                                        } else {
+                                            settleSwipe(0f, dismiss = false)
+                                        }
+                                    },
+                                    onDragCancel = { settleSwipe(0f, dismiss = false) },
+                                ) { change, dragAmount ->
+                                    velocityTracker.addPosition(
+                                        change.uptimeMillis,
+                                        change.position,
+                                    )
+                                    change.consume()
+                                    swipeX += dragAmount
+                                }
+                            }
+                            .graphicsLayer {
+                                this.scaleX = scaleX.value
+                                this.scaleY = scaleY.value
+                                this.alpha =
+                                    alpha.value *
+                                        (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f)
+                                this.translationX = swipeX
+                                this.translationY = translationY.value
+                                this.transformOrigin = transformOrigin
+                            }
+                ) {
+                    CompositionLocalProvider(LocalHidePopup provides hidePopupAction) {
+                        PopupBody(viewModel)
                     }
-                    is PopupContentModel.ScreenRecord -> ScreenRecordPopup(model = popupContent.model)
-                    is PopupContentModel.LiveScore -> LiveScorePopup(model = popupContent.model)
-                    is PopupContentModel.Flashlight -> FlashlightPopup(model = popupContent.model)
-                    is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
-                    is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
-                    PopupContentModel.None -> Unit
                 }
             }
         }
     }
 }
+
+@Composable
+private fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
+    when (val popupContent = viewModel.popupContent) {
+        is PopupContentModel.Media -> {
+            val model = popupContent.model
+            val useWaveform = popupContent.useWaveform
+            val hasLyrics =
+                !model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank()
+            if (hasLyrics) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MediaControlPopup(model = model, useWaveform = useWaveform)
+                    LyricsCard(model = model)
+                }
+            } else {
+                MediaControlPopup(model = model, useWaveform = useWaveform)
+            }
+        }
+        is PopupContentModel.ScreenRecord -> ScreenRecordPopup(model = popupContent.model)
+        is PopupContentModel.LiveScore -> LiveScorePopup(model = popupContent.model)
+        is PopupContentModel.Flashlight -> FlashlightPopup(model = popupContent.model)
+        is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
+        is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
+        PopupContentModel.None -> Unit
+    }}
 
 private fun LayoutCoordinates.boundsInScreen(view: android.view.View): Rect {
     val location = IntArray(2)

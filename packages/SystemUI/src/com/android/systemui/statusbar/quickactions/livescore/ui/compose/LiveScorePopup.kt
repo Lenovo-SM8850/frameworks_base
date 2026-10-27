@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.android.systemui.common.ui.compose.Icon
 import com.android.systemui.statusbar.quickactions.livescore.shared.model.LiveScoreChipModel
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -49,12 +50,13 @@ fun LiveScorePopup(
     modifier: Modifier = Modifier,
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    val onOpen = rememberPopupLaunchAction(model.onOpen)
     PopupSurface(
         shape = PopupShape,
         modifier =
             modifier
                 .widthIn(min = 320.dp, max = 400.dp)
-                .clickable(enabled = model.onOpen != null) { model.onOpen?.invoke() },
+                .clickable(enabled = onOpen != null) { onOpen?.invoke() },
     ) {
         Row(
             modifier =

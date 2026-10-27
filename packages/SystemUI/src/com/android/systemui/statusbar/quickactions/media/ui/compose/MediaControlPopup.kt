@@ -87,6 +87,7 @@ import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.media.ui.viewmodel.MediaControlPopupViewModel
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -152,6 +153,7 @@ fun MediaControlPopup(
     modifier: Modifier = Modifier,
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    val openApp = rememberPopupLaunchAction(model.openApp)
     PopupSurface(
         shape = PopupShape,
         modifier = modifier.widthIn(min = 320.dp, max = 400.dp),
@@ -165,9 +167,9 @@ fun MediaControlPopup(
                     Modifier.fillMaxWidth().clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                        enabled = model.openApp != null,
+                        enabled = openApp != null,
                     ) {
-                        model.openApp?.invoke()
+                        openApp?.invoke()
                     },
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,

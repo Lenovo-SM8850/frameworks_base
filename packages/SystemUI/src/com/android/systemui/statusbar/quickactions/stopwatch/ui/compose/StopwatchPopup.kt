@@ -41,6 +41,8 @@ import com.android.systemui.statusbar.quickactions.stopwatch.shared.model.Stopwa
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberElapsedDurationText
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -51,12 +53,13 @@ fun StopwatchPopup(
     modifier: Modifier = Modifier,
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    val onOpen = rememberPopupLaunchAction(model.onOpen)
     PopupSurface(
         shape = PopupShape,
         modifier =
             modifier
                 .widthIn(min = 300.dp, max = 360.dp)
-                .clickable(enabled = model.onOpen != null) { model.onOpen?.invoke() },
+                .clickable(enabled = onOpen != null) { onOpen?.invoke() },
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
@@ -103,7 +106,7 @@ fun StopwatchPopup(
                 color = accent,
             )
 
-            PopupActionChips(actions = model.actions, accent = accent)
+            PopupActionChips(actions = rememberPopupActions(model.actions), accent = accent)
         }
     }
 }

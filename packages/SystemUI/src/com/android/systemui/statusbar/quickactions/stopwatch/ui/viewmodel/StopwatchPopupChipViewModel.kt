@@ -37,9 +37,10 @@ import com.android.systemui.statusbar.notification.collection.notifcollection.No
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 import com.android.systemui.statusbar.quickactions.popups.shared.toActivityLaunchAction
-import com.android.systemui.statusbar.quickactions.popups.shared.toSendAction
 import com.android.systemui.statusbar.quickactions.popups.ui.viewmodel.StatusBarPopupChipViewModel
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.PopupItemDismissal
+import com.android.systemui.statusbar.quickactions.popups.shared.toSendPopupAction
 import com.android.systemui.statusbar.quickactions.shared.model.ChipIcon
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipId
@@ -65,6 +66,8 @@ constructor(
     private val lockscreenUserManager: NotificationLockscreenUserManager,
     private val keyguardStateController: KeyguardStateController,
 ) : StatusBarPopupChipViewModel, HydratedActivatable() {
+
+    private val dismissal = PopupItemDismissal()
 
     override val chip: QuickActionChipModel by
         callbackFlow {
@@ -106,6 +109,7 @@ constructor(
                     .firstOrNull()
             }
             .map(::toPopupChipModel)
+            .let(dismissal::filterDismissed)
             .combine(
                 DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
                     context,
@@ -131,6 +135,7 @@ constructor(
             colors = ChipColors.DynamicIsland,
             contentDescription = ContentDescription.Loaded(model.title),
             popupContent = PopupContentModel.Stopwatch(model),
+            dismissKey = model.key,
         )
     }
 
@@ -182,6 +187,7 @@ private fun NotificationEntry.toStopwatchModel(
                 keyguardStateController = keyguardStateController,
             ),
         actions = notification.toStopwatchActions(context),
+        key = sbn.key,
     )
 }
 
@@ -310,29 +316,24 @@ private fun Notification.toStopwatchActions(context: Context): List<PopupActionM
     }
 
     return if (isRunning(this)) {
-        buildList {
-            actions.getOrNull(0)?.actionIntent?.toSendAction()?.let {
-                add(PopupActionModel(context.getString(R.string.controls_media_button_pause), it))
-            }
-            actions.getOrNull(1)?.actionIntent?.toSendAction()?.let {
-                add(PopupActionModel(context.getString(R.string.dynamic_island_action_lap), it))
-            }
-        }
+        listOfNotNull(
+            actions.getOrNull(0)?.actionIntent.toSendPopupAction(
+                context.getString(R.string.controls_media_button_pause)
+            ),
+            actions.getOrNull(1)?.actionIntent.toSendPopupAction(
+                context.getString(R.string.dynamic_island_action_lap)
+            ),
+        )
     } else {
-        buildList {
-            actions.getOrNull(0)?.actionIntent?.toSendAction()?.let {
-                add(PopupActionModel(context.getString(R.string.dynamic_island_action_resume), it))
-            }
-            actions.getOrNull(1)?.actionIntent?.toSendAction()?.let {
-                add(
-                    PopupActionModel(
-                        context.getString(R.string.dynamic_island_action_stop),
-                        it,
-                        emphasized = true,
-                    )
-                )
-            }
-        }
+        listOfNotNull(
+            actions.getOrNull(0)?.actionIntent.toSendPopupAction(
+                context.getString(R.string.dynamic_island_action_resume)
+            ),
+            actions.getOrNull(1)?.actionIntent.toSendPopupAction(
+                context.getString(R.string.dynamic_island_action_stop),
+                emphasized = true,
+            ),
+        )
     }
 }
 

@@ -43,6 +43,8 @@ import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.alarm.shared.model.AlarmPopupModel
 import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -53,6 +55,8 @@ fun AlarmPopup(
     modifier: Modifier = Modifier,
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    val onOpen = rememberPopupLaunchAction(model.onOpen)
+    val actions = rememberPopupActions(model.actions)
     Surface(
         color = Color(0xF21A1A1A),
         contentColor = Color.White,
@@ -61,7 +65,7 @@ fun AlarmPopup(
         modifier =
             modifier
                 .widthIn(min = 300.dp, max = 360.dp)
-                .clickable(enabled = model.onOpen != null) { model.onOpen?.invoke() },
+                .clickable(enabled = onOpen != null) { onOpen?.invoke() },
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
@@ -104,8 +108,8 @@ fun AlarmPopup(
             PopupActionChips(
                 actions =
                     buildList {
-                        model.actions.forEach(::add)
-                        model.onOpen?.let {
+                        actions.forEach(::add)
+                        onOpen?.let {
                             add(
                                 PopupActionModel(
                                     label = stringResource(R.string.dynamic_island_open_clock_action),
