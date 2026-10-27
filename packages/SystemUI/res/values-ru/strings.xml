@@ -159,6 +159,20 @@
     <string name="screenrecord_stop_dialog_message" msgid="6262768207331626817">"Вы записываете весь экран."</string>
     <string name="screenrecord_stop_dialog_message_specific_app" msgid="5995770227684523244">"Вы записываете экран приложения \"<xliff:g id="APP_NAME">%1$s</xliff:g>\"."</string>
     <string name="screenrecord_stop_dialog_button" msgid="2883812564938194350">"Остановить запись"</string>
+    <string name="dynamic_island_screen_record_short">ЗАПИСЬ</string>
+    <string name="dynamic_island_screen_record_active">Идёт запись</string>
+    <string name="dynamic_island_screen_record_countdown">Начало через %1$s с</string>
+    <string name="dynamic_island_alarm_title">Следующий будильник</string>
+    <string name="dynamic_island_flashlight_enabled">Включено</string>
+    <string name="dynamic_island_flashlight_short">ВКЛ</string>
+    <string name="dynamic_island_open_action">Открыть</string>
+    <string name="dynamic_island_open_clock_action">Открыть часы</string>
+    <string name="dynamic_island_stopwatch_title">Секундомер</string>
+    <string name="dynamic_island_alarm_active_title">Будильник</string>
+    <string name="dynamic_island_action_snooze">Отложить</string>
+    <string name="dynamic_island_action_lap">Круг</string>
+    <string name="dynamic_island_action_stop">Стоп</string>
+    <string name="dynamic_island_action_resume">Продолжить</string>
     <string name="screen_record_entire_screen" msgid="66944996337928170">"Весь экран"</string>
     <string name="screen_record_single_app" msgid="7355880948574569290">"Одно приложение"</string>
     <string name="screen_record_single_app_hint" msgid="8404332826093639170">"Выбрать приложение"</string>
@@ -470,6 +484,7 @@
     <string name="quick_settings_rotation_unlocked_label" msgid="2359922767950346112">"Автоповорот"</string>
     <string name="accessibility_quick_settings_rotation" msgid="4800050198392260738">"Автоповорот экрана"</string>
     <string name="quick_settings_location_label" msgid="2621868789013389163">"Геолокация"</string>
+    <string name="quick_settings_screensaver_label">Заставка</string>
     <string name="quick_settings_camera_label" msgid="5612076679385269339">"Доступ к камере"</string>
     <string name="quick_settings_mic_label" msgid="8392773746295266375">"Доступ к микрофону"</string>
     <string name="quick_settings_camera_mic_available" msgid="1453719768420394314">"Разрешен"</string>
@@ -939,6 +954,7 @@
     <string name="status_bar_airplane" msgid="4848702508684541009">"Режим полета"</string>
     <string name="status_bar_supervision" msgid="6735015942701134125">"Родительский контроль"</string>
     <string name="status_bar_pin_supervision" msgid="4376576498566645782">"Некоторые настройки устройства защищены PIN-кодом"</string>
+    <string name="zen_alarm_warning_indef">Следующий будильник (<xliff:g id="when" example="at 7:00 AM">%1$s</xliff:g>) не прозвучит, если не отключить этот режим до этого времени</string>
     <string name="zen_alarm_warning" msgid="7844303238486849503">"Следующий будильник: <xliff:g id="WHEN">%1$s</xliff:g>. Звук отключен."</string>
     <string name="alarm_template" msgid="2234991538018805736">"<xliff:g id="WHEN">%1$s</xliff:g>"</string>
     <string name="alarm_template_far" msgid="3561752195856839456">"<xliff:g id="WHEN">%1$s</xliff:g>"</string>
@@ -1893,4 +1909,24 @@
     <string name="ace_attribution_settings_button_accessibility_description" msgid="8426163772933746374">"Кнопка \"Настройки\""</string>
     <string name="ace_attribution_thumbs_up_button_accessibility_description" msgid="3561722934830934360">"Кнопка \"Нравится\""</string>
     <string name="ace_attribution_thumbs_down_button_accessibility_description" msgid="5471283747650437662">"Кнопка \"Не нравится\""</string>
+    <string name="now_playing_track_and_artist_description">Сейчас играет: %1$s — %2$s</string>
+    <string name="camera">Камера</string>
+    <string name="calculator">Калькулятор</string>
+    <string name="gallery">Галерея</string>
+    <string name="no_default_app_found">Приложение по умолчанию (%1$s) не найдено</string>
+    <string name="weather_data_unavailable">Данные недоступны</string>
+    <string name="omnijaws_weather">OmniJaws</string>
+    <string name="quick_settings_data_label">Мобильный интернет</string>
+    <string name="quick_settings_ringer_label">Режим звонка</string>
+    <string name="torch_active">Фонарик включён</string>
+    <string name="google_wallet">Google Кошелёк</string>
+    <!-- Values for strings that the Material library defines without this language. -->
+    <string name="mtrl_button_collapsed_content_description">Свёрнуто</string>
+    <string name="mtrl_button_expanded_content_description">Развёрнуто</string>
+    <string name="mtrl_button_overflow_icon_content_description">Дополнительное меню</string>
+    <string name="nav_rail_collapsed_a11y_label">Свёрнуто</string>
+    <string name="nav_rail_expanded_a11y_label">Развёрнуто</string>
+    <string name="quick_settings_desktop_mode_label">Многооконный режим</string>
+    <string name="notification_open_split_screen">Открыть в режиме разделения экрана</string>
+    <string name="notification_open_floating">Открыть в плавающем окне</string>
 </resources>

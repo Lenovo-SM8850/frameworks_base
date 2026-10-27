@@ -31,6 +31,8 @@
     <string name="accessibility_action_pip_resize" msgid="4623966104749543182">"Изменить размер"</string>
     <string name="accessibility_action_pip_stash" msgid="4060775037619702641">"Скрыть"</string>
     <string name="accessibility_action_pip_unstash" msgid="7467499339610437646">"Показать"</string>
+    <string name="pip_phone_minimize">Свернуть</string>
+    <string name="pip_phone_dismiss_hint">Потяните вниз, чтобы закрыть</string>
     <string name="dock_forced_resizable" msgid="7429086980048964687">"Когда включено разделение экрана, приложение может работать нестабильно."</string>
     <string name="dock_non_resizeble_failed_to_dock_text" msgid="2733543750291266047">"Приложение не поддерживает разделение экрана."</string>
     <string name="dock_multi_instances_not_supported_text" msgid="5011042177901502928">"Это приложение можно открыть только в одном окне."</string>
@@ -181,4 +183,27 @@
     <string name="open_by_default_splash_dialog_app_text" msgid="2680408983754147907">"В приложении"</string>
     <string name="open_by_default_splash_dialog_ask_me_later_text" msgid="2706872945449736432">"Напомнить позже"</string>
     <string name="package_update_text" msgid="196015273357188152">"Обновление…"</string>
+    <string name="floating_window_restore">Восстановить плавающее окно приложения «%1$s»</string>
+    <string name="floating_window_handle">Обозначение плавающего окна</string>
+    <string name="floating_window_close">Закрыть плавающее окно</string>
+    <string name="handle_menu_swap_horizontal">Поменять местами приложения слева и справа</string>
+    <string name="handle_menu_swap_vertical">Поменять местами приложения сверху и снизу</string>
+    <string name="handle_menu_close_app">Закрыть это приложение</string>
+    <string name="handle_menu_close_named_app">Закрыть приложение «%1$s»</string>
+    <string name="split_picker_add_below">Добавить разделение снизу</string>
+    <string name="split_picker_add_to_side">Добавить разделение сбоку</string>
+    <string name="split_picker_title">Выберите приложение</string>
+    <string name="split_picker_search">Поиск приложений</string>
+    <string name="split_picker_recent">Недавние</string>
+    <string name="split_picker_all_apps">Все приложения</string>
+    <string name="split_picker_close">Закрыть</string>
+    <string name="split_picker_already_open">Уже открыто в этой части экрана</string>
+    <string name="split_picker_unavailable">Недоступно для этой части экрана</string>
+    <string name="split_picker_disabled_app">%1$s, %2$s</string>
+    <string name="split_picker_empty">Нет подходящих приложений</string>
+    <string name="split_picker_loading">Загрузка приложений…</string>
+    <string name="split_picker_launching">Открытие приложения в режиме разделения экрана</string>
+    <string name="handle_menu_replace_app">Заменить другим приложением</string>
+    <string name="split_divider_rotate_three_apps">Повернуть макет трех приложений</string>
+    <string name="split_picker_no_results">Приложения не найдены</string>
 </resources>

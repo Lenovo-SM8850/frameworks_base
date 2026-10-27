@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Copyright (C) 2019-2024 The Evolution X Project
+     SPDX-License-Identifier: Apache-2.0
+-->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="status_bar_hd_calling">Вызовы HD (VoLTE/VoNR)</string>
+    <string name="status_bar_vowifi">Вызовы по Wi-Fi (VoWiFi)</string>
+    <string name="data_disabled_icon_title">Значок «Данные отключены»</string>
+    <string name="show_fourg_icon_title">Значок 4G</string>
+    <string name="wifi_standard_icon_title">Стандарт Wi-Fi</string>
+    <string name="projection_privacy_indicator_title">Индикатор конфиденциальности захвата экрана</string>
+    <plurals name="quick_settings_internet_hotspot_summary_num_devices">
+        <item quantity="one">%d устройство подключено</item>
+        <item quantity="few">%d устройства подключено</item>
+        <item quantity="many">%d устройств подключено</item>
+        <item quantity="other">%d устройства подключено</item>
+    </plurals>
+    <string name="quick_settings_sound_ring">Звонок</string>
+    <string name="quick_settings_sound_mute">Отключить звук</string>
+    <string name="quick_settings_locale_more_locales_toast">Сначала настройте несколько языков</string>
+    <string name="quick_settings_compass_S">Ю</string>
+    <string name="screenshot_long_press">Удерживайте, чтобы выделить область для скриншота</string>
+    <string name="quick_settings_autobrightness_label">Автояркость</string>
+    <string name="vpn_tethering_changed_off">VPN для модема отключён.</string>
+    <string name="vpn_tethering_changed_on">VPN для модема включён.</string>
+    <string name="keyguard_indication_dash_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • Dash Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_dash_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка Dash</string>
+    <string name="keyguard_indication_warp_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • Warp Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_warp_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка Warp</string>
+    <string name="keyguard_indication_vooc_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • VOOC Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_vooc_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка VOOC</string>
+    <string name="keyguard_indication_turbo_power_time"><xliff:g id="percentage">%2$s</xliff:g> • Turbo Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_turbo_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка Turbo</string>
+    <string name="global_action_restart_systemui">SystemUI</string>
+    <string name="usb_mode_photo_transfer">Передача фото и видео</string>
+    <string name="usb_mode_webcam">Веб-камера USB</string>
+    <string name="onthego_notif_error">Невозможно запустить режим «На ходу»</string>
+    <string name="onthego_notif_camera_changed">Режим камеры изменён</string>
+    <string name="onthego_dialog_title">Режим «На ходу»</string>
+    <string name="onthego_opacity_title">Непрозрачность камеры</string>
+    <string name="onthego_restart_title">Перезапуск при смене камеры</string>
+    <string name="onthego_restart_summary">Кратко перезапускать предпросмотр при смене камеры</string>
+    <string name="onthego_front_camera_title">Фронтальная камера</string>
+    <string name="onthego_front_camera_summary">Использовать фронтальную камеру вместо задней</string>
+    <string name="ax_dynamic_bar_media_output">Вывод мультимедиа</string>
+    <string name="ax_dynamic_bar_ring">Звонок</string>
+    <string name="ax_dynamic_bar_saver">Экономия</string>
+    <string name="ax_dynamic_bar_image_copied">Изображение скопировано</string>
+    <string name="ax_dynamic_bar_reset">Сбросить</string>
+    <string name="ax_dynamic_bar_kill_app">Завершить приложение</string>
+    <string name="ax_dynamic_bar_casting_to">Трансляция на</string>
+    <string name="ax_dynamic_bar_camera_mic">Камера и микрофон</string>
+    <string name="ax_dynamic_bar_camera_mic_short">Камера и микр.</string>
+    <string name="ax_dynamic_bar_hotspot_devices">Устройств: <xliff:g id="count" example="3">%d</xliff:g></string>
+    <string name="ax_dynamic_bar_until_full">до полной зарядки</string>
+    <string name="ax_dynamic_bar_battery_saver">Режим энергосбережения</string>
+    <string name="ax_dynamic_bar_devices_connected">Подключено устройств: <xliff:g id="count" example="3">%d</xliff:g></string>
+    <string name="ax_dynamic_bar_vpn_connected">VPN подключён</string>
+    <string name="ax_dynamic_bar_apps_count">Приложений: <xliff:g id="count" example="2">%d</xliff:g></string>
+    <string name="ax_dynamic_bar_mins_ago"><xliff:g id="count" example="5">%d</xliff:g> мин. назад</string>
+    <string name="ax_dynamic_bar_hours_ago"><xliff:g id="count" example="2">%d</xliff:g> ч. назад</string>
+    <string name="ax_dynamic_bar_days_ago"><xliff:g id="count" example="3">%d</xliff:g> д. назад</string>
+    <string name="ax_dynamic_bar_weeks_ago"><xliff:g id="count" example="1">%d</xliff:g> нед. назад</string>
+    <string name="ax_dynamic_bar_cast_short">Трансляция</string>
+    <string name="ax_dynamic_bar_trust">Trust</string>
+    <string name="quick_settings_screenshot_label">Скриншот</string>
+    <string name="reevaluating_system_theme">Обновление системной темы… Подождите несколько секунд</string>
+    <string name="clock_ide_weather_data_unavailable">null</string>
+    <string name="usage_data_weekly">использовано за неделю</string>
+    <string name="screenshot_save_to_storage_label">Сохранить в хранилище</string>
+    <string name="ax_dynamic_bar_left_earbud">Левый наушник</string>
+    <string name="ax_dynamic_bar_right_earbud">Правый наушник</string>
+    <string name="ax_dynamic_bar_earbuds_case">Кейс</string>
+    <string name="screenshot_lens_label">Объектив</string>
+    <string name="quick_settings_blur_label">Размытие</string>
+    <string name="app_volume_panel_title">Громкость приложений</string>
+    <string name="app_volume_panel_subtitle_idle">Настройте громкость для каждого приложения, которое воспроизводит звук</string>
+    <plurals name="app_volume_panel_subtitle_active">
+        <item quantity="one"><xliff:g id="count" example="1">%d</xliff:g> приложение воспроизводит звук</item>
+        <item quantity="few"><xliff:g id="count" example="3">%d</xliff:g> приложения воспроизводят звук</item>
+        <item quantity="many"><xliff:g id="count" example="3">%d</xliff:g> приложений воспроизводят звук</item>
+        <item quantity="other"><xliff:g id="count" example="3">%d</xliff:g> приложения воспроизводят звук</item>
+    </plurals>
+    <string name="app_volume_panel_empty">Сейчас нет приложений, воспроизводящих звук</string>
+    <string name="app_volume_panel_percent"><xliff:g id="percent" example="50">%d</xliff:g>%%</string>
+    <string name="qs_coloros_no_media">Не воспроизводится</string>
+</resources>

@@ -31,6 +31,8 @@
     <string name="accessibility_action_pip_resize" msgid="4623966104749543182">"크기 조절"</string>
     <string name="accessibility_action_pip_stash" msgid="4060775037619702641">"숨기기"</string>
     <string name="accessibility_action_pip_unstash" msgid="7467499339610437646">"숨기기 취소"</string>
+    <string name="pip_phone_minimize">최소화</string>
+    <string name="pip_phone_dismiss_hint">아래로 드래그하여 닫기</string>
     <string name="dock_forced_resizable" msgid="7429086980048964687">"앱이 화면 분할 모드로는 작동하지 않을 수 있습니다"</string>
     <string name="dock_non_resizeble_failed_to_dock_text" msgid="2733543750291266047">"앱이 화면 분할을 지원하지 않습니다"</string>
     <string name="dock_multi_instances_not_supported_text" msgid="5011042177901502928">"이 앱은 창 1개에서만 열 수 있습니다."</string>
@@ -125,7 +127,7 @@
     <string name="desktop_text" msgid="9058641752519570266">"데스크톱 윈도잉"</string>
     <string name="split_screen_text" msgid="1396336058129570886">"화면 분할"</string>
     <string name="more_button_text" msgid="3655388105592893530">"더보기"</string>
-    <string name="float_button_text" msgid="9221657008391364581">"플로팅"</string>
+    <string name="float_button_text" msgid="9221657008391364581">플로팅 창</string>
     <string name="select_text" msgid="5139083974039906583">"선택"</string>
     <string name="screenshot_text" msgid="1477704010087786671">"스크린샷"</string>
     <string name="open_in_browser_text" msgid="9181692926376072904">"브라우저에서 열기"</string>
@@ -181,4 +183,27 @@
     <string name="open_by_default_splash_dialog_app_text" msgid="2680408983754147907">"앱에서 계속"</string>
     <string name="open_by_default_splash_dialog_ask_me_later_text" msgid="2706872945449736432">"나중에 알림"</string>
     <string name="package_update_text" msgid="196015273357188152">"업데이트 중..."</string>
+    <string name="floating_window_restore">%1$s 플로팅 창 복원</string>
+    <string name="floating_window_handle">플로팅 창 핸들</string>
+    <string name="floating_window_close">플로팅 창 닫기</string>
+    <string name="handle_menu_swap_horizontal">왼쪽 앱과 오른쪽 앱 바꾸기</string>
+    <string name="handle_menu_swap_vertical">위 앱과 아래 앱 바꾸기</string>
+    <string name="handle_menu_close_app">이 앱 닫기</string>
+    <string name="handle_menu_close_named_app">%1$s 닫기</string>
+    <string name="split_picker_add_below">아래에 분할 추가</string>
+    <string name="split_picker_add_to_side">옆에 분할 추가</string>
+    <string name="split_picker_title">앱 선택</string>
+    <string name="split_picker_search">앱 검색</string>
+    <string name="split_picker_recent">최근</string>
+    <string name="split_picker_all_apps">모든 앱</string>
+    <string name="split_picker_close">닫기</string>
+    <string name="split_picker_already_open">이미 열려 있는 앱</string>
+    <string name="split_picker_unavailable">이 분할에서 열 수 없는 앱</string>
+    <string name="split_picker_disabled_app">%1$s, %2$s</string>
+    <string name="split_picker_empty">일치하는 앱이 없습니다.</string>
+    <string name="split_picker_loading">앱 로드 중…</string>
+    <string name="split_picker_launching">화면 분할에서 앱 여는 중</string>
+    <string name="handle_menu_replace_app">다른 앱으로 교체</string>
+    <string name="split_divider_rotate_three_apps">3개 앱 레이아웃 회전</string>
+    <string name="split_picker_no_results">앱을 찾을 수 없음</string>
 </resources>

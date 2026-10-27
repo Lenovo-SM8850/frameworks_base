@@ -159,6 +159,20 @@
     <string name="screenrecord_stop_dialog_message" msgid="6262768207331626817">"現在、画面全体を録画しています"</string>
     <string name="screenrecord_stop_dialog_message_specific_app" msgid="5995770227684523244">"現在、<xliff:g id="APP_NAME">%1$s</xliff:g>を録画しています"</string>
     <string name="screenrecord_stop_dialog_button" msgid="2883812564938194350">"録画を停止"</string>
+    <string name="dynamic_island_screen_record_short">録画</string>
+    <string name="dynamic_island_screen_record_active">録画中</string>
+    <string name="dynamic_island_screen_record_countdown">%1$s秒後に開始</string>
+    <string name="dynamic_island_alarm_title">次のアラーム</string>
+    <string name="dynamic_island_flashlight_enabled">オン</string>
+    <string name="dynamic_island_flashlight_short">オン</string>
+    <string name="dynamic_island_open_action">開く</string>
+    <string name="dynamic_island_open_clock_action">時計を開く</string>
+    <string name="dynamic_island_stopwatch_title">ストップウォッチ</string>
+    <string name="dynamic_island_alarm_active_title">アラーム</string>
+    <string name="dynamic_island_action_snooze">スヌーズ</string>
+    <string name="dynamic_island_action_lap">ラップ</string>
+    <string name="dynamic_island_action_stop">停止</string>
+    <string name="dynamic_island_action_resume">再開</string>
     <string name="screen_record_entire_screen" msgid="66944996337928170">"画面全体"</string>
     <string name="screen_record_single_app" msgid="7355880948574569290">"1 つのアプリ"</string>
     <string name="screen_record_single_app_hint" msgid="8404332826093639170">"録画するアプリ"</string>
@@ -390,6 +404,7 @@
     <string name="accessibility_battery_level_charging" msgid="8892191177774027364">"電池充電中: <xliff:g id="BATTERY_PERCENTAGE">%d</xliff:g>パーセント"</string>
     <string name="accessibility_battery_level_charging_paused" msgid="3560711496775146763">"バッテリー残量 <xliff:g id="PERCENTAGE">%d</xliff:g>%%: バッテリー保護のため、充電を一時停止しました。"</string>
     <string name="accessibility_battery_level_charging_paused_with_estimate" msgid="2223541217743647858">"バッテリー残量 <xliff:g id="PERCENTAGE">%1$d</xliff:g>%%、<xliff:g id="TIME">%2$s</xliff:g>: バッテリー保護のため、充電を一時停止しました。"</string>
+    <string name="accessibility_battery_level_battery_saver_with_percent">バッテリー残量: <xliff:g id="number">%d</xliff:g> パーセント。バッテリー セーバーが ON になっています。</string>
     <!-- String.format failed for translation -->
     <!-- no translation found for accessibility_battery_level_battery_saver_with_percent (4529897661660196093) -->
     <skip />
@@ -472,6 +487,7 @@
     <string name="quick_settings_rotation_unlocked_label" msgid="2359922767950346112">"自動回転"</string>
     <string name="accessibility_quick_settings_rotation" msgid="4800050198392260738">"画面を自動回転します"</string>
     <string name="quick_settings_location_label" msgid="2621868789013389163">"位置情報"</string>
+    <string name="quick_settings_screensaver_label">スクリーン セーバー</string>
     <string name="quick_settings_camera_label" msgid="5612076679385269339">"カメラへのアクセス"</string>
     <string name="quick_settings_mic_label" msgid="8392773746295266375">"マイクへのアクセス"</string>
     <string name="quick_settings_camera_mic_available" msgid="1453719768420394314">"使用可能"</string>
@@ -941,6 +957,7 @@
     <string name="status_bar_airplane" msgid="4848702508684541009">"機内モード"</string>
     <string name="status_bar_supervision" msgid="6735015942701134125">"保護者による使用制限"</string>
     <string name="status_bar_pin_supervision" msgid="4376576498566645782">"一部のデバイス コントロールに対する PIN 保護"</string>
+    <string name="zen_alarm_warning_indef">それまでにオフにしない限り、次回のアラーム（<xliff:g id="when" example="at 7:00 AM">%1$s</xliff:g>）は鳴りません</string>
     <string name="zen_alarm_warning" msgid="7844303238486849503">"次回のアラーム（<xliff:g id="WHEN">%1$s</xliff:g>）は鳴りません"</string>
     <string name="alarm_template" msgid="2234991538018805736">"<xliff:g id="WHEN">%1$s</xliff:g>"</string>
     <string name="alarm_template_far" msgid="3561752195856839456">"<xliff:g id="WHEN">%1$s</xliff:g>"</string>
@@ -1895,4 +1912,24 @@
     <string name="ace_attribution_settings_button_accessibility_description" msgid="8426163772933746374">"設定ボタン"</string>
     <string name="ace_attribution_thumbs_up_button_accessibility_description" msgid="3561722934830934360">"高評価のフィードバック ボタン"</string>
     <string name="ace_attribution_thumbs_down_button_accessibility_description" msgid="5471283747650437662">"低評価のフィードバック ボタン"</string>
+    <string name="now_playing_track_and_artist_description">再生中: %2$s の %1$s</string>
+    <string name="camera">カメラ</string>
+    <string name="calculator">電卓</string>
+    <string name="gallery">ギャラリー</string>
+    <string name="no_default_app_found">デフォルトの %1$s アプリが見つかりません</string>
+    <string name="weather_data_unavailable">データなし</string>
+    <string name="omnijaws_weather">OmniJaws</string>
+    <string name="quick_settings_data_label">モバイルデータ</string>
+    <string name="quick_settings_ringer_label">着信音モード</string>
+    <string name="torch_active">ライト点灯中</string>
+    <string name="google_wallet">Google ウォレット</string>
+    <!-- Values for strings that the Material library defines without this language. -->
+    <string name="mtrl_button_collapsed_content_description">折りたたみ済み</string>
+    <string name="mtrl_button_expanded_content_description">展開済み</string>
+    <string name="mtrl_button_overflow_icon_content_description">その他のオプション</string>
+    <string name="nav_rail_collapsed_a11y_label">折りたたみ済み</string>
+    <string name="nav_rail_expanded_a11y_label">展開済み</string>
+    <string name="quick_settings_desktop_mode_label">デスクトップ ウィンドウ</string>
+    <string name="notification_open_split_screen">分割画面で開く</string>
+    <string name="notification_open_floating">フローティング ウィンドウで開く</string>
 </resources>

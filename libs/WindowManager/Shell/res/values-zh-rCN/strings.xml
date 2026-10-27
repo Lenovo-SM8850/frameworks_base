@@ -31,6 +31,8 @@
     <string name="accessibility_action_pip_resize" msgid="4623966104749543182">"调整大小"</string>
     <string name="accessibility_action_pip_stash" msgid="4060775037619702641">"隐藏"</string>
     <string name="accessibility_action_pip_unstash" msgid="7467499339610437646">"取消隐藏"</string>
+    <string name="pip_phone_minimize">最小化</string>
+    <string name="pip_phone_dismiss_hint">向下拖动即可关闭</string>
     <string name="dock_forced_resizable" msgid="7429086980048964687">"应用可能无法在分屏模式下正常运行"</string>
     <string name="dock_non_resizeble_failed_to_dock_text" msgid="2733543750291266047">"应用不支持分屏"</string>
     <string name="dock_multi_instances_not_supported_text" msgid="5011042177901502928">"此应用只能在 1 个窗口中打开"</string>
@@ -125,7 +127,7 @@
     <string name="desktop_text" msgid="9058641752519570266">"窗口化模式"</string>
     <string name="split_screen_text" msgid="1396336058129570886">"分屏"</string>
     <string name="more_button_text" msgid="3655388105592893530">"更多"</string>
-    <string name="float_button_text" msgid="9221657008391364581">"悬浮"</string>
+    <string name="float_button_text" msgid="9221657008391364581">悬浮窗口</string>
     <string name="select_text" msgid="5139083974039906583">"选择"</string>
     <string name="screenshot_text" msgid="1477704010087786671">"屏幕截图"</string>
     <string name="open_in_browser_text" msgid="9181692926376072904">"在浏览器中打开"</string>
@@ -181,4 +183,27 @@
     <string name="open_by_default_splash_dialog_app_text" msgid="2680408983754147907">"留在应用内"</string>
     <string name="open_by_default_splash_dialog_ask_me_later_text" msgid="2706872945449736432">"以后再说"</string>
     <string name="package_update_text" msgid="196015273357188152">"正在更新…"</string>
+    <string name="floating_window_restore">恢复“%1$s”悬浮窗口</string>
+    <string name="floating_window_handle">悬浮窗口手柄</string>
+    <string name="floating_window_close">关闭悬浮窗口</string>
+    <string name="handle_menu_swap_horizontal">左右互换应用</string>
+    <string name="handle_menu_swap_vertical">上下互换应用</string>
+    <string name="handle_menu_close_app">关闭此应用</string>
+    <string name="handle_menu_close_named_app">关闭“%1$s”</string>
+    <string name="split_picker_add_below">在下方添加分屏</string>
+    <string name="split_picker_add_to_side">在侧边添加分屏</string>
+    <string name="split_picker_title">选择应用</string>
+    <string name="split_picker_search">搜索应用</string>
+    <string name="split_picker_recent">最近</string>
+    <string name="split_picker_all_apps">所有应用</string>
+    <string name="split_picker_close">关闭</string>
+    <string name="split_picker_already_open">已在此分屏中打开</string>
+    <string name="split_picker_unavailable">此分屏不可用</string>
+    <string name="split_picker_disabled_app">%1$s，%2$s</string>
+    <string name="split_picker_empty">没有匹配的应用</string>
+    <string name="split_picker_loading">正在加载应用…</string>
+    <string name="split_picker_launching">正在分屏中打开应用</string>
+    <string name="handle_menu_replace_app">替换为其他应用</string>
+    <string name="split_divider_rotate_three_apps">旋转三应用布局</string>
+    <string name="split_picker_no_results">未找到应用</string>
 </resources>
