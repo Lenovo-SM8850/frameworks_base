@@ -1476,6 +1476,7 @@ public class DisplayPolicy {
     }
 
     void onDisplayInfoChanged(DisplayInfo info) {
+        updateGameGestureInputTarget();
         if (com.android.window.flags.Flags.enableTransientGestureInSystemUi()) {
             StatusBarManagerInternal statusBar = getStatusBarManagerInternal();
             if (statusBar != null) statusBar.onDisplayInfoChanged();
@@ -2700,6 +2701,11 @@ public class DisplayPolicy {
         if (lock == null) return;
         final Task task = mFocusedWindow != null ? mFocusedWindow.getTask() : null;
         final WindowState ime = mDisplayContent.getImeWindow();
+        final Resources res = getCurrentUserResources();
+        final DisplayInfo info = mDisplayContent.getDisplayInfo();
+        lock.setInputGeometry(mDisplayContent.getDisplayId(),
+                res.getInteger(R.integer.config_navBarInteractionMode), info.logicalWidth,
+                info.logicalHeight, res.getDimensionPixelSize(R.dimen.navigation_bar_gesture_height));
         lock.setInputTarget(mDisplayContent.getDisplayId(), task != null ? task.mTaskId : -1,
                 task != null ? task.mUserId : -1, mDisplayContent.getRotation(),
                 task != null && task.getWindowingMode() == android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN

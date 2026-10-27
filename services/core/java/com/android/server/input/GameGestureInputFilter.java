@@ -2,13 +2,9 @@
 package com.android.server.input;
 
 import android.content.Context;
-import android.graphics.Point;
-import android.hardware.display.DisplayManager;
 import android.os.Handler;
 import android.os.SystemClock;
-import android.view.Display;
 import android.view.GameGestureLock;
-import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 
@@ -84,7 +80,7 @@ final class GameGestureInputFilter {
                 if (c != null) c.end(GameGestureLock.HOME, event.getDisplayId(), event.getDeviceId(),
                         event.getDownTime(), event.getEventTime(), cancelled);
             }
-        }, handler, lock, event -> isCandidate(context, event),
+        }, handler, lock, GameGestureInputFilter::isCandidate,
                 ViewConfiguration.get(context).getScaledTouchSlop(), SystemClock::uptimeMillis);
     }
 
@@ -94,18 +90,9 @@ final class GameGestureInputFilter {
         mCandidate = candidate; mSlop = slop; mClock = clock;
     }
 
-    private static boolean isCandidate(Context context, MotionEvent event) {
-        if (!GameGestureLock.isGestureNavigation(context.getResources().getInteger(
-                com.android.internal.R.integer.config_navBarInteractionMode))
-                || !event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)
-                || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
-        Display display = context.getSystemService(DisplayManager.class).getDisplay(event.getDisplayId());
-        if (display == null) return false;
-        Point size = new Point();
-        display.getRealSize(size);
-        int edge = context.getResources().getDimensionPixelSize(
-                com.android.internal.R.dimen.navigation_bar_gesture_height);
-        return event.getY() >= size.y - edge;
+    private static boolean isCandidate(MotionEvent event) {
+        GameGestureLockController controller = GameGestureLockController.get();
+        return controller != null && controller.isHomeGestureCandidate(event);
     }
 
     private String key(MotionEvent event) {

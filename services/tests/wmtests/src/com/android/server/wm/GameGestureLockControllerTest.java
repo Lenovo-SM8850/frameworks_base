@@ -10,6 +10,8 @@ import android.os.SystemClock;
 import android.view.GameGestureLock;
 import android.os.test.TestLooper;
 import android.view.IGameGestureLockListener;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import androidx.test.filters.SmallTest;
 import org.junit.Test;
 import java.io.PrintWriter;
@@ -22,6 +24,7 @@ public class GameGestureLockControllerTest {
     private final TestLooper mLooper = new TestLooper();
     private final Handler mHandler = new Handler(mLooper.getLooper());
     private final List<String> mEffects = new ArrayList<>();
+    private final List<Boolean> mNotices = new ArrayList<>();
     private int mProcess = 100;
     private Runnable mDuringWrite;
     private boolean mRequested = true;
@@ -54,7 +57,7 @@ public class GameGestureLockControllerTest {
     }
     private void initialize() {
         mController.setListener(new IGameGestureLockListener.Stub() {
-            @Override public void onNotice(long generation, int user, boolean visible) { }
+            @Override public void onNotice(long generation, int user, boolean visible) { mNotices.add(visible); }
             @Override public void onStateChanged(boolean active) { }
         });
         mController.setTurnOffCallback(() -> mEffects.add("command:" + mProcess));
@@ -62,6 +65,78 @@ public class GameGestureLockControllerTest {
         mLooper.dispatchAll();
         assertTrue(mController.isActive(0));
     }
+
+    private MotionEvent touch(float x, float y, int display, int source, int tool) {
+        MotionEvent.PointerProperties properties = new MotionEvent.PointerProperties();
+        properties.id = 0;
+        properties.toolType = tool;
+        MotionEvent.PointerCoords coords = new MotionEvent.PointerCoords();
+        coords.x = x;
+        coords.y = y;
+        MotionEvent event = MotionEvent.obtain(1000, 1000, MotionEvent.ACTION_DOWN, 1,
+                new MotionEvent.PointerProperties[] {properties},
+                new MotionEvent.PointerCoords[] {coords}, 0, 0, 1, 1, 7, 0, source, 0);
+        event.setDisplayId(display);
+        return event;
+    }
+
+    private boolean candidate(float x, float y, int display, int source, int tool) {
+        MotionEvent event = touch(x, y, display, source, tool);
+        try { return mController.isHomeGestureCandidate(event); }
+        finally { event.recycle(); }
+    }
+
+    @Test public void bottomCandidatesUseCurrentUserModeAndLogicalDisplayGeometry() {
+        initialize();
+        for (int[] size : new int[][] {{1904, 3040}, {3040, 1904}}) {
+            mController.setInputGeometry(0, 2, size[0], size[1], 88);
+            for (float x : new float[] {0, 1, size[0] / 2f, size[0] - 1}) {
+                assertTrue(candidate(x, size[1] - 1, 0, InputDevice.SOURCE_TOUCHSCREEN,
+                        MotionEvent.TOOL_TYPE_FINGER));
+                assertTrue(candidate(x, size[1] - 88, 0, InputDevice.SOURCE_TOUCHSCREEN,
+                        MotionEvent.TOOL_TYPE_FINGER));
+            }
+            assertFalse(candidate(100, size[1] - 89, 0, InputDevice.SOURCE_TOUCHSCREEN,
+                    MotionEvent.TOOL_TYPE_FINGER));
+            assertFalse(candidate(size[0], size[1] - 1, 0, InputDevice.SOURCE_TOUCHSCREEN,
+                    MotionEvent.TOOL_TYPE_FINGER));
+            assertFalse(candidate(100, size[1], 0, InputDevice.SOURCE_TOUCHSCREEN,
+                    MotionEvent.TOOL_TYPE_FINGER));
+            for (int mode : new int[] {0, 1}) {
+                mController.setInputGeometry(0, mode, size[0], size[1], 88);
+                assertFalse(candidate(100, size[1] - 1, 0, InputDevice.SOURCE_TOUCHSCREEN,
+                        MotionEvent.TOOL_TYPE_FINGER));
+            }
+        }
+    }
+
+    @Test public void bottomCandidatesRejectForeignDisplayMouseStylusAndUnknownGeometry() {
+        initialize();
+        assertFalse(candidate(100, 1903, 0, InputDevice.SOURCE_TOUCHSCREEN, MotionEvent.TOOL_TYPE_FINGER));
+        mController.setInputGeometry(0, 2, 3040, 1904, 88);
+        assertFalse(candidate(100, 1903, 1, InputDevice.SOURCE_TOUCHSCREEN, MotionEvent.TOOL_TYPE_FINGER));
+        assertFalse(candidate(100, 1903, 0, InputDevice.SOURCE_MOUSE, MotionEvent.TOOL_TYPE_FINGER));
+        assertFalse(candidate(100, 1903, 0, InputDevice.SOURCE_TOUCHSCREEN, MotionEvent.TOOL_TYPE_STYLUS));
+        mController.setInputGeometry(1, 0, 0, 0, 0);
+        assertTrue(candidate(100, 1903, 0, InputDevice.SOURCE_TOUCHSCREEN, MotionEvent.TOOL_TYPE_FINGER));
+    }
+
+    @Test public void geometryChangeClearsHomeConfirmationAndFirstSwipeNotifies() {
+        initialize();
+        mController.setInputGeometry(0, 2, 1904, 3040, 88);
+        long down = SystemClock.uptimeMillis();
+        assertEquals(GameGestureLock.BLOCK, mController.begin(GameGestureLock.HOME, 0, 7, down));
+        assertTrue(mController.recognize(GameGestureLock.HOME, 0, 7, down));
+        mController.end(GameGestureLock.HOME, 0, 7, down, down + 100, false);
+        mLooper.dispatchAll();
+        assertTrue(mNotices.contains(true));
+        assertEquals(GameGestureLock.ALLOW, mController.begin(GameGestureLock.HOME, 0, 7, down + 350));
+        long generation = mController.generation();
+        mController.setInputGeometry(0, 2, 3040, 1904, 88);
+        assertTrue(mController.generation() > generation);
+        assertEquals(GameGestureLock.BLOCK, mController.begin(GameGestureLock.HOME, 0, 7, down + 700));
+    }
+
 
     @Test public void sessionRotationKeepsLockAndClearsConfirmations() {
         initialize();

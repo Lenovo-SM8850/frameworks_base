@@ -23,6 +23,7 @@ public class GameGestureInputFilterTest {
     private long mGeneration = 1;
     private int mRecognitions;
     private int mBegins;
+    private int mEnds;
     private int mDecision = GameGestureLock.BLOCK;
     private boolean mCandidate = true;
     private final GameGestureInputFilter mFilter = new GameGestureInputFilter(
@@ -30,7 +31,7 @@ public class GameGestureInputFilterTest {
                 @Override public int begin(MotionEvent event) { mBegins++; return mDecision; }
                 @Override public boolean recognize(MotionEvent event) { mRecognitions++; return mDecision == GameGestureLock.BLOCK; }
                 @Override public long generation() { return mGeneration; }
-                @Override public void end(MotionEvent event, boolean cancelled) { }
+                @Override public void end(MotionEvent event, boolean cancelled) { mEnds++; }
             }, mHandler, new Object(), event -> mCandidate, 8, () -> mTime);
 
     private boolean event(int action, float x, float y) {
@@ -43,6 +44,33 @@ public class GameGestureInputFilterTest {
         mTime += ms;
         mLooper.moveTimeForward(ms);
         mLooper.dispatchAll();
+    }
+
+    @Test public void blockedBottomSwipeCompletesBeforeNextAllowedSwipePasses() {
+        assertTrue(event(MotionEvent.ACTION_DOWN, 100, 1903));
+        mTime += 20;
+        assertTrue(event(MotionEvent.ACTION_MOVE, 100, 1800));
+        assertTrue(event(MotionEvent.ACTION_UP, 100, 1800));
+        assertEquals(1, mRecognitions);
+        assertEquals(1, mEnds);
+        assertTrue(mSent.isEmpty());
+        mDecision = GameGestureLock.ALLOW;
+        mTime += 350;
+        assertFalse(event(MotionEvent.ACTION_DOWN, 100, 1903));
+        assertFalse(event(MotionEvent.ACTION_MOVE, 100, 1800));
+        assertFalse(event(MotionEvent.ACTION_UP, 100, 1800));
+        assertEquals(2, mRecognitions);
+        assertEquals(2, mEnds);
+        assertTrue(mSent.isEmpty());
+    }
+
+    @Test public void inactiveSessionNeverHoldsOrRecognizesBottomInput() {
+        mDecision = GameGestureLock.INACTIVE;
+        assertFalse(event(MotionEvent.ACTION_DOWN, 100, 1903));
+        assertFalse(event(MotionEvent.ACTION_MOVE, 100, 1800));
+        assertFalse(event(MotionEvent.ACTION_UP, 100, 1800));
+        assertEquals(0, mRecognitions);
+        assertEquals(0, mEnds);
     }
 
     @Test public void stationaryDownReplaysAtBoundedDeadlineAndContinuesInOrder() {

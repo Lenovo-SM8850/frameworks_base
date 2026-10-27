@@ -11,6 +11,8 @@ import android.provider.Settings;
 import android.view.Display;
 import android.view.GameGestureLock;
 import android.view.IGameGestureLockListener;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 
 import com.android.server.LocalServices;
 
@@ -38,6 +40,10 @@ public final class GameGestureLockController {
     private int mInputUser = -1;
     private int mInputRotation = -1;
     private boolean mInputEligible;
+    private int mNavigationMode;
+    private int mInputWidth;
+    private int mInputHeight;
+    private int mBottomGestureHeight;
     private boolean mWasActive;
     private boolean mBound;
     private boolean mRequested;
@@ -133,6 +139,31 @@ public final class GameGestureLockController {
         mInputEligible = eligible;
     }
 
+    synchronized void setInputGeometry(int display, int navigationMode, int width, int height,
+            int bottomGestureHeight) {
+        if (display != Display.DEFAULT_DISPLAY) return;
+        if (mNavigationMode != navigationMode || mInputWidth != width || mInputHeight != height
+                || mBottomGestureHeight != bottomGestureHeight) {
+            mNavigationMode = navigationMode;
+            mInputWidth = width;
+            mInputHeight = height;
+            mBottomGestureHeight = bottomGestureHeight;
+            invalidate();
+        }
+    }
+
+    public synchronized boolean isHomeGestureCandidate(MotionEvent event) {
+        return event.getDisplayId() == Display.DEFAULT_DISPLAY
+                && GameGestureLock.isGestureNavigation(mNavigationMode)
+                && event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)
+                && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+                && mInputWidth > 0 && mInputHeight > 0 && mBottomGestureHeight > 0
+                && event.getX() >= 0 && event.getX() < mInputWidth
+                && event.getY() >= mInputHeight - mBottomGestureHeight
+                && event.getY() < mInputHeight;
+    }
+
+
     synchronized void startSession() {
         ++mIncarnation;
         mTask = -1;
@@ -187,6 +218,9 @@ public final class GameGestureLockController {
                 + " rotation=" + mRotation + " eligible=" + mEligible);
         pw.println(prefix + "  input: task=" + mInputTask + " user=" + mInputUser
                 + " rotation=" + mInputRotation + " eligible=" + mInputEligible);
+        pw.println(prefix + "  navigationMode=" + mNavigationMode + " inputSize=" + mInputWidth
+                + "x" + mInputHeight + " bottomGestureHeight=" + mBottomGestureHeight
+                );
         pw.println(prefix + "  bound=" + mBound + " listenerPresent=" + (mListener != null)
                 + " accessibilityInputFilterInstalled=" + mInputFilterInstalled
                 + " accessibilityEnabled=" + mAccessibilityEnabled
