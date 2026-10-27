@@ -491,6 +491,9 @@ class PinnedLayerController(
 
     fun canResolveSidebarSplit(): Boolean = !keyguardShowing && !recentsRunning && !overviewShowing
 
+    fun canLaunchNewWindow(task: TaskInfo): Boolean =
+        canResolveSidebarSplit() && isPinningSupported(task)
+
     /** Read-only geometry query; no pinning or remembered-entry state changes during hover. */
     fun calculateSidebarEntry(component: android.content.ComponentName, userId: Int, displayId: Int,
         info: android.content.pm.ActivityInfo, existing: TaskInfo?, x: Int, y: Int):
