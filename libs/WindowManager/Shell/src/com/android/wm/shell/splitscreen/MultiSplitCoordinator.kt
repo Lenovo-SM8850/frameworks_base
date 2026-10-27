@@ -926,6 +926,13 @@ class MultiSplitCoordinator(
             leaf.id.value, false, revision)
     }
 
+    fun startTask(taskId: Int, slot: AppDragSlot): Boolean {
+        if ((layout ?: pairModel())?.getLeaves()?.any { it.taskId == taskId } == true) return false
+        return insert(slot, null, true) { wct, opts, _ ->
+            wct.startTask(taskId, opts.toBundle())
+        }
+    }
+
     fun startTask(task: android.app.TaskInfo, slot: AppDragSlot): Boolean {
         val model = layout
         val existing = model?.getLeaves()?.firstOrNull { it.taskId == task.taskId }

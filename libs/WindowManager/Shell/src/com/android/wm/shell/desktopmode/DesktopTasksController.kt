@@ -4433,6 +4433,18 @@ class DesktopTasksController(
 
     /** Open an existing instance of an app. */
     fun openInstance(callingTask: RunningTaskInfo, requestedTaskId: Int) {
+        if (callingTask.isMultiWindow &&
+            splitScreenController.splitLeafTaskIds.contains(callingTask.taskId)) {
+            val selected = shellTaskOrganizer.getRunningTaskInfo(requestedTaskId)
+            if (splitScreenController.splitLeafTaskIds.contains(requestedTaskId) &&
+                selected != null && (selected.isVisible || selected.isVisibleRequested)) {
+                val wct = WindowContainerTransaction().reorder(selected.token, true, true)
+                transitions.startTransition(TRANSIT_TO_FRONT, wct, null)
+            } else {
+                splitScreenController.replaceSplitTaskInstance(requestedTaskId, callingTask.taskId)
+            }
+            return
+        }
         val deskId = getOrCreateDefaultDeskId(callingTask.displayId, callingTask.userId) ?: return
         if (callingTask.isFreeform) {
             val requestedTaskInfo = shellTaskOrganizer.getRunningTaskInfo(requestedTaskId)
