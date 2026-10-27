@@ -494,6 +494,13 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         return true;
     }
 
+    /** Launches a managed instance by id, including tasks no longer tracked by the organizer. */
+    public boolean replaceSplitTaskInstance(int taskId, int sourceTaskId) {
+        final AppDragSlot slot = getReplaceSplitSlot(sourceTaskId);
+        if (slot == null || getSplitLeafTaskIds().contains(taskId)) return false;
+        return mStageCoordinator.replaceSplitTaskInstance(taskId, slot);
+    }
+
     public java.util.List<Integer> getSplitLeafTaskIds() {
         return mStageCoordinator.getSplitLeafTaskIds();
     }

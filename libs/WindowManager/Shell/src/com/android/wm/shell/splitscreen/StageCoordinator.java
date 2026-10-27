@@ -2561,6 +2561,12 @@ public class StageCoordinator extends StageCoordinatorAbstract {
                 bounds, hit, true);
     }
 
+    boolean replaceSplitTaskInstance(int taskId, SplitScreenController.AppDragSlot slot) {
+        if (slot.leafId >= 0) return mMultiSplit != null && mMultiSplit.startTask(taskId, slot);
+        startTask(taskId, slot.position, null, null, slot.index);
+        return true;
+    }
+
     void replacePairTask(TaskInfo task, SplitScreenController.AppDragSlot slot) {
         WindowContainerTransaction wct = new WindowContainerTransaction();
         if (task.isFloatingWindow && task.token != null) {
