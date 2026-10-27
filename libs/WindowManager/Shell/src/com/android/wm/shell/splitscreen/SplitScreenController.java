@@ -1567,6 +1567,27 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
     @VisibleForTesting
     void startPendingIntent(PendingIntent intent, int userId, @Nullable Intent fillInIntent,
             @Nullable Bundle options) {
+        final java.util.List<Integer> leaves = getSplitLeafTaskIds();
+        if (leaves.size() > 2) {
+            final int focused = leaves.stream().filter(id -> {
+                final ActivityManager.RunningTaskInfo task = mTaskOrganizer.getRunningTaskInfo(id);
+                return task != null && task.isFocused;
+            }).findFirst().orElse(leaves.get(0));
+            AppDragSlot slot = getAddBelowSlot(focused);
+            if (slot == null) {
+                final int companion = leaves.stream().filter(id -> id != focused)
+                        .findFirst().orElse(focused);
+                slot = getReplaceSplitSlot(companion);
+            }
+            if (slot != null
+                    && startSidebarIntent(intent, userId, fillInIntent, options, slot)) return;
+            try {
+                intent.send(mContext, 0, fillInIntent, null, null, null, options);
+            } catch (PendingIntent.CanceledException e) {
+                Slog.w(TAG, "Could not launch notification", e);
+            }
+            return;
+        }
         int position = SPLIT_POSITION_BOTTOM_OR_RIGHT;
         if (isSplitScreenVisible()) {
             ActivityManager.RunningTaskInfo right = getTaskInfo(SPLIT_POSITION_BOTTOM_OR_RIGHT);
