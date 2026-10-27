@@ -140,6 +140,12 @@ class DesktopModeKeyGestureHandler(
             }
             KeyGestureEvent.KEY_GESTURE_TYPE_SNAP_LEFT_FREEFORM_WINDOW -> {
                 logV("Key gesture SNAP_LEFT_FREEFORM_WINDOW is handled")
+                getGloballyFocusedMultitaskingTask()?.let { task ->
+                    mainExecutor.execute {
+                        desktopTasksController.get().enterSplit(task.displayId, task.userId, true)
+                    }
+                    return
+                }
                 getGloballyFocusedDesktopTask()?.let {
                     mainExecutor.execute {
                         desktopModeWindowDecorViewModel
@@ -155,6 +161,12 @@ class DesktopModeKeyGestureHandler(
             }
             KeyGestureEvent.KEY_GESTURE_TYPE_SNAP_RIGHT_FREEFORM_WINDOW -> {
                 logV("Key gesture SNAP_RIGHT_FREEFORM_WINDOW is handled")
+                getGloballyFocusedMultitaskingTask()?.let { task ->
+                    mainExecutor.execute {
+                        desktopTasksController.get().enterSplit(task.displayId, task.userId, false)
+                    }
+                    return
+                }
                 getGloballyFocusedDesktopTask()?.let {
                     mainExecutor.execute {
                         desktopModeWindowDecorViewModel
@@ -170,6 +182,13 @@ class DesktopModeKeyGestureHandler(
             }
             KeyGestureEvent.KEY_GESTURE_TYPE_TOGGLE_MAXIMIZE_FREEFORM_WINDOW -> {
                 logV("Key gesture TOGGLE_MAXIMIZE_FREEFORM_WINDOW is handled")
+                getGloballyFocusedMultitaskingTask()?.let { task ->
+                    mainExecutor.execute {
+                        desktopTasksController.get().enterFullscreen(task.displayId, task.userId,
+                            DesktopModeTransitionSource.KEYBOARD_SHORTCUT)
+                    }
+                    return
+                }
                 getGloballyFocusedDesktopTask()?.let { taskInfo ->
                     val displayId = taskInfo.displayId
                     val displayLayout = displayController.getDisplayLayout(displayId)
@@ -203,7 +222,7 @@ class DesktopModeKeyGestureHandler(
             }
             KeyGestureEvent.KEY_GESTURE_TYPE_QUIT_FOCUSED_DESKTOP_TASK -> {
                 logV("Key gesture KEY_GESTURE_TYPE_QUIT_FOCUSED_DESKTOP_TASK is handled")
-                val focusedTask =
+                val focusedTask = getGloballyFocusedMultitaskingTask() ?:
                     if (
                         DesktopExperienceFlags.CLOSE_FULLSCREEN_AND_SPLITSCREEN_KEYBOARD_SHORTCUT
                             .isTrue
@@ -244,7 +263,7 @@ class DesktopModeKeyGestureHandler(
 
     /** Quits the focussed task in desktop mode */
     public fun quitFocusedDesktopTask(): Boolean {
-        val focusedTask = getGloballyFocusedDesktopTask()
+        val focusedTask = getGloballyFocusedMultitaskingTask() ?: getGloballyFocusedDesktopTask()
         if (focusedTask == null) {
             logV(
                 "Globally focused desktop task is not found to close. focusedDisplayId=%d",
@@ -260,6 +279,12 @@ class DesktopModeKeyGestureHandler(
     //  TODO: b/364154795 - wait for the completion of moveToNextDisplay transition, otherwise it
     //  will pick a wrong task when a user quickly perform other actions with keyboard shortcuts
     //  after moveToNextDisplay, and move this to FocusTransitionObserver class.
+    private fun getGloballyFocusedMultitaskingTask(): RunningTaskInfo? =
+        desktopTasksController.get().getFocusedMultitaskingTask(
+            focusTransitionObserver.globallyFocusedDisplayId)?.takeIf {
+                focusTransitionObserver.hasGlobalFocus(it)
+            }
+
     private fun getGloballyFocusedDesktopTask(): RunningTaskInfo? {
         val repository = desktopUserRepositories.current
         return shellTaskOrganizer.getRunningTasks().find { taskInfo ->
@@ -317,6 +342,7 @@ class DesktopModeKeyGestureHandler(
     }
 
     private fun getGloballyFocusedTaskToClose(): RunningTaskInfo? {
+        getGloballyFocusedMultitaskingTask()?.let { return it }
         getGloballyFocusedDesktopTask()?.let { desktopTask ->
             logV("getGloballyFocusedTaskToClose: Found desktop task: %d", desktopTask.taskId)
             return@getGloballyFocusedTaskToClose desktopTask
