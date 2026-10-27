@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -313,17 +315,26 @@ private fun MediaProgressSection(
 
     val accentArgb = accent.toArgb()
     val trackAlphaArgb = accent.copy(alpha = 0.20f).toArgb()
+    val timeStyle = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum")
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = formatElapsedTime(displayedPositionMs),
-            style = MaterialTheme.typography.labelMedium,
-            color = LocalContentColor.current.copy(alpha = 0.60f),
-        )
+        // The elapsed time reserves the width of the duration so the seek bar keeps its length.
+        Box(contentAlignment = Alignment.CenterEnd) {
+            Text(
+                text = formatElapsedTime(durationMs),
+                style = timeStyle,
+                modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+            )
+            Text(
+                text = formatElapsedTime(displayedPositionMs),
+                style = timeStyle,
+                color = LocalContentColor.current.copy(alpha = 0.60f),
+            )
+        }
 
         Box(modifier = Modifier.weight(1f).height(28.dp)) {
             var boxWidthPx by remember { mutableStateOf(0) }
@@ -480,7 +491,7 @@ private fun MediaProgressSection(
 
         Text(
             text = formatElapsedTime(durationMs),
-            style = MaterialTheme.typography.labelMedium,
+            style = timeStyle,
             color = LocalContentColor.current.copy(alpha = 0.60f),
         )
     }
