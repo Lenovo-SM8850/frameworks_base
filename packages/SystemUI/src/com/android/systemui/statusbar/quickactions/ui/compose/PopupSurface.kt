@@ -62,7 +62,10 @@ fun PopupSurface(
                 cornerRadius = 32.dp,
                 highlight = AxBlurSurfaceDefaults.highlightBrush(),
             ) {
-                CompositionLocalProvider(LocalContentColor provides Color.White) {
+                // The blur surface follows the theme, so its content does too.
+                CompositionLocalProvider(
+                    LocalContentColor provides MaterialTheme.colorScheme.onSurface
+                ) {
                     content()
                 }
             }

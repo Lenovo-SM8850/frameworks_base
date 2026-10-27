@@ -257,16 +257,18 @@ private fun MediaArtwork(model: MediaControlChipModel) {
                 resId = com.android.internal.R.drawable.ic_audio_media,
                 contentDescription = contentDescription,
             )
+    // Without artwork the app icon stands in; keep it icon-sized inside the artwork frame.
+    val isArtwork = model.artworkIcon != null && model.artworkIcon !== model.appIcon
     Box(
         modifier =
             Modifier.size(76.dp)
                 .clip(ArtworkShape)
-                .background(Color.White.copy(alpha = 0.08f)),
+                .background(LocalContentColor.current.copy(alpha = 0.08f)),
         contentAlignment = Alignment.Center,
     ) {
         UiIconView(
             icon = artwork,
-            modifier = Modifier.size(76.dp),
+            modifier = Modifier.size(if (isArtwork) 76.dp else 40.dp),
             tint = Color.Unspecified,
         )
     }

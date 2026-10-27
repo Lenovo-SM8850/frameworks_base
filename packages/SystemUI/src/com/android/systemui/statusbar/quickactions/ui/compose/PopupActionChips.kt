@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,10 +46,11 @@ fun PopupActionChips(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         actions.forEach { action ->
+            val surfaceContent = LocalContentColor.current
             val backgroundColor =
-                if (action.emphasized) accent else Color.White.copy(alpha = 0.11f)
+                if (action.emphasized) accent else surfaceContent.copy(alpha = 0.11f)
             val contentColor =
-                if (action.emphasized) MaterialTheme.colorScheme.onPrimary else Color.White
+                if (action.emphasized) MaterialTheme.colorScheme.onPrimary else surfaceContent
 
             Text(
                 text = action.label,
