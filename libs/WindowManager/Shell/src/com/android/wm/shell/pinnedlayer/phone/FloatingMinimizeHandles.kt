@@ -5,7 +5,6 @@ import android.app.TaskInfo
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Rect
-import android.graphics.drawable.GradientDrawable
 import android.os.Binder
 import android.os.UserHandle
 import android.view.Display.DEFAULT_DISPLAY
@@ -17,7 +16,6 @@ import android.widget.ImageView
 import com.android.wm.shell.R
 import com.android.wm.shell.common.DisplayController
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /** Small trusted Shell windows whose touch regions are limited to their visible handles. */
 class FloatingMinimizeHandles(
@@ -45,9 +43,9 @@ class FloatingMinimizeHandles(
         val layout = displayController.getDisplayLayout(DEFAULT_DISPLAY) ?: return
         val stable = Rect().also { layout.getStableBounds(it) }
         if (stable.isEmpty) return
-        val density = windowContext.resources.displayMetrics.density
-        val size = (48 * density).roundToInt()
-        val peek = (24 * density).roundToInt()
+        val resources = windowContext.resources
+        val size = resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_size)
+        val peek = resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_peek)
         val wanted = state.entries.values.filter { visible && it.userId in users && taskForId(it.taskId) != null }
         handles.keys.toList().filter { id -> wanted.none { it.taskId == id } }.forEach { id ->
             handles.remove(id)?.let { if (it.added) wm.removeViewImmediate(it.view) }
@@ -55,7 +53,7 @@ class FloatingMinimizeHandles(
         for (right in listOf(false, true)) {
             val ordered = wanted.filter { it.right == right }.sortedBy { it.fractionY }
             val positions = state.stackPositions(ordered, stable.top, stable.bottom,
-                size, size + (8 * density).roundToInt())
+                size, size + resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_gap))
             ordered.forEachIndexed { index, entry ->
                 val task = taskForId(entry.taskId) ?: return@forEachIndexed
                 val handle = handles.getOrPut(entry.taskId) { create(task, size) }
@@ -99,12 +97,11 @@ class FloatingMinimizeHandles(
         view.setImageDrawable(icon ?: context.getDrawable(android.R.drawable.sym_def_app_icon))
         val label = info?.loadLabel(userContext.packageManager) ?: task.baseActivity?.packageName.orEmpty()
         view.contentDescription = context.getString(R.string.floating_window_restore, label)
-        view.background = GradientDrawable().apply {
-            setColor(context.getColor(android.R.color.system_neutral1_800))
-            cornerRadius = size / 2f
-        }
-        view.elevation = size / 8f
-        view.setPadding(size / 6, size / 6, size / 6, size / 6)
+        view.setBackgroundResource(R.drawable.floating_minimize_handle_background)
+        view.elevation = windowContext.resources.getDimension(R.dimen.floating_minimize_handle_elevation)
+        val padding = windowContext.resources.getDimensionPixelSize(
+            R.dimen.floating_minimize_handle_padding)
+        view.setPadding(padding, padding, padding, padding)
         view.systemGestureExclusionRects = listOf(Rect(0, 0, size, size))
         view.isClickable = true
         view.setOnClickListener { onRestore(task.taskId) }

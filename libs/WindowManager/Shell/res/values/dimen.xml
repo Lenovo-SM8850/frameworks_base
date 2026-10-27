@@ -779,4 +779,11 @@
     <dimen name="split_picker_app_icon_label_gap">4dp</dimen>
     <!-- Opacity of the apps that cannot take the destination. -->
     <item name="split_picker_disabled_alpha" format="float" type="dimen">0.38</item>
+
+    <!-- Handle that restores a minimized floating window. -->
+    <dimen name="floating_minimize_handle_size">48dp</dimen>
+    <dimen name="floating_minimize_handle_peek">24dp</dimen>
+    <dimen name="floating_minimize_handle_gap">8dp</dimen>
+    <dimen name="floating_minimize_handle_padding">8dp</dimen>
+    <dimen name="floating_minimize_handle_elevation">6dp</dimen>
 </resources>
