@@ -19,7 +19,6 @@ import com.android.wm.shell.windowdecor.common.DecorThemeUtil
 import com.android.wm.shell.windowdecor.common.Theme
 import com.android.wm.shell.windowdecor.common.NavigationHandleColor
 import com.android.wm.shell.windowdecor.common.HandleRegionSampler
-import kotlin.math.roundToInt
 
 /**
  * A task-attached slim handle using the same touch pipeline as the app header. The decoration
@@ -53,9 +52,13 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         val display = context.display ?: return
         val bounds = task.presentationBounds
         if (bounds.isEmpty) return
-        val density = context.resources.displayMetrics.density
-        val width = minOf(bounds.width(), (56 * density).roundToInt())
-        val height = minOf(bounds.height(), (24 * density).roundToInt())
+        val resources = context.resources
+        val pillWidth = resources.getDimensionPixelSize(R.dimen.floating_handle_pill_width)
+        val pillHeight = resources.getDimensionPixelSize(R.dimen.floating_handle_pill_height)
+        val width = minOf(bounds.width(),
+            resources.getDimensionPixelSize(R.dimen.floating_handle_touch_width))
+        val height = minOf(bounds.height(),
+            resources.getDimensionPixelSize(R.dimen.floating_handle_touch_height))
         if (parent != taskSurface) close()
         if (host == null) {
             val leash = SurfaceControl.Builder().setContainerLayer()
@@ -86,8 +89,7 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
                         background?.setTint(NavigationHandleColor.get(context, light))
                     }
                     background = context.getDrawable(R.drawable.decor_handle_dark)?.mutate()
-                }, FrameLayout.LayoutParams((32 * density).roundToInt(),
-                    (4 * density).roundToInt(), Gravity.CENTER))
+                }, FrameLayout.LayoutParams(pillWidth, pillHeight, Gravity.CENTER))
             }
             val params = WindowManager.LayoutParams(width, height,
                 WindowManager.LayoutParams.TYPE_APPLICATION,
@@ -111,8 +113,6 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         val light = if (appearance != null && appearance != 0) {
             appearance and android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS == 0
         } else DecorThemeUtil(context).getAppTheme(task) == Theme.DARK
-        val pillWidth = (32 * density).roundToInt()
-        val pillHeight = (4 * density).roundToInt()
         val x = bounds.centerX() - pillWidth / 2
         val y = (if (atBottom) bounds.bottom - height else bounds.top) +
             (height - pillHeight) / 2

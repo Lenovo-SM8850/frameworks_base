@@ -786,4 +786,10 @@
     <dimen name="floating_minimize_handle_gap">8dp</dimen>
     <dimen name="floating_minimize_handle_padding">8dp</dimen>
     <dimen name="floating_minimize_handle_elevation">6dp</dimen>
+
+    <!-- Slim handle shown on a floating window. -->
+    <dimen name="floating_handle_touch_width">56dp</dimen>
+    <dimen name="floating_handle_touch_height">24dp</dimen>
+    <dimen name="floating_handle_pill_width">32dp</dimen>
+    <dimen name="floating_handle_pill_height">4dp</dimen>
 </resources>
