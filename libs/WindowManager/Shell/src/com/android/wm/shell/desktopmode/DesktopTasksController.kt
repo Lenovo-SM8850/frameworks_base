@@ -4489,6 +4489,17 @@ class DesktopTasksController(
                 /* options= */ null,
                 userHandle,
             )
+        if (callingTaskInfo.isMultiWindow &&
+            splitScreenController.splitLeafTaskIds.contains(callingTaskInfo.taskId)) {
+            val slot = splitScreenController.getNewWindowSlot(callingTaskInfo.taskId)
+            val splitOptions = ActivityOptions.makeBasic().apply {
+                setPendingIntentLaunchFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+            }
+            if (slot != null && splitScreenController.startSidebarIntent(
+                    launchIntent, userId, fillIn, splitOptions.toBundle(), slot)) return
+            if (splitScreenController.splitLeafTaskIds.size >= 4 &&
+                launchNewFloatingWindow(callingTaskInfo, launchIntent, fillIn)) return
+        }
         val repository = userRepositories.getProfile(userId)
         val deskId =
             repository.getDeskIdForTask(callingTaskInfo.taskId)
@@ -4536,6 +4547,37 @@ class DesktopTasksController(
                     flexibleLaunchSize = options.getFlexibleLaunchSize(),
                 )
             }
+        }
+    }
+
+    private fun launchNewFloatingWindow(task: RunningTaskInfo, intent: PendingIntent,
+        fillIn: Intent): Boolean {
+        val controller = pinnedLayerController ?: return false
+        if (lockTaskChangeListener.isTaskLocked || !controller.canLaunchNewWindow(task)) return false
+        val component = fillIn.component ?: return false
+        val info = task.topActivityInfo ?: return false
+        val stable = Rect()
+        displayController.getDisplayLayout(task.displayId)?.getStableBounds(stable) ?: return false
+        val entry = controller.calculateSidebarEntry(component, task.userId, task.displayId, info,
+            null, stable.centerX(), stable.centerY()) ?: return false
+        val options = ActivityOptions.makeBasic().apply {
+            launchDisplayId = task.displayId
+            launchWindowingMode = WINDOWING_MODE_FREEFORM
+            setLaunchFloatingWindow(true)
+            setDisallowEnterPictureInPictureWhileLaunching(true)
+            setPendingIntentLaunchFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+            setPendingIntentBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS)
+        }
+        val cookie = controller.setSidebarLaunchOptions(options, component, task.userId,
+            task.displayId, entry) ?: return false
+        return try {
+            intent.send(context, 0, fillIn, null, null, null, options.toBundle())
+            true
+        } catch (e: PendingIntent.CanceledException) {
+            controller.clearSidebarLaunch(cookie)
+            logW("Could not open a floating window: %s", e)
+            false
         }
     }
 

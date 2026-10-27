@@ -452,6 +452,11 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         return mStageCoordinator.getAddBelowSlot(taskId);
     }
 
+    @Nullable
+    public AppDragSlot getNewWindowSlot(int taskId) {
+        return mStageCoordinator.getNewWindowSlot(taskId);
+    }
+
     public AppDragSlot getAddBelowSlotForValidation(int taskId) {
         return mStageCoordinator.getAddBelowSlotForValidation(taskId);
     }

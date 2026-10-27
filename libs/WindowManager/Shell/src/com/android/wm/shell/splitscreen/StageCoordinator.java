@@ -2537,6 +2537,11 @@ public class StageCoordinator extends StageCoordinatorAbstract {
     }
 
     @Nullable
+    SplitScreenController.AppDragSlot getNewWindowSlot(int taskId) {
+        return mMultiSplit == null ? null : mMultiSplit.getNewWindowSlot(taskId, canMutateSplit());
+    }
+
+    @Nullable
     SplitScreenController.AppDragSlot getAddBelowSlotForValidation(int taskId) {
         return mMultiSplit == null ? null : mMultiSplit.getBelowSlotForValidation(taskId);
     }
