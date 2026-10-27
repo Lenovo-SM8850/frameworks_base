@@ -747,13 +747,29 @@ class MultiSplitCoordinator(
             com.android.wm.shell.common.MultitaskingWindowLimit.MAX_WINDOWS
     }
 
+    /** Makes the caller a single-app half before adding its new window to a four-app grid. */
+    private fun insertionModel(model: MultiSplitLayout, id: LeafId): MultiSplitLayout? {
+        if (model.insertionAxis(id) != null) return model
+        if (model.getLeaves().size != 3) return null
+        val selected = model.getLeaves().firstOrNull { it.id == id } ?: return null
+        val others = model.getLeaves().filter { it.id != id }
+        val inner = (model.root.first as? Split) ?: (model.root.second as? Split) ?: return null
+        val axis = if (model.root.orientation == Orientation.LEFT_RIGHT) Orientation.TOP_BOTTOM
+            else Orientation.LEFT_RIGHT
+        val pair = Split(inner.id, axis, .5f, others[0], others[1])
+        val first = position(id, model) == SPLIT_POSITION_TOP_OR_LEFT
+        return MultiSplitLayout(Split(model.root.id, model.root.orientation, .5f,
+            if (first) selected else pair, if (first) pair else selected))
+    }
+
     private fun candidate(model: MultiSplitLayout, leaf: LeafId, first: Boolean,
         columns: Boolean = false): MultiSplitLayout? {
         if (columns && !canInsertColumn(model)) return null
-        val axis = model.insertionAxis(leaf) ?: return null
+        val source = insertionModel(model, leaf) ?: return null
+        val axis = source.insertionAxis(leaf) ?: return null
         val minimum = LayoutPolicy().getMinimumLeafSize(displays.getDisplayContext(
             host.rootInfo()!!.displayId)!!.resources)
-        val inserted = model.insert(leaf, Leaf(LeafId(nextLeaf), -100 - nextLeaf), DividerId(nextDivider),
+        val inserted = source.insert(leaf, Leaf(LeafId(nextLeaf), -100 - nextLeaf), DividerId(nextDivider),
             axis, 0.5f, displayBounds(), layoutInsets(), host.pairLayout().dividerSize,
             if (columns) 0 else minimum, first) ?: return null
         if (!columns) return inserted
@@ -771,12 +787,16 @@ class MultiSplitCoordinator(
     fun getAddSlot(taskId: Int, canMutate: Boolean = true): AppDragSlot? =
         belowSlot(taskId, canMutate, true, true) ?: belowSlot(taskId, canMutate, true)
 
+    fun getNewWindowSlot(taskId: Int, canMutate: Boolean): AppDragSlot? =
+        getAddSlot(taskId, canMutate) ?:
+            belowSlot(taskId, canMutate, true, normalize = true)
+
     /** Session identity is independent of a transient unrelated transition. */
     fun getBelowSlotForValidation(taskId: Int): AppDragSlot? =
         belowSlot(taskId, true, false, true) ?: belowSlot(taskId, true, false)
 
     private fun belowSlot(taskId: Int, canMutate: Boolean, requireReady: Boolean,
-        columns: Boolean = false): AppDragSlot? {
+        columns: Boolean = false, normalize: Boolean = false): AppDragSlot? {
         fun reject(reason: String): AppDragSlot? {
             lastBelowRejection = "task=$taskId $reason"
             return null
@@ -798,7 +818,9 @@ class MultiSplitCoordinator(
         if (!hasInsertionBudget(model)) return reject("Window budget")
         val source = bounds(model)?.leaves?.get(leaf.id) ?: return reject("Source bounds")
         if (columns && !canInsertColumn(model)) return reject("Columns unavailable")
-        val below = if (columns) false else model.insertionAxis(leaf.id)?.let {
+        val insertion = if (normalize) insertionModel(model, leaf.id) ?: return reject("At capacity")
+            else model
+        val below = if (columns) false else insertion.insertionAxis(leaf.id)?.let {
             it == Orientation.TOP_BOTTOM
         } ?: return reject("At capacity")
         val first = !below && displays.getDisplayContext(host.rootInfo()!!.displayId)
