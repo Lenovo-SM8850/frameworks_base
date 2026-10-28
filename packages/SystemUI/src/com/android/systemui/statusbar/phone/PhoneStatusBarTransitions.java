@@ -20,8 +20,10 @@ import android.animation.Animator;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.content.res.Resources;
+import android.graphics.Rect;
 import android.view.View;
 
+import com.android.internal.policy.SystemBarUtils;
 import com.android.systemui.res.R;
 import com.android.systemui.shared.statusbar.phone.BarTransitions;
 
@@ -42,12 +44,26 @@ public final class PhoneStatusBarTransitions extends BarTransitions {
      */
     public PhoneStatusBarTransitions(PhoneStatusBarView statusBarView, View backgroundView) {
         super(backgroundView, R.drawable.status_background);
+        // The window can extend below the bar for the Dynamic Island. Keep its background
+        // within the normal status bar insets without clipping the island or its touch region.
+        updateBackgroundFrame(backgroundView);
+        View.OnLayoutChangeListener updateFrame =
+                (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                        updateBackgroundFrame(backgroundView);
+        backgroundView.addOnLayoutChangeListener(updateFrame);
+        statusBarView.addOnLayoutChangeListener(updateFrame);
         final Resources res = statusBarView.getContext().getResources();
         mIconAlphaWhenOpaque = res.getFraction(R.dimen.status_bar_icon_drawing_alpha, 1, 1);
         mStartSide = statusBarView.findViewById(R.id.status_bar_start_side_except_heads_up);
         mStatusIcons = statusBarView.findViewById(R.id.statusIcons);
         applyModeBackground(-1, getMode(), false /*animate*/);
         applyMode(getMode(), false /*animate*/);
+    }
+
+    private void updateBackgroundFrame(View backgroundView) {
+        mBarBackground.setFrame(new Rect(0, 0, backgroundView.getWidth(),
+                SystemBarUtils.getStatusBarHeight(backgroundView.getContext())));
+        backgroundView.invalidate();
     }
 
     public ObjectAnimator animateTransitionTo(View v, float toAlpha) {
