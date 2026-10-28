@@ -55,6 +55,8 @@ class GameStateDispatcher {
     private static final ComponentName GAME_SPACE_SESSION_COMPONENT =
             new ComponentName(GAME_SPACE_PACKAGE, GAME_SPACE_SESSION_SERVICE);
     private static final String ACTION_GAME_START = "game_start";
+    private static final String ACTION_GAME_VISIBILITY = "game_visibility";
+    private static final String EXTRA_GAME_VISIBLE = "game_visible";
     private static final String EXTRA_PACKAGE_NAME = "package_name";
     private static final String KEY_GAMING_MODE_ACTIVE = "ax_gaming_mode_active";
     private static final String KEY_BYPASS_CHARGE_ENABLED = "bypass_charge_enabled";
@@ -77,6 +79,7 @@ class GameStateDispatcher {
     private String mGamePackage;
     private int mGameUserId = UserHandle.USER_SYSTEM;
     private boolean mGameVisible;
+    private boolean mGameUiVisible;
     private boolean mSessionReady;
     private boolean mBypassChargeActive;
     private boolean mInitialized;
@@ -129,10 +132,12 @@ class GameStateDispatcher {
                 active ? 1 : 0, UserHandle.USER_CURRENT);
         mGameVisible = active;
         if (active) {
+            mGameUiVisible = true;
             mGamePackage = packageName;
             mGameUserId = ActivityManager.getCurrentUser();
             startGameSession();
         } else {
+            setGameUiVisible(false);
             updateBypassCharge();
             stopGameSession();
             mGamePackage = null;
@@ -140,6 +145,7 @@ class GameStateDispatcher {
     }
 
     void setGameVisible(boolean visible, Runnable onHidden) {
+        setGameUiVisible(visible);
         if (visible) {
             cancelPendingGameHidden();
             mGameVisible = true;
@@ -154,6 +160,27 @@ class GameStateDispatcher {
                 onHidden.run();
             };
             mHandler.postDelayed(mPendingGameHidden, GAME_VISIBILITY_GRACE_MS);
+        }
+    }
+
+    private void setGameUiVisible(boolean visible) {
+        if (mGameUiVisible == visible) {
+            return;
+        }
+        mGameUiVisible = visible;
+        if (mGamePackage == null || mGameUserId != ActivityManager.getCurrentUser()) {
+            return;
+        }
+        // Use the same ordered service-start channel without ending the session grace.
+        final Intent intent = new Intent(ACTION_GAME_VISIBILITY)
+                .setComponent(GAME_SPACE_SESSION_COMPONENT)
+                .putExtra(EXTRA_PACKAGE_NAME, mGamePackage)
+                .putExtra(EXTRA_GAME_VISIBLE, visible);
+        try {
+            mActivityManager.startService(null, intent, null, false,
+                    mContext.getOpPackageName(), mContext.getAttributionTag(), mGameUserId);
+        } catch (RemoteException | RuntimeException e) {
+            Slog.w(TAG, "Failed to update GameSpace UI visibility", e);
         }
     }
 
@@ -180,6 +207,7 @@ class GameStateDispatcher {
         return new Intent(ACTION_GAME_START)
                 .setComponent(GAME_SPACE_SESSION_COMPONENT)
                 .putExtra(EXTRA_PACKAGE_NAME, mGamePackage)
+                .putExtra(EXTRA_GAME_VISIBLE, mGameUiVisible)
                 .putExtra(EXTRA_BYPASS_CHARGE_ACTIVE, mBypassChargeActive);
     }
 
