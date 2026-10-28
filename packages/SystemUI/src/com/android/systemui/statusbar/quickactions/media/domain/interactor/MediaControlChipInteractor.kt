@@ -62,6 +62,7 @@ import com.android.systemui.statusbar.quickactions.media.shared.model.MediaContr
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaOutputSwitcherAction
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -460,15 +461,34 @@ constructor(
             val a = java.net.URLEncoder.encode(request.artist, "UTF-8")
             val t = java.net.URLEncoder.encode(request.song, "UTF-8")
             var conclusive = true
+            // Plain lyrics of the exact lookup wait for the search to find synced ones.
+            var exactFallback: org.json.JSONObject? = null
             try {
                 if (durationSec != null) {
-                    val exact = lrclibGet("get?artist_name=$a&track_name=$t&duration=$durationSec")
-                    if (exact.code == 200) {
-                        val item = org.json.JSONObject(exact.body.orEmpty())
-                        if (item.hasLyrics()) {
-                            return@withContext LyricsResult(item, true)
+                    // A failed exact lookup leaves the lyrics to the search.
+                    try {
+                        val exact =
+                            lrclibGet("get?artist_name=$a&track_name=$t&duration=$durationSec")
+                        if (exact.code == 200) {
+                            val item = org.json.JSONObject(exact.body.orEmpty())
+                            if (item.hasLyrics()) {
+                                val synced = item.lyric("syncedLyrics").isNotBlank()
+                                val matches = item.matchesDuration(durationSec)
+                                if (synced && matches) {
+                                    return@withContext LyricsResult(item, true)
+                                }
+                                if (matches || !synced) {
+                                    exactFallback = item
+                                }
+                            }
+                        } else if (exact.code != 404) {
+                            conclusive = false
                         }
-                    } else if (exact.code != 404) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.w(
+                            "MediaControlChipInteractor", "Exact LRCLIB lyrics lookup failed", e)
                         conclusive = false
                     }
                 }
@@ -486,7 +506,9 @@ constructor(
                     }
                     val items = org.json.JSONArray(response.body.orEmpty())
                     val item = pickLyrics(items, durationSec)
-                    if (item != null) {
+                    if (item != null &&
+                        (exactFallback == null || item.lyric("syncedLyrics").isNotBlank())
+                    ) {
                         return@withContext LyricsResult(item, true)
                     }
                 }
@@ -494,7 +516,7 @@ constructor(
                 android.util.Log.e("MediaControlChipInteractor", "Failed to fetch lyrics from LRCLIB", e)
                 conclusive = false
             }
-            LyricsResult(null, conclusive)
+            LyricsResult(exactFallback, conclusive)
         }
 
     private class LrclibResponse(val code: Int, val body: String?)
@@ -528,12 +550,7 @@ constructor(
     private fun pickLyrics(items: org.json.JSONArray, durationSec: Long?): org.json.JSONObject? {
         val withLyrics =
             (0 until items.length()).map { items.getJSONObject(it) }.filter { it.hasLyrics() }
-        val matching =
-            withLyrics.filter {
-                durationSec == null ||
-                    kotlin.math.abs(it.optDouble("duration", -1000.0) - durationSec) <=
-                        LYRICS_DURATION_TOLERANCE_S
-            }
+        val matching = withLyrics.filter { it.matchesDuration(durationSec) }
         return matching.firstOrNull { it.lyric("syncedLyrics").isNotBlank() }
             ?: matching.firstOrNull()
             ?: withLyrics.firstOrNull { it.lyric("syncedLyrics").isBlank() }
@@ -547,6 +564,11 @@ constructor(
     // A track without synced lyrics has them as null, which optString turns into "null".
     private fun org.json.JSONObject.lyric(name: String): String =
         if (isNull(name)) "" else optString(name, "").trim()
+
+    private fun org.json.JSONObject.matchesDuration(durationSec: Long?): Boolean =
+        durationSec == null ||
+            kotlin.math.abs(optDouble("duration", -1000.0) - durationSec) <=
+                LYRICS_DURATION_TOLERANCE_S
 
     private fun org.json.JSONObject.hasLyrics(): Boolean =
         lyric("plainLyrics").isNotBlank() || lyric("syncedLyrics").isNotBlank()
