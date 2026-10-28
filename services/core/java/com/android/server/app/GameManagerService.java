@@ -171,6 +171,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
     private final Object mGameStateListenerLock = new Object();
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
     final Handler mHandler;
+    private final GamePolicyClient mGamePolicyClient;
     private final PackageManager mPackageManager;
     private final UserManager mUserManager;
     private final PowerManagerInternal mPowerManagerInternal;
@@ -238,6 +239,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
         super(PermissionEnforcer.fromContext(context));
         mContext = context;
         mHandler = new SettingsHandler(looper);
+        mGamePolicyClient = new GamePolicyClient(mHandler,
+                this::resolveGamePolicySession);
         mPackageManager = mContext.getPackageManager();
         mUserManager = mContext.getSystemService(UserManager.class);
         mPowerManagerInternal = LocalServices.getService(PowerManagerInternal.class);
@@ -950,6 +953,16 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
     private final class LocalService extends GameManagerInternal implements CompatScaleProvider {
         @Override
+        public boolean isGame(String packageName, int userId) {
+            return isPackageGame(packageName, userId);
+        }
+
+        @Override
+        public void setGamePolicySession(String packageName, int userId) {
+            mGamePolicyClient.setGame(packageName, userId);
+        }
+
+        @Override
         public float getResolutionScalingFactor(String packageName, int userId) {
             final int gameMode = getGameModeFromSettingsUnchecked(packageName, userId);
             return getResolutionScalingFactorInternal(packageName, gameMode, userId);
@@ -1214,6 +1227,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
             userSettings.setGameModeLocked(packageName, gameMode);
         }
         updateInterventions(packageName, gameMode, userId);
+        mGamePolicyClient.refresh();
         synchronized (mGameModeListenerLock) {
             for (IGameModeListener listener : mGameModeListeners.keySet()) {
                 Binder.allowBlocking(listener.asBinder());
@@ -1663,6 +1677,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
     void onUserSwitching(TargetUser from, TargetUser to) {
         final int toUserId = to.getUserIdentifier();
+        mGamePolicyClient.setGame(null, toUserId);
         // we want to re-populate the setting when switching user as the device config may have
         // changed, which will only update for the previous user, see
         // DeviceConfigListener#onPropertiesChanged.
@@ -2308,6 +2323,50 @@ public final class GameManagerService extends IGameManagerService.Stub {
      */
     private static native void nativeSetGameModeFrameRateOverride(int uid, float frameRate);
     private static native void nativeSetGameDefaultFrameRateOverride(int uid, float frameRate);
+
+    private io.github.miner7222.gamepolicy.GameSession resolveGamePolicySession(
+            String packageName, int userId) {
+        if (userId != ActivityManager.getCurrentUser() || !isPackageGame(packageName, userId)) {
+            return null;
+        }
+        try {
+            final int uid = mPackageManager.getPackageUidAsUser(packageName, userId);
+            final java.util.List<ActivityManager.RunningAppProcessInfo> processes =
+                    mContext.getSystemService(ActivityManager.class).getRunningAppProcesses();
+            if (processes == null) return null;
+            ActivityManager.RunningAppProcessInfo selected = null;
+            for (ActivityManager.RunningAppProcessInfo process : processes) {
+                // AMS must attribute this package to the process, even with a shared UID
+                // or an application-defined main process name.
+                if (process.uid != uid || process.pid <= 0 || process.pkgList == null
+                        || !Arrays.asList(process.pkgList).contains(packageName)) continue;
+                if (selected == null || packageName.equals(process.processName)
+                        || (!packageName.equals(selected.processName)
+                                && process.importance < selected.importance)) {
+                    selected = process;
+                }
+            }
+            if (selected != null) {
+                final android.app.ActivityManagerInternal activityManager =
+                        LocalServices.getService(android.app.ActivityManagerInternal.class);
+                final long startTime = activityManager == null ? 0
+                        : activityManager.getProcessStartTimeTicks(selected.pid, uid, packageName);
+                if (startTime <= 0) return null;
+                final io.github.miner7222.gamepolicy.GameSession session =
+                        new io.github.miner7222.gamepolicy.GameSession();
+                session.userId = userId;
+                session.uid = uid;
+                session.packageName = packageName;
+                session.pid = selected.pid;
+                session.processStartTimeTicks = startTime;
+                session.mode = getGameModeFromSettingsUnchecked(packageName, userId);
+                return session;
+            }
+        } catch (NameNotFoundException e) {
+            // Removal or a user change invalidates the session before it reaches the executor.
+        }
+        return null;
+    }
 
     final class MyUidObserver extends UidObserver {
         @Override

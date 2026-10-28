@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+aidl_interface {
+    name: "io.github.miner7222.gamepolicy",
+    vendor_available: true,
+    srcs: ["io/github/miner7222/gamepolicy/*.aidl"],
+    stability: "vintf",
+    backend: {
+        cpp: {
+            enabled: false,
+        },
+        java: {
+            sdk_version: "system_current",
+        },
+    },
+    versions_with_info: [
+        {
+            version: "1",
+            imports: [],
+        },
+
+    ],
+    frozen: true,
+}
