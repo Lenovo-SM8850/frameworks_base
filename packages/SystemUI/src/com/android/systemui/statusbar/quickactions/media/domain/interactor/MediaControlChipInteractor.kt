@@ -188,6 +188,31 @@ constructor(
                 }
             }
 
+    /** Whether the status bar shows lyrics, which it takes from the lookup here. */
+    private val statusBarLyricsEnabled: Flow<Boolean> = callbackFlow {
+        fun read() =
+            Settings.Secure.getIntForUser(
+                context.contentResolver,
+                Settings.Secure.STATUS_BAR_SHOW_LYRIC,
+                0,
+                UserHandle.USER_CURRENT,
+            ) != 0
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    trySend(read())
+                }
+            }
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor(Settings.Secure.STATUS_BAR_SHOW_LYRIC),
+            false,
+            observer,
+            UserHandle.USER_ALL,
+        )
+        trySend(read())
+        awaitClose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+
     private val baseMediaControlChipModel: Flow<MediaControlChipModel?> =
         combine(
             combine(
@@ -357,7 +382,8 @@ constructor(
                         DynamicIslandFeatureSettings.SHOW_LYRICS,
                         true,
                     ),
-                ) { state, playbackInfo, lyricsEnabled ->
+                    statusBarLyricsEnabled,
+                ) { state, playbackInfo, lyricsEnabled, statusBarLyrics ->
                     val model = state.model
                     // The title, artist and length come from the one metadata snapshot of the
                     // player, so they always belong to the same song.
@@ -369,7 +395,8 @@ constructor(
                             ?: model?.artistName?.toString()
                     val durationMs =
                         playbackInfo?.durationMs?.takeIf { it > 0L } ?: model?.durationMs ?: 0L
-                    if (model != null && lyricsEnabled && !song.isNullOrBlank() &&
+                    if (model != null && (lyricsEnabled || statusBarLyrics) &&
+                        !song.isNullOrBlank() &&
                         !artist.isNullOrBlank()
                     ) {
                         LyricsRequest(

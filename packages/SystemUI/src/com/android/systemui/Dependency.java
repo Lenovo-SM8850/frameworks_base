@@ -56,8 +56,10 @@ import com.android.systemui.statusbar.phone.SystemUIDialogManager;
 import com.android.systemui.statusbar.policy.BluetoothController;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController;
 import com.android.systemui.statusbar.policy.KeyguardStateController;
+import com.android.systemui.statusbar.quickactions.media.domain.interactor.MediaControlChipInteractor;
 import com.android.systemui.statusbar.window.StatusBarWindowControllerStore;
 import com.android.systemui.tuner.TunerService;
+import com.android.systemui.util.kotlin.JavaAdapter;
 import com.android.systemui.statusbar.policy.HotspotController;
 import com.android.systemui.plugins.ActivityStarter;
 import com.android.systemui.bluetooth.ui.viewModel.BluetoothDetailsContentViewModel;
@@ -177,6 +179,8 @@ public class Dependency {
     @Inject Lazy<FlashlightController> mFlashlightController;
     @Inject Lazy<BluetoothDetailsContentViewModel> mBluetoothDetailsContentViewModel;
     @Inject Lazy<HotspotController> mHotspotController;
+    @Inject Lazy<MediaControlChipInteractor> mMediaControlChipInteractor;
+    @Inject Lazy<JavaAdapter> mJavaAdapter;
 
     @Inject
     public Dependency() {
@@ -237,6 +241,8 @@ public class Dependency {
         mProviders.put(BluetoothDetailsContentViewModel.class, mBluetoothDetailsContentViewModel::get);
         mProviders.put(ActivityStarter.class, mActivityStarter::get);
         mProviders.put(HotspotController.class, mHotspotController::get);
+        mProviders.put(MediaControlChipInteractor.class, mMediaControlChipInteractor::get);
+        mProviders.put(JavaAdapter.class, mJavaAdapter::get);
 
         Dependency.setInstance(this);
     }
