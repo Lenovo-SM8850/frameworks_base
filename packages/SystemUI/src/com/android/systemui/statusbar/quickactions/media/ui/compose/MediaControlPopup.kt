@@ -17,20 +17,26 @@
 package com.android.systemui.statusbar.quickactions.media.ui.compose
 
 import android.content.Context
+import android.database.ContentObserver
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import android.text.format.DateUtils
 import android.widget.SeekBar
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -46,6 +52,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,20 +65,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.android.settingslib.widget.AdaptiveIcon
 import com.android.systemui.common.shared.model.ContentDescription
 import com.android.systemui.common.shared.model.Icon as UiIcon
 import com.android.systemui.common.ui.compose.Icon as UiIconView
@@ -86,6 +103,8 @@ import com.android.systemui.media.remedia.ui.viewmodel.MediaCarouselVisibility
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.media.ui.viewmodel.MediaControlPopupViewModel
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 import kotlinx.coroutines.coroutineScope
@@ -99,10 +118,7 @@ private val ArtworkShape = RoundedCornerShape(24.dp)
 
 /** Displays a popup containing the Media controls in QuickActionsOverlay. */
 @Composable
-fun MediaControlPopup(
-    viewModel: MediaControlPopupViewModel,
-    modifier: Modifier = Modifier,
-) {
+fun MediaControlPopup(viewModel: MediaControlPopupViewModel, modifier: Modifier = Modifier) {
     val viewModelFactory = viewModel.mediaViewModelFactory
     val mediaHost = viewModel.mediaHost
     if (MediaControlsInComposeFlag.isEnabled) {
@@ -154,14 +170,48 @@ fun MediaControlPopup(
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val openApp = rememberPopupLaunchAction(model.openApp)
-    PopupSurface(
-        shape = PopupShape,
-        modifier = modifier.widthIn(min = 320.dp, max = 400.dp),
-    ) {
+    val launchAfterHide = LocalLaunchAfterPopupHidden.current
+    val openOutput: (() -> Unit)? =
+        model.openOutputSwitcher?.let { open -> { open(launchAfterHide) } }
+    val motionEnabled = rememberMarqueeMotionEnabled()
+    val marqueeEnabled = LocalPopupMarqueeEnabled.current && motionEnabled
+    var popupWidth by remember { mutableIntStateOf(0) }
+    val compactOutput = popupWidth < with(LocalDensity.current) { 320.dp.toPx() }
+    PopupSurface(shape = PopupShape, modifier = modifier.widthIn(min = 320.dp, max = 400.dp)) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
+                    .onSizeChanged { popupWidth = it.width },
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier =
+                        Modifier.weight(1f).clickable(enabled = openApp != null) {
+                            openApp?.invoke()
+                        }
+                ) {
+                    model.appName
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { appName ->
+                            MediaMarqueeText(
+                                text = appName.uppercase(),
+                                style =
+                                    MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                color = accent.copy(alpha = 0.82f),
+                                enabled = marqueeEnabled,
+                            )
+                        }
+                }
+                MediaOutputChip(model = model, onClick = openOutput, iconOnly = compactOutput)
+            }
             Row(
                 modifier =
                     Modifier.fillMaxWidth().clickable(
@@ -179,33 +229,25 @@ fun MediaControlPopup(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    model.appName?.takeIf { it.isNotBlank() }?.let { appName ->
-                        Text(
-                            text = appName.uppercase(),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = accent.copy(alpha = 0.82f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
+                    MediaMarqueeText(
+                        enabled = marqueeEnabled,
                         text = model.songName?.toString().orEmpty(),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        style =
+                            MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
                         color = LocalContentColor.current,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
-                    model.artistName?.takeIf { it.isNotBlank() }?.let { artist ->
-                        Text(
-                            text = artist.toString(),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = LocalContentColor.current.copy(alpha = 0.8f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    model.artistName
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { artist ->
+                            MediaMarqueeText(
+                                enabled = marqueeEnabled,
+                                text = artist.toString(),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = LocalContentColor.current.copy(alpha = 0.8f),
+                            )
+                        }
                 }
             }
 
@@ -247,6 +289,106 @@ fun MediaControlPopup(
                     iconTint = LocalContentColor.current,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun rememberMarqueeMotionEnabled(): Boolean {
+    val context = LocalContext.current
+    fun readEnabled() =
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) > 0f
+    var enabled by remember(context) { mutableStateOf(readEnabled()) }
+    DisposableEffect(context) {
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    enabled = readEnabled()
+                }
+            }
+        context.contentResolver.registerContentObserver(
+            Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+            false,
+            observer,
+        )
+        enabled = readEnabled()
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+    return enabled
+}
+
+@Composable
+private fun MediaMarqueeText(text: String, style: TextStyle, color: Color, enabled: Boolean) {
+    val measurer = rememberTextMeasurer()
+    val textWidth =
+        remember(text, style, measurer) {
+            measurer.measure(text, style, softWrap = false, maxLines = 1).size.width
+        }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val scrolls = enabled && textWidth > constraints.maxWidth
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier =
+                Modifier.fillMaxWidth()
+                    .clipToBounds()
+                    .then(
+                        if (scrolls)
+                            Modifier.basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 1500,
+                                repeatDelayMillis = 2000,
+                            )
+                        else Modifier
+                    ),
+        )
+    }
+}
+
+@Composable
+private fun MediaOutputChip(
+    model: MediaControlChipModel,
+    onClick: (() -> Unit)?,
+    iconOnly: Boolean,
+) {
+    val name =
+        model.outputDevice?.name?.toString() ?: stringResource(R.string.media_seamless_other_device)
+    val icon =
+        model.outputDevice?.icon?.let { drawable ->
+            UiIcon.Loaded(if (drawable is AdaptiveIcon) drawable.getDrawable(1) else drawable, null)
+        } ?: UiIcon.Resource(R.drawable.ic_media_home_devices, null)
+    val foreground = LocalContentColor.current
+    BoxWithConstraints(modifier = Modifier.widthIn(max = 180.dp)) {
+        // A narrow popup reserves its text column by using the QS icon-only variant.
+        Row(
+            modifier =
+                Modifier.clip(RoundedCornerShape(50))
+                    .background(foreground.copy(alpha = 0.1f))
+                    .alpha(if (onClick != null) 1f else 0.38f)
+                    .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
+                    .semantics(mergeDescendants = true) { contentDescription = name }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UiIconView(icon = icon, modifier = Modifier.size(18.dp), tint = foreground)
+            if (!iconOnly)
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = foreground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
+                )
         }
     }
 }
@@ -414,10 +556,12 @@ private fun MediaProgressSection(
                             thumb = createSeekBarThumb(context, accentArgb)
                             val layer = progressDrawable?.mutate() as? LayerDrawable
                             if (layer != null) {
-                                layer.findDrawableByLayerId(android.R.id.background)
+                                layer
+                                    .findDrawableByLayerId(android.R.id.background)
                                     ?.mutate()
                                     ?.setTint(trackAlphaArgb)
-                                layer.findDrawableByLayerId(android.R.id.secondaryProgress)
+                                layer
+                                    .findDrawableByLayerId(android.R.id.secondaryProgress)
                                     ?.mutate()
                                     ?.setTint(
                                         com.android.internal.graphics.ColorUtils.setAlphaComponent(
@@ -472,13 +616,17 @@ private fun MediaProgressSection(
                         (seekBar.thumb as? GradientDrawable)?.setColor(accentArgb)
 
                         val layer = seekBar.progressDrawable as? LayerDrawable
-                        layer?.findDrawableByLayerId(android.R.id.background)?.setTint(trackAlphaArgb)
-                        layer?.findDrawableByLayerId(android.R.id.secondaryProgress)?.setTint(
-                            com.android.internal.graphics.ColorUtils.setAlphaComponent(
-                                accentArgb,
-                                60,
+                        layer
+                            ?.findDrawableByLayerId(android.R.id.background)
+                            ?.setTint(trackAlphaArgb)
+                        layer
+                            ?.findDrawableByLayerId(android.R.id.secondaryProgress)
+                            ?.setTint(
+                                com.android.internal.graphics.ColorUtils.setAlphaComponent(
+                                    accentArgb,
+                                    60,
+                                )
                             )
-                        )
                         val squiggle =
                             layer?.findDrawableByLayerId(android.R.id.progress) as? SquigglyProgress
                         squiggle?.apply {
@@ -532,11 +680,12 @@ private fun MediaActionButton(
                 },
         contentAlignment = Alignment.Center,
     ) {
-        val actualIcon = if (iconOverrideId != null) {
-            UiIcon.Resource(iconOverrideId, contentDescription)
-        } else {
-            act.icon?.let { UiIcon.Loaded(it, contentDescription) }
-        }
+        val actualIcon =
+            if (iconOverrideId != null) {
+                UiIcon.Resource(iconOverrideId, contentDescription)
+            } else {
+                act.icon?.let { UiIcon.Loaded(it, contentDescription) }
+            }
         if (actualIcon != null) {
             UiIconView(
                 icon = actualIcon,

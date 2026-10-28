@@ -151,6 +151,8 @@ fun StatusBarPopup(
         val progress = remember { Animatable(0f) }
         val contentAlpha = remember { Animatable(0f) }
         val surfaceProgress = remember { Animatable(0f) }
+        var pendingLaunch by remember { mutableStateOf<(() -> Unit)?>(null) }
+        var isAnimating by remember { mutableStateOf(true) }
         var ready by remember { mutableStateOf(false) }
         var viewport by remember { mutableStateOf(Rect.Zero) }
         var radiusPx by remember { mutableFloatStateOf(0f) }
@@ -196,7 +198,9 @@ fun StatusBarPopup(
 
         LaunchedEffect(isVisible, ready) {
             if (!ready) return@LaunchedEffect
+            isAnimating = true
             if (isVisible) {
+                pendingLaunch = null
                 currentOnMorphActiveChanged(true)
                 withFrameNanos {}
                 swipeJob?.cancel()
@@ -212,6 +216,7 @@ fun StatusBarPopup(
                         contentAlpha.animateTo(1f, EffectsSpring)
                     }
                 }
+                isAnimating = false
             } else {
                 // Fade and scale the controls with the shrinking container so both collapse
                 // together; the shrinking shape clips whatever is still visible.
@@ -224,7 +229,10 @@ fun StatusBarPopup(
                 // Let the original chip draw under the source-sized popup before removing it.
                 withFrameNanos {}
                 withFrameNanos {}
+                val launch = pendingLaunch
+                pendingLaunch = null
                 currentOnHidden()
+                launch?.invoke()
             }
         }
 
@@ -335,6 +343,11 @@ fun StatusBarPopup(
                 ) {
                     CompositionLocalProvider(
                         LocalHidePopup provides hidePopupAction,
+                        LocalLaunchAfterPopupHidden provides { action ->
+                            pendingLaunch = action
+                            currentChip.hidePopup()
+                        },
+                        LocalPopupMarqueeEnabled provides (isVisible && !isAnimating && swipeX == 0f),
                         LocalPopupContainer provides true,
                     ) {
                         PopupBody(viewModel)

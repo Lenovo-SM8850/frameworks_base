@@ -16,6 +16,8 @@
 
 package com.android.systemui.statusbar.quickactions.media.domain.interactor
 
+import android.app.ActivityOptions
+import android.app.BroadcastOptions
 import android.app.PendingIntent
 import android.content.Context
 import android.database.ContentObserver
@@ -40,6 +42,9 @@ import com.android.systemui.media.controls.domain.pipeline.getNotificationAction
 import com.android.systemui.media.controls.shared.model.MediaAction
 import com.android.systemui.media.controls.shared.model.MediaButton
 import com.android.systemui.media.controls.shared.model.MediaData
+import com.android.systemui.media.controls.shared.model.MediaDeviceData
+import com.android.systemui.media.dialog.MediaOutputDialogManager
+import com.android.systemui.plugins.FalsingManager
 import com.android.systemui.media.remedia.data.model.MediaDataModel
 import com.android.systemui.media.remedia.data.repository.MediaRepositoryImpl
 import com.android.systemui.media.remedia.shared.flag.MediaControlsInComposeFlag
@@ -48,6 +53,7 @@ import com.android.systemui.plugins.ActivityStarter
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.NotificationLockscreenUserManager
 import com.android.systemui.statusbar.policy.KeyguardStateController
+import com.android.systemui.statusbar.quickactions.media.shared.model.MediaOutputSwitcherAction
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import javax.inject.Inject
@@ -86,6 +92,8 @@ constructor(
     @Application private val context: Context,
     @Background private val backgroundScope: CoroutineScope,
     private val mediaRepository: MediaRepositoryImpl,
+    private val mediaOutputDialogManager: MediaOutputDialogManager,
+    private val falsingManager: FalsingManager,
     private val activityStarter: ActivityStarter,
     private val activityIntentHelper: ActivityIntentHelper,
     private val lockscreenUserManager: NotificationLockscreenUserManager,
@@ -165,11 +173,69 @@ constructor(
             isDynamicIslandEnabled,
             mediaControlsEnabled ->
                 if (isEnabled && isDynamicIslandEnabled && mediaControlsEnabled) {
-                    mediaControlState.model?.withPlaybackInfo(playbackInfo)
+                    mediaControlState.withOutputSwitcher()?.withPlaybackInfo(playbackInfo)
                 } else {
                     null
                 }
         }
+
+    private fun MediaControlState.withOutputSwitcher(): MediaControlChipModel? {
+        val model = model ?: return null
+        val packageName = model.packageName ?: return model
+        val outputAction: MediaOutputSwitcherAction? =
+            if (outputDevice?.enabled == false || isResume) null
+            else {
+                { launchAfterHide ->
+                    if (!falsingManager.isFalseTap(FalsingManager.MODERATE_PENALTY)) {
+                        launchAfterHide {
+                            val deviceIntent = outputDevice?.intent
+                            if (deviceIntent != null) {
+                                // Match the QS route override, including its lockscreen policy.
+                                if (deviceIntent.isActivity) {
+                                    val showOverLockscreen =
+                                        keyguardStateController.isShowing &&
+                                            activityIntentHelper.wouldPendingShowOverLockscreen(
+                                                deviceIntent,
+                                                lockscreenUserManager.currentUserId,
+                                            )
+                                    if (!showOverLockscreen) {
+                                        activityStarter.postStartActivityDismissingKeyguard(
+                                            deviceIntent
+                                        )
+                                    } else {
+                                        try {
+                                            val options =
+                                                BroadcastOptions.makeBasic().apply {
+                                                    setInteractive(true)
+                                                    setPendingIntentBackgroundActivityStartMode(
+                                                        ActivityOptions
+                                                            .MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                                                    )
+                                                }
+                                            deviceIntent.send(options.toBundle())
+                                        } catch (e: PendingIntent.CanceledException) {
+                                            android.util.Log.e(
+                                                "MediaControlChipInteractor",
+                                                "Device pending intent was canceled",
+                                                e,
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                mediaOutputDialogManager.createAndShow(
+                                    packageName = packageName,
+                                    aboveStatusBar = true,
+                                    userHandle = UserHandle.getUserHandleForUid(appUid),
+                                    token = token,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        return model.copy(outputDevice = outputDevice, openOutputSwitcher = outputAction)
+    }
 
     val mediaUseWaveform: StateFlow<Boolean> =
         DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
@@ -370,6 +436,9 @@ private fun MediaDataModel.toMediaControlState(
                 isPlaying = state is MediaSessionState.Playing || state is MediaSessionState.Buffering,
             ),
         token = token,
+        outputDevice = outputDevice,
+        isResume = isResume,
+        appUid = appUid,
     )
 }
 
@@ -436,6 +505,9 @@ private fun MediaData.toMediaControlState(
                 isPlaying = playOrPauseAction.isPauseAction(),
             ),
         token = token,
+        outputDevice = device,
+        isResume = resumption,
+        appUid = appUid,
     )
 }
 
@@ -718,6 +790,9 @@ private data class PlaybackInfo(
 private data class MediaControlState(
     val model: MediaControlChipModel?,
     val token: MediaSession.Token?,
+    val outputDevice: MediaDeviceData? = null,
+    val isResume: Boolean = false,
+    val appUid: Int = -1,
 ) {
     companion object {
         val Hidden = MediaControlState(model = null, token = null)
