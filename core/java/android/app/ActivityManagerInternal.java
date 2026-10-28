@@ -343,6 +343,11 @@ public abstract class ActivityManagerInternal {
      */
     public abstract List<ProcessMemoryState> getMemoryStateForProcesses();
 
+    /** Returns the recorded kernel birth tick for a matching process/package, or zero. */
+    public long getProcessStartTimeTicks(int pid, int uid, String packageName) {
+        return 0;
+    }
+
     /**
      * Checks to see if the calling pid is allowed to handle the user. Returns adjusted user id as
      * needed.

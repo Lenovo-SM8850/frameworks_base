@@ -128,6 +128,21 @@ class ProcessRecord extends ProcessRecordInternal implements WindowProcessListen
      */
     @CompositeRWLock({"mService", "mProcLock"})
     int mPid;
+    private volatile long mStartTimeTicks;
+    private static final int[] START_TIME_TICKS_FORMAT = createStartTimeTicksFormat();
+
+    private static int[] createStartTimeTicksFormat() {
+        final int[] format = new int[22];
+        java.util.Arrays.fill(format, Process.PROC_SPACE_TERM);
+        format[1] |= Process.PROC_PARENS;
+        format[21] |= Process.PROC_OUT_LONG;
+        return format;
+    }
+
+    /** Kernel /proc stat field 22, in clock ticks since boot; zero if unavailable. */
+    long getStartTimeTicks() {
+        return mStartTimeTicks;
+    }
 
     /**
      * The process ID which will be set when we're killing this process.
@@ -728,6 +743,16 @@ class ProcessRecord extends ProcessRecordInternal implements WindowProcessListen
         // So if the process record is re-used for a different pid, it wouldn't keep the state.
         if (pid != mPid && mPid != 0) {
             setWasForceStopped(false);
+        }
+        if (pid != mPid) {
+            mStartTimeTicks = 0;
+            if (pid > 0) {
+                final long[] startTime = new long[1];
+                if (Process.readProcFile("/proc/" + pid + "/stat", START_TIME_TICKS_FORMAT,
+                        null, startTime, null) && startTime[0] > 0) {
+                    mStartTimeTicks = startTime[0];
+                }
+            }
         }
         mPid = pid;
         mWindowProcessController.setPid(pid);

@@ -16,6 +16,7 @@
 package com.android.server.wm;
 
 import android.app.ActivityManager;
+import android.app.GameManagerInternal;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -23,9 +24,12 @@ import android.os.Handler;
 import android.os.Process;
 import android.util.Slog;
 
+import com.android.server.LocalServices;
 import com.android.server.ServiceThread;
 import com.android.server.SystemService;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.Predicate;
 
 public final class GameSpaceService extends SystemService {
@@ -43,6 +47,7 @@ public final class GameSpaceService extends SystemService {
     private String mCurrentGame;
     private Task mCurrentGameTask;
     private boolean mOverlayStarted;
+    private boolean mManagedSession;
     private final WindowContainerListener mGameTaskListener = new WindowContainerListener() {
         @Override
         public void onVisibleRequestedChanged(boolean visible) {
@@ -150,11 +155,17 @@ public final class GameSpaceService extends SystemService {
         mGameListManager.registerGameListObserver(mHandler);
         mGameListManager.addListener(() -> mHandler.post(() -> {
             updateGameTask(mCurrentGameTask, null);
-            if (mOverlayStarted) {
+            if (mOverlayStarted && mManagedSession) {
                 mGameStateDispatcher.boostGame(mGameListManager.isGameInPerfMode(mCurrentGame));
             }
         }));
         Slog.i(TAG, "GameSpaceService initialized");
+    }
+
+    private boolean isPolicyGame(String packageName, int userId) {
+        final GameManagerInternal manager = LocalServices.getService(GameManagerInternal.class);
+        return mGameListManager.isGame(packageName)
+                || (manager != null && manager.isGame(packageName, userId));
     }
 
     private void updateGameTask(Task focusedTask, Task removedTask) {
@@ -163,6 +174,23 @@ public final class GameSpaceService extends SystemService {
             return;
         }
         final int userId = ActivityManager.getCurrentUser();
+        // Snapshot task identities under WM, classify outside it, then select from
+        // the still-valid tasks using only immutable set membership under the lock.
+        final Set<String> candidates = new HashSet<>();
+        synchronized (reference.mAtmService.mGlobalLock) {
+            reference.mAtmService.mRootWindowContainer.forAllLeafTasks(task -> {
+                if (task != removedTask && task.isAttached() && task.mUserId == userId) {
+                    getGamePackageName(task, pkg -> {
+                        candidates.add(pkg);
+                        return false; // Collect every activity package, including task root.
+                    });
+                }
+                return false;
+            });
+        }
+        candidates.removeIf(pkg -> !isPolicyGame(pkg, userId));
+        final Set<String> games = Set.copyOf(candidates);
+        if (userId != ActivityManager.getCurrentUser()) return;
         final Task gameTask;
         final String gamePackage;
         final boolean visible;
@@ -170,7 +198,7 @@ public final class GameSpaceService extends SystemService {
             final Predicate<Task> isGameTask = t -> t != removedTask && t.isLeafTask()
                     && t.isAttached() && t.mUserId == userId
                     && t.getTopNonFinishingActivity() != null
-                    && getGamePackageName(t, mGameListManager::isGame) != null;
+                    && getGamePackageName(t, games::contains) != null;
             Task candidate = getVisibleGameTask(mCurrentGameTask, focusedTask, isGameTask);
             if (candidate == null) {
                 candidate = reference.mAtmService.mRootWindowContainer.getTask(
@@ -186,7 +214,7 @@ public final class GameSpaceService extends SystemService {
             }
             gameTask = candidate;
             gamePackage = gameTask != null
-                    ? getGamePackageName(gameTask, mGameListManager::isGame) : null;
+                    ? getGamePackageName(gameTask, games::contains) : null;
             visible = gameTask != null && isGameTaskVisible(gameTask);
             setCurrentGameTask(gameTask);
         }
@@ -194,6 +222,9 @@ public final class GameSpaceService extends SystemService {
             stopOverlay();
         }
         mCurrentGame = gamePackage;
+        if (mOverlayStarted && mManagedSession != mGameListManager.isGame(gamePackage)) {
+            stopOverlay();
+        }
         if (mKeyguardShowing || gameTask == null) {
             // A removed/finished game and keyguard are definitive exits, not transitions.
             stopOverlay();
@@ -232,7 +263,14 @@ public final class GameSpaceService extends SystemService {
             mHandler.postDelayed(mPendingBoost, BOOST_DELAY_MS);
         }
         mOverlayStarted = true;
-        mGameStateDispatcher.dispatchGameState(true, currentGame);
+        mManagedSession = mGameListManager.isGame(currentGame);
+        if (mManagedSession) {
+            mGameStateDispatcher.dispatchGameState(true, currentGame);
+        }
+        final GameManagerInternal manager = LocalServices.getService(GameManagerInternal.class);
+        if (manager != null) {
+            manager.setGamePolicySession(currentGame, ActivityManager.getCurrentUser());
+        }
     }
 
     private void stopOverlay() {
@@ -241,8 +279,15 @@ public final class GameSpaceService extends SystemService {
         }
         mOverlayStarted = false;
         cancelPendingBoost();
-        mGameStateDispatcher.dispatchGameState(false, null);
-        mGameStateDispatcher.boostGame(false);
+        if (mManagedSession) {
+            mGameStateDispatcher.dispatchGameState(false, null);
+            mGameStateDispatcher.boostGame(false);
+        }
+        mGameStateDispatcher.endPolicySession();
+        final GameManagerInternal manager = LocalServices.getService(GameManagerInternal.class);
+        if (manager != null) {
+            manager.setGamePolicySession(null, ActivityManager.getCurrentUser());
+        }
     }
 
     private void cancelPendingBoost() {

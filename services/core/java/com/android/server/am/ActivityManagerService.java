@@ -18067,6 +18067,16 @@ public class ActivityManagerService extends IActivityManager.Stub
         }
 
         @Override
+        public long getProcessStartTimeTicks(int pid, int uid, String packageName) {
+            synchronized (mPidsSelfLocked) {
+                final ProcessRecord process = mPidsSelfLocked.get(pid);
+                if (process == null || process.uid != uid
+                        || !process.getPkgList().containsKey(packageName)) return 0;
+                return process.getStartTimeTicks();
+            }
+        }
+
+        @Override
         public List<ProcessMemoryState> getMemoryStateForProcesses() {
             List<ProcessMemoryState> processMemoryStates = new ArrayList<>();
             synchronized (mPidsSelfLocked) {
