@@ -56,7 +56,6 @@ private constructor(
     fun cancelFloatingMiniPreview() { floatingMiniPreviewCancellation?.invoke() }
 
     private var floatingBottomHandle: FloatingBottomHandle? = null
-    private var floatingTopHandle: FloatingBottomHandle? = null
     private var floatingMiniInput: FloatingMiniInput? = null
     private var floatingController: PinnedLayerController? = null
     private var floatingFocusActive = false
@@ -64,7 +63,6 @@ private constructor(
         defaultWindowDecor?.updateFloatingFocusShadow(radius)
         desktopWindowDecor?.updateFloatingFocusShadow(radius)
         floatingBottomHandle?.setFocusAlpha(alpha)
-        floatingTopHandle?.setFocusAlpha(alpha)
     }
 
     private fun updateFloatingFocus(task: RunningTaskInfo,
@@ -98,22 +96,18 @@ private constructor(
                 floatingMiniInput = FloatingMiniInput({ currentDecorWindowContext }, it)
             }
             floatingBottomHandle = FloatingBottomHandle({ currentDecorWindowContext }, listener)
-            floatingTopHandle = FloatingBottomHandle({ currentDecorWindowContext }, listener, false)
         }
     }
 
     fun performFloatingTargetHapticFeedback() {
-        val view = floatingTopHandle?.getTargetFeedbackView()
-            ?: floatingBottomHandle?.getTargetFeedbackView()
+        val view = floatingBottomHandle?.getTargetFeedbackView()
         view?.performHapticFeedback(android.view.HapticFeedbackConstants.SEGMENT_TICK)
     }
 
     private fun updateFloatingBottomHandle(t: SurfaceControl.Transaction? = null) {
         floatingBottomHandle?.update(decorTaskInfo, taskSurface, t)
-        floatingTopHandle?.update(decorTaskInfo, taskSurface, t)
         floatingMiniInput?.update(decorTaskInfo, taskSurface, t)
         floatingBottomHandle?.setFocusAlpha(floatingFocusIndicator.alpha)
-        floatingTopHandle?.setFocusAlpha(floatingFocusIndicator.alpha)
     }
 
     private fun requireDefaultWindowDecor(): DefaultWindowDecoration =
@@ -191,7 +185,6 @@ private constructor(
         val original = taskInfo
         val scale = original.floatingWindowScale
         floatingBottomHandle?.update(original, taskSurface, t)
-        floatingTopHandle?.update(original, taskSurface, t)
         updateFloatingWindowChildScale(t, scale)
         if (taskSurface.isValid) {
             val bounds = original.presentationBounds
@@ -472,8 +465,6 @@ private constructor(
         floatingMiniInput = null
         floatingBottomHandle?.close()
         floatingBottomHandle = null
-        floatingTopHandle?.close()
-        floatingTopHandle = null
         when {
             defaultWindowDecor != null -> requireDefaultWindowDecor().close()
             desktopWindowDecor != null -> requireDesktopWindowDecor().close()
