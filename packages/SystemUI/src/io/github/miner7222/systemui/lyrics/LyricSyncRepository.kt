@@ -52,6 +52,7 @@ constructor(
     @Application private val context: Context,
     @Application private val scope: CoroutineScope,
     private val userTracker: UserTracker,
+    private val audioCapture: LyricAudioCapture,
     private val broadcastDispatcher: BroadcastDispatcher,
 ) {
     fun interface Listener {
@@ -60,18 +61,40 @@ constructor(
 
     private val main = Handler(Looper.getMainLooper())
     private val sessions = context.getSystemService(MediaSessionManager::class.java)
+    private val audio = context.getSystemService(AudioManager::class.java)
     private val listeners = mutableSetOf<Listener>()
     private val consumers = mutableMapOf<Any, MediaSession.Token?>()
     private val mutableState = MutableStateFlow(LyricState())
     val state = mutableState.asStateFlow()
+    private val offsets = LyricOffsetCache()
+    private val attempts = LyricAttemptCache()
+    private var calibrationDeadlineMs: Long? = null
     private var controller: MediaController? = null
     private var track: Track? = null
     private var parsed = ParsedLyrics(emptyList())
     private var record: LyricRecord? = null
+    private var audioOffsetMs = 0L
     private var fetchJob: Job? = null
+    private var captureJob: Job? = null
     private var generation = 0
     private var started = false
+    private var occurrence = LyricCalibrationAttempt()
+    private var captureAnchor: LyricPlaybackSnapshot? = null
+    private var captureUid = -1
+    private var captureRoute: String? = null
+    private val playbackCallback =
+        object : AudioManager.AudioPlaybackCallback() {
+            override fun onPlaybackConfigChanged(configs: List<AudioPlaybackConfiguration>) {
+                if (
+                    captureAnchor != null &&
+                        (playerRoute(configs, captureUid) != captureRoute ||
+                            LyricAudioCapture.hasLowLatencyOutput(configs))
+                )
+                    cancelCapture()
+            }
+        }
     private val tick = Runnable { update() }
+    private val calibrate = Runnable { startCalibration() }
     private var sessionListener: MediaSessionManager.OnActiveSessionsChangedListener? = null
     private val wakeReceiver =
         object : BroadcastReceiver() {
@@ -92,9 +115,22 @@ constructor(
                 }
             }
         }
+    private val deviceCallback =
+        object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(devices: Array<out AudioDeviceInfo>) {
+                routeChanged(devices)
+            }
+
+            override fun onAudioDevicesRemoved(devices: Array<out AudioDeviceInfo>) {
+                routeChanged(devices)
+            }
+        }
     private val callback =
         object : MediaController.Callback() {
             override fun onPlaybackStateChanged(state: PlaybackState?) {
+                captureAnchor?.let {
+                    if (LyricCalibrationRules.cancels(it, snapshot())) cancelCapture()
+                }
                 update()
                 if (state?.state != PlaybackState.STATE_PLAYING) refreshSessions()
             }
@@ -104,6 +140,7 @@ constructor(
             }
 
             override fun onAudioInfoChanged(info: MediaController.PlaybackInfo) {
+                captureAnchor?.let { if (snapshot()?.route != it.route) cancelCapture() }
                 update()
             }
 
@@ -141,6 +178,8 @@ constructor(
         if (consumers.isNotEmpty() && !started) {
             started = true
             userTracker.addCallback(userCallback, Executor { main.post(it) })
+            audio?.registerAudioDeviceCallback(deviceCallback, main)
+            audio?.registerAudioPlaybackCallback(playbackCallback, main)
             try {
                 broadcastDispatcher.registerReceiver(
                     wakeReceiver,
@@ -162,6 +201,8 @@ constructor(
             sessionListener = null
             broadcastDispatcher.unregisterReceiver(wakeReceiver)
             userTracker.removeCallback(userCallback)
+            audio?.unregisterAudioDeviceCallback(deviceCallback)
+            audio?.unregisterAudioPlaybackCallback(playbackCallback)
             detach()
         } else if (started) {
             refreshSessions()
@@ -227,8 +268,13 @@ constructor(
         fetchJob?.cancel()
         fetchJob = null
         main.removeCallbacks(tick)
+        main.removeCallbacks(calibrate)
+        cancelCapture()
+        occurrence = LyricCalibrationAttempt()
+        calibrationDeadlineMs = null
         parsed = ParsedLyrics(emptyList())
         record = null
+        audioOffsetMs = 0
         publish(LyricState())
     }
 
@@ -277,6 +323,8 @@ constructor(
                     if (result != null) {
                         record = result.record
                         parsed = LyricTiming.parse(result.record?.synced.orEmpty())
+                        key()?.let { audioOffsetMs = offsets[it] ?: 0 }
+                        if (key()?.let { it in attempts || offsets[it] != null } == true) occurrence.begin()
                         update()
                         return@launch
                     }
@@ -287,11 +335,12 @@ constructor(
 
     private fun update() {
         main.removeCallbacks(tick)
+        main.removeCallbacks(calibrate)
         val playback = controller?.playbackState
         val duration = track?.durationMs ?: 0
         val playing = playback?.state == PlaybackState.STATE_PLAYING
         val position = currentPosition(playback)
-        val offset = -parsed.lrcOffsetMs
+        val offset = audioOffsetMs - parsed.lrcOffsetMs
         val index = LyricTiming.activeIndex(parsed.lines, position, offset)
         publish(
             LyricState(
@@ -318,6 +367,27 @@ constructor(
                 )
                 ?.let { main.postDelayed(tick, it) }
         }
+        if (
+            playing &&
+                playback?.playbackSpeed == 1f &&
+                !occurrence.attempted &&
+                parsed.lines.isNotEmpty()
+        ) {
+            val start =
+                LyricCalibrationRules.windowStart(
+                    parsed.lines,
+                    parsed.lrcOffsetMs,
+                    position,
+                    duration,
+                )
+            if (start == null || playback.lastPositionUpdateTime == 0L) {
+                occurrence.begin()
+            } else {
+                val delayMs = (start - position).coerceAtLeast(0)
+                calibrationDeadlineMs = SystemClock.elapsedRealtime() + delayMs
+                main.postDelayed(calibrate, delayMs)
+            }
+        }
     }
 
     private fun currentPosition(playback: PlaybackState?): Long {
@@ -332,11 +402,150 @@ constructor(
         )
     }
 
+    private fun snapshot(): LyricPlaybackSnapshot? {
+        val playback = controller?.playbackState ?: return null
+        val info = controller?.playbackInfo
+        return LyricPlaybackSnapshot(
+            currentPosition(playback),
+            SystemClock.elapsedRealtime(),
+            playback.state == PlaybackState.STATE_PLAYING,
+            playback.playbackSpeed,
+            "${info?.playbackType}:${info?.volumeControlId}",
+            generation.toString(),
+        )
+    }
 
+    private fun playerRoute(configs: List<AudioPlaybackConfiguration>, uid: Int): String? {
+        val players =
+            configs.filter {
+                it.clientUid == uid &&
+                    it.isActive &&
+                    it.audioAttributes.usage == AudioAttributes.USAGE_MEDIA
+            }
+        if (players.isEmpty()) return null
+        return players
+            .flatMap { it.audioDeviceInfos }
+            .filter { it.type != AudioDeviceInfo.TYPE_REMOTE_SUBMIX }
+            .map { it.id }
+            .distinct()
+            .sorted()
+            .joinToString(",")
+            .takeIf { it.isNotEmpty() }
+    }
 
+    private fun routeChanged(devices: Array<out AudioDeviceInfo>) {
+        if (devices.any { it.isSink && it.type != AudioDeviceInfo.TYPE_REMOTE_SUBMIX })
+            cancelCapture()
+    }
 
+    private fun cancelCapture() {
+        captureJob?.cancel()
+        captureJob = null
+        captureAnchor = null
+        captureUid = -1
+        captureRoute = null
+    }
 
+    private fun startCalibration() {
+        if (!started || occurrence.attempted) return
+        val deadline = calibrationDeadlineMs ?: return
+        val remaining = deadline - SystemClock.elapsedRealtime()
+        if (remaining > 0) {
+            main.postDelayed(calibrate, remaining)
+            return
+        }
+        if (remaining < -250) {
+            update()
+            return
+        }
+        val anchor = snapshot() ?: return
+        if (!anchor.playing || anchor.speed != 1f) return
+        val current = track ?: return
+        val key = key() ?: return
+        val start =
+            LyricCalibrationRules.windowStart(
+                parsed.lines,
+                parsed.lrcOffsetMs,
+                anchor.positionMs,
+                current.durationMs,
+            )
+                ?: run {
+                    occurrence.begin()
+                    return
+                }
+        if (start > anchor.positionMs) {
+            update()
+            return
+        }
+        val uid = controller?.sessionToken?.uid ?: return
+        if (UserHandle.getUserId(uid) != current.userId) return
+        val starts =
+            parsed.lines.filter { it.text.isNotBlank() }.map { it.timestampMs - parsed.lrcOffsetMs }
+        val expected = generation
+        val configs = audio?.activePlaybackConfigurations.orEmpty()
+        val route = playerRoute(configs, uid)
+        if (route == null || LyricAudioCapture.hasLowLatencyOutput(configs)) {
+            occurrence.begin()
+            return
+        }
+        occurrence.begin()
+        if (!attempts.begin(key)) return
+        captureUid = uid
+        captureRoute = route
+        captureAnchor = anchor
+        captureJob =
+            scope.launch(Dispatchers.Main) {
+                try {
+                    val window = audioCapture.capture(uid, anchor)
+                    val result =
+                        if (window == null) LyricOffsetEstimator.Result()
+                        else
+                            withContext(Dispatchers.Default) {
+                                LyricOffsetEstimator.estimate(
+                                    window.pcm,
+                                    window.startPositionMs,
+                                    starts,
+                                )
+                            }
+                    if (
+                        generation != expected ||
+                            snapshot()?.let { LyricCalibrationRules.cancels(anchor, it) } != false
+                    )
+                        return@launch
+                    if (result.accepted) {
+                        offsets.put(key, result.offsetMs)
+                        audioOffsetMs = result.offsetMs
+                        update()
+                    }
+                    Log.d(TAG, "Offset=${result.offsetMs}ms confidence=${result.confidence}")
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    Log.d(TAG, "Offset=0ms confidence=0.0")
+                } finally {
+                    if (generation == expected && captureAnchor === anchor) {
+                        captureAnchor = null
+                        captureUid = -1
+                        captureRoute = null
+                        captureJob = null
+                    }
+                }
+            }
+    }
 
+    private fun key(): LyricTrackKey? {
+        val current = track ?: return null
+        val lyrics = record ?: return null
+        return LyricTrackKey(
+            current.userId,
+            current.playerPackage,
+            current.mediaId.ifEmpty {
+                "${current.artist}\u0000${current.title}\u0000${current.album}"
+            },
+            current.durationMs,
+            "${lyrics.id}:${LyricTrackKey.contentHash(lyrics.synced.orEmpty())}",
+        )
+    }
 
     private fun publish(value: LyricState) {
         if (mutableState.value == value) return

@@ -84,12 +84,108 @@ class LyricTimingTest {
         assertEquals("Song", LyricLookup.title("Song (Live Version) - Radio Edit", 0))
     }
 
+    @Test
+    fun keySeparatesUsersPlayersTracksDurationAndLyricsAndCacheIsLru() {
+        val key = LyricTrackKey(0, "player", "id", 200_000, LyricTrackKey.contentHash("lyrics"))
+        val cache = LyricOffsetCache(2)
+        cache.put(key, 1200)
+        assertEquals(1200L, cache[key])
+        assertNull(cache[key.copy(userId = 10)])
+        assertNull(cache[key.copy(playerPackage = "other")])
+        assertNull(cache[key.copy(mediaId = "other")])
+        assertNull(cache[key.copy(durationMs = 201_000)])
+        assertNull(cache[key.copy(lyricIdentity = LyricTrackKey.contentHash("new lyrics"))])
+        val second = key.copy(mediaId = "second")
+        cache.put(second, -800)
+        assertEquals(1200L, cache[key])
+        cache.put(key.copy(mediaId = "third"), 20)
+        assertNull(cache[second])
+        assertEquals(1200L, cache[key])
+    }
 
+    @Test
+    fun calibrationStaysIdleForIntroAndRequiresCoveredStarts() {
+        val useful = listOf(30_000L, 30_700L, 31_800L, 32_700L).map { LyricLine(it, "line") }
+        assertEquals(26_000L, LyricCalibrationRules.windowStart(useful, 0))
+        assertEquals(25_750L, LyricCalibrationRules.windowStart(useful, 250))
+        assertNull(LyricCalibrationRules.windowStart(useful.take(3), 0))
+        assertNull(
+            LyricCalibrationRules.windowStart(
+                useful.map { it.copy(timestampMs = it.timestampMs + 100_000) },
+                0,
+            )
+        )
+        assertNull(LyricCalibrationRules.windowStart(listOf(LyricLine(1000, "")), 0))
+    }
 
+    @Test
+    fun cancellationRulesDiscardDiscontinuitiesAndNeverRetryOccurrence() {
+        val anchor = LyricPlaybackSnapshot(4000, 100_000, true, 1f, "speaker")
+        val next = anchor.copy(positionMs = 5000, clockMs = 101_000)
+        assertFalse(LyricCalibrationRules.cancels(anchor, next))
+        assertTrue(LyricCalibrationRules.cancels(anchor, next.copy(playing = false)))
+        assertTrue(LyricCalibrationRules.cancels(anchor, next.copy(speed = 1.1f)))
+        assertTrue(LyricCalibrationRules.cancels(anchor, next.copy(positionMs = 9000)))
+        assertTrue(LyricCalibrationRules.cancels(anchor, next.copy(positionMs = 5100)))
+        assertTrue(LyricCalibrationRules.cancels(anchor, next.copy(positionMs = 1000)))
+        assertTrue(LyricCalibrationRules.cancels(anchor, next.copy(route = "usb")))
+        assertTrue(LyricCalibrationRules.cancels(anchor, null))
+        assertTrue(LyricCalibrationRules.cancels(anchor, next.copy(identity = "new session/track")))
+        val occurrence = LyricCalibrationAttempt()
+        assertTrue(occurrence.begin())
+        assertTrue(occurrence.attempted)
+        assertFalse(occurrence.begin())
+        assertTrue(LyricCalibrationAttempt().begin())
+    }
 
+    @Test
+    fun captureClockMapsBoottimeFramesToPlaybackAndRejectsInsufficientData() {
+        val clock = LyricCaptureClock()
+        val anchor = LyricPlaybackSnapshot(4000, 100_000, true, 1f, "speaker")
+        assertNull(clock.startPositionMs(anchor, 100_030_000_000L))
+        assertTrue(clock.observe(160, 100_010_000_000L, 100_010_000_000L))
+        assertNull(clock.startPositionMs(anchor, 100_030_000_000L))
+        assertTrue(clock.observe(320, 100_020_000_000L, 100_020_000_000L))
+        assertTrue(clock.observe(480, 100_030_000_000L, 100_030_000_000L))
+        assertEquals(4000.0, clock.startPositionMs(anchor, 100_030_000_000L)!!, 0.001)
+        assertNull(clock.startPositionMs(anchor, 101_000_000_000L))
+    }
 
+    @Test
+    fun captureClockRejectsDriftStaleAndNonMonotonicTimestamps() {
+        val clock = LyricCaptureClock()
+        assertTrue(clock.observe(160, 100_010_000_000L, 100_010_000_000L))
+        assertTrue(clock.observe(160, 100_010_000_000L, 100_010_000_000L))
+        assertFalse(clock.observe(160, 100_010_000_000L, 101_010_000_000L))
+        assertFalse(clock.observe(159, 100_020_000_000L, 100_020_000_000L))
+        assertFalse(clock.observe(320, 100_010_000_000L, 100_010_000_000L))
+        assertFalse(clock.observe(320, 100_050_000_000L, 100_050_000_000L))
+        assertFalse(clock.observe(320, 100_020_000_000L, 101_020_000_000L))
+    }
 
+    @Test
+    fun defaultOffsetCacheIsBoundedAt200Entries() {
+        val cache = LyricOffsetCache()
+        val key = LyricTrackKey(0, "player", "0", 200_000, "lyrics")
+        repeat(201) { cache.put(key.copy(mediaId = it.toString()), it.toLong()) }
+        assertNull(cache[key])
+        assertEquals(1L, cache[key.copy(mediaId = "1")])
+        assertEquals(200L, cache[key.copy(mediaId = "200")])
+    }
 
+    @Test
+    fun attemptedTracksSurviveFailureCancellationAndReplayWithLruBound() {
+        val attempts = LyricAttemptCache(2)
+        val key = LyricTrackKey(0, "player", "track", 200_000, "lyrics")
+        assertTrue(attempts.begin(key))
+        assertFalse(attempts.begin(key))
+        assertFalse(attempts.begin(key.copy()))
+        assertTrue(attempts.begin(key.copy(userId = 10)))
+        assertTrue(key in attempts)
+        assertTrue(attempts.begin(key.copy(mediaId = "new")))
+        assertFalse(key.copy(userId = 10) in attempts)
+        assertFalse(attempts.begin(key))
+    }
 
     @Test
     fun reverseBoundaryAtClampedZeroCannotBeCrossed() {
@@ -108,4 +204,16 @@ class LyricTimingTest {
         assertNull(LyricLookup.choose(listOf(wrong.copy(plain = null)), 200_000))
     }
 
+    @Test
+    fun lateLookupChoosesNextCoverableWindowWithoutConsumingAttempt() {
+        val lines =
+            listOf(3200L, 3700L, 5800L, 6700L, 13_200L, 13_700L, 15_800L, 16_700L).map {
+                LyricLine(it, "line")
+            }
+        assertEquals(0L, LyricCalibrationRules.windowStart(lines, 0))
+        assertEquals(50L, LyricCalibrationRules.windowStart(lines, 0, 50))
+        assertEquals(9800L, LyricCalibrationRules.windowStart(lines, 0, 300))
+        assertNull(LyricCalibrationRules.windowStart(lines, 0, 14_000))
+        assertNull(LyricCalibrationRules.windowStart(lines, 0, 0, 9000))
+    }
 }

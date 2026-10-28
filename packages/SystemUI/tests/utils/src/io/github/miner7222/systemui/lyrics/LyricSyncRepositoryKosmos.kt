@@ -8,12 +8,14 @@ import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.kosmos.applicationCoroutineScope
 import com.android.systemui.settings.userTracker
 
+val Kosmos.lyricAudioCapture by Kosmos.Fixture { LyricAudioCapture(applicationContext) }
 val Kosmos.lyricSyncRepository by
     Kosmos.Fixture {
         LyricSyncRepository(
             applicationContext,
             applicationCoroutineScope,
             userTracker,
+            lyricAudioCapture,
             broadcastDispatcher,
         )
     }
