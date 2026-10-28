@@ -3279,7 +3279,8 @@ class Task extends TaskFragment {
 
     @Nullable
     WindowState getTopFullscreenMainWindow() {
-        return getWindow(w -> w.mAttrs.type == TYPE_BASE_APPLICATION && w.mAttrs.isFullscreen());
+        return getWindow(w -> w.mAttrs.type == TYPE_BASE_APPLICATION
+                && (w.mAttrs.isFullscreen() || GameWindowRatioController.isAdjusted(w)));
     }
 
     /**

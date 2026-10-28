@@ -399,6 +399,7 @@ public class DisplayPolicy {
     private final WindowLayout mWindowLayout = new WindowLayout();
 
     private WindowState mTopFullscreenOpaqueWindowState;
+    private final GameWindowRatioController mGameWindowRatioController;
     private int mNavBarOpacityMode = NAV_BAR_OPAQUE_WHEN_FREEFORM_OR_DOCKED;
 
     /**
@@ -468,6 +469,7 @@ public class DisplayPolicy {
         mDisplayContent = displayContent;
         mDecorInsets = new DecorInsets(displayContent);
         mLock = service.getWindowManagerLock();
+        mGameWindowRatioController = new GameWindowRatioController(service, displayContent);
 
         final int displayId = displayContent.getDisplayId();
 
@@ -1140,6 +1142,7 @@ public class DisplayPolicy {
         if (!win.mSession.mCanSetUnrestrictedGestureExclusion) {
             attrs.privateFlags &= ~PRIVATE_FLAG_UNRESTRICTED_GESTURE_EXCLUSION;
         }
+        mGameWindowRatioController.adjustWindowParams(win, attrs);
     }
 
     /**
@@ -1534,6 +1537,7 @@ public class DisplayPolicy {
         // This window might be in the simulated environment.
         // We invoke this to get the proper DisplayFrames.
         displayFrames = win.getDisplayFrames(displayFrames);
+        mGameWindowRatioController.apply(win, win.mAttrs, displayFrames);
         
         if (win.mActivityRecord != null) {
             final int cutoutMode = mService.mAtmService.getCutoutMode(
@@ -1551,7 +1555,10 @@ public class DisplayPolicy {
 
         // If this window has different LayoutParams for rotations, we cannot trust its requested
         // size. Because it might have not sent its requested size for the new rotation.
-        final boolean trustedSize = attrs == win.mAttrs;
+        // Server-adjusted geometry must not reuse the client's last measured window size.
+        final boolean ratioSizeChanged = GameWindowRatioController.consumeLayoutSizeChanged(win);
+        final boolean trustedSize = attrs == win.mAttrs && !ratioSizeChanged
+                && !GameWindowRatioController.isAdjusted(win);
         final int requestedWidth = trustedSize ? win.mRequestedWidth : UNSPECIFIED_LENGTH;
         final int requestedHeight = trustedSize ? win.mRequestedHeight : UNSPECIFIED_LENGTH;
 
@@ -1679,14 +1686,16 @@ public class DisplayPolicy {
                 }
             }
 
-            if (appWindow && attached == null && attrs.isFullscreen()
+            if (appWindow && attached == null
+                    && (attrs.isFullscreen() || GameWindowRatioController.isAdjusted(win))
                     && (fl & FLAG_ALLOW_LOCK_WHILE_SCREEN_ON) != 0) {
                 mAllowLockscreenWhenOn = true;
             }
         }
 
         // Check the windows that overlap with system bars to determine system bars' appearance.
-        if ((appWindow && attached == null && attrs.isFullscreen())
+        if ((appWindow && attached == null
+                && (attrs.isFullscreen() || GameWindowRatioController.isAdjusted(win)))
                 || attrs.type == TYPE_VOICE_INTERACTION) {
 
             // If this is the exiting starting window, don't let it control the system bars.
@@ -1929,6 +1938,7 @@ public class DisplayPolicy {
      * Called when the user is switched.
      */
     public void switchUser() {
+        mGameWindowRatioController.onUserChanged();
         updateCurrentUserResources();
         updateForceShowNavBarSettings();
     }
@@ -3467,6 +3477,7 @@ public class DisplayPolicy {
     }
 
     void release() {
+        mGameWindowRatioController.release();
         mDisplayContent.mTransitionController.unregisterLegacyListener(mAppTransitionListener);
         mHandler.post(mGestureNavigationSettingsObserver::unregister);
         mHandler.post(mForceShowNavBarSettingsObserver::unregister);

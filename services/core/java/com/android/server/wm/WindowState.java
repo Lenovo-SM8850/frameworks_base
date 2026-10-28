@@ -304,6 +304,7 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
      * Use this member instead of get userId from mOwnerUid while query for visibility.
      */
     final int mShowUserId;
+    GameWindowRatioController.State mGameWindowRatioState;
     /** The owner has {@link android.Manifest.permission#INTERNAL_SYSTEM_WINDOW} */
     final boolean mOwnerCanAddInternalSystemWindow;
     final WindowId mWindowId;
@@ -2757,8 +2758,13 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
             getTouchableRegion(region);
         }
 
-        // Translate to surface based coordinates.
         final Rect frame = mWindowFrames.mFrame;
+        if (GameWindowRatioController.isAdjusted(this)) {
+            // Keep black margins outside input while preserving client exclusions and transforms.
+            region.op(frame, Region.Op.INTERSECT);
+        }
+
+        // Translate to surface based coordinates.
         if (frame.left != 0 || frame.top != 0) {
             region.translate(-frame.left, -frame.top);
         }
