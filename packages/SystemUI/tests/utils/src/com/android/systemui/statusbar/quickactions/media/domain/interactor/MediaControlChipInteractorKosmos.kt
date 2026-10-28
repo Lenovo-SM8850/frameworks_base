@@ -18,17 +18,23 @@ package com.android.systemui.statusbar.quickactions.media.domain.interactor
 
 import android.content.applicationContext
 import com.android.systemui.activityIntentHelper
+import com.android.systemui.classifier.falsingManager
 import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.kosmos.backgroundScope
+import com.android.systemui.media.mediaOutputDialogManager
 import com.android.systemui.media.remedia.data.repository.mediaRepository
 import com.android.systemui.plugins.activityStarter
 import com.android.systemui.statusbar.notificationLockscreenUserManager
 import com.android.systemui.statusbar.policy.keyguardStateController
+import io.github.miner7222.systemui.lyrics.lyricSyncRepository
 
 val Kosmos.mediaControlChipInteractor: MediaControlChipInteractor by
     Kosmos.Fixture {
         MediaControlChipInteractor(
             context = applicationContext,
+            mediaOutputDialogManager = mediaOutputDialogManager,
+            falsingManager = falsingManager,
+            lyricSyncRepository = lyricSyncRepository,
             backgroundScope = backgroundScope,
             mediaRepository = mediaRepository,
             activityStarter = activityStarter,

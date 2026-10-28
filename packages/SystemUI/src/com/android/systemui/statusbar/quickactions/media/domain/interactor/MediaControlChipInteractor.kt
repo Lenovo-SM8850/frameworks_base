@@ -50,13 +50,12 @@ import com.android.systemui.statusbar.NotificationLockscreenUserManager
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import io.github.miner7222.systemui.lyrics.LyricState
+import io.github.miner7222.systemui.lyrics.LyricTiming
+import io.github.miner7222.systemui.lyrics.LyricSyncRepository
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -68,14 +67,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-
-private const val PLAYBACK_POSITION_POLL_INTERVAL_MS = 1000L
-private const val LYRICS_RETRY_DELAY_MS = 15_000L
-
-/** How far the length of a lyrics entry can be from the song's before its timing is off. */
-private const val LYRICS_DURATION_TOLERANCE_S = 3.0
 
 /**
  * Interactor for managing the state of the media control chip in the status bar.
@@ -95,12 +87,12 @@ constructor(
     private val activityIntentHelper: ActivityIntentHelper,
     private val lockscreenUserManager: NotificationLockscreenUserManager,
     private val keyguardStateController: KeyguardStateController,
+    private val lyricSyncRepository: LyricSyncRepository,
 ) {
     private val isEnabled = MutableStateFlow(false)
     private val isDynamicIslandEnabled = MutableStateFlow(false)
     private var isInitialized = false
-    private val currentLyrics = MutableStateFlow<String?>(null)
-    private val currentSyncedLyrics = MutableStateFlow<String?>(null)
+    private val lyricsEnabled = MutableStateFlow(false)
     private val dynamicIslandObserver =
         object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
@@ -185,10 +177,22 @@ constructor(
     val mediaControlChipModel: StateFlow<MediaControlChipModel?> =
         combine(
             baseMediaControlChipModel,
-            currentLyrics,
-            currentSyncedLyrics,
-        ) { baseModel, lyrics, syncedLyrics ->
-            baseModel?.copy(lyrics = lyrics, syncedLyrics = syncedLyrics)
+            lyricSyncRepository.state,
+            lyricsEnabled,
+            mediaControlState,
+        ) { baseModel, lyrics, enabled, media ->
+            val shared =
+                if (enabled && lyrics.playerPackage == baseModel?.packageName &&
+                    lyrics.sessionKey == media.token?.hashCode()) {
+                    lyrics
+                } else {
+                    LyricState()
+                }
+            baseModel?.copy(
+                lyrics = shared.plainLyrics,
+                syncedLyrics = shared.syncedLyrics,
+                lyricState = shared,
+            )
         }
         .stateIn(backgroundScope, SharingStarted.WhileSubscribed(), null)
 
@@ -224,179 +228,23 @@ constructor(
     private fun setupLyricsWorker() {
         backgroundScope.launch {
             combine(
-                    mediaControlState,
-                    livePlaybackInfo,
-                    DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
-                        context,
-                        DynamicIslandFeatureSettings.SHOW_LYRICS,
-                        true,
-                    ),
-                ) { state, playbackInfo, lyricsEnabled ->
-                    val model = state.model
-                    // The title, artist and length come from the one metadata snapshot of the
-                    // player, so they always belong to the same song.
-                    val song =
-                        playbackInfo?.songName?.takeIf { it.isNotBlank() }
-                            ?: model?.songName?.toString()
-                    val artist =
-                        playbackInfo?.artistName?.takeIf { it.isNotBlank() }
-                            ?: model?.artistName?.toString()
-                    val durationMs =
-                        playbackInfo?.durationMs?.takeIf { it > 0L } ?: model?.durationMs ?: 0L
-                    if (model != null && lyricsEnabled && !song.isNullOrBlank() &&
-                        !artist.isNullOrBlank()
-                    ) {
-                        LyricsRequest(
-                            artist = cleanArtistName(artist),
-                            song = cleanSongTitle(song),
-                            durationSec = (durationMs / 1000L).takeIf { it > 0L },
-                        )
-                    } else {
-                        null
-                    }
-                }
+                baseMediaControlChipModel,
+                mediaControlState,
+                DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                    context,
+                    DynamicIslandFeatureSettings.SHOW_LYRICS,
+                    true,
+                ),
+            ) { model, media, enabled -> Pair(media.token, model != null && enabled) }
                 .distinctUntilChanged()
-                .collectLatest { request ->
-                    currentLyrics.value = null
-                    currentSyncedLyrics.value = null
-                    if (request == null) {
-                        return@collectLatest
-                    }
-                    var result = fetchLyrics(request)
-                    // A lookup that failed, such as without a connection, is tried again later.
-                    while (result.item == null && !result.conclusive) {
-                        delay(LYRICS_RETRY_DELAY_MS)
-                        result = fetchLyrics(request)
-                    }
-                    result.item?.let { publishLyrics(it) }
-                }
-        }
-    }
-
-    private fun cleanSongTitle(title: String): String {
-        if (title.isBlank()) return title
-        val separatorRegex = Regex("\\s+[-–—|•]\\s+")
-        var cleaned = title.split(separatorRegex)[0]
-        val parentheticalRegex =
-            Regex("(?i)\\s*[\\(\\[]([^\\)\\]]*(?:feat|remaster|live|video|version|edit|acoustic|single|studio|mono|stereo|re-recorded)[^\\)\\]]*)[\\]\\)]")
-        cleaned = cleaned.replace(parentheticalRegex, "")
-        val featRegex = Regex("(?i)\\s+\\b(feat\\.?|featuring|ft\\.?|with)\\b.*")
-        cleaned = cleaned.replace(featRegex, "")
-        return cleaned.trim()
-    }
-
-    private fun cleanArtistName(artist: String): String {
-        if (artist.isBlank()) return artist
-        val splitRegex = Regex("(?i)\\s*[,/;]\\s*|\\s+\\b(feat\\.?|featuring|ft\\.?|and|&)\\b\\s+")
-        return artist.split(splitRegex)[0].trim()
-    }
-
-    private data class LyricsRequest(val artist: String, val song: String, val durationSec: Long?)
-
-    private class LyricsResult(val item: org.json.JSONObject?, val conclusive: Boolean)
-
-    /**
-     * Looks the lyrics up on LRCLIB, by the exact track and length first, as an entry of another
-     * length has other timing. The result is not conclusive if the lookup failed and is worth
-     * trying again. It is published by the caller, so a lookup of a song that is no longer playing
-     * is dropped with its coroutine.
-     */
-    private suspend fun fetchLyrics(request: LyricsRequest): LyricsResult =
-        withContext(Dispatchers.IO) {
-            val durationSec = request.durationSec
-            val a = java.net.URLEncoder.encode(request.artist, "UTF-8")
-            val t = java.net.URLEncoder.encode(request.song, "UTF-8")
-            var conclusive = true
-            try {
-                if (durationSec != null) {
-                    val exact = lrclibGet("get?artist_name=$a&track_name=$t&duration=$durationSec")
-                    if (exact.code == 200) {
-                        val item = org.json.JSONObject(exact.body.orEmpty())
-                        if (item.hasLyrics()) {
-                            return@withContext LyricsResult(item, true)
-                        }
-                    } else if (exact.code != 404) {
-                        conclusive = false
-                    }
-                }
-                val queries =
-                    listOf(
-                        "search?artist_name=$a&track_name=$t",
-                        "search?q=" +
-                            java.net.URLEncoder.encode("${request.artist} ${request.song}", "UTF-8"),
+                .collect { (token, enabled) ->
+                    lyricsEnabled.value = enabled
+                    lyricSyncRepository.setConsumerEnabled(
+                        this@MediaControlChipInteractor, enabled, token,
                     )
-                for (query in queries) {
-                    val response = lrclibGet(query)
-                    if (response.code != 200) {
-                        conclusive = false
-                        continue
-                    }
-                    val items = org.json.JSONArray(response.body.orEmpty())
-                    val item = pickLyrics(items, durationSec)
-                    if (item != null) {
-                        return@withContext LyricsResult(item, true)
-                    }
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("MediaControlChipInteractor", "Failed to fetch lyrics from LRCLIB", e)
-                conclusive = false
-            }
-            LyricsResult(null, conclusive)
-        }
-
-    private class LrclibResponse(val code: Int, val body: String?)
-
-    private fun lrclibGet(path: String): LrclibResponse {
-        var connection: java.net.HttpURLConnection? = null
-        try {
-            connection = java.net.URL("https://lrclib.net/api/$path").openConnection()
-                as java.net.HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty(
-                "User-Agent",
-                "SystemUI-DynamicIslandLyrics/1.0 (https://lineageos.org)",
-            )
-            val code = connection.responseCode
-            val body =
-                if (code == 200) connection.inputStream.bufferedReader().use { it.readText() }
-                else null
-            return LrclibResponse(code, body)
-        } finally {
-            connection?.disconnect()
         }
     }
-
-    /**
-     * The entry to show: one of the right length with synced lyrics, then any of the right length.
-     * One of another length is only used for its plain lyrics, as its timing would be off.
-     */
-    private fun pickLyrics(items: org.json.JSONArray, durationSec: Long?): org.json.JSONObject? {
-        val withLyrics =
-            (0 until items.length()).map { items.getJSONObject(it) }.filter { it.hasLyrics() }
-        val matching =
-            withLyrics.filter {
-                durationSec == null ||
-                    kotlin.math.abs(it.optDouble("duration", -1000.0) - durationSec) <=
-                        LYRICS_DURATION_TOLERANCE_S
-            }
-        return matching.firstOrNull { it.lyric("syncedLyrics").isNotBlank() }
-            ?: matching.firstOrNull()
-            ?: withLyrics.firstOrNull { it.lyric("syncedLyrics").isBlank() }
-    }
-
-    private fun publishLyrics(item: org.json.JSONObject) {
-        currentLyrics.value = item.lyric("plainLyrics").takeIf { it.isNotBlank() }
-        currentSyncedLyrics.value = item.lyric("syncedLyrics").takeIf { it.isNotBlank() }
-    }
-
-    // A track without synced lyrics has them as null, which optString turns into "null".
-    private fun org.json.JSONObject.lyric(name: String): String =
-        if (isNull(name)) "" else optString(name, "").trim()
-
-    private fun org.json.JSONObject.hasLyrics(): Boolean =
-        lyric("plainLyrics").isNotBlank() || lyric("syncedLyrics").isNotBlank()
 }
 
 private fun MediaDataModel.toMediaControlState(
@@ -605,30 +453,9 @@ private fun MediaSession.Token?.playbackInfoFlow(context: Context): Flow<Playbac
                     close()
                     return@callbackFlow
                 }
-        var poller: Job? = null
-
-        fun updatePolling(playbackInfo: PlaybackInfo) {
-            if (playbackInfo.isPlaying) {
-                if (poller?.isActive == true) {
-                    return
-                }
-                poller =
-                    launch {
-                        while (isActive) {
-                            delay(PLAYBACK_POSITION_POLL_INTERVAL_MS)
-                            trySend(controller.resolvePlaybackInfo(context))
-                        }
-                    }
-            } else {
-                poller?.cancel()
-                poller = null
-            }
-        }
-
         fun dispatchPlaybackInfo() {
             val playbackInfo = controller.resolvePlaybackInfo(context)
             trySend(playbackInfo)
-            updatePolling(playbackInfo)
         }
 
         val callback =
@@ -651,7 +478,6 @@ private fun MediaSession.Token?.playbackInfoFlow(context: Context): Flow<Playbac
         dispatchPlaybackInfo()
 
         awaitClose {
-            poller?.cancel()
             runCatching { controller.unregisterCallback(callback) }
         }
     }
@@ -660,6 +486,7 @@ private fun MediaSession.Token?.playbackInfoFlow(context: Context): Flow<Playbac
 private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo {
     val metadata = metadata
     val playbackState = playbackState
+    val positionClock = SystemClock.elapsedRealtime()
     val durationMs =
         metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
     val isPlaying = playbackState?.isActivePlaybackState() == true
@@ -700,13 +527,15 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
         )
 
     return PlaybackInfo(
-        songName = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE),
-        artistName =
-            metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
-                ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
-        resolvedAtMs = SystemClock.elapsedRealtime(),
         durationMs = durationMs,
-        positionMs = playbackState?.computeActualPosition(durationMs) ?: 0L,
+        positionMs = playbackState?.computeActualPosition(durationMs, positionClock) ?: 0L,
+        positionUpdatedAtMs =
+            if (playbackState != null && playbackState.lastPositionUpdateTime > 0) positionClock
+            else 0L,
+        playbackSpeed =
+            if (playbackState != null && NotificationMediaManager.isPlayingState(playbackState.state))
+                playbackState.playbackSpeed
+            else 0f,
         canSeek =
             (playbackState?.actions?.and(PlaybackState.ACTION_SEEK_TO) != 0L || durationMs > 0L) && durationMs > 0L,
         isPlaying = isPlaying,
@@ -716,16 +545,11 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
     )
 }
 
-private fun PlaybackState.computeActualPosition(durationMs: Long): Long {
-    var currentPosition = position.coerceAtLeast(0L)
-    if (NotificationMediaManager.isPlayingState(state) && lastPositionUpdateTime > 0L) {
-        currentPosition =
-            ((playbackSpeed * (SystemClock.elapsedRealtime() - lastPositionUpdateTime)).toLong() +
-                    position)
-                .coerceAtLeast(0L)
-    }
-    return if (durationMs > 0L) currentPosition.coerceAtMost(durationMs) else currentPosition
-}
+private fun PlaybackState.computeActualPosition(durationMs: Long, nowMs: Long): Long =
+    LyricTiming.position(
+        position, lastPositionUpdateTime, nowMs, playbackSpeed,
+        NotificationMediaManager.isPlayingState(state), durationMs,
+    )
 
 private fun PlaybackState.toPlayPauseAction(
     context: Context,
@@ -779,12 +603,10 @@ private fun PlaybackState.isActivePlaybackState(): Boolean {
 }
 
 private data class PlaybackInfo(
-    val songName: String?,
-    val artistName: String?,
-    /** When [positionMs] was read, on the [SystemClock.elapsedRealtime] clock. */
-    val resolvedAtMs: Long,
     val durationMs: Long,
     val positionMs: Long,
+    val positionUpdatedAtMs: Long,
+    val playbackSpeed: Float,
     val canSeek: Boolean,
     val isPlaying: Boolean,
     val playOrPause: MediaAction?,
@@ -811,7 +633,8 @@ private fun MediaControlChipModel.withPlaybackInfo(playbackInfo: PlaybackInfo?):
         previousAction = playbackInfo.previousAction ?: previousAction,
         durationMs = durationMs.takeIf { it > 0L } ?: playbackInfo.durationMs,
         positionMs = playbackInfo.positionMs,
-        positionUpdatedAtMs = playbackInfo.resolvedAtMs,
+        positionUpdatedAtMs = playbackInfo.positionUpdatedAtMs,
+        playbackSpeed = playbackInfo.playbackSpeed,
         canBeScrubbed = canBeScrubbed || playbackInfo.canSeek,
         isPlaying = playbackInfo.isPlaying,
     )
