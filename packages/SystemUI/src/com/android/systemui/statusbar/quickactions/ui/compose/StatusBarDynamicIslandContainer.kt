@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -48,7 +49,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipId
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
-import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import kotlin.math.abs
 
@@ -69,6 +69,7 @@ fun StatusBarDynamicIslandContainer(
     var selectedChipId by remember { mutableStateOf<QuickActionChipId?>(null) }
     var popupAnchorChip by remember { mutableStateOf<QuickActionChipModel.PopupChip?>(null) }
     var popupVisible by remember { mutableStateOf(false) }
+    var popupOwnsIsland by remember { mutableStateOf(false) }
     var knownChipIds by remember { mutableStateOf<List<QuickActionChipId>>(emptyList()) }
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
 
@@ -100,8 +101,6 @@ fun StatusBarDynamicIslandContainer(
             popupVisible = true
         } else if (popupAnchorChip != null) {
             popupVisible = false
-            delay(220)
-            popupAnchorChip = null
         }
     }
 
@@ -111,10 +110,10 @@ fun StatusBarDynamicIslandContainer(
         )
     }
 
-    val hasChip = selectedChip != null
+    val hasChip = selectedChip != null || popupAnchorChip != null
     LaunchedEffect(hasChip) { onIslandActiveChanged(hasChip) }
 
-    val isExpanded = shownChip != null
+    val isExpanded = shownChip != null || popupOwnsIsland
     LaunchedEffect(isExpanded) { onIslandExpandedChanged(isExpanded) }
 
     LaunchedEffect(selectedChip) {
@@ -180,9 +179,7 @@ fun StatusBarDynamicIslandContainer(
                 },
         contentAlignment = Alignment.Center,
     ) {
-        if (selectedChip == null) return@Box
-
-        AnimatedContent(
+        if (selectedChip != null) AnimatedContent(
             targetState = selectedChip.chipId,
             transitionSpec = {
                 if (targetState == initialState) {
@@ -208,6 +205,7 @@ fun StatusBarDynamicIslandContainer(
                         ) + fadeOut(animationSpec = tween(140)))
                 }
             },
+            modifier = Modifier.graphicsLayer { alpha = if (popupOwnsIsland) 0f else 1f },
             label = "dynamic_island_chip",
         ) { chipId ->
             val chip = chips.firstOrNull { it.chipId == chipId } ?: return@AnimatedContent
@@ -249,6 +247,10 @@ fun StatusBarDynamicIslandContainer(
                 viewModel = anchoredChip,
                 isVisible = popupVisible,
                 chipBoundsInScreen = anchorBounds,
+                onMorphActiveChanged = { popupOwnsIsland = it },
+                onHidden = {
+                    if (shownChip == null) popupAnchorChip = null
+                },
             )
         }
     }

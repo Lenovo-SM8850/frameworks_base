@@ -38,31 +38,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.keyframes
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -82,10 +72,6 @@ import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.Scr
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.shared.model.chipText
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -172,7 +158,6 @@ fun StatusBarDynamicIslandChip(
         ((CompactIslandMaxWidth * widthScale) - 24.dp - leadingDecorationWidth - trailingDecorationWidth)
             .coerceAtLeast(56.dp)
 
-    val collapseState = rememberDynamicIslandCollapseState(viewModel.isPopupShown)
     val isStartAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START
     val startGap = if (isStartAnchored) cutoutSpec.embeddedGapWidth else 0.dp
 
@@ -185,10 +170,6 @@ fun StatusBarDynamicIslandChip(
                     min = if (isStartAnchored) startGap else (compactWidth ?: 0.dp),
                     max = (compactWidth ?: (CompactIslandMaxWidth * widthScale)) + startGap,
                 )
-                .graphicsLayer {
-                    scaleX = collapseState.scale
-                    if (isStartAnchored) transformOrigin = TransformOrigin(0f, 0.5f)
-                }
                 .clip(chipShape)
                 .background(Color.Black)
                 .border(width = 1.dp, color = chipOutline, shape = chipShape)
@@ -201,8 +182,7 @@ fun StatusBarDynamicIslandChip(
                     end = if (isStartAnchored) 8.dp * widthScale else 12.dp * widthScale,
                     top = 7.dp * heightScale,
                     bottom = 7.dp * heightScale,
-                )
-                .graphicsLayer { alpha = collapseState.contentAlpha },
+                ),
         horizontalArrangement =
             if (isMediaChip && !isStartAnchored) {
                 Arrangement.SpaceBetween
@@ -313,7 +293,6 @@ private fun UtilityStatusIslandChip(
     chipOutline: Color,
     modifier: Modifier = Modifier,
 ) {
-    val collapseState = rememberDynamicIslandCollapseState(viewModel.isPopupShown)
     val isStartAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START
     val rightSegmentWidth =
         (when (viewModel.popupContent) {
@@ -348,10 +327,6 @@ private fun UtilityStatusIslandChip(
     Row(
         modifier =
             modifier
-                .graphicsLayer {
-                    scaleX = collapseState.scale
-                    if (isStartAnchored) transformOrigin = TransformOrigin(0f, 0.5f)
-                }
                 .defaultMinSize(minHeight = maxOf(32.dp * heightScale, cutoutSpec.minimumHeight))
                 .then(
                     if (isStartAnchored) Modifier else Modifier.width(connectedIslandWidth)
@@ -359,8 +334,7 @@ private fun UtilityStatusIslandChip(
                 .clip(RoundedCornerShape(50))
                 .background(Color.Black)
                 .border(width = 1.dp, color = chipOutline, shape = RoundedCornerShape(50))
-                .clickable(onClick = onTap)
-                .graphicsLayer { alpha = collapseState.contentAlpha },
+                .clickable(onClick = onTap),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -763,46 +737,6 @@ private fun rememberDynamicIslandSizeScale(): Pair<Float, Float> {
             )
         }.collectAsState(initial = 1f)
     return widthScale to heightScale
-}
-
-private data class DynamicIslandCollapseState(val scale: Float, val contentAlpha: Float)
-
-@Composable
-private fun rememberDynamicIslandCollapseState(isOpen: Boolean): DynamicIslandCollapseState {
-    val scaleX = remember { Animatable(1f, visibilityThreshold = 0.0005f) }
-    val currentIsOpen by rememberUpdatedState(isOpen)
-
-    LaunchedEffect(Unit) {
-        snapshotFlow { currentIsOpen }
-            .drop(1)
-            .collectLatest { open ->
-                if (open) {
-                    scaleX.animateTo(
-                        targetValue = 0f,
-                        animationSpec =
-                            spring(
-                                dampingRatio = 0.9f,
-                                stiffness = Spring.StiffnessMediumLow,
-                            ),
-                    )
-                } else {
-                    scaleX.animateTo(
-                        targetValue = 1f,
-                        animationSpec =
-                            keyframes {
-                               durationMillis = 380
-                                0f at 0
-                                1.08f at 240 using FastOutSlowInEasing
-                                0.96f at 320
-                                1f at 380
-                            },
-                    )
-                }
-            }
-    }
-    val fadeThreshold = 0.7f
-    val alpha = (scaleX.value / fadeThreshold).coerceIn(0f, 1f)
-    return DynamicIslandCollapseState(scale = scaleX.value, contentAlpha = alpha)
 }
 
 private fun LayoutCoordinates.boundsInScreen(view: android.view.View): Rect {

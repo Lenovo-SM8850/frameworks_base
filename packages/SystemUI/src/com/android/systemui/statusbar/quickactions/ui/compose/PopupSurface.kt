@@ -16,6 +16,9 @@
 
 package com.android.systemui.statusbar.quickactions.ui.compose
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,6 +27,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -46,27 +50,52 @@ fun rememberPopupColorMode(): Int {
     return mode
 }
 
+// The morph supplies one surface for the entire popup, including its lyrics.
+internal val LocalPopupContainer = staticCompositionLocalOf { false }
+
 @Composable
 fun PopupSurface(
     shape: Shape,
     modifier: Modifier = Modifier,
     shadowElevation: Dp = 12.dp,
     colorMode: Int = rememberPopupColorMode(),
+    cornerRadius: Dp = 32.dp,
+    containerProgress: Float = 1f,
     content: @Composable () -> Unit,
 ) {
+    if (LocalPopupContainer.current) {
+        val contentColor =
+            if (colorMode == POPUP_COLOR_MODE_SOLID_BLACK) Color.White
+            else MaterialTheme.colorScheme.onSurface
+        Box(modifier = modifier) {
+            CompositionLocalProvider(LocalContentColor provides contentColor) { content() }
+        }
+        return
+    }
+    val surfaceContent: @Composable () -> Unit = {
+        Box(modifier = if (containerProgress < 1f) Modifier.fillMaxSize() else Modifier) {
+            content()
+            if (containerProgress < 1f) {
+                Box(
+                    Modifier.matchParentSize()
+                        .background(Color.Black.copy(alpha = 1f - containerProgress))
+                )
+            }
+        }
+    }
     when (colorMode) {
         POPUP_COLOR_MODE_BLUR -> {
             AxBlurSurface(
                 modifier = modifier,
                 shape = shape,
-                cornerRadius = 32.dp,
+                cornerRadius = cornerRadius,
                 highlight = AxBlurSurfaceDefaults.highlightBrush(),
             ) {
                 // The blur surface follows the theme, so its content does too.
                 CompositionLocalProvider(
                     LocalContentColor provides MaterialTheme.colorScheme.onSurface
                 ) {
-                    content()
+                    surfaceContent()
                 }
             }
         }
@@ -78,7 +107,7 @@ fun PopupSurface(
                 shadowElevation = shadowElevation,
                 modifier = modifier,
             ) {
-                content()
+                surfaceContent()
             }
         }
         else -> {
@@ -89,7 +118,7 @@ fun PopupSurface(
                 shadowElevation = shadowElevation,
                 modifier = modifier,
             ) {
-                content()
+                surfaceContent()
             }
         }
     }
