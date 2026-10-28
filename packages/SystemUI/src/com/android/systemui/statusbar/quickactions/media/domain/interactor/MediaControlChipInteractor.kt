@@ -298,8 +298,11 @@ constructor(
                     val jsonArray = org.json.JSONArray(response)
                     for (i in 0 until jsonArray.length()) {
                         val item = jsonArray.getJSONObject(i)
-                        val plainLyrics = item.optString("plainLyrics", "").trim()
-                        val syncedLyrics = item.optString("syncedLyrics", "").trim()
+                        // LRCLIB sends JSON null for missing lyrics, which optString turns into "null".
+                        val plainLyrics =
+                            if (item.isNull("plainLyrics")) "" else item.optString("plainLyrics").trim()
+                        val syncedLyrics =
+                            if (item.isNull("syncedLyrics")) "" else item.optString("syncedLyrics").trim()
 
                         if (plainLyrics.isNotBlank() || syncedLyrics.isNotBlank()) {
                             currentLyrics.value = plainLyrics.takeIf { it.isNotBlank() }

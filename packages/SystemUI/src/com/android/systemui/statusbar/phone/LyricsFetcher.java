@@ -331,16 +331,21 @@ public class LyricsFetcher {
                 if (generation != mFetchGeneration) return;
 
                 JSONArray results = new JSONArray(sb.toString());
-                if (results.length() > 0) {
-                    JSONObject best = results.getJSONObject(0);
-                    String syncedLyrics = best.optString("syncedLyrics", "");
-                    String plain = best.optString("plainLyrics", "");
+                // Use the first match that has lyrics; instrumental or empty entries come first at times.
+                for (int i = 0; i < results.length(); i++) {
+                    JSONObject best = results.getJSONObject(i);
+                    // LRCLIB sends JSON null for missing lyrics, which optString turns into "null".
+                    String syncedLyrics = best.isNull("syncedLyrics")
+                            ? "" : best.optString("syncedLyrics", "");
+                    String plain = best.isNull("plainLyrics") ? "" : best.optString("plainLyrics", "");
+                    if (TextUtils.isEmpty(syncedLyrics) && TextUtils.isEmpty(plain)) continue;
                     if (!TextUtils.isEmpty(syncedLyrics)) {
                         parsedSynced = parseLrc(syncedLyrics);
                     }
                     if (!TextUtils.isEmpty(plain)) {
                         plainLyrics = plain;
                     }
+                    break;
                 }
             } else {
                 failed = true;
