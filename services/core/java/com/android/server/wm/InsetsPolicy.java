@@ -710,7 +710,9 @@ class InsetsPolicy {
         final boolean nonAttachedAppWindow = win != null
                 && win.mAttrs.type >= WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW
                 && win.mAttrs.type <= WindowManager.LayoutParams.LAST_APPLICATION_WINDOW;
-        return nonAttachedAppWindow && win.mAttrs.isFullscreen() && !win.isFullyTransparent()
+        return nonAttachedAppWindow
+                && (win.mAttrs.isFullscreen() || GameWindowRatioController.isAdjusted(win))
+                && !win.isFullyTransparent()
                 && !win.inMultiWindowMode();
     }
 
