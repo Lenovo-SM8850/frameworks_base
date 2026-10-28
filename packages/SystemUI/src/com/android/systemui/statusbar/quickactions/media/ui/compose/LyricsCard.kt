@@ -31,9 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -47,40 +45,22 @@ import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 
 private val PopupShape = RoundedCornerShape(34.dp)
 
-data class LyricLine(val timestampMs: Long, val text: String)
+typealias LyricLine = io.github.miner7222.systemui.lyrics.LyricLine
 
 @Composable
 fun LyricsCard(
     model: MediaControlChipModel,
     modifier: Modifier = Modifier,
 ) {
-    val syncedLyrics = model.syncedLyrics
     val plainLyrics = model.lyrics
-
-    val lyricLines = remember(syncedLyrics) {
-        if (syncedLyrics.isNullOrBlank()) emptyList() else parseLrc(syncedLyrics)
-    }
+    val lyricLines = model.lyricState.lines
+    val activeIndex = model.lyricState.activeIndex
 
     PopupSurface(
         shape = PopupShape,
         modifier = modifier.widthIn(min = 320.dp, max = 400.dp).height(200.dp),
     ) {
         if (lyricLines.isNotEmpty()) {
-            val positionMs = model.positionMs
-            val activeIndex by remember(lyricLines, positionMs) {
-                derivedStateOf {
-                    var index = -1
-                    for (i in lyricLines.indices) {
-                        if (positionMs >= lyricLines[i].timestampMs) {
-                            index = i
-                        } else {
-                            break
-                        }
-                    }
-                    index
-                }
-            }
-
             val lazyListState = rememberLazyListState()
 
             LaunchedEffect(activeIndex) {
@@ -133,24 +113,4 @@ fun LyricsCard(
             }
         }
     }
-}
-
-private fun parseLrc(lrcText: String): List<LyricLine> {
-    val lines = mutableListOf<LyricLine>()
-    val pattern = Regex("\\[(\\d+):(\\d+)(?:[.:](\\d+))?\\](.*)")
-    lrcText.split("\n").forEach { lineStr ->
-        val match = pattern.matchEntire(lineStr.trim())
-        if (match != null) {
-            val min = match.groupValues[1].toLong()
-            val sec = match.groupValues[2].toLong()
-            val frac = match.groupValues[3].takeIf { it.isNotEmpty() }?.toLong() ?: 0L
-            val fracMs = if (match.groupValues[3].length == 3) frac else frac * 10L
-            val timestampMs = (min * 60 + sec) * 1000L + fracMs
-            val text = match.groupValues[4].trim()
-            if (text.isNotEmpty() || lines.isNotEmpty()) { // Skip initial empty lines
-                lines.add(LyricLine(timestampMs, text))
-            }
-        }
-    }
-    return lines.sortedBy { it.timestampMs }
 }

@@ -56,13 +56,12 @@ import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaOutputSwitcherAction
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import io.github.miner7222.systemui.lyrics.LyricState
+import io.github.miner7222.systemui.lyrics.LyricTiming
+import io.github.miner7222.systemui.lyrics.LyricSyncRepository
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -73,10 +72,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-
-private const val PLAYBACK_POSITION_POLL_INTERVAL_MS = 1000L
 
 /**
  * Interactor for managing the state of the media control chip in the status bar.
@@ -98,14 +94,12 @@ constructor(
     private val activityIntentHelper: ActivityIntentHelper,
     private val lockscreenUserManager: NotificationLockscreenUserManager,
     private val keyguardStateController: KeyguardStateController,
+    private val lyricSyncRepository: LyricSyncRepository,
 ) {
     private val isEnabled = MutableStateFlow(false)
     private val isDynamicIslandEnabled = MutableStateFlow(false)
     private var isInitialized = false
-    private val currentLyrics = MutableStateFlow<String?>(null)
-    private val currentSyncedLyrics = MutableStateFlow<String?>(null)
-    private var lastFetchedSong: String? = null
-    private var lastFetchedArtist: String? = null
+    private val lyricsEnabled = MutableStateFlow(false)
     private val dynamicIslandObserver =
         object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
@@ -248,10 +242,22 @@ constructor(
     val mediaControlChipModel: StateFlow<MediaControlChipModel?> =
         combine(
             baseMediaControlChipModel,
-            currentLyrics,
-            currentSyncedLyrics,
-        ) { baseModel, lyrics, syncedLyrics ->
-            baseModel?.copy(lyrics = lyrics, syncedLyrics = syncedLyrics)
+            lyricSyncRepository.state,
+            lyricsEnabled,
+            mediaControlState,
+        ) { baseModel, lyrics, enabled, media ->
+            val shared =
+                if (enabled && lyrics.playerPackage == baseModel?.packageName &&
+                    lyrics.sessionKey == media.token?.hashCode()) {
+                    lyrics
+                } else {
+                    LyricState()
+                }
+            baseModel?.copy(
+                lyrics = shared.plainLyrics,
+                syncedLyrics = shared.syncedLyrics,
+                lyricState = shared,
+            )
         }
         .stateIn(backgroundScope, SharingStarted.WhileSubscribed(), null)
 
@@ -287,102 +293,23 @@ constructor(
     private fun setupLyricsWorker() {
         backgroundScope.launch {
             combine(
+                baseMediaControlChipModel,
                 mediaControlState,
                 DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
                     context,
                     DynamicIslandFeatureSettings.SHOW_LYRICS,
                     true,
                 ),
-            ) { state, lyricsEnabled ->
-                Pair(state.model, lyricsEnabled)
-            }.collect { (model, lyricsEnabled) ->
-                if (model != null && lyricsEnabled) {
-                    val song = model.songName?.toString()
-                    val artist = model.artistName?.toString()
-                    val packageName = model.packageName
-                        if (song != null && artist != null) {
-                        if (song != lastFetchedSong || artist != lastFetchedArtist) {
-                            lastFetchedSong = song
-                            lastFetchedArtist = artist
-                            currentLyrics.value = null
-                            currentSyncedLyrics.value = null
-                            fetchLyrics(cleanArtistName(artist), cleanSongTitle(song))
-                        }
-                    } else {
-                        lastFetchedSong = null
-                        lastFetchedArtist = null
-                        currentLyrics.value = null
-                        currentSyncedLyrics.value = null
-                    }
-                } else {
-                    if (model == null) {
-                        lastFetchedSong = null
-                        lastFetchedArtist = null
-                    }
-                    currentLyrics.value = null
-                    currentSyncedLyrics.value = null
+            ) { model, media, enabled -> Pair(media.token, model != null && enabled) }
+                .distinctUntilChanged()
+                .collect { (token, enabled) ->
+                    lyricsEnabled.value = enabled
+                    lyricSyncRepository.setConsumerEnabled(
+                        this@MediaControlChipInteractor, enabled, token,
+                    )
                 }
-            }
         }
     }
-
-    private fun cleanSongTitle(title: String): String {
-        if (title.isBlank()) return title
-        val separatorRegex = Regex("\\s+[-–—|•]\\s+")
-        var cleaned = title.split(separatorRegex)[0]
-        val parentheticalRegex =
-            Regex("(?i)\\s*[\\(\\[]([^\\)\\]]*(?:feat|remaster|live|video|version|edit|acoustic|single|studio|mono|stereo|re-recorded)[^\\)\\]]*)[\\]\\)]")
-        cleaned = cleaned.replace(parentheticalRegex, "")
-        val featRegex = Regex("(?i)\\s+\\b(feat\\.?|featuring|ft\\.?|with)\\b.*")
-        cleaned = cleaned.replace(featRegex, "")
-        return cleaned.trim()
-    }
-
-    private fun cleanArtistName(artist: String): String {
-        if (artist.isBlank()) return artist
-        val splitRegex = Regex("(?i)\\s*[,/;]\\s*|\\s+\\b(feat\\.?|featuring|ft\\.?|and|&)\\b\\s+")
-        return artist.split(splitRegex)[0].trim()
-    }
-
-    private suspend fun fetchLyrics(artist: String, song: String) =
-        withContext(Dispatchers.IO) {
-            var connection: java.net.HttpURLConnection? = null
-            try {
-                val query = java.net.URLEncoder.encode("$artist $song", "UTF-8")
-                val url = java.net.URL("https://lrclib.net/api/search?q=$query")
-                connection = url.openConnection() as java.net.HttpURLConnection
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-                connection.setRequestProperty(
-                    "User-Agent",
-                    "SystemUI-DynamicIslandLyrics/1.0 (https://lineageos.org)",
-                )
-
-                if (connection.responseCode == 200) {
-                    val response = connection.inputStream.bufferedReader().use { it.readText() }
-                    val jsonArray = org.json.JSONArray(response)
-                    for (i in 0 until jsonArray.length()) {
-                        val item = jsonArray.getJSONObject(i)
-                        // LRCLIB sends JSON null for missing lyrics, which optString turns into "null".
-                        val plainLyrics =
-                            if (item.isNull("plainLyrics")) "" else item.optString("plainLyrics").trim()
-                        val syncedLyrics =
-                            if (item.isNull("syncedLyrics")) "" else item.optString("syncedLyrics").trim()
-
-                        if (plainLyrics.isNotBlank() || syncedLyrics.isNotBlank()) {
-                            currentLyrics.value = plainLyrics.takeIf { it.isNotBlank() }
-                            currentSyncedLyrics.value = syncedLyrics.takeIf { it.isNotBlank() }
-                            break
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("MediaControlChipInteractor", "Failed to fetch lyrics from LRCLIB", e)
-            } finally {
-                connection?.disconnect()
-            }
-        }
 }
 
 private fun MediaDataModel.toMediaControlState(
@@ -617,30 +544,9 @@ private fun MediaSession.Token?.playbackInfoFlow(context: Context): Flow<Playbac
                     close()
                     return@callbackFlow
                 }
-        var poller: Job? = null
-
-        fun updatePolling(playbackInfo: PlaybackInfo) {
-            if (playbackInfo.isPlaying) {
-                if (poller?.isActive == true) {
-                    return
-                }
-                poller =
-                    launch {
-                        while (isActive) {
-                            delay(PLAYBACK_POSITION_POLL_INTERVAL_MS)
-                            trySend(controller.resolvePlaybackInfo(context))
-                        }
-                    }
-            } else {
-                poller?.cancel()
-                poller = null
-            }
-        }
-
         fun dispatchPlaybackInfo() {
             val playbackInfo = controller.resolvePlaybackInfo(context)
             trySend(playbackInfo)
-            updatePolling(playbackInfo)
         }
 
         val callback =
@@ -663,7 +569,6 @@ private fun MediaSession.Token?.playbackInfoFlow(context: Context): Flow<Playbac
         dispatchPlaybackInfo()
 
         awaitClose {
-            poller?.cancel()
             runCatching { controller.unregisterCallback(callback) }
         }
     }
@@ -672,6 +577,7 @@ private fun MediaSession.Token?.playbackInfoFlow(context: Context): Flow<Playbac
 private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo {
     val metadata = metadata
     val playbackState = playbackState
+    val positionClock = SystemClock.elapsedRealtime()
     val durationMs =
         metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
     val isPlaying = playbackState?.isActivePlaybackState() == true
@@ -713,7 +619,14 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
 
     return PlaybackInfo(
         durationMs = durationMs,
-        positionMs = playbackState?.computeActualPosition(durationMs) ?: 0L,
+        positionMs = playbackState?.computeActualPosition(durationMs, positionClock) ?: 0L,
+        positionUpdatedAtMs =
+            if (playbackState != null && playbackState.lastPositionUpdateTime > 0) positionClock
+            else 0L,
+        playbackSpeed =
+            if (playbackState != null && NotificationMediaManager.isPlayingState(playbackState.state))
+                playbackState.playbackSpeed
+            else 0f,
         canSeek =
             (playbackState?.actions?.and(PlaybackState.ACTION_SEEK_TO) != 0L || durationMs > 0L) && durationMs > 0L,
         isPlaying = isPlaying,
@@ -723,16 +636,11 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
     )
 }
 
-private fun PlaybackState.computeActualPosition(durationMs: Long): Long {
-    var currentPosition = position.coerceAtLeast(0L)
-    if (NotificationMediaManager.isPlayingState(state) && lastPositionUpdateTime > 0L) {
-        currentPosition =
-            ((playbackSpeed * (SystemClock.elapsedRealtime() - lastPositionUpdateTime)).toLong() +
-                    position)
-                .coerceAtLeast(0L)
-    }
-    return if (durationMs > 0L) currentPosition.coerceAtMost(durationMs) else currentPosition
-}
+private fun PlaybackState.computeActualPosition(durationMs: Long, nowMs: Long): Long =
+    LyricTiming.position(
+        position, lastPositionUpdateTime, nowMs, playbackSpeed,
+        NotificationMediaManager.isPlayingState(state), durationMs,
+    )
 
 private fun PlaybackState.toPlayPauseAction(
     context: Context,
@@ -780,6 +688,8 @@ private fun PlaybackState.isActivePlaybackState(): Boolean {
 private data class PlaybackInfo(
     val durationMs: Long,
     val positionMs: Long,
+    val positionUpdatedAtMs: Long,
+    val playbackSpeed: Float,
     val canSeek: Boolean,
     val isPlaying: Boolean,
     val playOrPause: MediaAction?,
@@ -809,6 +719,8 @@ private fun MediaControlChipModel.withPlaybackInfo(playbackInfo: PlaybackInfo?):
         previousAction = playbackInfo.previousAction ?: previousAction,
         durationMs = durationMs.takeIf { it > 0L } ?: playbackInfo.durationMs,
         positionMs = playbackInfo.positionMs,
+        positionUpdatedAtMs = playbackInfo.positionUpdatedAtMs,
+        playbackSpeed = playbackInfo.playbackSpeed,
         canBeScrubbed = canBeScrubbed || playbackInfo.canSeek,
         isPlaying = playbackInfo.isPlaying,
     )

@@ -73,6 +73,8 @@ import dagger.Lazy;
 
 import java.util.function.Consumer;
 
+import io.github.miner7222.systemui.lyrics.LyricSyncRepository;
+
 import javax.inject.Inject;
 import javax.inject.Named;
 
@@ -128,6 +130,7 @@ public class Dependency {
     private final ArrayMap<Object, LazyDependencyCreator> mProviders = new ArrayMap<>();
 
     @Inject DumpManager mDumpManager;
+    @Inject Lazy<LyricSyncRepository> mLyricSyncRepository;
 
     @Inject Lazy<BroadcastDispatcher> mBroadcastDispatcher;
     @Inject Lazy<BluetoothController> mBluetoothController;
@@ -190,6 +193,8 @@ public class Dependency {
         // on imports.
         mProviders.put(TIME_TICK_HANDLER, mTimeTickHandler::get);
         mProviders.put(BG_LOOPER, mBgLooper::get);
+        mProviders.put(LyricSyncRepository.class,
+                mLyricSyncRepository::get);
         mProviders.put(BroadcastDispatcher.class, mBroadcastDispatcher::get);
         mProviders.put(BluetoothController.class, mBluetoothController::get);
         mProviders.put(KeyguardStateController.class, mKeyguardStateController::get);

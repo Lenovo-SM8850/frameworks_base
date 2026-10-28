@@ -19,6 +19,7 @@ package com.android.systemui.statusbar.quickactions.media.shared.model
 import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.media.controls.shared.model.MediaAction
 import com.android.systemui.media.controls.shared.model.MediaDeviceData
+import io.github.miner7222.systemui.lyrics.LyricState
 
 /** Checks an output tap, then schedules the accepted launch after the popup closes. */
 typealias MediaOutputSwitcherAction = (launchAfterHide: (() -> Unit) -> Unit) -> Unit
@@ -46,4 +47,7 @@ typealias MediaOutputSwitcherAction = (launchAfterHide: (() -> Unit) -> Unit) ->
         val syncedLyrics: String? = null,
         /** Ends the session, or pauses it when the session can't be stopped. */
         val stop: (() -> Unit)? = null,
+        val lyricState: LyricState = LyricState(),
+        val positionUpdatedAtMs: Long = 0L,
+        val playbackSpeed: Float = 1f,
 )

@@ -22,6 +22,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.DateUtils
 import android.widget.SeekBar
@@ -107,6 +108,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPo
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
+import io.github.miner7222.systemui.lyrics.LyricTiming
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -254,6 +256,8 @@ fun MediaControlPopup(
             if (model.durationMs > 0L) {
                 MediaProgressSection(
                     positionMs = model.positionMs,
+                    positionUpdatedAtMs = model.positionUpdatedAtMs,
+                    playbackSpeed = model.playbackSpeed,
                     durationMs = model.durationMs,
                     isPlaying = model.isPlaying,
                     canBeScrubbed = model.canBeScrubbed,
@@ -423,6 +427,8 @@ private fun MediaArtwork(model: MediaControlChipModel) {
 @Composable
 private fun MediaProgressSection(
     positionMs: Long,
+    positionUpdatedAtMs: Long,
+    playbackSpeed: Float,
     durationMs: Long,
     isPlaying: Boolean,
     canBeScrubbed: Boolean,
@@ -434,24 +440,30 @@ private fun MediaProgressSection(
     var displayedPositionMs by remember { mutableStateOf(positionMs.coerceIn(0L, durationMs)) }
     val currentSeekAction by rememberUpdatedState(onSeekTo)
 
-    LaunchedEffect(positionMs, durationMs, isPlaying, isScrubbing) {
+    LaunchedEffect(positionMs, positionUpdatedAtMs, playbackSpeed, durationMs, isPlaying, isScrubbing) {
         if (isScrubbing) {
             return@LaunchedEffect
         }
 
-        displayedPositionMs = positionMs.coerceIn(0L, durationMs)
+        fun currentPosition() =
+            LyricTiming.position(
+                positionMs,
+                positionUpdatedAtMs,
+                SystemClock.elapsedRealtime(),
+                playbackSpeed,
+                isPlaying,
+                durationMs,
+            )
+        displayedPositionMs = currentPosition()
 
-        if (!isPlaying || durationMs <= 0L) {
+        if (!isPlaying || durationMs <= 0L || playbackSpeed == 0f || positionUpdatedAtMs <= 0L) {
             return@LaunchedEffect
         }
 
-        val startWallClockMs = System.currentTimeMillis()
-        val startPositionMs = displayedPositionMs
         while (!isScrubbing) {
             delay(16L)
-            val elapsedMs = System.currentTimeMillis() - startWallClockMs
-            displayedPositionMs = (startPositionMs + elapsedMs).coerceAtMost(durationMs)
-            if (displayedPositionMs >= durationMs) {
+            displayedPositionMs = currentPosition()
+            if (displayedPositionMs >= durationMs || displayedPositionMs <= 0L) {
                 break
             }
         }
