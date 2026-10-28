@@ -66,6 +66,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -512,6 +514,8 @@ constructor(
                         return@withContext LyricsResult(item, true)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 android.util.Log.e("MediaControlChipInteractor", "Failed to fetch lyrics from LRCLIB", e)
                 conclusive = false
@@ -521,25 +525,35 @@ constructor(
 
     private class LrclibResponse(val code: Int, val body: String?)
 
-    private fun lrclibGet(path: String): LrclibResponse {
-        var connection: java.net.HttpURLConnection? = null
+    /** The blocking request is cut off by disconnecting when the coroutine is cancelled. */
+    private suspend fun lrclibGet(path: String): LrclibResponse = coroutineScope {
+        val connection = java.net.URL("https://lrclib.net/api/$path").openConnection()
+            as java.net.HttpURLConnection
+        val call =
+            async(Dispatchers.IO) {
+                try {
+                    connection.requestMethod = "GET"
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.setRequestProperty(
+                        "User-Agent",
+                        "SystemUI-DynamicIslandLyrics/1.0 (https://lineageos.org)",
+                    )
+                    val code = connection.responseCode
+                    val body =
+                        if (code == 200) {
+                            connection.inputStream.bufferedReader().use { it.readText() }
+                        } else null
+                    LrclibResponse(code, body)
+                } finally {
+                    connection.disconnect()
+                }
+            }
         try {
-            connection = java.net.URL("https://lrclib.net/api/$path").openConnection()
-                as java.net.HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty(
-                "User-Agent",
-                "SystemUI-DynamicIslandLyrics/1.0 (https://lineageos.org)",
-            )
-            val code = connection.responseCode
-            val body =
-                if (code == 200) connection.inputStream.bufferedReader().use { it.readText() }
-                else null
-            return LrclibResponse(code, body)
-        } finally {
-            connection?.disconnect()
+            call.await()
+        } catch (e: CancellationException) {
+            connection.disconnect()
+            throw e
         }
     }
 
