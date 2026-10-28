@@ -27,4 +27,10 @@ public abstract class GameManagerInternal {
      * Used by the CompatModePackages to read game's compat scaling override.
      */
     public abstract float getResolutionScalingFactor(String packageName, int userId);
+
+    /** Whether the package is a managed game or declares the game category. */
+    public boolean isGame(String packageName, int userId) { return false; }
+
+    /** Visible-task session after the existing transition grace has been applied. */
+    public void setGamePolicySession(String packageName, int userId) {}
 }

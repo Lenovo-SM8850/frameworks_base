@@ -144,6 +144,11 @@ class GameStateDispatcher {
         }
     }
 
+    void endPolicySession() {
+        cancelPendingGameHidden();
+        mGameVisible = false;
+    }
+
     void setGameVisible(boolean visible, Runnable onHidden) {
         setGameUiVisible(visible);
         if (visible) {
