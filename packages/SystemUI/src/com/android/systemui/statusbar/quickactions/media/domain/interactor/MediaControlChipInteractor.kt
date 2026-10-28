@@ -77,8 +77,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -167,6 +169,8 @@ constructor(
         mediaControlState
             .flatMapLatest { state -> state.token.playbackInfoFlow(context) }
             .distinctUntilChanged()
+            // The card, the lyric lookup and the lyric timing read one poll of the session.
+            .shareIn(backgroundScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), 1)
 
     private val isMediaAppVisible: Flow<Boolean> =
         mediaControlState
@@ -273,14 +277,44 @@ constructor(
             false,
         ).stateIn(backgroundScope, SharingStarted.WhileSubscribed(), false)
 
+    /**
+     * The lyrics with the synced line playing, which the status bar shows too. The line changes at
+     * its own time on the session clock, between the polls of the position.
+     */
+    val lyricState: StateFlow<LyricState> =
+        combine(
+                currentSyncedLyrics.map { LyricTiming.parse(it.orEmpty()) },
+                currentLyrics,
+                livePlaybackInfo,
+            ) { parsed, plainLyrics, playbackInfo ->
+                lyricTimeline(parsed, plainLyrics, playbackInfo, -parsed.lrcOffsetMs)
+            }
+            .flatMapLatest { it }
+            .stateIn(
+                backgroundScope,
+                SharingStarted.WhileSubscribed(replayExpirationMillis = 0),
+                LyricState(),
+            )
+
     /** The currently active [MediaControlChipModel] */
     val mediaControlChipModel: StateFlow<MediaControlChipModel?> =
         combine(
             baseMediaControlChipModel,
             currentLyrics,
             currentSyncedLyrics,
-        ) { baseModel, lyrics, syncedLyrics ->
-            baseModel?.copy(lyrics = lyrics, syncedLyrics = syncedLyrics)
+            lyricState,
+            DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                context,
+                DynamicIslandFeatureSettings.SHOW_LYRICS,
+                true,
+            ),
+        ) { baseModel, lyrics, syncedLyrics, timing, showLyrics ->
+            // The lookup also runs for the status bar, so the island keeps to its own setting.
+            if (showLyrics) {
+                baseModel?.copy(lyrics = lyrics, syncedLyrics = syncedLyrics, lyricState = timing)
+            } else {
+                baseModel
+            }
         }
         .stateIn(backgroundScope, SharingStarted.WhileSubscribed(), null)
 
@@ -838,7 +872,12 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
         artistName =
             metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                 ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
-        resolvedAtMs = SystemClock.elapsedRealtime(),
+        resolvedAtMs =
+            if (playbackState != null && playbackState.lastPositionUpdateTime > 0) {
+                SystemClock.elapsedRealtime()
+            } else {
+                0L
+            },
         playbackSpeed =
             if (playbackState != null && NotificationMediaManager.isPlayingState(playbackState.state))
                 playbackState.playbackSpeed
@@ -890,16 +929,11 @@ private fun MediaController.heartAction(
     )
 }
 
-private fun PlaybackState.computeActualPosition(durationMs: Long): Long {
-    var currentPosition = position.coerceAtLeast(0L)
-    if (NotificationMediaManager.isPlayingState(state) && lastPositionUpdateTime > 0L) {
-        currentPosition =
-            ((playbackSpeed * (SystemClock.elapsedRealtime() - lastPositionUpdateTime)).toLong() +
-                    position)
-                .coerceAtLeast(0L)
-    }
-    return if (durationMs > 0L) currentPosition.coerceAtMost(durationMs) else currentPosition
-}
+private fun PlaybackState.computeActualPosition(durationMs: Long): Long =
+    LyricTiming.position(
+        position, lastPositionUpdateTime, SystemClock.elapsedRealtime(), playbackSpeed,
+        NotificationMediaManager.isPlayingState(state), durationMs,
+    )
 
 private fun PlaybackState.toPlayPauseAction(
     context: Context,
@@ -955,7 +989,10 @@ private fun PlaybackState.isActivePlaybackState(): Boolean {
 private data class PlaybackInfo(
     val songName: String?,
     val artistName: String?,
-    /** When [positionMs] was read, on the [SystemClock.elapsedRealtime] clock. */
+    /**
+     * When [positionMs] was read, on the [SystemClock.elapsedRealtime] clock, or 0 when the session
+     * does not report when its position was last updated.
+     */
     val resolvedAtMs: Long,
     val durationMs: Long,
     val positionMs: Long,
@@ -969,6 +1006,52 @@ private data class PlaybackInfo(
     val previousAction: MediaAction?,
     val heartAction: MediaAction? = null,
 )
+
+/**
+ * The line of [parsed] playing, at the poll [playbackInfo] and then at each line boundary, as the
+ * position runs on from the poll. [offsetMs] delays the lines.
+ */
+private fun lyricTimeline(
+    parsed: ParsedLyrics,
+    plainLyrics: String?,
+    playbackInfo: PlaybackInfo?,
+    offsetMs: Long,
+): Flow<LyricState> = flow {
+    val playing = playbackInfo?.isPlaying == true
+    val speed = playbackInfo?.playbackSpeed ?: 0f
+    val durationMs = playbackInfo?.durationMs ?: 0L
+    while (true) {
+        val positionMs =
+            playbackInfo?.let {
+                LyricTiming.position(
+                    it.positionMs,
+                    it.resolvedAtMs,
+                    SystemClock.elapsedRealtime(),
+                    speed,
+                    playing,
+                    durationMs,
+                )
+            } ?: 0L
+        emit(
+            LyricState(
+                lines = parsed.lines,
+                activeIndex = LyricTiming.activeIndex(parsed.lines, positionMs, offsetMs),
+                plainLyrics = plainLyrics,
+                isPlaying = playing,
+            )
+        )
+        val nextMs =
+            LyricTiming.nextDelayMs(
+                parsed.lines,
+                positionMs,
+                offsetMs,
+                speed,
+                playing && (playbackInfo?.resolvedAtMs ?: 0L) > 0L,
+                durationMs,
+            ) ?: break
+        delay(nextMs)
+    }
+}
 
 private data class MediaControlState(
     val model: MediaControlChipModel?,

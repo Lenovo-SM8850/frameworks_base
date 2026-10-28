@@ -116,6 +116,7 @@ import com.android.systemui.media.remedia.ui.compose.MediaPresentationStyle
 import com.android.systemui.media.remedia.ui.compose.MediaUiBehavior
 import com.android.systemui.media.remedia.ui.viewmodel.MediaCarouselVisibility
 import com.android.systemui.res.R
+import com.android.systemui.statusbar.quickactions.media.domain.interactor.LyricTiming
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.media.ui.viewmodel.MediaControlPopupViewModel
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupDarkSurface
@@ -546,23 +547,6 @@ private fun MediaArtwork(model: MediaControlChipModel, artworkIcon: UiIcon?, cos
     }
 }
 
-/** Position of a session reported at [updatedMs], advanced to [nowMs] at [speed] while playing. */
-private fun mediaPositionMs(
-    positionMs: Long,
-    updatedMs: Long,
-    nowMs: Long,
-    speed: Float,
-    playing: Boolean,
-    durationMs: Long,
-): Long {
-    val elapsed = if (playing && updatedMs > 0) (nowMs - updatedMs).coerceAtLeast(0) else 0
-    val value =
-        (positionMs.coerceAtLeast(0) + elapsed * (if (speed.isFinite()) speed.toDouble() else 0.0))
-            .toLong()
-            .coerceAtLeast(0)
-    return if (durationMs > 0) value.coerceAtMost(durationMs) else value
-}
-
 @Composable
 private fun MediaProgressSection(
     positionMs: Long,
@@ -594,7 +578,7 @@ private fun MediaProgressSection(
         }
 
         fun currentPosition() =
-            mediaPositionMs(
+            LyricTiming.position(
                 positionMs,
                 positionUpdatedAtMs,
                 SystemClock.elapsedRealtime(),
