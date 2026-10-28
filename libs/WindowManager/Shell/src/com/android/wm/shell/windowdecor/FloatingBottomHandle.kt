@@ -10,7 +10,6 @@ import android.view.MotionEvent
 import android.view.SurfaceControl
 import android.view.SurfaceControlViewHost
 import android.view.View
-import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.WindowlessWindowManager
 import android.widget.FrameLayout
@@ -20,26 +19,26 @@ import com.android.wm.shell.windowdecor.common.Theme
 import com.android.wm.shell.windowdecor.common.NavigationHandleColor
 import com.android.wm.shell.windowdecor.common.HandleRegionSampler
 
-/**
- * A task-attached slim handle using the same touch pipeline as the app header. The decoration
- * creates its window context on the first relayout and recreates it on configuration changes, so
- * read the current one on each update.
- */
+/** Slim top handle; app content is observed separately for two-finger resizing. */
 class FloatingBottomHandle(private val contextProvider: () -> Context?,
-    private val listener: DesktopModeTouchEventListener,
-    private val atBottom: Boolean = true) : AutoCloseable {
+    private val listener: DesktopModeTouchEventListener) : AutoCloseable {
     private var host: SurfaceControlViewHost? = null
     private var surface: SurfaceControl? = null
     private var parent: SurfaceControl? = null
     private var hostWidth = 0
     private var hostHeight = 0
+    private var touchHeight = 0
     private var hostParams: WindowManager.LayoutParams? = null
     private var lastScale = Float.NaN
-    private var visibleWidth = 0
-    private var visibleHeight = 0
-    private var pill: View? = null
-    private var sampler: HandleRegionSampler? = null
-    private val sampleBounds = Rect()
+    private var topTarget: View? = null
+    private var topPill: View? = null
+    private var topSampler: HandleRegionSampler? = null
+
+    private fun onTouch(view: View, event: MotionEvent): Boolean {
+        val handled = listener.onTouch(view, event)
+        if (!handled && event.actionMasked == MotionEvent.ACTION_UP) view.performClick()
+        return true
+    }
 
     fun update(task: RunningTaskInfo, taskSurface: SurfaceControl,
         transaction: SurfaceControl.Transaction? = null) {
@@ -59,50 +58,64 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
             resources.getDimensionPixelSize(R.dimen.floating_handle_touch_width))
         val height = minOf(bounds.height(),
             resources.getDimensionPixelSize(R.dimen.floating_handle_touch_height))
+        val handleHeight = minOf(height,
+            resources.getDimensionPixelSize(R.dimen.floating_handle_touch_height))
         if (parent != taskSurface) close()
+        val unchanged = width == hostWidth && height == hostHeight &&
+            handleHeight == touchHeight && lastScale == task.floatingWindowScale
+        hostWidth = width
+        hostHeight = height
+        touchHeight = handleHeight
         if (host == null) {
             val leash = SurfaceControl.Builder().setContainerLayer()
-                .setName("Floating ${if (atBottom) "bottom" else "top"} handle ${task.taskId}").setParent(taskSurface)
+                .setName("Floating handles ${task.taskId}").setParent(taskSurface)
                 .setCallsite("FloatingBottomHandle.update").build()
             surface = leash
             parent = taskSurface
             val manager = WindowlessWindowManager(task.configuration, leash, null)
             val viewHost = SurfaceControlViewHost(context, display, manager, "FloatingBottomHandle")
-            val root = FrameLayout(context).apply {
-                id = if (atBottom) R.id.floating_bottom_handle else R.id.caption_handle
-                contentDescription = context.getString(R.string.floating_window_handle)
+            val root = object : FrameLayout(context) {
+                override fun onInterceptTouchEvent(event: MotionEvent) = true
+            }.apply {
+                id = R.id.caption_handle
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 isClickable = true
-                viewTreeObserver.addOnComputeInternalInsetsListener { insets ->
-                    // Limit hit testing to the pill host, including its touch padding.
-                    insets.setTouchableInsets(ViewTreeObserver.InternalInsetsInfo.TOUCHABLE_INSETS_REGION)
-                    insets.touchableRegion.set(0, 0, this.width, this.height)
+                isMotionEventSplittingEnabled = false
+                setOnClickListener { topTarget?.performClick() }
+                setOnTouchListener { v, e -> onTouch(v, e) }
+                val target = FrameLayout(context).apply {
+                    id = R.id.caption_handle
+                    contentDescription = context.getString(R.string.floating_window_handle)
+                    setOnClickListener(listener)
                 }
-                setOnClickListener(listener)
-                setOnTouchListener { v, e ->
-                    val handled = listener.onTouch(v, e)
-                    if (!handled && e.actionMasked == MotionEvent.ACTION_UP) v.performClick()
-                    true
-                }
-                addView(View(context).apply {
-                    pill = this
-                    sampler = HandleRegionSampler(this) { light ->
+                topTarget = target
+                target.addView(View(context).apply {
+                    topSampler = HandleRegionSampler(this) { light ->
                         background?.setTint(NavigationHandleColor.get(context, light))
                     }
+                    topPill = this
                     background = context.getDrawable(R.drawable.decor_handle_dark)?.mutate()
                 }, FrameLayout.LayoutParams(pillWidth, pillHeight, Gravity.CENTER))
+                addView(target, FrameLayout.LayoutParams(width, handleHeight, Gravity.TOP))
             }
+
             val params = WindowManager.LayoutParams(width, height,
                 WindowManager.LayoutParams.TYPE_APPLICATION,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT).apply {
                     setTrustedOverlay()
                     setFitInsetsTypes(0)
-                    setTitle("Floating ${if (atBottom) "bottom" else "top"} handle ${task.taskId}")
+                    setTitle("Floating handles ${task.taskId}")
                 }
             hostParams = params
             viewHost.setView(root, params)
             host = viewHost
-        } else if (width != hostWidth || height != hostHeight) {
+        } else if (!unchanged) {
+            (topTarget?.layoutParams as? FrameLayout.LayoutParams)?.let { params ->
+                params.width = width
+                params.height = handleHeight
+                topTarget?.layoutParams = params
+            }
             hostParams?.let {
                 it.width = width
                 it.height = height
@@ -110,29 +123,20 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
             }
         }
         val appearance = task.taskDescription?.systemBarsAppearance
-        val light = if (appearance != null && appearance != 0) {
+        val light = if (appearance != null) {
             appearance and android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS == 0
         } else DecorThemeUtil(context).getAppTheme(task) == Theme.DARK
         val x = bounds.centerX() - pillWidth / 2
-        val y = (if (atBottom) bounds.bottom - height else bounds.top) +
-            (height - pillHeight) / 2
-        sampleBounds.set(x, y, x + pillWidth, y + pillHeight)
-        sampler?.update(sampleBounds, true, light)
-        val unchanged = width == hostWidth && height == hostHeight &&
-            lastScale == task.floatingWindowScale && visibleWidth == bounds.width() &&
-            visibleHeight == bounds.height()
-        visibleWidth = bounds.width()
-        visibleHeight = bounds.height()
-        hostWidth = width
-        hostHeight = height
+        val top = bounds.top + (handleHeight - pillHeight) / 2
+        topSampler?.updateTask(task)
+        topSampler?.update(Rect(x, top, x + pillWidth, top + pillHeight), true, light)
         lastScale = task.floatingWindowScale
         if (unchanged && transaction == null) return
         val t = transaction ?: SurfaceControl.Transaction()
         try {
             val inverse = 1f / task.floatingWindowScale
             t.setMatrix(surface!!, inverse, 0f, 0f, inverse)
-                .setPosition(surface!!, (bounds.width() - width) / 2f * inverse,
-                (if (atBottom) bounds.height() - height else 0) * inverse)
+                .setPosition(surface!!, (bounds.width() - width) / 2f * inverse, 0f)
                 .setLayer(surface!!, Int.MAX_VALUE).show(surface!!)
             if (transaction == null) t.apply()
         } finally {
@@ -140,27 +144,28 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         }
     }
 
-    fun getTargetFeedbackView(): View? = pill?.takeIf { it.isAttachedToWindow }
+    fun getTargetFeedbackView(): View? = topPill?.takeIf { it.isAttachedToWindow }
 
-    fun setFocusAlpha(alpha: Float) { pill?.alpha = alpha }
+    fun setFocusAlpha(alpha: Float) {
+        topPill?.alpha = alpha
+    }
 
     override fun close() {
-        sampler?.close()
-        sampler = null
+        topSampler?.close()
+        topSampler = null
         val oldHost = host
         val oldSurface = surface
         host = null
         hostParams = null
         surface = null
         parent = null
-        pill = null
+        topTarget = null
+        topPill = null
         oldHost?.release()
         oldSurface?.let { leash ->
             if (leash.isValid) SurfaceControl.Transaction().use { it.remove(leash).apply() }
             leash.release()
         }
-        surface = null
-        parent = null
         lastScale = Float.NaN
     }
 }

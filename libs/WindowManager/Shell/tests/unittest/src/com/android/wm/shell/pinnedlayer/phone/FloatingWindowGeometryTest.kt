@@ -345,4 +345,49 @@ class FloatingWindowGeometryTest {
         assertThat(FloatingWindowGeometry.snapAspect(1.6f, values, state)).isEqualTo(1.6f)
     }
 
+    @Test fun pinch_scalesAboutOffCenterFingerMidpoint() {
+        val start = Rect(100, 200, 500, 1000)
+        val result = FloatingWindowGeometry.pinch(start, Rect(start), Rect(0, 0, 2000, 3000),
+            1.5f, 250f, 600f, 500f, 1000f, 100, 100)
+        assertThat(result.visible).isEqualTo(Rect(275, 400, 875, 1600))
+        assertThat(result.visible.width().toFloat() / result.visible.height()).isEqualTo(.5f)
+    }
+
+    @Test fun pinch_clampsToStableInsetsAndFullDisplaySize() {
+        val stable = Rect(20, 50, 1020, 2050)
+        val start = Rect(200, 300, 600, 1100)
+        val result = FloatingWindowGeometry.pinch(start, Rect(start), stable, 10f,
+            400f, 700f, -100f, -100f, 100, 100)
+        assertThat(result.visible).isEqualTo(stable)
+        assertThat(result.logical).isEqualTo(stable)
+        assertThat(result.commitsBounds).isTrue()
+        assertThat(result.scale).isEqualTo(1f)
+    }
+
+    @Test fun pinch_minimumMatchesCornerAndKeepsRatio() {
+        val start = Rect(200, 300, 600, 1100)
+        val logical = Rect(200, 300, 1000, 1900)
+        val stable = Rect(0, 0, 1200, 2400)
+        val result = FloatingWindowGeometry.pinch(start, logical, stable, .01f,
+            400f, 700f, 400f, 700f, 200, 300, .4f, 160)
+        val corner = FloatingWindowGeometry.scaledCorner(Rect(0, 0, 400, 800), logical,
+            stable, CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM, -396f, -792f, 200, 300,
+            minimumScale = .4f, minimumVisibleShortSide = 160)
+        assertThat(result.visible.width()).isEqualTo(corner.visible.width())
+        assertThat(result.visible.height()).isEqualTo(corner.visible.height())
+        assertThat(result.scale).isEqualTo(corner.scale)
+        assertThat(result.atMinimum).isTrue()
+    }
+
+    @Test fun pinch_scaleOnlyPreservesLogicalSize() {
+        val result = FloatingWindowGeometry.pinch(Rect(100, 100, 500, 900),
+            Rect(100, 100, 900, 1700), Rect(0, 0, 1600, 3000), 1.5f,
+            300f, 500f, 300f, 700f, 100, 100)
+        assertThat(result.visible).isEqualTo(Rect(0, 100, 600, 1300))
+        assertThat(result.logical.width()).isEqualTo(800)
+        assertThat(result.logical.height()).isEqualTo(1600)
+        assertThat(result.scale).isEqualTo(.75f)
+        assertThat(result.commitsBounds).isFalse()
+    }
+
 }

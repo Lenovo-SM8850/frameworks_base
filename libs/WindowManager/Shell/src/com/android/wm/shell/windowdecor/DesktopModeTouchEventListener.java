@@ -398,6 +398,40 @@ public class DesktopModeTouchEventListener
         }
     }
 
+    public boolean startFloatingHandlePinch(View view, MotionEvent event,
+            float span, float x, float y) {
+        if (!(mDragPositioningCallback instanceof MultiDisplayVeiledResizeTaskPositioner)) {
+            return false;
+        }
+        final MultiDisplayVeiledResizeTaskPositioner positioner =
+                (MultiDisplayVeiledResizeTaskPositioner) mDragPositioningCallback;
+        final Rect bounds = positioner.getFloatingHandlePinchBounds();
+        // Release the single-pointer detector before handing the live bounds to resize.
+        final MotionEvent cancel = MotionEvent.obtain(event);
+        cancel.setAction(MotionEvent.ACTION_CANCEL);
+        try {
+            onTouch(view, cancel);
+        } finally {
+            cancel.recycle();
+        }
+        positioner.startFloatingHandlePinch(event.getDisplayId(), span, x, y, bounds);
+        return true;
+    }
+
+    public void moveFloatingHandlePinch(float span, float x, float y) {
+        if (mDragPositioningCallback instanceof MultiDisplayVeiledResizeTaskPositioner) {
+            ((MultiDisplayVeiledResizeTaskPositioner) mDragPositioningCallback)
+                    .moveFloatingHandlePinch(span, x, y);
+        }
+    }
+
+    public void endFloatingHandlePinch(boolean cancelled) {
+        if (mDragPositioningCallback instanceof MultiDisplayVeiledResizeTaskPositioner) {
+            ((MultiDisplayVeiledResizeTaskPositioner) mDragPositioningCallback)
+                    .endFloatingHandlePinch(cancelled);
+        }
+    }
+
     @Override
     public boolean onLongClick(View v) {
         final String viewName = getResourceName(v);

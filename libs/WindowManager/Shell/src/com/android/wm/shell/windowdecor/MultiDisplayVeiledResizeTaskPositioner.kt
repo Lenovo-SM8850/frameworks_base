@@ -109,6 +109,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var floatingNaturalWidth = 1
     private var floatingNaturalHeight = 1
     private var floatingStartScale = 1f
+    private var floatingPinchSpan = 0f
+    private val floatingPinchCenter = PointF()
     private var floatingMinimumScale = .5f
     private var floatingMinimumVisibleSize = 0
     private var floatingMinWidth = 1
@@ -701,6 +703,38 @@ class MultiDisplayVeiledResizeTaskPositioner(
             if (task.minHeight > 0) task.minHeight else defaultMin)
     }
 
+    fun getFloatingHandlePinchBounds() = Rect(repositionTaskBounds)
+
+    fun startFloatingHandlePinch(displayId: Int, span: Float, x: Float, y: Float,
+        bounds: Rect = windowDecoration.taskInfo.presentationBounds) {
+        onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM, displayId, x, y,
+            DragPositioningCallback.INPUT_METHOD_TYPE_TOUCH)
+        floatingBaseBounds.offset(bounds.left - taskBoundsAtDragStart.left,
+            bounds.top - taskBoundsAtDragStart.top)
+        taskBoundsAtDragStart.set(bounds)
+        repositionTaskBounds.set(bounds)
+        floatingPinchSpan = span
+        floatingPinchCenter.set(x, y)
+        lastFloatingX = x
+        lastFloatingY = y
+    }
+
+    fun moveFloatingHandlePinch(span: Float, x: Float, y: Float) {
+        if (!floatingDragActive || floatingDragCancelled || floatingPinchSpan <= 0f) return
+        val result = FloatingWindowGeometry.pinch(taskBoundsAtDragStart, floatingLogicalBounds,
+            stableBounds, span / floatingPinchSpan, floatingPinchCenter.x, floatingPinchCenter.y,
+            x, y, floatingMinWidth, floatingMinHeight, floatingMinimumScale,
+            floatingMinimumVisibleSize, floatingResizeScratch)
+        updateFloatingResize(result)
+    }
+
+    fun endFloatingHandlePinch(cancelled: Boolean) {
+        if (floatingPinchSpan <= 0f) return
+        floatingPinchSpan = 0f
+        if (cancelled || floatingDragCancelled) onDragPositioningCancel()
+        else endFloatingResize(lastFloatingX, lastFloatingY)
+    }
+
     private fun moveFloatingResize(x: Float, y: Float): Rect {
         if (x == lastFloatingX && y == lastFloatingY) return Rect(repositionTaskBounds)
         lastFloatingX = x
@@ -716,6 +750,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 .toInt(), floatingResizeScratch, floatingNaturalWidth, floatingNaturalHeight,
             floatingAspectSnap,
             ViewConfiguration.get(windowDecoration.decorWindowContext).scaledTouchSlop.toFloat())
+        updateFloatingResize(result)
+        return Rect(repositionTaskBounds)
+    }
+
+    private fun updateFloatingResize(result: FloatingWindowGeometry.ScaledResize) {
         floatingResize = result
         val entersMini = result.atMinimum && (result.visible != taskBoundsAtDragStart ||
             result.scale < floatingStartScale - .001f || result.commitsBounds)
@@ -725,7 +764,6 @@ class MultiDisplayVeiledResizeTaskPositioner(
         previewFloatingResize(result.visible, if (result.commitsBounds) 1f else result.scale,
             result.commitsBounds)
         repositionTaskBounds.set(result.visible)
-        return Rect(repositionTaskBounds)
     }
 
     private fun previewFloatingResize(bounds: Rect, scale: Float, veiled: Boolean = false) {
