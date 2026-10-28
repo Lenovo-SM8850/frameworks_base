@@ -47,7 +47,6 @@ class AxPlatformFeatureMapper @Inject constructor(
         labelCache[feature]?.let { return it }
         val label = when {
             FEATURE_LABEL_RES.containsKey(feature) -> context.getString(FEATURE_LABEL_RES[feature]!!)
-            feature == AxPlatformClient.FEATURE_SMART_PIXELS -> LABEL_SMART_PIXELS
             else -> return null
         }
         labelCache[feature] = label
@@ -103,10 +102,9 @@ class AxPlatformFeatureMapper @Inject constructor(
     }
 
     companion object {
-        private const val LABEL_SMART_PIXELS = "Smart Pixels"
-
         private val FEATURE_LABEL_RES = mapOf(
             AxPlatformClient.FEATURE_WIFI to R.string.quick_settings_wifi_label,
+            AxPlatformClient.FEATURE_SMART_PIXELS to R.string.quick_settings_smart_pixels_label,
             AxPlatformClient.FEATURE_MOBILE_DATA to R.string.quick_settings_internet_label,
             AxPlatformClient.FEATURE_BLUETOOTH to R.string.quick_settings_bluetooth_label,
             AxPlatformClient.FEATURE_HOTSPOT to R.string.quick_settings_hotspot_label,
