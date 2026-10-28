@@ -21,6 +21,11 @@ import android.app.BroadcastOptions
 import android.app.PendingIntent
 import android.content.Context
 import android.database.ContentObserver
+import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.media.MediaMetadata
 import android.media.Rating
 import android.media.session.MediaController
@@ -67,6 +72,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.awaitClose
@@ -79,14 +85,19 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 
 private const val PLAYBACK_POSITION_POLL_INTERVAL_MS = 1000L
 private const val LYRICS_RETRY_DELAY_MS = 15_000L
@@ -123,6 +134,11 @@ constructor(
     private var isInitialized = false
     private val currentLyrics = MutableStateFlow<String?>(null)
     private val currentSyncedLyrics = MutableStateFlow<String?>(null)
+    /** How far the played audio runs behind the synced lyrics. */
+    private val lyricAudioOffset = MutableStateFlow(0L)
+    private val lyricOffsets = LyricOffsetCache()
+    private val lyricAttempts = LyricAttemptCache()
+    private val lyricAudioCapture by lazy { LyricAudioCapture(context) }
     private val dynamicIslandObserver =
         object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
@@ -314,8 +330,9 @@ constructor(
                 currentSyncedLyrics.map { LyricTiming.parse(it.orEmpty()) },
                 currentLyrics,
                 livePlaybackInfo,
-            ) { parsed, plainLyrics, playbackInfo ->
-                lyricTimeline(parsed, plainLyrics, playbackInfo, -parsed.lrcOffsetMs)
+                lyricAudioOffset,
+            ) { parsed, plainLyrics, playbackInfo, audioOffsetMs ->
+                lyricTimeline(parsed, plainLyrics, playbackInfo, audioOffsetMs - parsed.lrcOffsetMs)
             }
             .flatMapLatest { it }
             .stateIn(
@@ -415,6 +432,7 @@ constructor(
                 .collectLatest { request ->
                     currentLyrics.value = null
                     currentSyncedLyrics.value = null
+                    lyricAudioOffset.value = 0L
                     if (request == null) {
                         return@collectLatest
                     }
@@ -424,7 +442,10 @@ constructor(
                         delay(LYRICS_RETRY_DELAY_MS)
                         result = fetchLyrics(request)
                     }
-                    result.item?.let { publishLyrics(it) }
+                    result.item?.let {
+                        publishLyrics(it)
+                        calibrateLyrics(request, it)
+                    }
                 }
         }
     }
@@ -568,6 +589,129 @@ constructor(
         return matching.firstOrNull { it.lyric("syncedLyrics").isNotBlank() }
             ?: matching.firstOrNull()
             ?: withLyrics.firstOrNull { it.lyric("syncedLyrics").isBlank() }
+    }
+
+    /**
+     * Times the synced lyrics of [item] by the played audio, once for the track and lyrics: a short
+     * capture of the player at the first window with enough line starts, while it plays at normal
+     * speed. An offset found before applies again without a capture.
+     */
+    private suspend fun calibrateLyrics(request: LyricsRequest, item: org.json.JSONObject) {
+        val synced = item.lyric("syncedLyrics")
+        val parsed = LyricTiming.parse(synced)
+        if (parsed.lines.isEmpty()) return
+        val state = mediaControlState.first()
+        val uid = state.token?.uid ?: return
+        val key =
+            LyricTrackKey(
+                UserHandle.getUserId(uid),
+                state.model?.packageName.orEmpty(),
+                "${request.artist}\u0000${request.song}",
+                (request.durationSec ?: 0L) * 1000L,
+                "${item.optString("id")}:${LyricTrackKey.contentHash(synced)}",
+            )
+        lyricOffsets[key]?.let {
+            lyricAudioOffset.value = it
+            return
+        }
+        if (key in lyricAttempts) return
+        val anchor = calibrationAnchor(parsed) ?: return
+        val audioManager = context.getSystemService(AudioManager::class.java) ?: return
+        val configs = audioManager.activePlaybackConfigurations
+        val route = playerRoute(configs, uid)
+        if (route == null || LyricAudioCapture.hasLowLatencyOutput(configs)) return
+        if (!lyricAttempts.begin(key)) return
+        val starts =
+            parsed.lines.filter { it.text.isNotBlank() }.map { it.timestampMs - parsed.lrcOffsetMs }
+        val result = captureOffset(audioManager, uid, route, anchor, starts) ?: return
+        if (result.accepted) {
+            lyricOffsets.put(key, result.offsetMs)
+            lyricAudioOffset.value = result.offsetMs
+        }
+    }
+
+    /** The playback at the start of the first window to capture, or null if there is none. */
+    private suspend fun calibrationAnchor(parsed: ParsedLyrics): LyricPlaybackSnapshot? =
+        livePlaybackInfo
+            .transformLatest<PlaybackInfo?, LyricPlaybackSnapshot?> { playbackInfo ->
+                if (playbackInfo == null || !playbackInfo.isPlaying ||
+                    playbackInfo.playbackSpeed != 1f
+                ) {
+                    return@transformLatest
+                }
+                while (true) {
+                    val now = playbackInfo.snapshot()
+                    val start =
+                        LyricCalibrationRules.windowStart(
+                            parsed.lines,
+                            parsed.lrcOffsetMs,
+                            now.positionMs,
+                            playbackInfo.durationMs,
+                        )
+                    if (start == null || playbackInfo.resolvedAtMs == 0L) {
+                        emit(null)
+                        return@transformLatest
+                    }
+                    if (start <= now.positionMs) {
+                        emit(now)
+                        return@transformLatest
+                    }
+                    delay(start - now.positionMs)
+                }
+            }
+            .first()
+
+    /**
+     * Captures the playback of [uid] from [anchor] and estimates the lyric offset in it. Null when
+     * the playback jumps or stops, or the output changes, before the capture ends.
+     */
+    private suspend fun captureOffset(
+        audioManager: AudioManager,
+        uid: Int,
+        route: String,
+        anchor: LyricPlaybackSnapshot,
+        lineStartsMs: List<Long>,
+    ): LyricOffsetEstimator.Result? = coroutineScope {
+        val interrupted = async {
+            merge(
+                    livePlaybackInfo.filter {
+                        LyricCalibrationRules.cancels(anchor, it?.snapshot())
+                    },
+                    audioManager.outputChanges(uid, route),
+                )
+                .first()
+        }
+        val estimate = async {
+            try {
+                val window = lyricAudioCapture.capture(uid, anchor)
+                if (window == null) {
+                    LyricOffsetEstimator.Result()
+                } else {
+                    withContext(Dispatchers.Default) {
+                        LyricOffsetEstimator.estimate(
+                            window.pcm,
+                            window.startPositionMs,
+                            lineStartsMs,
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                LyricOffsetEstimator.Result()
+            }
+        }
+        // The interruption wins a tie, and a playback that changed late in the capture is checked
+        // again, so an offset of a captured window that was not played straight is not kept.
+        select<LyricOffsetEstimator.Result?> {
+                interrupted.onAwait { null }
+                estimate.onAwait { it }
+            }
+            .takeUnless {
+                it != null &&
+                    LyricCalibrationRules.cancels(anchor, livePlaybackInfo.first()?.snapshot())
+            }
+            .also { coroutineContext.cancelChildren() }
     }
 
     private fun publishLyrics(item: org.json.JSONObject) {
@@ -1069,6 +1213,77 @@ private data class PlaybackInfo(
     val previousAction: MediaAction?,
     val heartAction: MediaAction? = null,
 )
+
+/** The position now, as it runs on from the poll at [PlaybackInfo.resolvedAtMs]. */
+private fun PlaybackInfo.snapshot(): LyricPlaybackSnapshot {
+    val nowMs = SystemClock.elapsedRealtime()
+    return LyricPlaybackSnapshot(
+        LyricTiming.position(positionMs, resolvedAtMs, nowMs, playbackSpeed, isPlaying, durationMs),
+        nowMs,
+        isPlaying,
+        playbackSpeed,
+    )
+}
+
+/** The output devices of the media playback of [uid], or null when it plays nothing. */
+private fun playerRoute(configs: List<AudioPlaybackConfiguration>, uid: Int): String? {
+    val players =
+        configs.filter {
+            it.clientUid == uid &&
+                it.isActive &&
+                it.audioAttributes.usage == AudioAttributes.USAGE_MEDIA
+        }
+    if (players.isEmpty()) return null
+    return players
+        .flatMap { it.audioDeviceInfos }
+        .filter { it.type != AudioDeviceInfo.TYPE_REMOTE_SUBMIX }
+        .map { it.id }
+        .distinct()
+        .sorted()
+        .joinToString(",")
+        .takeIf { it.isNotEmpty() }
+}
+
+/**
+ * Emits when the media playback of [uid] leaves [route], a low-latency output starts, or an output
+ * device comes or goes. The capture's own submix is not an output.
+ */
+private fun AudioManager.outputChanges(uid: Int, route: String): Flow<Unit> = callbackFlow {
+    fun outputs() =
+        getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .filter { it.type != AudioDeviceInfo.TYPE_REMOTE_SUBMIX }
+            .map { it.id }
+            .toSet()
+    val initial = outputs()
+    val playback =
+        object : AudioManager.AudioPlaybackCallback() {
+            override fun onPlaybackConfigChanged(configs: List<AudioPlaybackConfiguration>) {
+                if (playerRoute(configs, uid) != route ||
+                    LyricAudioCapture.hasLowLatencyOutput(configs)
+                ) {
+                    trySend(Unit)
+                }
+            }
+        }
+    // Registering reports the devices already there, so only a change of the set counts.
+    val devices =
+        object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
+                if (outputs() != initial) trySend(Unit)
+            }
+
+            override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+                if (outputs() != initial) trySend(Unit)
+            }
+        }
+    val handler = Handler(Looper.getMainLooper())
+    registerAudioPlaybackCallback(playback, handler)
+    registerAudioDeviceCallback(devices, handler)
+    awaitClose {
+        unregisterAudioPlaybackCallback(playback)
+        unregisterAudioDeviceCallback(devices)
+    }
+}
 
 /**
  * The line of [parsed] playing, at the poll [playbackInfo] and then at each line boundary, as the
