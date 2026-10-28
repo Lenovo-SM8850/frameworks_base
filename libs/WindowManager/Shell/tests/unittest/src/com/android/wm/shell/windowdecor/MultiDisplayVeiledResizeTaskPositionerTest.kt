@@ -1512,6 +1512,46 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         taskPositioner.onDragPositioningMove(DISPLAY_ID_0, -1000f, -1000f)
         verify(mockWindowDecoration, times(3)).performFloatingTargetHapticFeedback()
     }
+    @Test fun floatingHandlePinch_commitsThroughExistingResizePath() = runOnUiThread {
+        val task = mockWindowDecoration.taskInfo
+        val initial = Rect(100, 100, 500, 900)
+        task.isFloatingWindow = true
+        task.configuration.windowConfiguration.setBounds(initial)
+        taskPositioner.startFloatingHandlePinch(DISPLAY_ID_0, 800f, 300f, 500f)
+        taskPositioner.moveFloatingHandlePinch(1000f, 350f, 600f)
+        taskPositioner.flushFloatingResizePreview()
+        verify(mockWindowDecoration).showResizeVeil(Rect(100, 100, 600, 1100))
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        taskPositioner.endFloatingHandlePinch(false)
+        verify(mockTransitions).startTransition(eq(TRANSIT_CHANGE), argThat {
+            changes[taskBinder]?.configuration?.windowConfiguration?.bounds ==
+                Rect(100, 100, 600, 1100)
+        }, eq(taskPositioner))
+    }
+
+    @Test fun floatingHandlePinch_keepsLiveDragPositionAtHandoff() = runOnUiThread {
+        beginFloatingMove()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 450f, 550f)
+        val moved = taskPositioner.getFloatingHandlePinchBounds()
+        taskPositioner.onDragPositioningCancel()
+        taskPositioner.startFloatingHandlePinch(DISPLAY_ID_0, 800f, 450f, 550f, moved)
+        taskPositioner.moveFloatingHandlePinch(800f, 450f, 550f)
+        Assert.assertEquals(moved, taskPositioner.getFloatingHandlePinchBounds())
+        taskPositioner.endFloatingHandlePinch(true)
+    }
+
+    @Test fun floatingHandlePinch_cancelDoesNotCommit() = runOnUiThread {
+        beginFloatingCorner()
+        taskPositioner.startFloatingHandlePinch(DISPLAY_ID_0, 800f, 300f, 500f)
+        taskPositioner.moveFloatingHandlePinch(1000f, 350f, 600f)
+        taskPositioner.endFloatingHandlePinch(true)
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        verify(mockShellTaskOrganizer, never()).applyTransaction(argThat {
+            changes[taskBinder]?.windowSetMask?.and(WindowConfiguration.WINDOW_CONFIG_BOUNDS) != 0
+        })
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+    }
+
     @Test fun floatingCorner_changesAspectInOneBoundsCommit() = runOnUiThread {
         beginFloatingCorner()
         taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 800f, 1000f)

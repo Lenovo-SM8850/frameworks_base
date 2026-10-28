@@ -90,6 +90,27 @@ object FloatingWindowGeometry {
         return out
     }
 
+    /** Reuses corner size constraints, then anchors the result to the fingers' midpoint. */
+    fun pinch(start: Rect, logical: Rect, stable: Rect, factor: Float,
+        startX: Float, startY: Float, centerX: Float, centerY: Float,
+        minWidth: Int, minHeight: Int, minimumScale: Float = MIN_SCALE,
+        minimumVisibleShortSide: Int = 0,
+        out: ScaledResize = ScaledResize(Rect(), Rect(), 1f, false)): ScaledResize {
+        val origin = Rect(start).apply { offsetTo(stable.left, stable.top) }
+        val result = scaledCorner(origin, logical, stable, CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
+            start.width() * (factor - 1f), start.height() * (factor - 1f),
+            minWidth, minHeight, out, minimumScale, minimumVisibleShortSide)
+        val applied = result.visible.width().toFloat() / start.width()
+        val left = (centerX + (start.left - startX) * applied).roundToInt()
+            .coerceIn(stable.left, stable.right - result.visible.width())
+        val top = (centerY + (start.top - startY) * applied).roundToInt()
+            .coerceIn(stable.top, stable.bottom - result.visible.height())
+        result.visible.offsetTo(left, top)
+        result.logical.offsetTo(left.coerceIn(stable.left, stable.right - result.logical.width()),
+            top.coerceIn(stable.top, stable.bottom - result.logical.height()))
+        return result
+    }
+
     /**
      * Selection belongs to one gesture; the original ratio belongs to the floating session.
      * [reshaping] is decided by the gesture's first movement: along one axis it changes the
