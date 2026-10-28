@@ -12,8 +12,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement.spacedBy
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -21,14 +24,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +55,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -61,10 +66,22 @@ import com.android.systemui.brightness.ui.viewmodel.BrightnessSliderViewModel
 import com.android.systemui.brightness.ui.viewmodel.Drag
 import com.android.systemui.qs.panels.ui.compose.GridLayout
 import com.android.systemui.qs.panels.ui.compose.TileListener
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSActiveFill
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGap
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridFooterHeight
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridHeadroom
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridRows
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSMinGridRows
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSSliderFill
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSTileRim
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
-import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGap
-import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSTileRim
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGridRows
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTileSize
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSIconRowGap
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSPress
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSSpring
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSTileLabelHide
 import com.android.systemui.qs.panels.ui.viewmodel.TileViewModel
 import com.android.systemui.res.R
 import kotlinx.coroutines.launch
@@ -74,23 +91,87 @@ private val COLOROS_WIFI_SPECS = listOf("internet", "wifi")
 private val COLOROS_DATA_SPECS = listOf("cell", "mobile_data", "mobiledata")
 private val COLOROS_BT_SPECS = listOf("bt", "bluetooth")
 
+/** The blue of the volume icon, as in the ColorOS panel. */
+private val ColorOSSliderBlue = Color(0xFF0068FF)
+
+/** An icon on the white fill of a slider is black at 70%, not solid black, as in ColorOS. */
+private val ColorOSSliderIconOnFill = Color(0xB3000000)
+
 /** Sun-icon colour at full brightness (the orange of the 🔆 emoji). */
 private val ColorOSBrightnessFull = Color(0xFFFF9F0A)
 
 /** Slider position treated as "full" (allows for rounding of the brightness value). */
 private const val COLOROS_FULL_THRESHOLD = 0.995f
 
-/** Matches the media card's own corner radius (Media.kt clips cards to 32dp). */
+/** Diameter of the selected-mode bubble of the ringer switch, relative to the pill height. */
+private const val ColorOSRingerBubbleRatio = 0.68f
+
+/**
+ * Extra space between the ringer row and the round tiles, ColorOS leaves a bit more there. The
+ * pager adds [ColorOSGridHeadroom] on top of this, inside its bounds, so the gap is 6dp in all.
+ */
+private val ColorOSGridTopPadding = 2.dp
+
+/** Smallest round tile the panel shrinks to before it gives up and scrolls instead. */
+private val ColorOSMinTileSize = 56.dp
+
+/**
+ * How the ColorOS panel is sized: the diameter of the round tiles (which is also the height of the
+ * pills and of the sliders), the rows of round tiles per page, and whether it all fits the screen.
+ */
+internal data class ColorOSFit(val tileSize: Dp, val rows: Int, val fits: Boolean)
+
+/**
+ * Sizes the ColorOS panel for [availableHeight], the height the panel may take inside the Quick
+ * Settings scroller. The tiles keep the width of a column, [columnSize], when that fits. On a
+ * short screen they shrink to the height that does fit, but not below [ColorOSMinTileSize], and
+ * the grid first drops from [ColorOSGridRows] to [ColorOSMinGridRows] rows per page. If even that
+ * does not fit (landscape, tiny screens), the panel keeps its full size and the Quick Settings
+ * scroller takes over, which [ColorOSFit.fits] reports.
+ *
+ * The panel is stacked from, in tiles: the pills (1), the media card and sliders (2), the pills
+ * again (1) and the rows of the grid, plus the gaps, the room for the labels and the pager footer.
+ */
+internal fun colorOSFit(
+    columnSize: Dp,
+    availableHeight: Dp,
+    labelHeight: Dp,
+    iconRowGap: Dp,
+): ColorOSFit {
+    if (availableHeight == Dp.Unspecified || availableHeight <= 0.dp) {
+        return ColorOSFit(columnSize, ColorOSGridRows, fits = true)
+    }
+    for (rows in ColorOSGridRows downTo ColorOSMinGridRows) {
+        // Gaps: between the four blocks (3) and inside the media row (1).
+        val fixed =
+            ColorOSGap * 4 +
+                ColorOSGridTopPadding +
+                ColorOSGridHeadroom +
+                labelHeight * rows +
+                iconRowGap * (rows - 1) +
+                ColorOSGridFooterHeight
+        val tileSize = (availableHeight - fixed) / (4 + rows)
+        if (tileSize >= ColorOSMinTileSize) {
+            return ColorOSFit(minOf(columnSize, tileSize), rows, fits = true)
+        }
+    }
+    return ColorOSFit(columnSize, ColorOSGridRows, fits = false)
+}
+
+/** Corner radius of the glass slot behind the media card, playing or idle. */
 private val ColorOSMediaShape = RoundedCornerShape(32.dp)
 
 /**
  * ColorOS-style expanded Quick Settings.
  *
  * ```
- * [ Wi-Fi         ][ Mobile data   ]
+ * [ Wi-Fi         ][ Bluetooth     ]
  * [ Media        ][ ☀ ][ 🔊 ]          tall brightness + media volume sliders
- * [ Bluetooth     ][ 🔔  📳  🔕     ]   ringer switch
+ * [ 🔔  📳  🔕     ][ Mobile data   ]   ringer switch, mobile data card
  * ( ) ( ) ( ) ( )                       every other tile: round, label below
+ *
+ * The media card spans the first two columns of the round tile grid and each slider is one
+ * column wide, so they line up with the tiles below.
  * ```
  *
  * The fixed tiles are the real tile view models, so they behave exactly like their stock
@@ -108,101 +189,116 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     mediaHost: @Composable (Modifier) -> Unit = {},
     listening: () -> Boolean,
     modifier: Modifier = Modifier,
+    availableHeight: Dp = Dp.Unspecified,
+    onFitChanged: (Boolean) -> Unit = {},
 ) {
     fun pick(specs: List<String>): TileViewModel? =
         specs.firstNotNullOfOrNull { spec -> tiles.firstOrNull { it.spec.spec == spec } }
 
     val wifi = pick(COLOROS_WIFI_SPECS)
-    val data = pick(COLOROS_DATA_SPECS)
     val bt = pick(COLOROS_BT_SPECS)
-    val fixed = listOfNotNull(wifi, data, bt)
+    val data = pick(COLOROS_DATA_SPECS)
+    val fixed = listOfNotNull(wifi, bt, data)
     val rest = remember(tiles, fixed) { tiles.filterNot { it in fixed } }
 
     // The fixed tiles are not part of a grid, so make them listen ourselves.
     TileListener(fixed, listening)
 
-    // Follows the ColorOS tile height (66dp) set in CommonTileDefaults for this style.
-    val tileHeight = CommonTileDefaults.TileHeight
     val glass = colorOSGlass()
 
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = spacedBy(ColorOSGap)) {
-        // Row 1: Wi-Fi + mobile data
-        if (wifi != null || data != null) {
-            Row(horizontalArrangement = spacedBy(ColorOSGap)) {
-                listOfNotNull(wifi, data).forEach { tile ->
-                    with(infiniteGridLayout) {
-                        ColorOSWideTile(tile, listening, Modifier.weight(1f))
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        // ColorOS is built on four equal columns with a 16dp gap. The round tiles, the pills, the
+        // media card and the sliders all take their size from the column width, so the circles
+        // fill their column whatever the screen width is. When the screen is too short for that,
+        // the tiles shrink and the grid loses a row, see colorOSFit.
+        val columnSize = (maxWidth - ColorOSGap * 3) / 4
+        // Without the labels the round tile rows are shorter and further apart.
+        val labelsHidden = rememberQSTileLabelHide()
+        val labelHeight = if (labelsHidden) 0.dp else CommonTileDefaults.ClassicLabelHeight
+        val iconRowGap = colorOSIconRowGap(labelsHidden)
+        val fit =
+            remember(columnSize, availableHeight, labelHeight, iconRowGap) {
+                colorOSFit(columnSize, availableHeight, labelHeight, iconRowGap)
+            }
+        SideEffect { onFitChanged(fit.fits) }
+        val tileSize = fit.tileSize
+        CompositionLocalProvider(
+            LocalColorOSTileSize provides tileSize,
+            LocalColorOSGridRows provides fit.rows,
+        ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = spacedBy(ColorOSGap)) {
+                // Row 1: Wi-Fi + Bluetooth
+                if (wifi != null || bt != null) {
+                    Row(horizontalArrangement = spacedBy(ColorOSGap)) {
+                        listOfNotNull(wifi, bt).forEach { tile ->
+                            with(infiniteGridLayout) {
+                                ColorOSWideTile(tile, listening, Modifier.weight(1f))
+                            }
+                        }
+                        if (wifi == null || bt == null) Box(Modifier.weight(1f))
                     }
                 }
-                if (wifi == null || data == null) Box(Modifier.weight(1f))
-            }
-        }
 
-        // Row 2: media + tall brightness + tall volume
-        Row(
-            horizontalArrangement = spacedBy(ColorOSGap),
-            modifier = Modifier.height(tileHeight * 2 + ColorOSGap),
-        ) {
-            Box(
-                modifier =
-                    Modifier.weight(2f)
-                        .fillMaxHeight()
-                        // While media plays, the player card is the whole slot: no glass behind
-                        // it, same corner radius as the card (32dp) so there is a single outline.
-                        .then(
-                            if (showMedia) Modifier.clip(ColorOSMediaShape)
-                            else Modifier.glassSurface(glass, ColorOSMediaShape)
-                        ),
-                contentAlignment = Alignment.Center,
+                // Row 2: media + tall brightness + tall volume, on the same four columns as the round
+            // tiles below: the media card covers columns 1-2 and each slider one of columns 3-4.
+            Row(
+                horizontalArrangement = spacedBy(ColorOSGap),
+                modifier = Modifier.fillMaxWidth().height(tileSize * 2 + ColorOSGap),
             ) {
-                mediaHost(Modifier.matchParentSize())
-                if (showMedia) {
-                    media(Modifier.fillMaxSize())
-                } else {
-                    Text(
-                        text = stringResource(R.string.qs_coloros_no_media),
-                        color = glass.secondaryText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Center,
-                    )
+                Box(
+                    modifier =
+                        Modifier.width(columnSize * 2 + ColorOSGap)
+                            .fillMaxHeight()
+                            // Playing and idle share the same glass slot, like the other ColorOS
+                            // cards, the media card only lays out its content on it.
+                            .glassSurface(glass, ColorOSMediaShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    mediaHost(Modifier.matchParentSize())
+                    if (showMedia) {
+                        media(Modifier.fillMaxSize())
+                    } else {
+                        ColorOSIdleMediaCard(Modifier.fillMaxSize())
+                    }
                 }
-            }
-            ColorOSBrightnessSlider(
-                viewModel = brightnessViewModel,
-                glass = glass,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-            ColorOSVolumeSlider(
-                audioVolumeInteractor = audioVolumeInteractor,
-                glass = glass,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-        }
-
-        // Row 3: Bluetooth + ringer switch
-        Row(horizontalArrangement = spacedBy(ColorOSGap)) {
-            if (bt != null) {
-                with(infiniteGridLayout) { ColorOSWideTile(bt, listening, Modifier.weight(1f)) }
-            } else {
-                Box(Modifier.weight(1f))
-            }
-            ColorOSRingerSwitch(
-                audioVolumeInteractor = audioVolumeInteractor,
-                glass = glass,
-                height = tileHeight,
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        // Everything else: round icon tiles with labels (the grid handles paging + listening)
-        if (rest.isNotEmpty()) {
-            with(gridLayout) {
-                TileGrid(
-                    tiles = rest,
-                    modifier = Modifier.fillMaxWidth(),
-                    listening = listening,
-                    enableRevealEffect = false,
+                ColorOSBrightnessSlider(
+                    viewModel = brightnessViewModel,
+                    glass = glass,
+                    modifier = Modifier.width(columnSize).fillMaxHeight(),
                 )
+                ColorOSVolumeSlider(
+                    audioVolumeInteractor = audioVolumeInteractor,
+                    glass = glass,
+                    modifier = Modifier.width(columnSize).fillMaxHeight(),
+                )
+            }
+
+            // Row 3: ringer switch + mobile data. ColorOS keeps the ringer switch on the left next
+                // to the mobile data card, and on the right when there is no card to put beside it.
+                Row(horizontalArrangement = spacedBy(ColorOSGap)) {
+                    if (data == null) Box(Modifier.weight(1f))
+                    ColorOSRingerSwitch(
+                        audioVolumeInteractor = audioVolumeInteractor,
+                        glass = glass,
+                        height = tileSize,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (data != null) {
+                        with(infiniteGridLayout) { ColorOSWideTile(data, listening, Modifier.weight(1f)) }
+                    }
+                }
+
+                // Everything else: round icon tiles with labels (the grid handles paging + listening)
+                if (rest.isNotEmpty()) {
+                    with(gridLayout) {
+                        TileGrid(
+                            tiles = rest,
+                            modifier = Modifier.fillMaxWidth().padding(top = ColorOSGridTopPadding),
+                            listening = listening,
+                            enableRevealEffect = false,
+                        )
+                    }
+                }
             }
         }
     }
@@ -213,7 +309,6 @@ private data class ColorOSGlass(
     val fill: Color,
     val iconOff: Color,
     val accent: Color,
-    val secondaryText: Color,
     val dark: Boolean,
 )
 
@@ -221,12 +316,11 @@ private data class ColorOSGlass(
 private fun colorOSGlass(): ColorOSGlass {
     val onSurface = MaterialTheme.colorScheme.onSurface
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val accent = Color(0xFF1677FF)
+    val accent = ColorOSSliderBlue
     return ColorOSGlass(
         fill = if (dark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.55f),
         iconOff = onSurface,
         accent = accent,
-        secondaryText = onSurface.copy(alpha = 0.70f),
         dark = dark,
     )
 }
@@ -261,6 +355,7 @@ private fun ColorOSVerticalSlider(
     Box(
         modifier =
             modifier
+                .colorOSStretch()
                 .glassSurface(glass, shape)
                 .semantics { contentDescription = label }
                 .pointerInput(Unit) {
@@ -291,7 +386,7 @@ private fun ColorOSVerticalSlider(
                 Modifier.align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(local.coerceIn(0.001f, 1f))
-                    .background(Color.White)
+                    .background(ColorOSSliderFill)
         )
         Icon(
             painter = painterResource(iconRes),
@@ -325,7 +420,7 @@ private fun ColorOSBrightnessSlider(
     ColorOSVerticalSlider(
         fraction = fraction,
         iconRes = BrightnessSliderViewModel.getIconForPercentage(fraction * 100f),
-        iconTint = Color(0xFF1A1A1A),
+        iconTint = ColorOSSliderIconOnFill,
         // At full brightness only the sun icon turns orange, like the 🔆 emoji.
         fullIconTint = ColorOSBrightnessFull,
         label = stringResource(R.string.quick_settings_brightness_dialog_title),
@@ -369,16 +464,10 @@ private fun ColorOSVolumeSlider(
 }
 
 /**
- * ColorOS-style colour for each sound mode: ring = blue, vibrate = orange, silent = red.
- * Light panel: coloured bubble with a white icon. Dark panel: white bubble with a coloured icon,
- * the same pairing the active QS tiles use.
+ * ColorOS colours the selected sound mode red whichever mode it is. Light panel: red bubble with a
+ * white icon. Dark panel: white bubble with a red icon, the same pairing the active QS tiles use.
  */
-private fun colorOSRingerColor(mode: Int): Color =
-    when (mode) {
-        AudioManager.RINGER_MODE_NORMAL -> Color(0xFF1677FF)
-        AudioManager.RINGER_MODE_VIBRATE -> Color(0xFFFF8A00)
-        else -> Color(0xFFF2453D)
-    }
+private val ColorOSRingerRed = Color(0xFFF2453D)
 
 @Composable
 private fun ColorOSRingerSwitch(
@@ -409,40 +498,56 @@ private fun ColorOSRingerSwitch(
             ),
         )
     val shape = RoundedCornerShape(percent = 50)
-    val bubble = height - 18.dp
+    val bubble = height * ColorOSRingerBubbleRatio
 
     Row(
         modifier =
-            modifier.height(height).glassSurface(glass, shape).padding(horizontal = 9.dp),
+            modifier.height(height).glassSurface(glass, shape).padding(horizontal = 5.dp),
         horizontalArrangement = spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         modes.forEach { (mode, icon, label) ->
             val selected = ringerMode.value == mode
-            val modeColor = colorOSRingerColor(mode)
+            val modeColor = ColorOSRingerRed
+            val pressSource = remember { MutableInteractionSource() }
             Box(
-                modifier = Modifier.weight(1f).fillMaxSize(),
+                modifier =
+                    Modifier.weight(1f)
+                        .fillMaxSize()
+                        .colorOSPress(
+                            pressSource,
+                            press = colorOSSpring(0.18f, 0.13f),
+                            release = colorOSSpring(0.62f, 0.35f),
+                        ),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     modifier =
-                        Modifier.size(bubble)
+                        // requiredSize: the slot can be a little narrower than the bubble on
+                        // small screens, and size() would squash the circle into an oval.
+                        Modifier.requiredSize(bubble)
                             .clip(CircleShape)
                             .background(
                                 when {
                                     !selected -> Color.Transparent
-                                    glass.dark -> Color.White
+                                    glass.dark -> ColorOSActiveFill
                                     else -> modeColor
                                 }
                             )
                             .semantics { contentDescription = label }
                             .pointerInput(mode) {
                                 awaitEachGesture {
-                                    awaitFirstDown().consume()
+                                    val down = awaitFirstDown()
+                                    down.consume()
+                                    val press = PressInteraction.Press(down.position)
+                                    pressSource.tryEmit(press)
                                     val up = waitForUpOrCancellation()
                                     if (up != null) {
                                         up.consume()
+                                        pressSource.tryEmit(PressInteraction.Release(press))
                                         audioManager?.setRingerModeInternal(mode)
+                                    } else {
+                                        pressSource.tryEmit(PressInteraction.Cancel(press))
                                     }
                                 }
                             },
