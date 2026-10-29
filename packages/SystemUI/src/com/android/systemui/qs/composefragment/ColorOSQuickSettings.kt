@@ -7,6 +7,12 @@ package com.android.systemui.qs.composefragment
 
 import android.media.AudioManager
 import androidx.annotation.DrawableRes
+import androidx.annotation.RawRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -47,9 +53,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -58,6 +67,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.airbnb.lottie.LottieProperty
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.rememberLottieComposition
+import com.airbnb.lottie.compose.rememberLottieDynamicProperties
+import com.airbnb.lottie.compose.rememberLottieDynamicProperty
 import com.android.compose.animation.scene.ContentScope
 import com.android.settingslib.volume.domain.interactor.AudioVolumeInteractor
 import com.android.settingslib.volume.shared.model.AudioStream
@@ -469,6 +484,29 @@ private fun ColorOSVolumeSlider(
  */
 private val ColorOSRingerRed = Color(0xFFF2453D)
 
+/** How far the end buttons are pulled towards the middle, in segments, by the selected bubble. */
+private const val ColorOSRingerNudge = 0.1f
+
+private class ColorOSRingerMode(
+    val mode: Int,
+    @DrawableRes val icon: Int,
+    @RawRes val animation: Int,
+    val label: String,
+)
+
+/** Which way the button at [index] leans: the ends of the switch lean in, towards the middle. */
+private fun colorOSRingerNudge(index: Int, selected: Int, last: Int): Float =
+    when (selected) {
+        0 -> 1f
+        last -> -1f
+        else ->
+            when (index) {
+                0 -> 1f
+                last -> -1f
+                else -> 0f
+            }
+    }
+
 @Composable
 private fun ColorOSRingerSwitch(
     audioVolumeInteractor: AudioVolumeInteractor,
@@ -481,91 +519,177 @@ private fun ColorOSRingerSwitch(
     val ringerMode by audioVolumeInteractor.ringerMode.collectAsStateWithLifecycle()
     val modes =
         listOf(
-            Triple(
+            ColorOSRingerMode(
                 AudioManager.RINGER_MODE_NORMAL,
                 R.drawable.ic_volume_ringer,
+                R.raw.coloros_ringer_normal,
                 stringResource(R.string.volume_ringer_status_normal),
             ),
-            Triple(
+            ColorOSRingerMode(
                 AudioManager.RINGER_MODE_VIBRATE,
                 R.drawable.ic_volume_ringer_vibrate,
+                R.raw.coloros_ringer_vibrate,
                 stringResource(R.string.volume_ringer_status_vibrate),
             ),
-            Triple(
+            ColorOSRingerMode(
                 AudioManager.RINGER_MODE_SILENT,
                 R.drawable.ic_volume_ringer_mute,
+                R.raw.coloros_ringer_silent,
                 stringResource(R.string.volume_ringer_status_silent),
             ),
         )
     val shape = RoundedCornerShape(percent = 50)
     val bubble = height * ColorOSRingerBubbleRatio
+    val selected = modes.indexOfFirst { it.mode == ringerMode.value }.coerceAtLeast(0)
+    val last = modes.lastIndex
 
-    Row(
-        modifier =
-            modifier.height(height).glassSurface(glass, shape).padding(horizontal = 5.dp),
-        horizontalArrangement = spacedBy(0.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    BoxWithConstraints(
+        modifier = modifier.height(height).glassSurface(glass, shape).padding(horizontal = 5.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        modes.forEach { (mode, icon, label) ->
-            val selected = ringerMode.value == mode
-            val modeColor = ColorOSRingerRed
-            val pressSource = remember { MutableInteractionSource() }
-            Box(
-                modifier =
-                    Modifier.weight(1f)
-                        .fillMaxSize()
-                        .colorOSPress(
-                            pressSource,
-                            press = colorOSSpring(0.18f, 0.13f),
-                            release = colorOSSpring(0.62f, 0.35f),
-                        ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier =
-                        // requiredSize: the slot can be a little narrower than the bubble on
-                        // small screens, and size() would squash the circle into an oval.
-                        Modifier.requiredSize(bubble)
-                            .clip(CircleShape)
-                            .background(
-                                when {
-                                    !selected -> Color.Transparent
-                                    glass.dark -> ColorOSActiveFill
-                                    else -> modeColor
-                                }
-                            )
-                            .semantics { contentDescription = label }
-                            .pointerInput(mode) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown()
-                                    down.consume()
-                                    val press = PressInteraction.Press(down.position)
-                                    pressSource.tryEmit(press)
-                                    val up = waitForUpOrCancellation()
-                                    if (up != null) {
-                                        up.consume()
-                                        pressSource.tryEmit(PressInteraction.Release(press))
-                                        audioManager?.setRingerModeInternal(mode)
-                                    } else {
-                                        pressSource.tryEmit(PressInteraction.Cancel(press))
-                                    }
-                                }
-                            },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        painter = painterResource(icon),
-                        contentDescription = null,
-                        tint =
-                            when {
-                                !selected -> glass.iconOff
-                                glass.dark -> modeColor
-                                else -> Color.White
-                            },
-                        modifier = Modifier.size(24.dp),
+        val density = LocalDensity.current
+        val segmentPx = with(density) { maxWidth.toPx() } / modes.size
+        val bubblePx = with(density) { bubble.toPx() }
+        val nudge = { index: Int ->
+            colorOSRingerNudge(index, selected, last) * ColorOSRingerNudge * segmentPx
+        }
+        // One bubble slides to the selected mode, it leans a little towards the middle when it
+        // sits at an end. The buttons lean with it.
+        val indicatorX by
+            animateFloatAsState(
+                selected * segmentPx + (segmentPx - bubblePx) / 2f + nudge(selected),
+                colorOSSpring(0.25f, 0.3f),
+                label = "colorOSRingerIndicator",
+            )
+        // requiredSize: the slot can be a little narrower than the bubble on small screens, and
+        // size() would squash the circle into an oval.
+        Box(
+            Modifier.graphicsLayer { translationX = indicatorX }
+                .requiredSize(bubble)
+                .background(if (glass.dark) ColorOSActiveFill else ColorOSRingerRed, CircleShape)
+        )
+        Row(Modifier.fillMaxSize()) {
+            modes.forEachIndexed { index, mode ->
+                val shift by
+                    animateFloatAsState(
+                        nudge(index),
+                        colorOSSpring(0f, 0.35f),
+                        label = "colorOSRingerNudge",
                     )
-                }
+                ColorOSRingerButton(
+                    mode = mode,
+                    selected = index == selected,
+                    glass = glass,
+                    audioManager = audioManager,
+                    modifier =
+                        Modifier.weight(1f).fillMaxHeight().graphicsLayer { translationX = shift },
+                )
             }
+        }
+    }
+}
+
+/**
+ * One mode of the ringer switch. Its icon is red on the white bubble of a dark panel and white on
+ * the red bubble of a light one, it grows a little and plays its animation when it gets selected.
+ */
+@Composable
+private fun ColorOSRingerButton(
+    mode: ColorOSRingerMode,
+    selected: Boolean,
+    glass: ColorOSGlass,
+    audioManager: AudioManager?,
+    modifier: Modifier = Modifier,
+) {
+    val pressSource = remember { MutableInteractionSource() }
+    val scale by
+        animateFloatAsState(
+            if (selected) 1.2f else 1f,
+            colorOSSpring(0f, 0.25f),
+            label = "colorOSRingerScale",
+        )
+    val color by
+        animateColorAsState(
+            when {
+                !selected -> glass.iconOff
+                glass.dark -> ColorOSRingerRed
+                else -> Color.White
+            },
+            colorOSSpring(0f, 0.3f),
+            label = "colorOSRingerColor",
+        )
+    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(mode.animation))
+    val progress = remember { Animatable(1f) }
+    var wasSelected by remember { mutableStateOf(selected) }
+    LaunchedEffect(selected, composition) {
+        val clip = composition ?: return@LaunchedEffect
+        if (selected == wasSelected) return@LaunchedEffect
+        wasSelected = selected
+        if (!selected) {
+            progress.snapTo(1f)
+            return@LaunchedEffect
+        }
+        progress.snapTo(0f)
+        progress.animateTo(1f, tween(clip.duration.toInt(), easing = LinearEasing))
+    }
+
+    Box(
+        modifier =
+            modifier
+                .colorOSPress(
+                    pressSource,
+                    press = colorOSSpring(0.18f, 0.13f),
+                    release = colorOSSpring(0.62f, 0.35f),
+                )
+                .semantics { contentDescription = mode.label }
+                .pointerInput(mode.mode) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        down.consume()
+                        val press = PressInteraction.Press(down.position)
+                        pressSource.tryEmit(press)
+                        val up = waitForUpOrCancellation()
+                        if (up != null) {
+                            up.consume()
+                            pressSource.tryEmit(PressInteraction.Release(press))
+                            audioManager?.setRingerModeInternal(mode.mode)
+                        } else {
+                            pressSource.tryEmit(PressInteraction.Cancel(press))
+                        }
+                    }
+                },
+        contentAlignment = Alignment.Center,
+    ) {
+        val iconModifier =
+            Modifier.size(22.dp).graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+        val clip = composition
+        if (clip != null) {
+            // One colour for the whole animation, so it follows the icon colour above.
+            val properties =
+                rememberLottieDynamicProperties(
+                    rememberLottieDynamicProperty(LottieProperty.COLOR, color.toArgb(), "**"),
+                    rememberLottieDynamicProperty(
+                        LottieProperty.STROKE_COLOR,
+                        color.toArgb(),
+                        "**",
+                    ),
+                )
+            LottieAnimation(
+                composition = clip,
+                progress = { progress.value },
+                dynamicProperties = properties,
+                modifier = iconModifier,
+            )
+        } else {
+            Icon(
+                painter = painterResource(mode.icon),
+                contentDescription = null,
+                tint = color,
+                modifier = iconModifier,
+            )
         }
     }
 }
