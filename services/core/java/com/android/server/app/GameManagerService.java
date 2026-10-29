@@ -2324,6 +2324,13 @@ public final class GameManagerService extends IGameManagerService.Stub {
     private static native void nativeSetGameModeFrameRateOverride(int uid, float frameRate);
     private static native void nativeSetGameDefaultFrameRateOverride(int uid, float frameRate);
 
+    @Override
+    public void reportGameScene(int uid, int pid, int scene) {
+        checkPermission(Manifest.permission.MANAGE_GAME_ACTIVITY);
+        if (uid < 0 || pid <= 0 || scene < 0 || scene > 100000) return;
+        mGamePolicyClient.reportScene(uid, pid, scene);
+    }
+
     private io.github.miner7222.gamepolicy.GameSession resolveGamePolicySession(
             String packageName, int userId) {
         if (userId != ActivityManager.getCurrentUser() || !isPackageGame(packageName, userId)) {
