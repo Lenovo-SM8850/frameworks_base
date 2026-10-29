@@ -239,7 +239,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
         super(PermissionEnforcer.fromContext(context));
         mContext = context;
         mHandler = new SettingsHandler(looper);
-        mGamePolicyClient = new GamePolicyClient(mHandler,
+        mGamePolicyClient = new GamePolicyClient(mContext, mHandler,
                 this::resolveGamePolicySession);
         mPackageManager = mContext.getPackageManager();
         mUserManager = mContext.getSystemService(UserManager.class);
