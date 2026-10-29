@@ -21,7 +21,7 @@ import java.util.function.BiFunction;
 import io.github.miner7222.gamepolicy.GameSession;
 import io.github.miner7222.gamepolicy.IGamePolicy;
 
-/** Sends verified visible-game sessions; all state is confined to the service handler. */
+/** Sends verified visible-game sessions; session mutations and sends use the service handler. */
 final class GamePolicyClient {
     private static final String TAG = "GamePolicyClient";
     private static final String SERVICE = IGamePolicy.DESCRIPTOR + "/default";
@@ -31,7 +31,7 @@ final class GamePolicyClient {
     private final Runnable mUpdate = this::update;
     private final IBinder.DeathRecipient mDeath;
     private IGamePolicy mService;
-    private GameSession mSent;
+    private volatile GameSession mSent;
     private String mPackage;
     private int mUserId;
     private long mGeneration;
@@ -68,6 +68,27 @@ final class GamePolicyClient {
 
     void refresh() {
         mHandler.post(mUpdate);
+    }
+
+    void reportScene(int uid, int pid, int scene) {
+        final GameSession sent = mSent;
+        if (sent == null || sent.uid != uid || sent.pid != pid) return;
+        final android.app.ActivityManagerInternal activityManager =
+                LocalServices.getService(android.app.ActivityManagerInternal.class);
+        if (activityManager == null || activityManager.getProcessStartTimeTicks(
+                pid, uid, sent.packageName) != sent.processStartTimeTicks) return;
+        mHandler.post(() -> {
+            if (mSent != sent || mService == null || mPackage == null) return;
+            // Resolve again on this handler: a queued report cannot follow a process
+            // restart, package change, visibility loss or mode change into a new session.
+            final GameSession current = mResolver.apply(mPackage, mUserId);
+            if (current == null || !sameSession(current, mSent)) return;
+            try {
+                mService.reportScene(mSent.generation, scene, mToken);
+            } catch (RemoteException | RuntimeException e) {
+                refresh();
+            }
+        });
     }
 
     private void update() {
