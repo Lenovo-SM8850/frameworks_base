@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -93,6 +94,9 @@ private val ColorOSMediaArtSize = 46.dp
 private val ColorOSMediaArtShape = RoundedCornerShape(10.dp)
 private val ColorOSMediaButtonSize = 44.dp
 private val ColorOSMediaOutputIconSize = 24.dp
+
+/** Corner radius of the glass slot the card sits on, which the light along its edge follows. */
+private val ColorOSMediaLightCorner = 32.dp
 
 /** Colour of the text and icons of the card while the album art fills it. */
 private val ColorOSMediaOnArt = Color.White
@@ -161,7 +165,25 @@ internal fun ColorOSMediaCard(
     val prevIsStandard = prev != null && prev.icon === MediaControlDrawables.getPrevIcon(context)
     val nextIsStandard = next != null && next.icon === MediaControlDrawables.getNextIcon(context)
 
-    Box(modifier) {
+    // The light in the color of the art starts from the thumbnail. With the art over the whole
+    // card the art is the light, so it has none.
+    val density = LocalDensity.current
+    val thumbnailCenter =
+        with(density) {
+            Offset(
+                (16.dp + ColorOSMediaArtSize / 2).toPx(),
+                (14.dp + ColorOSMediaArtSize / 2).toPx(),
+            )
+        }
+    Box(
+        modifier.then(
+            if (fillArt) {
+                Modifier
+            } else {
+                Modifier.colorOSMediaLight(art, ColorOSMediaLightCorner, thumbnailCenter)
+            }
+        )
+    ) {
         if (fillArt && art != null) {
             Image(
                 bitmap = art,
