@@ -83,10 +83,12 @@ abstract class LyricViewController(
             }
 
             override fun onPlainLyricsAvailable(plainLyrics: String) {
-                if (!enabled) return
-                mediaLyricsActive = true
-                textSwitcher.setText(plainLyrics)
-                startLyric()
+                // Unsynced lyrics are a whole text without timing; one status bar line
+                // cannot show them, so leave the bar to the notification ticker.
+                if (mediaLyricsActive) {
+                    mediaLyricsActive = false
+                    stopLyric()
+                }
             }
 
             override fun onLyricsCleared() {
