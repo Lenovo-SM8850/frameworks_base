@@ -74,6 +74,12 @@
 -keepclassmembers class com.android.server.** {
   native <methods>;
 }
+
+# Private presentation listener registered and invoked through JNI.
+-keep class com.android.server.app.GamePolicyClient {
+  native <methods>;
+}
+-keep class com.android.server.app.GamePolicyClient$FrameCallback { *; }
 # TODO(b/210510433): Revisit and fix with @Keep, or consider auto-generating from
 # frameworks/base/services/core/jni/onload.cpp.
 -keep,allowoptimization,allowaccessmodification class com.android.server.broadcastradio.hal1.BroadcastRadioService { *; }
