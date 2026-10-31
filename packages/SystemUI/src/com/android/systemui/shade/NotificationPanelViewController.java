@@ -290,9 +290,8 @@ public final class NotificationPanelViewController implements
             "lineagesystem:" + LineageSettings.System.DOUBLE_TAP_SLEEP_GESTURE;
     private static final String STATUS_BAR_TRIPLE_TAP_FREEFORM =
             "system:" + Settings.System.STATUS_BAR_TRIPLE_TAP_FREEFORM;
-    private static final String LMO_FREEFORM_PACKAGE = "com.libremobileos.freeform";
-    private static final String LMO_FREEFORM_START_ACTION =
-            "com.libremobileos.freeform.START_FREEFORM";
+    private static final String ACTION_LAUNCH_FLOATING_WINDOW =
+            "com.android.wm.shell.action.LAUNCH_FLOATING_WINDOW";
     private static final long TRIPLE_TAP_TIMEOUT_MS = 200L;
     private static final String STATUS_BAR_BRIGHTNESS_CONTROL =
             "system:" + Settings.System.STATUS_BAR_BRIGHTNESS_CONTROL;
@@ -4121,11 +4120,10 @@ public final class NotificationPanelViewController implements
     }
 
     /**
-     * Opens the app currently in the foreground of this display in an LMOFreeform window.
+     * Opens the app currently in the foreground of this display in a floating window.
      *
-     * <p>This mirrors the broadcast used by the PixelLauncherEnhanced module's LMO freeform
-     * variant. Passing the running task id makes LMOFreeform move that existing task into its
-     * freeform display instead of launching a new instance of the activity.
+     * <p>Passing the running task id makes Shell move that existing task into a floating window
+     * instead of launching a new instance of the activity.
      */
     private void openCurrentAppInFreeform() {
         if (mBarState != StatusBarState.SHADE) {
@@ -4149,13 +4147,11 @@ public final class NotificationPanelViewController implements
             // Nothing sensible to put in a freeform window.
             return;
         }
-        final Intent intent = new Intent(LMO_FREEFORM_START_ACTION)
-                .setPackage(LMO_FREEFORM_PACKAGE)
-                .putExtra("packageName", task.topActivity.getPackageName())
-                .putExtra("activityName", task.topActivity.getClassName())
-                .putExtra("userId", task.userId)
-                .putExtra("taskId", task.taskId);
-        mView.getContext().sendBroadcastAsUser(intent, UserHandle.CURRENT);
+        final Intent intent = new Intent(ACTION_LAUNCH_FLOATING_WINDOW)
+                .setPackage(mView.getContext().getPackageName())
+                .putExtra("task_id", task.taskId);
+        // Shell only moves tasks that belong to the user the broadcast was sent to.
+        mView.getContext().sendBroadcastAsUser(intent, UserHandle.of(task.userId));
     }
 
     /** Handles MotionEvents for the Shade. */
