@@ -1273,6 +1273,53 @@ public class GameManagerServiceTests {
         checkFps(service, GameManager.GAME_MODE_BATTERY, 30);
     }
 
+    @Test
+    public void testStandardModeExplicitOverrideAppliesAndResets() {
+        mockDeviceConfigAll();
+        mockModifyGameModeGranted();
+        GameManagerService service = Mockito.spy(createServiceAndStartUser(USER_ID_1));
+        clearInvocations(service);
+        service.setGameModeConfigOverride(mPackageName, USER_ID_1,
+                GameManager.GAME_MODE_STANDARD, "30", "0.7");
+        verify(service).setGameModeFrameRateOverride(DEFAULT_PACKAGE_UID, 30.0f);
+        assertEquals(0.7f, service.getResolutionScalingFactor(mPackageName,
+                GameManager.GAME_MODE_STANDARD, USER_ID_1), 0.001f);
+
+        clearInvocations(service);
+        service.resetGameModeConfigOverride(mPackageName, USER_ID_1,
+                GameManager.GAME_MODE_STANDARD);
+        verify(service).setGameModeFrameRateOverride(DEFAULT_PACKAGE_UID, 0.0f);
+        assertEquals(-1.0f, service.getResolutionScalingFactor(mPackageName,
+                GameManager.GAME_MODE_STANDARD, USER_ID_1), 0.001f);
+    }
+
+    @Test
+    public void testStandardModeScalingOnlyOverride() {
+        mockDeviceConfigAll();
+        mockModifyGameModeGranted();
+        GameManagerService service = Mockito.spy(createServiceAndStartUser(USER_ID_1));
+        clearInvocations(service);
+        service.setGameModeConfigOverride(mPackageName, USER_ID_1,
+                GameManager.GAME_MODE_STANDARD, null, "0.8");
+        verify(service).setGameModeFrameRateOverride(DEFAULT_PACKAGE_UID, 0.0f);
+        assertEquals(0.8f, service.getResolutionScalingFactor(mPackageName,
+                GameManager.GAME_MODE_STANDARD, USER_ID_1), 0.001f);
+    }
+
+    @Test
+    public void testStandardModeWithoutOwnOverrideResetsFps() {
+        mockDeviceConfigAll();
+        mockModifyGameModeGranted();
+        GameManagerService service = Mockito.spy(createServiceAndStartUser(USER_ID_1));
+        service.setGameModeConfigOverride(mPackageName, USER_ID_1,
+                GameManager.GAME_MODE_PERFORMANCE, "60", "0.5");
+        clearInvocations(service);
+        service.setGameMode(mPackageName, GameManager.GAME_MODE_STANDARD, USER_ID_1);
+        verify(service).setGameModeFrameRateOverride(DEFAULT_PACKAGE_UID, 0.0f);
+        assertEquals(-1.0f, service.getResolutionScalingFactor(mPackageName,
+                GameManager.GAME_MODE_STANDARD, USER_ID_1), 0.001f);
+    }
+
     /**
      * PERFORMANCE game mode is configured through Phenotype, but the app has also opted into the
      * same mode. No interventions for this game mode should be available in this case.
