@@ -49,8 +49,12 @@ struct GameFrameCallback : public gui::BnGameFrameListener {
         if (!callback) return binder::Status::ok();
         env->CallVoidMethod(callback, gGameFrameReported, static_cast<jfloat>(stats.fps),
                             static_cast<jint>(stats.appJankFrames), static_cast<jint>(stats.totalFrames),
-                            static_cast<jint>(stats.windowMs), static_cast<jboolean>(stats.layerChanged),
-                            static_cast<jboolean>(stats.stalled));
+                            static_cast<jint>(stats.windowMs),
+                            static_cast<jint>(stats.maxFrameTimeUs),
+                            static_cast<jboolean>(stats.layerChanged),
+                            static_cast<jboolean>(stats.stalled),
+                            static_cast<jfloat>(stats.requestedFps),
+                            static_cast<jfloat>(stats.throttleFps));
         env->DeleteLocalRef(callback);
         if (env->ExceptionCheck()) {
             ALOGE("Game frame callback failed");
@@ -155,7 +159,7 @@ int register_com_android_server_wm_TaskFpsCallbackController(JNIEnv* env) {
                                            gGameFrameMethods, NELEM(gGameFrameMethods));
     LOG_ALWAYS_FATAL_IF(frameRes < 0, "Unable to register game frame native methods");
     jclass frameCallback = env->FindClass("com/android/server/app/GamePolicyClient$FrameCallback");
-    gGameFrameReported = env->GetMethodID(frameCallback, "onFrameReported", "(FIIIZZ)V");
+    gGameFrameReported = env->GetMethodID(frameCallback, "onFrameReported", "(FIIIIZZFF)V");
     LOG_ALWAYS_FATAL_IF(!gGameFrameReported, "Unable to find game frame callback");
     int res = jniRegisterNativeMethods(env, "com/android/server/wm/TaskFpsCallbackController",
                                        gMethods, NELEM(gMethods));

@@ -17,4 +17,12 @@ interface IGamePolicy {
     /** Presentation feedback from a single game layer; fallback reports carry no jank counts. */
     oneway void reportFrame(long generation, float fps, int appJankFrames, int totalFrames,
                            boolean layerChanged, IBinder client);
+    /**
+     * Like reportFrame, plus the longest present-to-present interval in the window (-1 unknown),
+     * the highest explicit frame rate vote of the game layers (-1 none) and the frame rate limit
+     * set for the game by the game mode intervention (-1 none).
+     */
+    oneway void reportFrameTiming(long generation, float fps, int appJankFrames, int totalFrames,
+                                  int maxFrameTimeUs, boolean layerChanged, float requestedFps,
+                                  float throttleFps, IBinder client);
 }

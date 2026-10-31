@@ -31,6 +31,8 @@ final class GamePolicyClient {
     private final Runnable mUpdate = this::update;
     private final IBinder.DeathRecipient mDeath;
     private IGamePolicy mService;
+    // Interface version of the bound service, read once per connection.
+    private int mServiceVersion;
     private volatile GameSession mSent;
     private String mPackage;
     private int mUserId;
@@ -103,6 +105,7 @@ final class GamePolicyClient {
                 if (binder != null) {
                     binder.linkToDeath(mDeath, 0);
                     mService = IGamePolicy.Stub.asInterface(binder);
+                    mServiceVersion = mService.getInterfaceVersion();
                     reconnected = true;
                 }
             }
@@ -166,13 +169,15 @@ final class GamePolicyClient {
         final FrameCallback frameCallback = new FrameCallback() {
             @Override
             void onFrameReported(float fps, int appJank, int frames, int windowMs,
-                    boolean layerChanged, boolean stalled) {
+                    int maxFrameTimeUs, boolean layerChanged, boolean stalled,
+                    float requestedFps, float throttleFps) {
                 mHandler.post(() -> {
                     if (mFrameCallback != this || mSent == null || mService == null
                             || mSent.generation != generation || windowMs != 500
                             || !Float.isFinite(fps)) return;
                     mLastFrameCallback = SystemClock.uptimeMillis();
-                    sendFrame(stalled ? 0 : fps, appJank, frames, layerChanged);
+                    sendFrame(stalled ? 0 : fps, appJank, frames, stalled ? -1 : maxFrameTimeUs,
+                            layerChanged, requestedFps, throttleFps);
                 });
             }
         };
@@ -232,11 +237,18 @@ final class GamePolicyClient {
         }
     }
 
-    private void sendFrame(float fps, int appJank, int frames, boolean layerChanged) {
+    private void sendFrame(float fps, int appJank, int frames, int maxFrameTimeUs,
+            boolean layerChanged, float requestedFps, float throttleFps) {
         if (mFrameListener == 0 || mSent == null || mService == null
                 || mFpsGeneration != mSent.generation) return;
         try {
-            mService.reportFrame(mFpsGeneration, fps, appJank, frames, layerChanged, mToken);
+            if (mServiceVersion >= 2) {
+                mService.reportFrameTiming(mFpsGeneration, fps, appJank, frames, maxFrameTimeUs,
+                        layerChanged, requestedFps, throttleFps, mToken);
+            } else {
+                // Version 1 services know neither the frame time nor the frame rate signals.
+                mService.reportFrame(mFpsGeneration, fps, appJank, frames, layerChanged, mToken);
+            }
         } catch (RemoteException | RuntimeException e) {
             stopFps();
             refresh();
@@ -245,7 +257,8 @@ final class GamePolicyClient {
 
     private abstract static class FrameCallback {
         abstract void onFrameReported(float fps, int appJank, int frames, int windowMs,
-                boolean layerChanged, boolean stalled);
+                int maxFrameTimeUs, boolean layerChanged, boolean stalled, float requestedFps,
+                float throttleFps);
     }
 
     private static native long nativeRegisterFrameListener(FrameCallback callback, int taskId, int uid);

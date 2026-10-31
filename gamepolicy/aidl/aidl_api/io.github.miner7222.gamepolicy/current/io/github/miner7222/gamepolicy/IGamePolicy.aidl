@@ -25,4 +25,5 @@ interface IGamePolicy {
   oneway void reportFps(long generation, float fps, IBinder client);
   oneway void reportScene(long generation, int scene, IBinder client);
   oneway void reportFrame(long generation, float fps, int appJankFrames, int totalFrames, boolean layerChanged, IBinder client);
+  oneway void reportFrameTiming(long generation, float fps, int appJankFrames, int totalFrames, int maxFrameTimeUs, boolean layerChanged, float requestedFps, float throttleFps, IBinder client);
 }
