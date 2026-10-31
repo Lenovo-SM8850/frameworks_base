@@ -7479,6 +7479,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             if (r == null) {
                 return;
             }
+            // A finished transient launch such as recents no longer holds the per-app rotation.
+            mDisplayRotation.onFocusedAppChanged();
             if (mFixedRotationLaunchingApp == null) {
                 // In most cases this is a no-op if the activity doesn't have fixed rotation.
                 // Otherwise it could be from finishing recents animation while the display has

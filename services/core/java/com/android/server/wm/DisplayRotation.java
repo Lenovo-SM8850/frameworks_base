@@ -971,6 +971,19 @@ public class DisplayRotation {
             return null;
         }
         ActivityRecord app = mDisplayContent.mFocusedApp;
+        // Recents keeps the app it was opened from in transient hide while the launcher has focus.
+        // Keep following that app so the display does not rotate under Overview, which would
+        // cancel the recents transition and leave its task views empty.
+        if (app != null && app.isActivityTypeHomeOrRecents()) {
+            final Task transientHide = mDisplayContent.getRootTask(task ->
+                    task.isActivityTypeStandard()
+                            && mDisplayContent.mTransitionController.isTransientHide(task));
+            final ActivityRecord previous =
+                    transientHide != null ? transientHide.topRunningActivity() : null;
+            if (previous != null) {
+                app = previous;
+            }
+        }
         if (app != null && app.getTask() != null) {
             final ActivityRecord top = app.getTask().topRunningActivity();
             if (top != null) {
