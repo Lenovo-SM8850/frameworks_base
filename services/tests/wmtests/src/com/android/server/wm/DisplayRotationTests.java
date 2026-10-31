@@ -837,6 +837,19 @@ public class DisplayRotationTests {
     }
 
     @Test
+    public void manualAppRotation_embeddedActivityInFullscreenTaskKeepsRotation()
+            throws Exception {
+        final ActivityRecord app = setupManualAppRotation("test.first", 0);
+        acceptRotationSuggestion(Surface.ROTATION_90);
+        when(app.getWindowingMode()).thenReturn(WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW);
+        when(app.isEmbedded()).thenReturn(true);
+        assertEquals(Surface.ROTATION_90, mTarget.getAppRotation());
+        when(app.getTask().getWindowingMode())
+                .thenReturn(WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW);
+        assertEquals(PerAppRotationSettings.NO_ROTATION, mTarget.getAppRotation());
+    }
+
+    @Test
     public void manualAppRotation_homeAndKeyguardUseGlobalLock() throws Exception {
         final ActivityRecord app = setupManualAppRotation("test.first", 0);
         acceptRotationSuggestion(Surface.ROTATION_90);

@@ -978,8 +978,12 @@ public class DisplayRotation {
             }
         }
         while (app != null) {
+            // Activity embedding splits a fullscreen task into multi-window task fragments in
+            // some orientations only. Judge embedded activities by their task, or the saved
+            // rotation would apply and lift again with every split change.
             if (!app.isActivityTypeStandard()
-                    || app.getWindowingMode() != WINDOWING_MODE_FULLSCREEN) {
+                    || (app.getWindowingMode() != WINDOWING_MODE_FULLSCREEN
+                            && !app.isEmbedded())) {
                 return null;
             }
             final Task task = app.getTask();
