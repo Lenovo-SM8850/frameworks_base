@@ -56,6 +56,8 @@ interface IGameManagerService {
     void toggleGameDefaultFrameRate(boolean isEnabled);
     @JavaPassthrough(annotation="@android.annotation.RequiresPermission(android.Manifest.permission.MANAGE_GAME_MODE)")
     void resetGameModeConfigOverride(String packageName, int userId, int gameModeToReset);
+    @JavaPassthrough(annotation="@android.annotation.RequiresPermission(android.Manifest.permission.MANAGE_GAME_MODE)")
+    void setGameModeConfigOverride(String packageName, int userId, int gameMode, String fpsStr, String scaling);
     /** Reports a scene on behalf of a verified active game process. */
     @JavaPassthrough(annotation="@android.annotation.RequiresPermission(android.Manifest.permission.MANAGE_GAME_ACTIVITY)")
     oneway void reportGameScene(int uid, int pid, int scene);

@@ -1738,7 +1738,17 @@ public final class GameManagerService extends IGameManagerService.Stub {
     private void updateInterventions(String packageName,
             @GameMode int gameMode, @UserIdInt int userId) {
         final GamePackageConfiguration packageConfig = getConfig(packageName, userId);
-        if (gameMode == GameManager.GAME_MODE_STANDARD
+        boolean hasStandardOverride = false;
+        if (gameMode == GameManager.GAME_MODE_STANDARD) {
+            synchronized (mLock) {
+                final GameManagerSettings settings = mSettings.get(userId);
+                final GamePackageConfiguration overrideConfig = settings == null ? null
+                        : settings.getConfigOverrideLocked(packageName);
+                hasStandardOverride = overrideConfig != null
+                        && overrideConfig.getGameModeConfiguration(gameMode) != null;
+            }
+        }
+        if ((gameMode == GameManager.GAME_MODE_STANDARD && !hasStandardOverride)
                 || gameMode == GameManager.GAME_MODE_UNSUPPORTED || packageConfig == null
                 || packageConfig.willGamePerformOptimizations(gameMode)
                 || packageConfig.getGameModeConfiguration(gameMode) == null) {
@@ -1762,6 +1772,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
      */
     @VisibleForTesting
     @RequiresPermission(Manifest.permission.MANAGE_GAME_MODE)
+    @Override
     public void setGameModeConfigOverride(String packageName, @UserIdInt int userId,
             @GameMode int gameMode, String fpsStr, String scaling) throws SecurityException {
         checkPermission(Manifest.permission.MANAGE_GAME_MODE);
