@@ -130,6 +130,9 @@ import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.mockito.quality.Strictness;
 
+import org.lineageos.internal.util.DeviceKeysConstants.Action;
+
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -520,12 +523,16 @@ class TestPhoneWindowManager {
         }
     }
 
-    void overrideLongPressOnHomeBehavior(int behavior) {
-        mPhoneWindowManager.mLongPressOnHomeBehavior = behavior;
+    void overrideLongPressOnHomeBehavior(Action action) throws ReflectiveOperationException {
+        final Field field = PhoneWindowManager.class.getDeclaredField("mHomeLongPressAction");
+        field.setAccessible(true);
+        field.set(mPhoneWindowManager, action);
     }
 
-    void overriderDoubleTapOnHomeBehavior(int behavior) {
-        mPhoneWindowManager.mDoubleTapOnHomeBehavior = behavior;
+    void overriderDoubleTapOnHomeBehavior(Action action) throws ReflectiveOperationException {
+        final Field field = PhoneWindowManager.class.getDeclaredField("mHomeDoubleTapAction");
+        field.setAccessible(true);
+        field.set(mPhoneWindowManager, action);
     }
 
     void overrideCanStartDreaming(boolean canDream) {
