@@ -149,7 +149,6 @@ class PipTouchHandlerTest : ShellTestCase() {
         whenever(pipTouchState.lastTouchDelta).thenReturn(mockTouchPosition)
         whenever(pipTouchState.isUserInteracting).thenReturn(true)
         whenever(pipTouchState.allowInputEvents).thenReturn(true)
-        whenever(pipTouchState.latestMotionEvent).thenReturn(mockMotionEvent)
         whenever(pipTransitionState.pinnedTaskLeash).thenReturn(mockLeash)
         whenever(mockPipBoundsState.movementBounds).thenReturn(PIP_BOUNDS)
         whenever(mockPipBoundsState.displayLayout).thenReturn(mockDisplayLayout)
@@ -284,6 +283,7 @@ class PipTouchHandlerTest : ShellTestCase() {
         whenever(mockPipDesktopState.isDraggingPipAcrossDisplaysEnabled()).thenReturn(false)
         whenever(pipTouchState.startedDragging()).thenReturn(true)
         whenever(mockMotionEvent.source).thenReturn(SOURCE_MOUSE)
+        whenever(pipTouchState.latestMotionEventSource).thenReturn(SOURCE_MOUSE)
 
         pipTouchHandler.handleTouchEvent(mockMotionEvent)
         pipTouchGesture.onMove(pipTouchState)
@@ -296,6 +296,7 @@ class PipTouchHandlerTest : ShellTestCase() {
         whenever(mockPipDesktopState.isDraggingPipAcrossDisplaysEnabled()).thenReturn(true)
         whenever(pipTouchState.startedDragging()).thenReturn(true)
         whenever(mockMotionEvent.source).thenReturn(SOURCE_TOUCHSCREEN)
+        whenever(pipTouchState.latestMotionEventSource).thenReturn(SOURCE_TOUCHSCREEN)
 
         pipTouchHandler.handleTouchEvent(mockMotionEvent)
         pipTouchGesture.onMove(pipTouchState)
@@ -308,6 +309,7 @@ class PipTouchHandlerTest : ShellTestCase() {
         whenever(mockPipDesktopState.isDraggingPipAcrossDisplaysEnabled()).thenReturn(true)
         whenever(pipTouchState.startedDragging()).thenReturn(true)
         whenever(mockMotionEvent.source).thenReturn(SOURCE_MOUSE)
+        whenever(pipTouchState.latestMotionEventSource).thenReturn(SOURCE_MOUSE)
 
         pipTouchHandler.handleTouchEvent(mockMotionEvent)
         pipTouchGesture.onMove(pipTouchState)
