@@ -818,6 +818,7 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
     CompatModePackages mCompatModePackages;
 
     private SettingObserver mSettingsObserver;
+    SplitPaneRatioSettings mSplitPaneRatioSettings;
 
     WindowOrganizerController mWindowOrganizerController;
     TaskOrganizerController mTaskOrganizerController;
@@ -929,6 +930,8 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
 
     public void installSystemProviders() {
         mSettingsObserver = new SettingObserver();
+        mSplitPaneRatioSettings = new SplitPaneRatioSettings(this);
+        mSplitPaneRatioSettings.start();
 
         // LineageActivityManager depends on settings so we can initialize only
         // after providers are available.

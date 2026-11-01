@@ -2780,15 +2780,13 @@ public class SizeCompatTests extends WindowTestsBase {
         assertEquals(WINDOWING_MODE_MULTI_WINDOW, mTask.getWindowingMode());
         assertEquals(WINDOWING_MODE_MULTI_WINDOW, mActivity.getWindowingMode());
 
-        // App should launch in fixed orientation letterbox.
-        assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+        // Display aspect ratio letterboxing must not restrict a resizable split-pane activity.
+        assertFalse(mActivity.mAppCompatController.getAspectRatioPolicy()
                 .isLetterboxedForFixedOrientationAndAspectRatio());
         // Checking that there is no size compat mode.
         assertFitted();
-        // Check that the display aspect ratio is used by the app.
-        final float targetMinAspectRatio = 1f * displayHeight / displayWidth;
-        assertEquals(targetMinAspectRatio, computeAspectRatio(mActivity.getBounds()),
-                DELTA_ASPECT_RATIO_TOLERANCE);
+        assertEquals(organizer.mPrimary.getBounds(), mActivity.getBounds());
+        assertEquals(mTask.getConfiguration().orientation, mActivity.getConfiguration().orientation);
     }
 
     @Test
@@ -2815,15 +2813,13 @@ public class SizeCompatTests extends WindowTestsBase {
         assertEquals(WINDOWING_MODE_MULTI_WINDOW, mTask.getWindowingMode());
         assertEquals(WINDOWING_MODE_MULTI_WINDOW, mActivity.getWindowingMode());
 
-        // App should launch in fixed orientation letterbox.
-        assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+        // Display aspect ratio letterboxing must not restrict a resizable split-pane activity.
+        assertFalse(mActivity.mAppCompatController.getAspectRatioPolicy()
                 .isLetterboxedForFixedOrientationAndAspectRatio());
         // Checking that there is no size compat mode.
         assertFitted();
-        // Check that the display aspect ratio is used by the app.
-        final float targetMinAspectRatio = 1f * displayWidth / displayHeight;
-        assertEquals(targetMinAspectRatio, computeAspectRatio(mActivity.getBounds()),
-                DELTA_ASPECT_RATIO_TOLERANCE);
+        assertEquals(organizer.mPrimary.getBounds(), mActivity.getBounds());
+        assertEquals(mTask.getConfiguration().orientation, mActivity.getConfiguration().orientation);
     }
 
     @Test
@@ -3360,25 +3356,161 @@ public class SizeCompatTests extends WindowTestsBase {
     }
 
     @Test
-    public void testResizableFixedOrientationAppInSplitScreen_letterboxForDifferentOrientation() {
-        setUpDisplaySizeWithApp(1000, 2800);
-        final TestSplitOrganizer organizer =
-                new TestSplitOrganizer(mAtm, mActivity.getDisplayContent());
+    public void testResizableFixedOrientationAppInSplitScreen_fillsPortraitPane() {
+        final Task stage = prepareResizableSplitPane(SCREEN_ORIENTATION_LANDSCAPE,
+                new Rect(0, 0, 1000, 1400));
 
-        // Resizable landscape-only activity.
-        prepareLimitedBounds(mActivity, SCREEN_ORIENTATION_LANDSCAPE, /* isUnresizable= */ false);
+        assertFillsSplitPane(stage, ORIENTATION_PORTRAIT, SCREEN_ORIENTATION_LANDSCAPE);
+    }
 
-        final Rect originalBounds = new Rect(mActivity.getBounds());
+    @Test
+    public void testResizableFixedOrientationAppInSplitScreen_fillsLandscapePane() {
+        final Task stage = prepareResizableSplitPane(SCREEN_ORIENTATION_PORTRAIT,
+                new Rect(0, 0, 2000, 1000));
 
-        // Move activity to split screen which takes half of the screen.
-        mTask.reparent(organizer.mPrimary, POSITION_TOP, /* moveParents= */ false, "test");
-        organizer.mPrimary.setBounds(0, 0, 1000, 1400);
-        assertEquals(WINDOWING_MODE_MULTI_WINDOW, mTask.getWindowingMode());
-        assertEquals(WINDOWING_MODE_MULTI_WINDOW, mActivity.getWindowingMode());
+        assertFillsSplitPane(stage, ORIENTATION_LANDSCAPE, SCREEN_ORIENTATION_PORTRAIT);
+    }
 
-        // Resizable activity is not in size compat mode but in the letterbox for fixed orientation.
+    @Test
+    public void testResizableFixedOrientationAppInSplitScreen_keepRatio() {
+        mAtm.mSplitPaneRatioSettings = mock(SplitPaneRatioSettings.class);
+        doReturn(true).when(mAtm.mSplitPaneRatioSettings)
+                .keepsRatioInSplit(anyString(), anyInt());
+        prepareResizableSplitPane(SCREEN_ORIENTATION_LANDSCAPE,
+                new Rect(0, 0, 1000, 1400));
+
         assertFitted();
         assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+                .isLetterboxedForFixedOrientationAndAspectRatio());
+        assertEquals(ORIENTATION_LANDSCAPE, mActivity.getConfiguration().orientation);
+        verify(mAtm.mSplitPaneRatioSettings, atLeastOnce())
+                .keepsRatioInSplit(mActivity.packageName, mActivity.mUserId);
+    }
+
+    @Test
+    public void testResizableFixedOrientationAppInSplitScreen_keepRatioChanges() {
+        mAtm.mSplitPaneRatioSettings = mock(SplitPaneRatioSettings.class);
+        final Task stage = prepareResizableSplitPane(SCREEN_ORIENTATION_LANDSCAPE,
+                new Rect(0, 0, 1000, 1400));
+        assertFillsSplitPane(stage, ORIENTATION_PORTRAIT, SCREEN_ORIENTATION_LANDSCAPE);
+
+        doReturn(true).when(mAtm.mSplitPaneRatioSettings)
+                .keepsRatioInSplit(mActivity.packageName, mActivity.mUserId);
+        mActivity.recomputeConfiguration();
+        assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+                .isLetterboxedForFixedOrientationAndAspectRatio());
+        assertEquals(ORIENTATION_LANDSCAPE, mActivity.getConfiguration().orientation);
+
+        doReturn(false).when(mAtm.mSplitPaneRatioSettings)
+                .keepsRatioInSplit(mActivity.packageName, mActivity.mUserId);
+        mActivity.recomputeConfiguration();
+        assertFillsSplitPane(stage, ORIENTATION_PORTRAIT, SCREEN_ORIENTATION_LANDSCAPE);
+    }
+
+    @Test
+    public void testResizableFixedOrientationAppInSplitScreen_exitRestoresOrientation() {
+        prepareResizableSplitPane(SCREEN_ORIENTATION_LANDSCAPE,
+                new Rect(0, 0, 1000, 1400));
+        final Task fullscreen = new TaskBuilder(mSupervisor)
+                .setWindowingMode(WINDOWING_MODE_FULLSCREEN).build();
+        mTask.reparent(fullscreen, POSITION_TOP, /* moveParents= */ false, "test");
+
+        assertFalse(mActivity.isInSplitPane());
+        assertEquals(SCREEN_ORIENTATION_LANDSCAPE, mActivity.getRequestedOrientation());
+        assertEquals(ORIENTATION_LANDSCAPE, mActivity.getConfiguration().orientation);
+        assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+                .isLetterboxedForFixedOrientationAndAspectRatio());
+    }
+
+    @Test
+    public void testResizableFixedOrientationAppInFlexibleSplitScreen_fillsPane() {
+        final Task stage = prepareResizableSplitPane(SCREEN_ORIENTATION_LANDSCAPE,
+                new Rect(0, 0, 1000, 1400));
+        stage.setDisallowOverrideBoundsForChildren(true);
+        stage.setDisallowOverrideWindowingModeForChildren(true);
+        stage.clearAdjacentTaskFragments();
+        mActivity.recomputeConfiguration();
+
+        assertTrue(stage.mCreatedByOrganizer);
+        assertFalse(stage.hasAdjacentTaskFragment());
+        assertFillsSplitPane(stage, ORIENTATION_PORTRAIT, SCREEN_ORIENTATION_LANDSCAPE);
+    }
+
+    @Test
+    public void testResizableFixedOrientationAppInMultiWindow_notSplit_keepsLetterbox() {
+        setUpDisplaySizeWithApp(1000, 2800);
+        prepareLimitedBounds(mActivity, SCREEN_ORIENTATION_LANDSCAPE, /* isUnresizable= */ false);
+        mTask.setWindowingMode(WINDOWING_MODE_MULTI_WINDOW);
+        mTask.setBounds(0, 0, 1000, 1400);
+
+        assertFalse(mActivity.isInSplitPane());
+        assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+                .isLetterboxedForFixedOrientationAndAspectRatio());
+    }
+
+    @Test
+    public void testResizableFixedOrientationAppInOrganizer_notSplit_keepsLetterbox() {
+        final Task stage = prepareResizableSplitPane(SCREEN_ORIENTATION_LANDSCAPE,
+                new Rect(0, 0, 1000, 1400));
+        stage.clearAdjacentTaskFragments();
+        // Bubble roots enforce windowing-mode inheritance only.
+        stage.setDisallowOverrideWindowingModeForChildren(true);
+        mActivity.recomputeConfiguration();
+
+        assertTrue(stage.mCreatedByOrganizer);
+        assertFalse(mActivity.isInSplitPane());
+        assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+                .isLetterboxedForFixedOrientationAndAspectRatio());
+    }
+
+    @Test
+    public void testResizableFixedOrientationAppInSplitScreen_embedded_keepsLetterbox() {
+        prepareResizableSplitPane(SCREEN_ORIENTATION_LANDSCAPE,
+                new Rect(0, 0, 1000, 1400));
+        doReturn(true).when(mActivity).isEmbedded();
+        mActivity.recomputeConfiguration();
+
+        assertFalse(mActivity.isInSplitPane());
+        assertTrue(mActivity.mAppCompatController.getAspectRatioPolicy()
+                .isLetterboxedForFixedOrientationAndAspectRatio());
+    }
+
+    @Test
+    public void testResizableFixedOrientationAppInFreeform_unchanged() {
+        setUpDisplaySizeWithApp(1000, 2800);
+        prepareLimitedBounds(mActivity, SCREEN_ORIENTATION_LANDSCAPE, /* isUnresizable= */ false);
+        mTask.setWindowingMode(WINDOWING_MODE_FREEFORM);
+        mTask.setBounds(0, 0, 1000, 1400);
+        final Configuration configuration = new Configuration(mActivity.getConfiguration());
+        mAtm.mSplitPaneRatioSettings = mock(SplitPaneRatioSettings.class);
+        doReturn(true).when(mAtm.mSplitPaneRatioSettings)
+                .keepsRatioInSplit(anyString(), anyInt());
+        mActivity.recomputeConfiguration();
+
+        assertFalse(mActivity.isInSplitPane());
+        assertEquals(configuration, mActivity.getConfiguration());
+        verify(mAtm.mSplitPaneRatioSettings, never()).keepsRatioInSplit(anyString(), anyInt());
+    }
+
+    private Task prepareResizableSplitPane(int requestedOrientation, Rect paneBounds) {
+        setUpDisplaySizeWithApp(2000, 2800);
+        final TestSplitOrganizer organizer =
+                new TestSplitOrganizer(mAtm, mActivity.getDisplayContent());
+        prepareLimitedBounds(mActivity, requestedOrientation, /* isUnresizable= */ false);
+        mTask.reparent(organizer.mPrimary, POSITION_TOP, /* moveParents= */ false, "test");
+        organizer.mPrimary.setBounds(paneBounds);
+        assertTrue(organizer.mPrimary.mCreatedByOrganizer);
+        assertEquals(WINDOWING_MODE_MULTI_WINDOW, mActivity.getWindowingMode());
+        return organizer.mPrimary;
+    }
+
+    private void assertFillsSplitPane(Task stage, int orientation, int requestedOrientation) {
+        assertTrue(mActivity.isInSplitPane());
+        assertEquals(stage.getBounds(), mActivity.getBounds());
+        assertEquals(orientation, mActivity.getConfiguration().orientation);
+        assertEquals(requestedOrientation, mActivity.getRequestedOrientation());
+        assertFalse(mActivity.inSizeCompatMode());
+        assertFalse(mActivity.mAppCompatController.getAspectRatioPolicy()
                 .isLetterboxedForFixedOrientationAndAspectRatio());
     }
 
