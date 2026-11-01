@@ -26,6 +26,8 @@ import static android.provider.Settings.Secure.DEVICE_STATE_ROTATION_LOCK_UNLOCK
 import static android.provider.Settings.System.ACCELEROMETER_ROTATION;
 import static android.provider.Settings.System.getUriFor;
 
+import static com.android.dx.mockito.inline.extended.ExtendedMockito.doReturn;
+import static com.android.dx.mockito.inline.extended.ExtendedMockito.mockitoSession;
 import static com.android.internal.view.RotationPolicy.getNaturalRotation;
 import static com.android.server.wm.DisplayRotation.NO_UPDATE_USER_ROTATION;
 import static com.android.server.wm.DisplayRotation.USE_CURRENT_ROTATION;
@@ -50,15 +52,19 @@ import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.hardware.devicestate.DeviceState;
 import android.os.Handler;
+import android.os.RemoteException;
 import android.os.UserHandle;
 import android.os.test.TestLooper;
 import android.platform.test.annotations.Presubmit;
 import android.provider.Settings;
 import android.util.SparseIntArray;
+import android.view.IWindowManager;
 import android.view.Surface;
+import android.view.WindowManagerGlobal;
 
 import androidx.test.filters.SmallTest;
 
+import com.android.dx.mockito.inline.extended.StaticMockitoSession;
 import com.android.internal.R;
 import com.android.internal.util.test.FakeSettingsProvider;
 import com.android.internal.util.test.FakeSettingsProviderRule;
@@ -68,6 +74,7 @@ import com.android.server.wm.utils.TestDeviceStateAutoRotateManager.TestDeviceSt
 import com.android.settingslib.devicestate.DeviceStateAutoRotateSettingManager;
 import com.android.settingslib.devicestate.PostureDeviceStateConverter;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -75,6 +82,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.mockito.quality.Strictness;
 
 /**
  * Test class for {@link DeviceStateAutoRotateSettingController}.
@@ -128,6 +136,8 @@ public class DeviceStateAutoRotateSettingControllerTests {
     @Mock
     private DisplayRotation mMockDisplayRotation;
     @Mock
+    private IWindowManager mMockWindowManager;
+    @Mock
     private PostureDeviceStateConverter mMockPostureDeviceStateConverter;
 
     @Captor
@@ -135,13 +145,20 @@ public class DeviceStateAutoRotateSettingControllerTests {
     @Captor
     private ArgumentCaptor<ContentObserver> mAccelerometerRotationSettingObserver;
 
+    private StaticMockitoSession mStaticMockitoSession;
+
     private final TestLooper mTestLooper = new TestLooper();
     private DeviceStateAutoRotateSettingController mDeviceStateAutoRotateSettingController;
     private TestDeviceStateAutoRotateManager mTestAutoRotateSettingManager;
 
     @Before
-    public void setup() {
+    public void setup() throws RemoteException {
         MockitoAnnotations.initMocks(this);
+        mStaticMockitoSession = mockitoSession().mockStatic(WindowManagerGlobal.class)
+                .strictness(Strictness.LENIENT).startMocking();
+        doReturn(mMockWindowManager).when(WindowManagerGlobal::getWindowManagerService);
+        // With no angle preference, 180 degrees is allowed only by config_allowAllRotations.
+        when(mMockWindowManager.getDefaultDisplayRotation()).thenReturn(Surface.ROTATION_180);
         final Handler handler = new Handler(mTestLooper.getLooper());
         final Context mockContext = mock(Context.class);
         final FakeSettingsProvider fakeSettingsProvider = new FakeSettingsProvider();
@@ -192,6 +209,11 @@ public class DeviceStateAutoRotateSettingControllerTests {
                 mAccelerometerRotationSettingObserver.capture(), eq(UserHandle.USER_CURRENT));
         verify(mMockDeviceStateController).registerDeviceStateCallback(
                 mDeviceStateListenerCaptor.capture(), any());
+    }
+
+    @After
+    public void teardown() {
+        mStaticMockitoSession.finishMocking();
     }
 
     @Test
@@ -476,11 +498,11 @@ public class DeviceStateAutoRotateSettingControllerTests {
         mTestLooper.dispatchAll();
 
         mDeviceStateAutoRotateSettingController.requestAccelerometerRotationSettingChange(
-                false, getNaturalRotation, "");
+                false, getNaturalRotation(), "");
         mTestLooper.dispatchAll();
 
         verify(mMockDisplayRotation).setUserRotationSetting(
-                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation), any());
+                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation()), any());
     }
 
     @Test
@@ -586,7 +608,7 @@ public class DeviceStateAutoRotateSettingControllerTests {
         mTestLooper.dispatchAll();
 
         verify(mMockDisplayRotation).setUserRotationSetting(
-                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation), any());
+                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation()), any());
     }
 
     private void setDeviceStateAutoRotateSetting(SparseIntArray deviceStateAutoRotateSetting) {
