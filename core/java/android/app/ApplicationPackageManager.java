@@ -910,7 +910,6 @@ public class ApplicationPackageManager extends PackageManager {
                 "com.google.photos.trust_debug_certs",
                 "com.google.android.feature.AER_OPTIMIZED",
                 "com.google.android.feature.NEXT_GENERATION_ASSISTANT",
-                "android.software.game_service",
                 "com.google.android.feature.EXCHANGE_6_2",
                 "com.google.android.apps.dialer.call_recording_audio",
                 "com.google.android.apps.dialer.SUPPORTED"
