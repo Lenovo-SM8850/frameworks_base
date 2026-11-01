@@ -60,7 +60,6 @@ import com.android.wm.shell.transition.FocusTransitionObserver
 import com.android.wm.shell.transition.Transitions
 import com.android.wm.shell.windowdecor.DesktopHandleManageWindowsMenu
 import com.android.wm.shell.windowdecor.HandleMenu
-import com.android.wm.shell.windowdecor.HandleMenu.Companion.shouldShowChangeAspectRatioButton
 import com.android.wm.shell.windowdecor.HandleMenu.Companion.shouldShowGameControlsButton
 import com.android.wm.shell.windowdecor.HandleMenu.Companion.shouldShowRestartButton
 import com.android.wm.shell.windowdecor.HandleMenu.HandleMenuFactory
@@ -403,7 +402,6 @@ class AppHandleController(
         val supportsMultiInstance =
             multiInstanceHelper.supportsMultiInstanceSplit(taskInfo.baseActivity, taskInfo.userId)
         val shouldShowManageWindowsButton = supportsMultiInstance && minimumInstancesFound
-        val shouldShowChangeAspectRatioButton = shouldShowChangeAspectRatioButton(taskInfo)
         val shouldShowGameControlsButton = shouldShowGameControlsButton(userContext, taskInfo)
         val shouldShowRestartButton = shouldShowRestartButton(taskInfo)
         viewHolder.onHandleMenuOpened()
@@ -426,7 +424,8 @@ class AppHandleController(
                         splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId),
                     shouldShowNewWindowButton = supportsMultiInstance,
                     shouldShowManageWindowsButton = shouldShowManageWindowsButton,
-                    shouldShowChangeAspectRatioButton = shouldShowChangeAspectRatioButton,
+                    // Aspect ratio stays in Settings, not in window menus.
+                    shouldShowChangeAspectRatioButton = false,
                     shouldShowGameControlsButton = shouldShowGameControlsButton,
                     shouldShowDesktopModeButton =
                         desktopState.isDesktopModeSupportedOnDisplay(display),
