@@ -138,6 +138,7 @@ import android.app.PendingIntent;
 import android.app.ProgressDialog;
 import android.app.SearchManager;
 import android.app.UiModeManager;
+import android.app.WindowConfiguration;
 import android.app.contextualsearch.ContextualSearchManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.ActivityNotFoundException;
@@ -2461,6 +2462,10 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                 moveFocusedTaskToStageSplit(displayId, leftOrTop);
                 break;
             }
+            case FLOATING_WINDOW:
+                openCurrentAppInFloatingWindow(event.getDisplayId() != Display.INVALID_DISPLAY
+                        ? event.getDisplayId() : DEFAULT_DISPLAY);
+                break;
             case KILL_APP:
                 ActionUtils.killForegroundApp(mContext, mCurrentUserId);
                 break;
@@ -2638,6 +2643,39 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         if (telecomManager != null && telecomManager.isRinging()) {
             telecomManager.silenceRinger();
         }
+    }
+
+    private void openCurrentAppInFloatingWindow(int displayId) {
+        final List<ActivityManager.RunningTaskInfo> tasks;
+        try {
+            tasks = ActivityTaskManager.getService().getTasks(1,
+                    false /* filterOnlyVisibleRecents */, false /* keepIntentExtra */, displayId);
+        } catch (RemoteException e) {
+            Slog.w(TAG, "Could not get the running task for the freeform gesture", e);
+            return;
+        }
+        if (tasks.isEmpty()) {
+            return;
+        }
+        final ActivityManager.RunningTaskInfo task = tasks.get(0);
+        if (task.topActivity == null || task.displayId != displayId) {
+            return;
+        }
+        final int activityType = task.getActivityType();
+        if (activityType == WindowConfiguration.ACTIVITY_TYPE_HOME
+                || activityType == WindowConfiguration.ACTIVITY_TYPE_RECENTS
+                || activityType == WindowConfiguration.ACTIVITY_TYPE_DREAM) {
+            return;
+        }
+        final ComponentName systemUiComponent = ComponentName.unflattenFromString(
+                mContext.getString(com.android.internal.R.string.config_systemUIServiceComponent));
+        if (systemUiComponent == null) {
+            return;
+        }
+        final Intent intent = new Intent("com.android.wm.shell.action.LAUNCH_FLOATING_WINDOW")
+                .setPackage(systemUiComponent.getPackageName())
+                .putExtra("task_id", task.taskId);
+        mContext.sendBroadcastAsUser(intent, UserHandle.of(task.userId));
     }
 
     private void cycleRingerMode() {
