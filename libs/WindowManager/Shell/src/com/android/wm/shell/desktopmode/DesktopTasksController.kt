@@ -6511,13 +6511,20 @@ class DesktopTasksController(
         runOnTransitStart?.invoke(transition)
     }
 
-    /** Enter split by using the focused desktop task in given `displayId`. */
+    /** Enter split using the focused task in the given `displayId`. */
     fun enterSplit(
         displayId: Int,
         userId: Int = shellController.currentUserId,
         leftOrTop: Boolean,
     ) {
         val task = getFocusedMultitaskingTask(displayId) ?: getFocusedDesktopTask(displayId, userId)
+            ?: shellTaskOrganizer.getRunningTaskInfo(
+                focusTransitionObserver.getFocusedTaskIdOnDisplay(displayId)
+            )?.takeIf {
+                it.displayId == displayId && it.userId == userId &&
+                    it.windowingMode == WINDOWING_MODE_FULLSCREEN &&
+                    it.activityType == ACTIVITY_TYPE_STANDARD
+            }
         task?.let { requestSplit(it, leftOrTop) }
     }
 
