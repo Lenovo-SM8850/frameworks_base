@@ -72,6 +72,7 @@ import com.android.window.flags.Flags;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
@@ -314,19 +315,26 @@ class TransitionController {
             return;
         }
 
-        for (Task task: mRoundedCornerOptTasks) {
-            if (task == null || isCollecting(task)
-                             || isParticipantOfPlayingTransition(task)) {
+        for (Iterator<Task> iterator = mRoundedCornerOptTasks.iterator(); iterator.hasNext();) {
+            final Task task = iterator.next();
+            if (task == null || task.isFloatingWindow()) {
+                // Floating presentation owns the disable independently of transitions.
+                iterator.remove();
+                continue;
+            }
+            if (inTransition(task) || task.getActivity(this::inTransition) != null) {
+                // Activity-only transitions also disable their task. Retain the restore
+                // until no transition owns the flag, including overlapping transitions.
                 continue;
             }
 
             SurfaceControl sc = task.getSurfaceControl();
-            if (sc == null || !sc.isValid()) continue;
-
-            SurfaceControl.Transaction t = task.getSyncTransaction();
-            t.toggleClientDrawnRoundedCornersOpt(sc, /*enable = */ true);
+            if (sc != null && sc.isValid()) {
+                SurfaceControl.Transaction t = task.getSyncTransaction();
+                t.toggleClientDrawnRoundedCornersOpt(sc, /*enable = */ true);
+            }
+            iterator.remove();
         }
-        mRoundedCornerOptTasks.clear();
     }
 
     void onRoundedCornerOptDisabled(Task task) {
