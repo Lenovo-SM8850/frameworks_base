@@ -186,6 +186,7 @@ public class LauncherAppsService extends SystemService {
 
     @Override
     public void onStart() {
+        mLauncherAppsImpl.mHiddenAppsFilter.register();
         publishBinderService(Context.LAUNCHER_APPS_SERVICE, mLauncherAppsImpl);
         mLauncherAppsImpl.registerLoadingProgressForIncrementalApps();
         LocalServices.addService(LauncherAppsServiceInternal.class, mLauncherAppsImpl.mInternal);
@@ -258,6 +259,7 @@ public class LauncherAppsService extends SystemService {
 
         final LauncherAppsServiceInternal mInternal;
         private SecureSettingsObserver mSecureSettingsObserver;
+        private final LauncherHiddenAppsFilter mHiddenAppsFilter;
 
         @NonNull
         private final RemoteCallbackList<IDumpCallback> mDumpCallbacks =
@@ -287,6 +289,9 @@ public class LauncherAppsService extends SystemService {
             mCallbackHandler = BackgroundThread.getHandler();
             mDpm = (DevicePolicyManager) mContext.getSystemService(Context.DEVICE_POLICY_SERVICE);
             mInternal = new LocalService();
+            mHiddenAppsFilter = new LauncherHiddenAppsFilter(context, mCallbackHandler,
+                    mRoleManager, mPackageManagerInternal, mUserManagerInternal,
+                    this::dispatchPackageIconChanged);
             registerSettingsObserver();
         }
 
@@ -673,6 +678,24 @@ public class LauncherAppsService extends SystemService {
 
         @Override
         public ParceledListSlice<LauncherActivityInfoInternal> getLauncherActivities(
+                String callingPackage, @Nullable String packageName, UserHandle user)
+                throws RemoteException {
+            ParceledListSlice<LauncherActivityInfoInternal> activities =
+                    getLauncherActivitiesUnfiltered(callingPackage, packageName, user);
+            if (activities == null) {
+                return null;
+            }
+            final int callingUid = injectBinderCallingUid();
+            final long ident = injectClearCallingIdentity();
+            try {
+                return mHiddenAppsFilter.filter(activities, callingPackage, callingUid,
+                        user.getIdentifier());
+            } finally {
+                injectRestoreCallingIdentity(ident);
+            }
+        }
+
+        private ParceledListSlice<LauncherActivityInfoInternal> getLauncherActivitiesUnfiltered(
                 String callingPackage, @Nullable String packageName, UserHandle user)
                 throws RemoteException {
             ParceledListSlice<LauncherActivityInfoInternal> launcherActivities =
@@ -2046,8 +2069,8 @@ public class LauncherAppsService extends SystemService {
                 if (shortcutInfos == null) {
                     return new ParceledListSlice<>(availableShortcuts);
                 }
-                List<LauncherActivityInfoInternal> appInfos = getLauncherActivities(callingPackage,
-                        null, user).getList();
+                List<LauncherActivityInfoInternal> appInfos =
+                        getLauncherActivitiesUnfiltered(callingPackage, null, user).getList();
                 if (appInfos == null) {
                     return new ParceledListSlice<>(availableShortcuts);
                 }
@@ -2657,6 +2680,7 @@ public class LauncherAppsService extends SystemService {
                         } finally {
                             mListeners.finishBroadcast();
                         }
+                        mHiddenAppsFilter.onPackageChanged(packageName, userId);
                     }
                 }
             }
@@ -2709,6 +2733,7 @@ public class LauncherAppsService extends SystemService {
                 } finally {
                     mListeners.finishBroadcast();
                 }
+                mHiddenAppsFilter.onPackageChanged(packageName, user.getIdentifier());
                 super.onPackageAdded(packageName, uid);
                 mPackageManagerInternal.registerInstalledLoadingProgressCallback(packageName,
                         new PackageLoadingProgressCallback(packageName, user),
@@ -2723,6 +2748,7 @@ public class LauncherAppsService extends SystemService {
 
             private void onPackageChanged(String packageName) {
                 dispatchPackageIconChanged(packageName, UserHandle.of(getChangingUserId()));
+                mHiddenAppsFilter.onPackageChanged(packageName, getChangingUserId());
             }
 
             @Override
