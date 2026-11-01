@@ -425,7 +425,8 @@ abstract class WindowDecoration2<T>(
 
         if (params.shouldSetBackground) {
             val backgroundColorInt =
-                if (DesktopExperienceFlags.ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS.isTrue) {
+                if (taskInfo.isFloatingWindow ||
+                    DesktopExperienceFlags.ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS.isTrue) {
                     params.runningTaskInfo.taskDescription?.backgroundColor?.takeIf { it != 0 }
                         ?: getBackgroundColor(decorWindowContext)
                 } else {
@@ -454,6 +455,14 @@ abstract class WindowDecoration2<T>(
     }
 
     private fun getBackgroundColor(context: Context): Int {
+        if (taskInfo.isFloatingWindow) {
+            // Shell's theme is fixed light; use the task's night mode for the backing surface.
+            val nightMode = taskInfo.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            return context.getColor(
+                if (nightMode == Configuration.UI_MODE_NIGHT_YES) android.R.color.system_surface_dark
+                else android.R.color.system_surface_light
+            )
+        }
         return context
             .obtainStyledAttributes(
                 intArrayOf(android.R.attr.windowBackground, android.R.attr.windowBackgroundFallback)
