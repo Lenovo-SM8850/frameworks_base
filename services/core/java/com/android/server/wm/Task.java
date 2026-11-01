@@ -75,6 +75,7 @@ import static android.view.WindowManager.TRANSIT_TO_BACK;
 import static android.view.WindowManager.TRANSIT_TO_FRONT;
 import static android.window.DisplayAreaOrganizer.FEATURE_UNDEFINED;
 
+import static com.android.graphics.surfaceflinger.flags.Flags.setClientDrawnCornerRadii;
 import static com.android.internal.protolog.WmProtoLogGroups.WM_DEBUG_ADD_REMOVE;
 import static com.android.internal.protolog.WmProtoLogGroups.WM_DEBUG_LOCKTASK;
 import static com.android.internal.protolog.WmProtoLogGroups.WM_DEBUG_PACKAGE_UPDATE;
@@ -685,6 +686,7 @@ class Task extends TaskFragment {
     private final Point mFloatingWindowPosition = new Point();
     private int mFloatingWindowImeOffset;
     private boolean mFloatingWindowTransformDirty;
+    private SurfaceControl mFloatingWindowRoundedCornersSurface;
 
     /** @see #isForceOpaque() */
     private final boolean mIsForceOpaque;
@@ -4841,6 +4843,11 @@ class Task extends TaskFragment {
         final boolean leaving = !floating && mFloatingWindow;
         mFloatingWindow = floating;
         mFloatingWindowTransformDirty = true;
+        if (isFloatingWindow()) {
+            disableFloatingWindowClientRounding(getSyncTransaction());
+        } else if (leaving) {
+            restoreFloatingWindowClientRounding(getSyncTransaction());
+        }
         if (entering && initialize && getDisplayContent() != null) {
             final Rect visible = new Rect(getBounds());
             final Rect stable = new Rect();
@@ -4913,6 +4920,7 @@ class Task extends TaskFragment {
 
     void applyFloatingWindowTransform(SurfaceControl.Transaction t, SurfaceControl leash) {
         if (!isFloatingWindow()) return;
+        disableFloatingWindowClientRounding(t);
         t.setMatrix(leash, mFloatingWindowScale, 0, 0, mFloatingWindowScale);
         t.setPosition(leash, mFloatingWindowPosition.x,
                 mFloatingWindowPosition.y + mFloatingWindowImeOffset);
@@ -4993,8 +5001,55 @@ class Task extends TaskFragment {
         return result;
     }
 
+    private void disableFloatingWindowClientRounding(SurfaceControl.Transaction t) {
+        if (!setClientDrawnCornerRadii() || mSurfaceControl == null
+                || !mSurfaceControl.isValid()) return;
+        final SurfaceControl surface = mSurfaceControl;
+        // Mini animations change the inherited radius without submitting app buffers. Keep
+        // clipping in SurfaceFlinger so those radii cannot be baked into a static app buffer.
+        t.toggleClientDrawnRoundedCornersOpt(surface, false /* enable */);
+        if (mFloatingWindowRoundedCornersSurface == surface) return;
+        mFloatingWindowRoundedCornersSurface = surface;
+        t.addTransactionCommittedListener(mWmService.mH::post, () -> {
+            synchronized (mWmService.mGlobalLock) {
+                if (!isFloatingWindow() || mSurfaceControl != surface
+                        || mFloatingWindowRoundedCornersSurface != surface) return;
+                // The first buffer after disabling delivers zero radii to HWUI, which then
+                // invalidates its root node and replaces any previously rounded buffer.
+                forAllWindows(w -> {
+                    if (w.mActivityRecord != null && w.mHasSurface && w.isVisibleRequested()) {
+                        w.applyWithNextDraw(drawTransaction -> { });
+                    }
+                }, true);
+                mWmService.mWindowPlacerLocked.requestTraversal();
+            }
+        });
+    }
+
+    private void restoreFloatingWindowClientRounding(SurfaceControl.Transaction t) {
+        final SurfaceControl surface = mFloatingWindowRoundedCornersSurface;
+        mFloatingWindowRoundedCornersSurface = null;
+        if (surface == null || !surface.isValid()) return;
+        if (mTransitionController.inTransition(this)
+                || getActivity(mTransitionController::inTransition) != null) {
+            // Activity-only transitions can also disable this task's optimization.
+            // Their cleanup must restore the flag after the last owner finishes.
+            mTransitionController.onRoundedCornerOptDisabled(this);
+        } else {
+            t.toggleClientDrawnRoundedCornersOpt(surface, true /* enable */);
+        }
+    }
+
     private void updateFloatingWindowSurface(SurfaceControl.Transaction t) {
-        if (!mFloatingWindowTransformDirty || !isFloatingWindow() || mSurfaceControl == null
+        if (!isFloatingWindow()) {
+            restoreFloatingWindowClientRounding(t);
+            return;
+        }
+        // Recover clipping ownership even when a transition or leash defers the transform.
+        if (mFloatingWindowRoundedCornersSurface != mSurfaceControl) {
+            disableFloatingWindowClientRounding(t);
+        }
+        if (!mFloatingWindowTransformDirty || mSurfaceControl == null
                 || inTransition() || mSurfaceAnimator.hasLeash() || mDragResizing) return;
         applyFloatingWindowTransform(t, mSurfaceControl);
         mFloatingWindowTransformDirty = false;
