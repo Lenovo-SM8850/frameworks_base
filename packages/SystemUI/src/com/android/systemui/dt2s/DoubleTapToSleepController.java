@@ -19,6 +19,7 @@ import android.view.Display;
 import android.view.GestureDetector;
 import android.view.InputEvent;
 import android.view.MotionEvent;
+import android.view.WindowManager;
 import android.window.WindowInfosListenerForTest;
 import android.window.WindowInfosListenerForTest.DisplayInfo;
 import android.window.WindowInfosListenerForTest.WindowInfo;
@@ -449,8 +450,15 @@ public final class DoubleTapToSleepController implements CoreStartable, TunerSer
         // such as input monitors, which are not what the user is touching.
         for (WindowInfo window : windows) {
             if (window.displayId != Display.DEFAULT_DISPLAY) continue;
-            if (!window.isVisible || !window.isTouchable || window.isTrustedOverlay) continue;
+            if (!window.isVisible || !window.isTouchable) continue;
             if (!window.touchableRegion.contains(x, y)) continue;
+            // PiP takes touches through a trusted input consumer over its bounds, so the
+            // launcher under PiP is not what the user is touching.
+            if (window.name.contains(WindowManager.INPUT_CONSUMER_PIP)) {
+                Log.d(TAG, "Touch is on picture-in-picture");
+                return false;
+            }
+            if (window.isTrustedOverlay) continue;
 
             final boolean launcher = window.name.contains(LAUNCHER_PKG);
             if (!launcher) Log.d(TAG, "Touch is on " + window.name);
