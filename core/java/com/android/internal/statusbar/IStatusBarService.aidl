@@ -117,6 +117,7 @@ interface IStatusBarService
     oneway void clearInlineReplyUriPermissions(String key);
     void onNotificationFeedbackReceived(String key, in Bundle feedback);
 
+    void onStatusBarTripleTap(int displayId);
     void onGlobalActionsShown();
     void onGlobalActionsHidden();
     @EnforcePermission(anyOf={"SHOW_POWER_MENU", "SHOW_POWER_MENU_PRIVILEGED"})

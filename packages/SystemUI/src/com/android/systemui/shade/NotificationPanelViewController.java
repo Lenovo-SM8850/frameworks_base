@@ -52,11 +52,8 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
-import android.app.ActivityManager;
-import android.app.WindowConfiguration;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.Intent;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.ContentObserver;
@@ -75,6 +72,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.PowerManager;
+import android.os.RemoteException;
 import android.os.Trace;
 import android.os.UserHandle;
 import android.provider.Settings;
@@ -165,7 +163,6 @@ import com.android.systemui.shade.data.repository.FlingInfo;
 import com.android.systemui.shade.data.repository.ShadeDisplaysRepository;
 import com.android.systemui.shade.data.repository.ShadeRepository;
 import com.android.systemui.shade.domain.interactor.ShadeAnimationInteractor;
-import com.android.systemui.shared.system.ActivityManagerWrapper;
 import com.android.systemui.shared.system.QuickStepContract;
 import com.android.systemui.statusbar.CommandQueue;
 import com.android.systemui.statusbar.GestureRecorder;
@@ -288,11 +285,8 @@ public final class NotificationPanelViewController implements
     private static final String COUNTER_PANEL_OPEN_PEEK = "panel_open_peek";
     private static final String DOUBLE_TAP_SLEEP_GESTURE =
             "lineagesystem:" + LineageSettings.System.DOUBLE_TAP_SLEEP_GESTURE;
-    private static final String STATUS_BAR_TRIPLE_TAP_FREEFORM =
-            "system:" + Settings.System.STATUS_BAR_TRIPLE_TAP_FREEFORM;
-    private static final String LMO_FREEFORM_PACKAGE = "com.libremobileos.freeform";
-    private static final String LMO_FREEFORM_START_ACTION =
-            "com.libremobileos.freeform.START_FREEFORM";
+    private static final String STATUS_BAR_TRIPLE_TAP_ACTION =
+            "system:" + Settings.System.STATUS_BAR_TRIPLE_TAP_ACTION;
     private static final long TRIPLE_TAP_TIMEOUT_MS = 200L;
     private static final String STATUS_BAR_BRIGHTNESS_CONTROL =
             "system:" + Settings.System.STATUS_BAR_BRIGHTNESS_CONTROL;
@@ -525,8 +519,8 @@ public final class NotificationPanelViewController implements
     private boolean mDoubleTapToSleepEnabled;
     private GestureDetector mDoubleTapGesture;
     private boolean mSleepGestureAllowedForTouch;
-    private boolean mTripleTapToFreeformEnabled;
-    /** A double tap was detected; a third tap within the double tap timeout opens freeform. */
+    private boolean mTripleTapActionEnabled;
+    /** A double tap was detected; a third tap within the timeout performs the selected action. */
     private boolean mTripleTapArmed;
     private long mLastTapUpTime = -1L;
     private float mLastTapDownX;
@@ -881,7 +875,7 @@ public final class NotificationPanelViewController implements
                 if (!mSleepGestureAllowedForTouch || !isSleepGestureAllowed()) {
                     return false;
                 }
-                if (mTripleTapToFreeformEnabled) {
+                if (mTripleTapActionEnabled && mBarState == StatusBarState.SHADE) {
                     // Wait for triple press otherwise go to sleep
                     mTripleTapArmed = true;
                 } else if (mDoubleTapToSleepEnabled && mPowerManager != null) {
@@ -3837,7 +3831,7 @@ public final class NotificationPanelViewController implements
             mStatusBarHeaderMachine.updateEnablement();
 
             mTunerService.addTunable(this, DOUBLE_TAP_SLEEP_GESTURE);
-            mTunerService.addTunable(this, STATUS_BAR_TRIPLE_TAP_FREEFORM);
+            mTunerService.addTunable(this, STATUS_BAR_TRIPLE_TAP_ACTION);
             mTunerService.addTunable(this, STATUS_BAR_BRIGHTNESS_CONTROL);
             mTunerService.addTunable(this, STATUS_BAR_BRIGHTNESS_CONTROL_LOCKSCREEN);
             mTunerService.addTunable(this, STATUS_BAR_CUSTOM_HEADER);
@@ -3873,8 +3867,8 @@ public final class NotificationPanelViewController implements
                                 mResources.getBoolean(org.lineageos.platform.internal.R.bool.
                                 config_dt2sGestureEnabledByDefault));
                     break;
-                case STATUS_BAR_TRIPLE_TAP_FREEFORM:
-                    mTripleTapToFreeformEnabled =
+                case STATUS_BAR_TRIPLE_TAP_ACTION:
+                    mTripleTapActionEnabled =
                             TunerService.parseIntegerSwitch(newValue, false);
                     break;
                 case STATUS_BAR_BRIGHTNESS_CONTROL:
@@ -4051,9 +4045,12 @@ public final class NotificationPanelViewController implements
      * second tap's ACTION_DOWN and the third tap is treated as the start of a new gesture. This
      * keeps our own streak so the tap that follows a detected double tap can be recognised. When
      * double tap to sleep is also enabled its sleep action is held back until the double tap
-     * timeout has elapsed, so a third tap can cancel it and open freeform instead.
+     * timeout has elapsed, so a third tap can cancel it and perform the selected action.
      */
     private void handleTripleTapGesture(MotionEvent event) {
+        if (mBarState != StatusBarState.SHADE) {
+            return;
+        }
         final int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
             final int slop = ViewConfiguration.get(mView.getContext()).getScaledDoubleTapSlop();
@@ -4066,7 +4063,11 @@ public final class NotificationPanelViewController implements
             if (isThirdTap) {
                 mTripleTapArmed = false;
                 cancelDeferredDoubleTapSleep();
-                openCurrentAppInFreeform();
+                try {
+                    mStatusBarService.onStatusBarTripleTap(mDisplayId);
+                } catch (RemoteException e) {
+                    Log.w(TAG, "Could not perform the status bar triple tap action", e);
+                }
                 return;
             }
             mTripleTapArmed = false;
@@ -4118,44 +4119,6 @@ public final class NotificationPanelViewController implements
         cancel.setAction(MotionEvent.ACTION_CANCEL);
         mDoubleTapGesture.onTouchEvent(cancel);
         cancel.recycle();
-    }
-
-    /**
-     * Opens the app currently in the foreground of this display in an LMOFreeform window.
-     *
-     * <p>This mirrors the broadcast used by the PixelLauncherEnhanced module's LMO freeform
-     * variant. Passing the running task id makes LMOFreeform move that existing task into its
-     * freeform display instead of launching a new instance of the activity.
-     */
-    private void openCurrentAppInFreeform() {
-        if (mBarState != StatusBarState.SHADE) {
-            // Only meaningful while unlocked
-            return;
-        }
-        final ActivityManager.RunningTaskInfo task;
-        try {
-            task = ActivityManagerWrapper.getInstance().getRunningTask();
-        } catch (Exception e) {
-            Log.w(TAG, "Could not get the running task for the freeform gesture", e);
-            return;
-        }
-        if (task == null || task.topActivity == null || task.displayId != mDisplayId) {
-            return;
-        }
-        final int activityType = task.getActivityType();
-        if (activityType == WindowConfiguration.ACTIVITY_TYPE_HOME
-                || activityType == WindowConfiguration.ACTIVITY_TYPE_RECENTS
-                || activityType == WindowConfiguration.ACTIVITY_TYPE_DREAM) {
-            // Nothing sensible to put in a freeform window.
-            return;
-        }
-        final Intent intent = new Intent(LMO_FREEFORM_START_ACTION)
-                .setPackage(LMO_FREEFORM_PACKAGE)
-                .putExtra("packageName", task.topActivity.getPackageName())
-                .putExtra("activityName", task.topActivity.getClassName())
-                .putExtra("userId", task.userId)
-                .putExtra("taskId", task.taskId);
-        mView.getContext().sendBroadcastAsUser(intent, UserHandle.CURRENT);
     }
 
     /** Handles MotionEvents for the Shade. */
@@ -4386,13 +4349,13 @@ public final class NotificationPanelViewController implements
                 return false;
             }
 
-            if (mDoubleTapToSleepEnabled || mTripleTapToFreeformEnabled) {
+            if (mDoubleTapToSleepEnabled || mTripleTapActionEnabled) {
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                     mSleepGestureAllowedForTouch = isSleepGestureAllowed();
                 }
                 mSleepGestureAllowedForTouch &= isSleepGestureAllowed();
                 if (mSleepGestureAllowedForTouch) {
-                    if (mTripleTapToFreeformEnabled) {
+                    if (mTripleTapActionEnabled) {
                         // Run before the detector so the tap that completes a triple tap is not
                         // seen by it before our own tap streak has been updated.
                         handleTripleTapGesture(event);

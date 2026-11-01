@@ -710,6 +710,7 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     private Action mEdgeLongSwipeAction;
     // Read from the input thread in ThreeFingersSwipeListener callback.
     private volatile Action mThreeFingersSwipeAction;
+    private Action mStatusBarTripleTapAction = Action.NOTHING;
     // Read from the sensor thread in ShakeGestureService callback.
     private volatile Action mShakeGestureAction;
     private volatile Action mQuickTapAction = QUICK_TAP_DEFAULT_ACTION;
@@ -1101,6 +1102,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(LineageSettings.System.getUriFor(
                     LineageSettings.System.KEY_THREE_FINGERS_SWIPE_ACTION), false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.STATUS_BAR_TRIPLE_TAP_ACTION), false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(LineageSettings.System.getUriFor(
                     LineageSettings.System.KEY_QUICK_TAP_ACTION), false, this,
@@ -3773,6 +3777,22 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                 Settings.System.DOZE_TRIGGER_DOUBLETAP, 0) == 1;
 
         synchronized (mLock) {
+            // Migrate the former freeform switch only if no action has been selected.
+            final String legacyTripleTapSetting = "status_bar_triple_tap_freeform";
+            if (Settings.System.getStringForUser(resolver,
+                    Settings.System.STATUS_BAR_TRIPLE_TAP_ACTION, mCurrentUserId) == null
+                    && Settings.System.getIntForUser(resolver, legacyTripleTapSetting,
+                            0, mCurrentUserId) == 1) {
+                if (Settings.System.putIntForUser(resolver,
+                        Settings.System.STATUS_BAR_TRIPLE_TAP_ACTION,
+                        Action.FLOATING_WINDOW.ordinal(), mCurrentUserId)) {
+                    Settings.System.putStringForUser(resolver, legacyTripleTapSetting,
+                            null, mCurrentUserId);
+                }
+            }
+            mStatusBarTripleTapAction = Action.fromIntSafe(Settings.System.getIntForUser(resolver,
+                    Settings.System.STATUS_BAR_TRIPLE_TAP_ACTION,
+                    Action.NOTHING.ordinal(), mCurrentUserId));
             mEndcallBehavior = Settings.System.getIntForUser(resolver,
                     Settings.System.END_BUTTON_BEHAVIOR,
                     Settings.System.END_BUTTON_BEHAVIOR_DEFAULT,
@@ -7223,6 +7243,23 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         // In normal flow, systemReady is called before other system services are ready.
         // So it is better not to bind keyguard here.
         mKeyguardDelegate.onSystemReady();
+
+        final StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
+        if (statusbar != null) {
+            statusbar.setStatusBarTripleTapListener(displayId -> mHandler.post(() -> {
+                if (!canPerformKeyAction(mStatusBarTripleTapAction)) {
+                    return;
+                }
+                final long now = SystemClock.uptimeMillis();
+                final KeyEvent event = new KeyEvent(now, now, KeyEvent.ACTION_DOWN,
+                        KeyEvent.KEYCODE_SYSRQ, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
+                        KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_TOUCHSCREEN);
+                event.setDisplayId(displayId);
+                performKeyAction(mStatusBarTripleTapAction, event,
+                        Settings.System.STATUS_BAR_TRIPLE_TAP_ACTION);
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, "Status Bar Triple Tap");
+            }));
+        }
 
         if (mContext.getResources().getBoolean(com.android.internal.R.bool.config_pocketModeSupported)) {
             mPocketManager = (PocketManager) mContext.getSystemService(Context.POCKET_SERVICE);

@@ -37,6 +37,12 @@ import com.android.server.notification.NotificationDelegate;
 import java.io.FileDescriptor;
 
 public interface StatusBarManagerInternal {
+    interface StatusBarTripleTapListener {
+        void onStatusBarTripleTap(int displayId);
+    }
+
+    void setStatusBarTripleTapListener(StatusBarTripleTapListener listener);
+
     void setNotificationDelegate(NotificationDelegate delegate);
     /** Show a screen pinning request for a specific task. */
     void showScreenPinningRequest(int taskId, int userId);

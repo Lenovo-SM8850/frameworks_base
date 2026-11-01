@@ -7347,11 +7347,11 @@ public final class Settings {
         public static final String STATUS_BAR_BRIGHTNESS_CONTROL_LOCKSCREEN = "status_bar_brightness_control_lockscreen";
 
         /**
-         * Whether triple tapping the status bar opens the current app in freeform
-         * 0 = off, 1 = on
+         * Action performed by triple tapping the status bar.
+         * DeviceKeysConstants.Action ordinal; 0 = no action.
          * @hide
          */
-        public static final String STATUS_BAR_TRIPLE_TAP_FREEFORM = "status_bar_triple_tap_freeform";
+        public static final String STATUS_BAR_TRIPLE_TAP_ACTION = "status_bar_triple_tap_action";
 
         /**
          * Whether to enable the ripple animation on fingerprint unlock

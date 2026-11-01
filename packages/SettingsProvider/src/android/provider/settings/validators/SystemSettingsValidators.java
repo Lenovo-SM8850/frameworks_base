@@ -41,6 +41,8 @@ import android.os.BatteryManager;
 import android.provider.Settings.System;
 import android.util.ArrayMap;
 
+import org.lineageos.internal.util.DeviceKeysConstants.Action;
+
 import java.util.Map;
 
 /**
@@ -54,6 +56,8 @@ public class SystemSettingsValidators {
     public static final Map<String, Validator> VALIDATORS = new ArrayMap<>();
 
     static {
+        VALIDATORS.put(System.STATUS_BAR_TRIPLE_TAP_ACTION,
+                new InclusiveIntegerRangeValidator(0, Action.values().length - 1));
         VALIDATORS.put(
                 System.STAY_ON_WHILE_PLUGGED_IN,
                 value -> {
