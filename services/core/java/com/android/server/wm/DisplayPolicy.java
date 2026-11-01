@@ -2887,14 +2887,6 @@ public class DisplayPolicy {
                 defaultTaskDisplayArea.getRootTask(task -> task.isVisible()
                         && task.getTopLeafTask().hasAdjacentTask())
                         != null;
-        final Task topFreeformTask = defaultTaskDisplayArea.getTask(
-                task ->
-                        task.getWindowingMode() == WINDOWING_MODE_FREEFORM
-                                // Must be filling to avoid container-only roots, such as
-                                // created-by-organizer desk roots.
-                                && task.hasFillingContent());
-        final boolean freeformRootTaskVisible = topFreeformTask != null
-                && topFreeformTask.isVisible();
         // Floating overlays must not force the fullscreen app below to consume system bars.
         // Keep looking past them so ordinary desktop windows retain the legacy policy.
         final Task topNonFloatingFreeformTask = defaultTaskDisplayArea.getTask(
@@ -2923,8 +2915,11 @@ public class DisplayPolicy {
 
         int appearance = APPEARANCE_OPAQUE_NAVIGATION_BARS | APPEARANCE_OPAQUE_STATUS_BARS;
         appearance = configureStatusBarOpacity(appearance);
+        // A floating overlay keeps the navigation bar of the app below, as it does its bars.
+        final boolean nonFloatingFreeformVisible = topNonFloatingFreeformTask != null
+                && topNonFloatingFreeformTask.isVisible();
         appearance = configureNavBarOpacity(appearance, adjacentTasksVisible,
-                freeformRootTaskVisible);
+                nonFloatingFreeformVisible);
 
         // Show immersive mode confirmation if needed.
         final boolean wasImmersiveMode = mIsImmersiveMode;
