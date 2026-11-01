@@ -215,9 +215,15 @@ final class GamePolicyClient {
         }
     }
 
+    private boolean isCurrentSession() {
+        if (mSent == null || mPackage == null) return false;
+        final GameSession current = mResolver.apply(mPackage, mUserId);
+        return current != null && sameSession(current, mSent);
+    }
+
     private void sendFps(float fps) {
         if (mFpsCallback == null || mSent == null || mService == null
-                || mFpsGeneration != mSent.generation) return;
+                || mFpsGeneration != mSent.generation || !isCurrentSession()) return;
         final long now = SystemClock.uptimeMillis();
         if (mLastFpsReport != 0 && now - mLastFpsReport < 400) return;
         mLastFpsReport = now;
@@ -240,7 +246,7 @@ final class GamePolicyClient {
     private void sendFrame(float fps, int appJank, int frames, int maxFrameTimeUs,
             boolean layerChanged, float requestedFps, float throttleFps) {
         if (mFrameListener == 0 || mSent == null || mService == null
-                || mFpsGeneration != mSent.generation) return;
+                || mFpsGeneration != mSent.generation || !isCurrentSession()) return;
         try {
             if (mServiceVersion >= 2) {
                 mService.reportFrameTiming(mFpsGeneration, fps, appJank, frames, maxFrameTimeUs,
