@@ -1668,8 +1668,6 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 .supportsMultiInstanceSplit(mTaskInfo.baseActivity, mTaskInfo.userId);
         final boolean shouldShowManageWindowsButton = supportsMultiInstance
                 && mMinimumInstancesFound;
-        final boolean shouldShowChangeAspectRatioButton = HandleMenu.Companion
-                .shouldShowChangeAspectRatioButton(mTaskInfo);
         final boolean shouldShowRestartButton = HandleMenu.Companion
                 .shouldShowRestartButton(mTaskInfo);
         final boolean shouldShowGameControlsButton =
@@ -1701,7 +1699,8 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                         || mSplitScreenController.isTaskInSplitScreenForeground(mTaskInfo.taskId),
                 supportsMultiInstance,
                 shouldShowManageWindowsButton,
-                shouldShowChangeAspectRatioButton,
+                // Aspect ratio stays in Settings, not in window menus.
+                /* shouldShowChangeAspectRatioButton= */ false,
                 shouldShowGameControlsButton,
                 mDesktopState.isDesktopModeSupportedOnDisplay(mDisplay),
                 shouldShowRestartButton,
