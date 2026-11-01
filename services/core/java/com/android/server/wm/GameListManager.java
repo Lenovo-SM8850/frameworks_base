@@ -15,6 +15,8 @@
  */
 package com.android.server.wm;
 
+import android.app.ActivityManager;
+import android.app.GameManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.ContentObserver;
@@ -38,6 +40,7 @@ class GameListManager {
     private static final String GAME_LIST_KEY = "gamespace_game_list";
     private static final String DENIED_LIST_KEY = "gamespace_denied_list";
     private static final String PERF_MODE_VALUE = "2";
+    private static final String DEFAULT_GAME_MODE_KEY = "gamespace_default_game_mode";
 
     private final Context mContext;
     private final Map<String, String> mGameList = Collections.synchronizedMap(new HashMap<>());
@@ -169,15 +172,22 @@ class GameListManager {
 
     private void updateGameList(String packageName, boolean add) {
         final ContentResolver resolver = mContext.getContentResolver();
+        final int userId = ActivityManager.getCurrentUser();
+        int defaultMode = Settings.Secure.getIntForUser(resolver, DEFAULT_GAME_MODE_KEY,
+                GameManager.GAME_MODE_STANDARD, userId);
+        if (defaultMode < 0 || defaultMode > GameManager.GAME_MODE_BATTERY) {
+            defaultMode = GameManager.GAME_MODE_STANDARD;
+        }
+        final String modeValue = Integer.toString(defaultMode);
         final String raw = Settings.System.getStringForUser(resolver, GAME_LIST_KEY,
-                UserHandle.USER_CURRENT);
+                userId);
         final Map<String, String> gameMap = parseGameList(raw);
 
         final boolean modified;
         if (add) {
-            modified = !PERF_MODE_VALUE.equals(gameMap.get(packageName));
+            modified = !modeValue.equals(gameMap.get(packageName));
             if (modified) {
-                gameMap.put(packageName, PERF_MODE_VALUE);
+                gameMap.put(packageName, modeValue);
             }
         } else {
             modified = gameMap.remove(packageName) != null;
@@ -188,10 +198,10 @@ class GameListManager {
         }
 
         Settings.System.putStringForUser(resolver, GAME_LIST_KEY, formatGameList(gameMap),
-                UserHandle.USER_CURRENT);
+                userId);
         synchronized (mGameList) {
             if (add) {
-                mGameList.put(packageName, PERF_MODE_VALUE);
+                mGameList.put(packageName, modeValue);
             } else {
                 mGameList.remove(packageName);
             }

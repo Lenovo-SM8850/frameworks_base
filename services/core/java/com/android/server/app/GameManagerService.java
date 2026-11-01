@@ -59,6 +59,7 @@ import android.content.res.CompatibilityInfo.CompatScale;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.content.res.XmlResourceParser;
+import android.database.ContentObserver;
 import android.hardware.power.Mode;
 import android.net.Uri;
 import android.os.Binder;
@@ -180,6 +181,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
     private DeviceConfigListener mDeviceConfigListener;
     @GuardedBy("mLock")
     private final ArrayMap<Integer, GameManagerSettings> mSettings = new ArrayMap<>();
+    @GuardedBy("mLock")
+    private final ArrayMap<Integer, Map<String, String>> mPreviousGameLists = new ArrayMap<>();
     @GuardedBy("mDeviceConfigLock")
     private final ArrayMap<String, GamePackageConfiguration> mConfigs = new ArrayMap<>();
     // listener to caller uid map
@@ -199,6 +202,10 @@ public final class GameManagerService extends IGameManagerService.Stub {
     private final Set<Integer> mNonGameForegroundUids = new HashSet<>();
     private final GameManagerServiceSystemPropertiesWrapper mSysProps;
     private float mGameDefaultFrameRateValue;
+    @GuardedBy("mLock")
+    private String mLoadingBoostPackage;
+    @GuardedBy("mLock")
+    private int mLoadingBoostUserId;
 
     @VisibleForTesting
     static class Injector {
@@ -357,6 +364,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
                         if (mSettings.containsKey(userId)) {
                             final GameManagerSettings userSettings = mSettings.get(userId);
                             mSettings.remove(userId);
+                            mPreviousGameLists.remove(userId);
                             userSettings.writePersistentDataLocked();
                         }
                     }
@@ -372,6 +380,9 @@ public final class GameManagerService extends IGameManagerService.Stub {
                             mSettings.put(userId, userSettings);
                             userSettings.readPersistentDataLocked();
                         }
+                        if (!mPreviousGameLists.containsKey(userId)) {
+                            mPreviousGameLists.put(userId, readGameList(userId));
+                        }
                     }
                     final String[] packageNames = getInstalledGamePackageNames(userId);
                     updateConfigsForUser(userId, false /*checkGamePackage*/, packageNames);
@@ -385,8 +396,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
                     final int userId = data.getInt(USER_ID_MSG_KEY);
 
                     // Restrict to games only. Requires performance mode to be enabled.
-                    final boolean boostEnabled =
-                            getGameMode(packageName, userId) == GameManager.GAME_MODE_PERFORMANCE;
+                    final boolean boostEnabled = !isGameModeNone(packageName, userId)
+                            && getGameMode(packageName, userId) == GameManager.GAME_MODE_PERFORMANCE;
                     int uid;
                     try {
                         uid = mPackageManager.getPackageUidAsUser(packageName, userId);
@@ -398,26 +409,31 @@ public final class GameManagerService extends IGameManagerService.Stub {
                             boostEnabled, gameStateModeToStatsdGameState(gameState.getMode()),
                             isLoading, gameState.getLabel(), gameState.getQuality());
 
-                    if (boostEnabled) {
-                        if (mPowerManagerInternal == null) {
-                            Slog.d(TAG, "Error setting loading mode for package " + packageName
-                                    + " and userId " + userId);
-                            break;
-                        }
-                        if (mHandler.hasMessages(CANCEL_GAME_LOADING_MODE)) {
-                            mHandler.removeMessages(CANCEL_GAME_LOADING_MODE);
-                        }
-                        Slog.v(TAG, String.format(
-                                "Game loading power mode %s (game state change isLoading=%b)",
-                                        isLoading ? "ON" : "OFF", isLoading));
-                        mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, isLoading);
-                        if (isLoading) {
-                            int loadingBoostDuration = getLoadingBoostDuration(packageName, userId);
-                            loadingBoostDuration = loadingBoostDuration > 0 ? loadingBoostDuration
-                                    : LOADING_BOOST_MAX_DURATION;
-                            mHandler.sendMessageDelayed(
-                                    mHandler.obtainMessage(CANCEL_GAME_LOADING_MODE),
-                                    loadingBoostDuration);
+                    synchronized (mLock) {
+                        if (boostEnabled && !isGameModeNone(packageName, userId)) {
+                            if (mPowerManagerInternal == null) {
+                                Slog.d(TAG, "Error setting loading mode for package " + packageName
+                                        + " and userId " + userId);
+                                break;
+                            }
+                            if (mHandler.hasMessages(CANCEL_GAME_LOADING_MODE)) {
+                                mHandler.removeMessages(CANCEL_GAME_LOADING_MODE);
+                            }
+                            Slog.v(TAG, String.format(
+                                    "Game loading power mode %s (game state change isLoading=%b)",
+                                            isLoading ? "ON" : "OFF", isLoading));
+                            mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, isLoading);
+                            mLoadingBoostPackage = isLoading ? packageName : null;
+                            mLoadingBoostUserId = userId;
+                            if (isLoading) {
+                                int loadingBoostDuration =
+                                        getLoadingBoostDuration(packageName, userId);
+                                loadingBoostDuration = loadingBoostDuration > 0 ? loadingBoostDuration
+                                        : LOADING_BOOST_MAX_DURATION;
+                                mHandler.sendMessageDelayed(
+                                        mHandler.obtainMessage(CANCEL_GAME_LOADING_MODE),
+                                        loadingBoostDuration);
+                            }
                         }
                     }
                     synchronized (mGameStateListenerLock) {
@@ -434,7 +450,10 @@ public final class GameManagerService extends IGameManagerService.Stub {
                 }
                 case CANCEL_GAME_LOADING_MODE: {
                     Slog.v(TAG, "Game loading power mode OFF (loading boost ended)");
-                    mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, false);
+                    synchronized (mLock) {
+                        mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, false);
+                        mLoadingBoostPackage = null;
+                    }
                     break;
                 }
                 case WRITE_GAME_MODE_INTERVENTION_LIST_FILE: {
@@ -959,6 +978,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
         @Override
         public void setGamePolicySession(String packageName, int userId) {
+            // Retain the visible package so leaving None can resume its session.
             mGamePolicyClient.setGame(packageName, userId);
         }
 
@@ -1055,6 +1075,96 @@ public final class GameManagerService extends IGameManagerService.Stub {
             return new int[]{GameManager.GAME_MODE_STANDARD, GameManager.GAME_MODE_CUSTOM};
         }
         return config.getAvailableGameModes();
+    }
+
+    private boolean isGameModeNone(String packageName, @UserIdInt int userId) {
+        final String gameList = Settings.System.getStringForUser(
+                mContext.getContentResolver(), "gamespace_game_list", userId);
+        if (gameList == null || gameList.isEmpty()) return false;
+        for (String entry : gameList.split(";")) {
+            final String[] parts = entry.split("=", 2);
+            if (parts.length == 2 && parts[0].equals(packageName) && parts[1].equals("0")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Map<String, String> readGameList(@UserIdInt int userId) {
+        final String gameList = Settings.System.getStringForUser(
+                mContext.getContentResolver(), "gamespace_game_list", userId);
+        final Map<String, String> entries = new ArrayMap<>();
+        if (gameList == null || gameList.isEmpty()) return entries;
+        for (String entry : gameList.split(";")) {
+            final String[] parts = entry.split("=", 2);
+            if (parts.length == 2) entries.put(parts[0], parts[1]);
+        }
+        return entries;
+    }
+
+    private void onGameListChanged() {
+        final Map<Integer, Set<String>> changedPackages = new ArrayMap<>();
+        synchronized (mLock) {
+            for (int userId : mSettings.keySet()) {
+                final Map<String, String> oldList = mPreviousGameLists.get(userId);
+                final Map<String, String> previous = oldList == null
+                        ? Collections.emptyMap() : oldList;
+                final Map<String, String> current = readGameList(userId);
+                final Set<String> packages = new HashSet<>(previous.keySet());
+                packages.addAll(current.keySet());
+                packages.removeIf(p -> TextUtils.equals(previous.get(p), current.get(p)));
+                if (!packages.isEmpty()) changedPackages.put(userId, packages);
+                mPreviousGameLists.put(userId, current);
+            }
+            if (mLoadingBoostPackage != null
+                    && isGameModeNone(mLoadingBoostPackage, mLoadingBoostUserId)) {
+                mHandler.removeMessages(CANCEL_GAME_LOADING_MODE);
+                mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, false);
+                mLoadingBoostPackage = null;
+            }
+        }
+        if (changedPackages.isEmpty()) return;
+        synchronized (mUidObserverLock) {
+            final Set<Integer> foregroundUids = new HashSet<>(mGameForegroundUids);
+            foregroundUids.addAll(mNonGameForegroundUids);
+            for (int uid : foregroundUids) {
+                mGameForegroundUids.remove(uid);
+                mNonGameForegroundUids.remove(uid);
+                final String[] packages = mPackageManager.getPackagesForUid(uid);
+                if (packages != null && packages.length > 0
+                        && mUidObserver.isGameUid(packages, uid)) {
+                    mGameForegroundUids.add(uid);
+                } else {
+                    mNonGameForegroundUids.add(uid);
+                }
+            }
+            mPowerManagerInternal.setPowerMode(Mode.GAME, !mGameForegroundUids.isEmpty()
+                    && mNonGameForegroundUids.isEmpty());
+        }
+        for (Map.Entry<Integer, Set<String>> entry : changedPackages.entrySet()) {
+            final int userId = entry.getKey();
+            for (String packageName : entry.getValue()) {
+                final boolean isGame = isPackageGame(packageName, userId);
+                updateInterventions(packageName, isGame
+                        ? getGameModeFromSettingsUnchecked(packageName, userId)
+                        : GameManager.GAME_MODE_UNSUPPORTED, userId);
+                try {
+                    final int uid = mPackageManager.getPackageUidAsUser(packageName, userId);
+                    synchronized (mUidObserverLock) {
+                        if (!isGame || isGameModeNone(packageName, userId)) {
+                            setGameDefaultFrameRateOverride(uid, 0.0f);
+                        } else if (mGameForegroundUids.contains(uid)) {
+                            final boolean disabled = mSysProps.getBoolean(
+                                    PROPERTY_DEBUG_GFX_GAME_DEFAULT_FRAME_RATE_DISABLED, false);
+                            setGameDefaultFrameRateOverride(uid, getGameDefaultFrameRate(!disabled));
+                        }
+                    }
+                } catch (NameNotFoundException e) {
+                    // A removed package no longer has a UID to update.
+                }
+            }
+        }
+        mGamePolicyClient.refresh();
     }
 
     private boolean isPackageGame(String packageName, @UserIdInt int userId) {
@@ -1262,7 +1372,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
     public @GameMode boolean isAngleEnabled(String packageName, int userId)
             throws SecurityException {
         final int gameMode = getGameMode(packageName, userId);
-        if (gameMode == GameManager.GAME_MODE_UNSUPPORTED) {
+        if (gameMode == GameManager.GAME_MODE_UNSUPPORTED
+                || isGameModeNone(packageName, userId)) {
             return false;
         }
         final GamePackageConfiguration config;
@@ -1288,7 +1399,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
     public int getLoadingBoostDuration(String packageName, int userId)
             throws SecurityException {
         final int gameMode = getGameMode(packageName, userId);
-        if (gameMode == GameManager.GAME_MODE_UNSUPPORTED) {
+        if (gameMode == GameManager.GAME_MODE_UNSUPPORTED
+                || isGameModeNone(packageName, userId)) {
             return -1;
         }
         final GamePackageConfiguration config;
@@ -1329,23 +1441,28 @@ public final class GameManagerService extends IGameManagerService.Stub {
                     + packageName);
             return;
         }
-        int loadingBoostDuration = getLoadingBoostDuration(packageName, userId);
-        if (loadingBoostDuration != -1) {
-            if (loadingBoostDuration == 0 || loadingBoostDuration > LOADING_BOOST_MAX_DURATION) {
-                loadingBoostDuration = LOADING_BOOST_MAX_DURATION;
-            }
-            if (mHandler.hasMessages(CANCEL_GAME_LOADING_MODE)) {
-                // The loading mode has already been set and is waiting to be unset. It is not
-                // required to set the mode again and we should replace the queued cancel
-                // instruction.
-                mHandler.removeMessages(CANCEL_GAME_LOADING_MODE);
-            } else {
-                Slog.v(TAG, "Game loading power mode ON (loading boost on game start)");
-                mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, true);
-            }
+        synchronized (mLock) {
+            if (isGameModeNone(packageName, userId)) return;
+            int loadingBoostDuration = getLoadingBoostDuration(packageName, userId);
+            if (loadingBoostDuration != -1) {
+                mLoadingBoostPackage = packageName;
+                mLoadingBoostUserId = userId;
+                if (loadingBoostDuration == 0 || loadingBoostDuration > LOADING_BOOST_MAX_DURATION) {
+                    loadingBoostDuration = LOADING_BOOST_MAX_DURATION;
+                }
+                if (mHandler.hasMessages(CANCEL_GAME_LOADING_MODE)) {
+                    // The loading mode has already been set and is waiting to be unset. It is not
+                    // required to set the mode again and we should replace the queued cancel
+                    // instruction.
+                    mHandler.removeMessages(CANCEL_GAME_LOADING_MODE);
+                } else {
+                    Slog.v(TAG, "Game loading power mode ON (loading boost on game start)");
+                    mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, true);
+                }
 
-            mHandler.sendMessageDelayed(
-                    mHandler.obtainMessage(CANCEL_GAME_LOADING_MODE), loadingBoostDuration);
+                mHandler.sendMessageDelayed(
+                        mHandler.obtainMessage(CANCEL_GAME_LOADING_MODE), loadingBoostDuration);
+            }
         }
     }
 
@@ -1416,6 +1533,9 @@ public final class GameManagerService extends IGameManagerService.Stub {
     }
 
     float getResolutionScalingFactorInternal(String packageName, int gameMode, int userId) {
+        if (isGameModeNone(packageName, userId)) {
+            return GamePackageConfiguration.GameModeConfiguration.DEFAULT_SCALING;
+        }
         final GamePackageConfiguration packageConfig = getConfig(packageName, userId);
         if (packageConfig == null) {
             return GamePackageConfiguration.GameModeConfiguration.DEFAULT_SCALING;
@@ -1625,6 +1745,14 @@ public final class GameManagerService extends IGameManagerService.Stub {
         mGameDefaultFrameRateValue = (float) mSysProps.getInt(
                 PROPERTY_RO_SURFACEFLINGER_GAME_DEFAULT_FRAME_RATE, 60);
         Slog.v(TAG, "Game Default Frame Rate : " + mGameDefaultFrameRateValue);
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor("gamespace_game_list"), false,
+                new ContentObserver(mHandler) {
+                    @Override
+                    public void onChange(boolean selfChange) {
+                        onGameListChanged();
+                    }
+                }, UserHandle.USER_ALL);
     }
 
     private void sendUserMessage(int userId, int what, String eventForLog, int delayMillis) {
@@ -1737,6 +1865,10 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
     private void updateInterventions(String packageName,
             @GameMode int gameMode, @UserIdInt int userId) {
+        if (isGameModeNone(packageName, userId)) {
+            resetFps(packageName, userId);
+            return;
+        }
         final GamePackageConfiguration packageConfig = getConfig(packageName, userId);
         boolean hasStandardOverride = false;
         if (gameMode == GameManager.GAME_MODE_STANDARD) {
@@ -2286,11 +2418,25 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
     @VisibleForTesting
     void setGameModeFrameRateOverride(int uid, float frameRate) {
+        if (frameRate != 0.0f) {
+            final String[] packages = mPackageManager.getPackagesForUid(uid);
+            if (packages != null && Arrays.stream(packages).anyMatch(
+                    p -> isGameModeNone(p, UserHandle.getUserId(uid)))) {
+                frameRate = 0.0f;
+            }
+        }
         nativeSetGameModeFrameRateOverride(uid, frameRate);
     }
 
     @VisibleForTesting
     void setGameDefaultFrameRateOverride(int uid, float frameRate) {
+        if (frameRate != 0.0f) {
+            final String[] packages = mPackageManager.getPackagesForUid(uid);
+            if (packages != null && Arrays.stream(packages).anyMatch(
+                    p -> isGameModeNone(p, UserHandle.getUserId(uid)))) {
+                frameRate = 0.0f;
+            }
+        }
         Slog.v(TAG, "setDefaultFrameRateOverride : " + uid + " , " + frameRate);
         nativeSetGameDefaultFrameRateOverride(uid, frameRate);
     }
@@ -2344,11 +2490,15 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
     private io.github.miner7222.gamepolicy.GameSession resolveGamePolicySession(
             String packageName, int userId) {
-        if (userId != ActivityManager.getCurrentUser() || !isPackageGame(packageName, userId)) {
+        if (userId != ActivityManager.getCurrentUser() || !isPackageGame(packageName, userId)
+                || isGameModeNone(packageName, userId)) {
             return null;
         }
         try {
             final int uid = mPackageManager.getPackageUidAsUser(packageName, userId);
+            final String[] packages = mPackageManager.getPackagesForUid(uid);
+            if (packages != null && Arrays.stream(packages).anyMatch(
+                    p -> isGameModeNone(p, userId))) return null;
             final java.util.List<ActivityManager.RunningAppProcessInfo> processes =
                     mContext.getSystemService(ActivityManager.class).getRunningAppProcesses();
             if (processes == null) return null;
@@ -2405,25 +2555,35 @@ public final class GameManagerService extends IGameManagerService.Stub {
             }
         }
 
+        private boolean isGameUid(String[] packages, int uid) {
+            final int userId = UserHandle.getUserId(uid);
+            // A shared UID containing a None game must also be free of UID-wide overrides.
+            return Arrays.stream(packages).noneMatch(p -> isGameModeNone(p, userId))
+                    && Arrays.stream(packages).anyMatch(p -> isPackageGame(p, userId));
+        }
+
         private void handleUidMovedToTop(int uid) {
             final String[] packages = mPackageManager.getPackagesForUid(uid);
             if (packages == null || packages.length == 0) {
                 return;
             }
 
-            final int userId = ActivityManager.getCurrentUser();
-            final boolean isNotGame = Arrays.stream(packages).noneMatch(
-                    p -> isPackageGame(p, userId));
             synchronized (mUidObserverLock) {
+                final boolean isNotGame = !isGameUid(packages, uid);
+                final boolean wasGamePowerMode = !mGameForegroundUids.isEmpty()
+                        && mNonGameForegroundUids.isEmpty();
+                final boolean wasGame = mGameForegroundUids.remove(uid);
+                mNonGameForegroundUids.remove(uid);
                 if (isNotGame) {
-                    if (!mGameForegroundUids.isEmpty() && mNonGameForegroundUids.isEmpty()) {
+                    mNonGameForegroundUids.add(uid);
+                    if (wasGamePowerMode) {
                         Slog.v(TAG, "Game power mode OFF (first non-game in foreground)");
                         mPowerManagerInternal.setPowerMode(Mode.GAME, false);
                     }
-                    mNonGameForegroundUids.add(uid);
+                    if (wasGame) setGameDefaultFrameRateOverride(uid, 0.0f);
                     return;
                 }
-                if (mGameForegroundUids.isEmpty() && mNonGameForegroundUids.isEmpty()) {
+                if (!wasGamePowerMode && mNonGameForegroundUids.isEmpty()) {
                     Slog.v(TAG, "Game power mode ON (first game in foreground)");
                     mPowerManagerInternal.setPowerMode(Mode.GAME, true);
                 }
