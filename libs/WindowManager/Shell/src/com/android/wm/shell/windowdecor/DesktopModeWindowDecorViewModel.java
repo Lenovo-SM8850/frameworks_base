@@ -372,7 +372,7 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                 new InputMonitorFactory(),
                 SurfaceControl.Transaction::new,
                 new AppHeaderViewHolder.DefaultFactory(),
-                new AppHandleViewHolder.Factory(),
+                new AppHandleViewHolder.Factory(captionVisibilityHelper::getAppHandleMode),
                 rootTaskDisplayAreaOrganizer,
                 new SparseArray<>(),
                 interactionJankMonitor,
@@ -625,6 +625,12 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             return Unit.INSTANCE;
         });
         mLockTaskChangeListener.addListener(this);
+        mCaptionVisibilityHelper.observeAppHandleMode(mContext, mMainHandler, mShellController,
+                () -> {
+                    for (int i = mWindowDecorByTaskId.size() - 1; i >= 0; i--) {
+                        onTaskInfoChanged(mWindowDecorByTaskId.valueAt(i).getTaskInfo());
+                    }
+                });
     }
 
     @Override
@@ -1867,8 +1873,9 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
                 && DesktopExperienceFlags.ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS.isTrue()) {
             return true;
         }
+        // Retain the decoration while the handle is off so live changes can relayout it.
         return mCaptionVisibilityHelper.shouldCreateCaption(taskInfo,
-                /* isKeyguardVisAndOccluded */ false);
+                /* isKeyguardVisAndOccluded */ false, /* isAppHandle */ false);
     }
 
     private void recreateWindowDecoration(

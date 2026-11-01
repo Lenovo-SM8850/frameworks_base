@@ -8057,6 +8057,12 @@ public final class Settings {
         public static final String FLASHLIGHT_ON_CALL_RATE = "flashlight_on_call_rate";
 
         /**
+         * App handle mode: 0 = Show (default), 1 = Transparent, 2 = Off.
+         * @hide
+         */
+        public static final String APP_HANDLE_MODE = "app_handle_mode";
+
+        /**
          * Keys we no longer back up under the current schema, but want to continue to
          * process when restoring historical backup datasets.
          *

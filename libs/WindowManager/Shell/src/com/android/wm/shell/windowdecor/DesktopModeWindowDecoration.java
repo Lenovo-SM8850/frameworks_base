@@ -115,6 +115,7 @@ import com.android.wm.shell.splitscreen.SplitScreenController;
 import com.android.wm.shell.transition.FocusTransitionObserver;
 import com.android.wm.shell.transition.Transitions;
 import com.android.wm.shell.windowdecor.caption.OccludingElement;
+import com.android.wm.shell.windowdecor.common.CaptionVisibilityHelper;
 import com.android.wm.shell.windowdecor.common.DecorThemeUtil;
 import com.android.wm.shell.windowdecor.common.ExclusionRegionListener;
 import com.android.wm.shell.windowdecor.common.Theme;
@@ -537,6 +538,15 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
                 mLockTaskChangeListener.isTaskLocked(),
                 /* occludingElementsCalculator = */ () -> getOccludingElements(),
                 mDecorThemeUtilFactory);
+
+        if (!taskInfo.isFloatingWindow
+                && mRelayoutParams.mLayoutResId == R.layout.desktop_mode_app_handle
+                && mAppHandleViewHolderFactory.getAppHandleMode()
+                        == CaptionVisibilityHelper.APP_HANDLE_MODE_OFF) {
+            mRelayoutParams.mIsCaptionVisible = false;
+            mRelayoutParams.mIsInsetSource = false;
+            closeHandleMenu();
+        }
 
         if (mFloatingFocusEnabled) {
             mRelayoutParams.mShadowRadiusId = FloatingFocusIndicator.shadowRadiusId(taskInfo.isFocused);

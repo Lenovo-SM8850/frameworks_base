@@ -60,6 +60,7 @@ import com.android.wm.shell.windowdecor.WindowDecorLinearLayout
 import com.android.wm.shell.windowdecor.WindowDecorationActions
 import com.android.wm.shell.windowdecor.WindowManagerWrapper
 import com.android.wm.shell.windowdecor.additionalviewcontainer.AdditionalSystemViewContainer
+import com.android.wm.shell.windowdecor.common.CaptionVisibilityHelper
 import com.android.wm.shell.windowdecor.common.DecorThemeUtil
 import com.android.wm.shell.windowdecor.common.Theme
 import com.android.wm.shell.windowdecor.extension.identityHashCode
@@ -81,6 +82,7 @@ class AppHandleViewHolder(
     private val focusTransitionObserver: FocusTransitionObserver,
     private val pinnedLayerController: PinnedLayerController?,
     private val desktopTasksController: DesktopTasksController,
+    private val appHandleMode: () -> Int = { CaptionVisibilityHelper.APP_HANDLE_MODE_SHOW },
 ) : WindowDecorationViewHolder<AppHandleViewHolder.HandleData>() {
 
     data class HandleData(
@@ -114,6 +116,7 @@ class AppHandleViewHolder(
         } else captionHandle.imageTintList = ColorStateList.valueOf(color)
     }
     private var handleMenuOpen = false
+    private var handleTransparent = false
     private var captionVisible = false
     private var statusBarInputLayerExists = false
 
@@ -181,8 +184,18 @@ class AppHandleViewHolder(
         showInputLayer: Boolean,
         isCaptionVisible: Boolean,
     ) {
-        captionVisible = isCaptionVisible
-        setVisibility(isCaptionVisible)
+        val mode = appHandleMode()
+        handleTransparent = mode == CaptionVisibilityHelper.APP_HANDLE_MODE_TRANSPARENT
+        // Image alpha is independent of view fades and sampled tint changes.
+        captionHandle.imageAlpha = if (mode == CaptionVisibilityHelper.APP_HANDLE_MODE_SHOW) 255 else 0
+        captionVisible = isCaptionVisible && mode != CaptionVisibilityHelper.APP_HANDLE_MODE_OFF
+        if (mode == CaptionVisibilityHelper.APP_HANDLE_MODE_OFF) {
+            animator.cancel()
+            rootView.visibility = View.GONE
+            rootView.alpha = 0f
+        } else {
+            setVisibility(captionVisible)
+        }
         regionSampler.updateTask(taskInfo)
         if (DesktopExperienceFlags.ENABLE_REENABLE_APP_HANDLE_COLOR_ANIMATIONS.isTrue) {
             animator.animateColorChange(getCaptionHandleBarColor(taskInfo))
@@ -194,14 +207,15 @@ class AppHandleViewHolder(
             position.y + captionHandle.paddingTop,
             position.x + width - captionHandle.paddingRight,
             position.y + height - captionHandle.paddingBottom)
-        regionSampler.update(sampleBounds, isCaptionVisible && !handleMenuOpen,
+        regionSampler.update(sampleBounds, captionVisible && !handleMenuOpen && !handleTransparent,
             shouldUseLightCaptionColors(taskInfo))
         if (!shouldAddStatusBarInputLayer) {
             return
         }
         // If handle is not in status bar region(i.e., bottom stage in vertical split),
         // do not create an input layer
-        if (position.y >= SystemBarUtils.getStatusBarHeight(context) || !showInputLayer) {
+        if (position.y >= SystemBarUtils.getStatusBarHeight(context) || !showInputLayer ||
+            mode == CaptionVisibilityHelper.APP_HANDLE_MODE_OFF) {
             disposeStatusBarInputLayer()
             return
         }
@@ -224,7 +238,7 @@ class AppHandleViewHolder(
 
     override fun onHandleMenuClosed() {
         handleMenuOpen = false
-        regionSampler.setVisible(captionVisible)
+        regionSampler.setVisible(captionVisible && !handleTransparent)
         animator.animateCaptionHandleAlpha(startValue = 0f, endValue = 1f)
     }
 
@@ -434,7 +448,11 @@ class AppHandleViewHolder(
     }
 
     /** Factory class for creating [AppHandleViewHolder] objects. */
-    class Factory {
+    class Factory(
+        private val appHandleMode: () -> Int = { CaptionVisibilityHelper.APP_HANDLE_MODE_SHOW },
+    ) {
+        fun getAppHandleMode(): Int = appHandleMode()
+
         /**
          * Create a [AppHandleViewHolder] object to handle caption view and status bar input layer
          * logic.
@@ -464,6 +482,7 @@ class AppHandleViewHolder(
                 focusTransitionObserver,
                 pinnedLayerController,
                 desktopTasksController,
+                appHandleMode,
             )
     }
 
