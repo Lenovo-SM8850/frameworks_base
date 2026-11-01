@@ -212,8 +212,9 @@ public class SensorTest {
                 1,
                 componentInfo,
                 FingerprintSensorProperties.TYPE_UDFPS_OPTICAL,
-                false,
-                false,
+                false /* halControlsIllumination */,
+                false /* halHandlesDisplayTouches */,
+                false /* resetLockoutRequiresHardwareAuthToken */,
                 List.of(locationInternal)
         );
 
