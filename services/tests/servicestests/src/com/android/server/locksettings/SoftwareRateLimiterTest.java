@@ -634,8 +634,9 @@ public class SoftwareRateLimiterTest {
     }
 
     private LockscreenCredential newPattern(String pattern) {
-        return LockscreenCredential.createPattern(
-                LockPatternUtils.byteArrayToPattern(pattern.getBytes()));
+        return LockscreenCredential.createPattern(LockPatternUtils.byteArrayToPattern(
+                pattern.getBytes(), LockPatternUtils.PATTERN_SIZE_DEFAULT),
+                LockPatternUtils.PATTERN_SIZE_DEFAULT);
     }
 
     private LockscreenCredential newPassword(String password) {
