@@ -56,6 +56,7 @@ public class SystemSettingsValidators {
     public static final Map<String, Validator> VALIDATORS = new ArrayMap<>();
 
     static {
+        VALIDATORS.put(System.APP_HANDLE_MODE, new InclusiveIntegerRangeValidator(0, 2));
         VALIDATORS.put(System.STATUS_BAR_TRIPLE_TAP_ACTION,
                 new InclusiveIntegerRangeValidator(0, Action.values().length - 1));
         VALIDATORS.put(

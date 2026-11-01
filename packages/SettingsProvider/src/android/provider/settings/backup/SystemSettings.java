@@ -104,6 +104,7 @@ public class SystemSettings {
                 Settings.System.ALARM_ALERT,
                 Settings.System.NOTIFICATION_LIGHT_PULSE,
                 Settings.System.STATUS_BAR_TRIPLE_TAP_ACTION,
+                Settings.System.APP_HANDLE_MODE,
                 Settings.System.WEAR_ACCESSIBILITY_GESTURE_ENABLED,
                 Settings.System.CLOCKWORK_BLUETOOTH_SETTINGS_PREF,
                 Settings.System.ENABLE_NOTIFICATION_WITHOUT_TAP_OR_TILT,

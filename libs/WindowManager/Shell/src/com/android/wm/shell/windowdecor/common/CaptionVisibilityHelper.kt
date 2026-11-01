@@ -19,6 +19,10 @@ package com.android.wm.shell.windowdecor.common
 import android.app.ActivityManager
 import android.app.WindowConfiguration
 import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
+import android.content.Context
+import android.database.ContentObserver
+import android.os.Handler
+import android.provider.Settings
 import android.view.Display
 import android.view.WindowManager
 import android.window.DesktopExperienceFlags
@@ -31,6 +35,8 @@ import com.android.wm.shell.desktopmode.DesktopWallpaperActivity.Companion.isWal
 import com.android.wm.shell.shared.bubbles.BubbleFlagHelper
 import com.android.wm.shell.shared.desktopmode.DesktopState
 import com.android.wm.shell.splitscreen.SplitScreenController
+import com.android.wm.shell.sysui.ShellController
+import com.android.wm.shell.sysui.UserChangeListener
 import java.util.Optional
 
 /**
@@ -45,15 +51,59 @@ class CaptionVisibilityHelper(
     private val lockTaskChangeListener: LockTaskChangeListener,
 ) {
     var splitScreenController: SplitScreenController? = null
+    var appHandleMode: Int = APP_HANDLE_MODE_SHOW
+        private set
+
+    /** Observes the foreground user's handle preference on the Shell main thread. */
+    fun observeAppHandleMode(
+        context: Context,
+        handler: Handler,
+        shellController: ShellController,
+        onModeChanged: Runnable,
+    ) {
+        val resolver = context.contentResolver
+        var userId = shellController.currentUserId
+        fun updateMode() {
+            val value = Settings.System.getIntForUser(
+                resolver, Settings.System.APP_HANDLE_MODE, APP_HANDLE_MODE_SHOW, userId)
+            val mode = if (value in APP_HANDLE_MODE_SHOW..APP_HANDLE_MODE_OFF) {
+                value
+            } else {
+                APP_HANDLE_MODE_SHOW
+            }
+            if (appHandleMode == mode) return
+            appHandleMode = mode
+            onModeChanged.run()
+        }
+        val observer = object : ContentObserver(handler) {
+            override fun onChange(selfChange: Boolean) {
+                updateMode()
+            }
+        }
+        shellController.addUserChangeListener(object : UserChangeListener {
+            override fun onUserChanged(newUserId: Int, userContext: Context) {
+                resolver.unregisterContentObserver(observer)
+                userId = newUserId
+                resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.APP_HANDLE_MODE),
+                    false, observer, userId)
+                updateMode()
+            }
+        })
+    }
 
     /**
      * Returns, given a task's attribute and its display attribute, whether the app caption should
      * be created or not for this task.
      */
+    @JvmOverloads
     fun shouldCreateCaption(
         taskInfo: ActivityManager.RunningTaskInfo,
         isKeyguardVisAndOccluded: Boolean,
+        isAppHandle: Boolean = taskInfo.windowingMode != WINDOWING_MODE_FREEFORM &&
+            !taskInfo.isFloatingWindow,
     ): Boolean {
+        if (isAppHandle && appHandleMode == APP_HANDLE_MODE_OFF) return false
 
         // If DisplayController doesn't have it tracked, it could be a private/managed display, so
         // return false if display is null
@@ -158,6 +208,12 @@ class CaptionVisibilityHelper(
             taskInfo.windowingMode != WindowConfiguration.WINDOWING_MODE_PINNED &&
             !taskInfo.configuration.windowConfiguration.isAlwaysOnTop &&
             !taskInfo.isBubble()
+    }
+
+    companion object {
+        const val APP_HANDLE_MODE_SHOW = 0
+        const val APP_HANDLE_MODE_TRANSPARENT = 1
+        const val APP_HANDLE_MODE_OFF = 2
     }
 
     private fun allowedForDisplay(display: Display): Boolean {

@@ -102,6 +102,7 @@ import com.android.wm.shell.windowdecor.extension.isDragResizable
 import com.android.wm.shell.windowdecor.extension.isFullscreen
 import com.android.wm.shell.windowdecor.extension.isTransparentCaptionBarAppearance
 import com.android.wm.shell.windowdecor.viewholder.AppHeaderViewHolder
+import com.android.wm.shell.windowdecor.viewholder.AppHandleViewHolder
 import com.android.wm.shell.windowdecor.viewholder.FullscreenHeaderViewHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainCoroutineDispatcher
@@ -486,10 +487,18 @@ constructor(
         desktopConfig: DesktopConfig,
         inSyncWithTransition: Boolean,
     ): RelayoutParams {
-        val shouldCreateCaption =
-            !DesktopExperienceFlags.ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS.isTrue ||
-                captionVisibilityHelper.shouldCreateCaption(taskInfo, isKeyguardVisibleAndOccluded)
         val isPinnedLayer = pinnedLayerController?.isPinned(taskInfo.taskId) ?: false
+        val isAppHandleTask = !isPinnedLayer && !taskInfo.isFreeform &&
+            !isFullscreenDesktop(taskInfo) && !taskInfo.isFloatingWindow
+        val shouldCreateCaption =
+            if (DesktopExperienceFlags.ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS.isTrue ||
+                (isAppHandleTask && captionVisibilityHelper.appHandleMode ==
+                    CaptionVisibilityHelper.APP_HANDLE_MODE_OFF)) {
+                captionVisibilityHelper.shouldCreateCaption(
+                    taskInfo, isKeyguardVisibleAndOccluded, isAppHandleTask)
+            } else {
+                true
+            }
         val captionType =
             when {
                 !shouldCreateCaption -> CaptionController.CaptionType.NO_CAPTION
@@ -1167,6 +1176,9 @@ constructor(
                     pinnedLayerController,
                     desktopTasksController,
                     decorThemeUtilFactory,
+                    appHandleViewHolderFactory = AppHandleViewHolder.Factory {
+                        captionVisibilityHelper.appHandleMode
+                    },
                 )
             }
 
