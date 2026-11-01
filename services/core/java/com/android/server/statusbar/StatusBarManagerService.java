@@ -198,6 +198,7 @@ public class StatusBarManagerService extends IStatusBarService.Stub implements D
     // for disabling the status bar
     private final ArrayList<DisableRecord> mDisableRecords = new ArrayList<DisableRecord>();
     private GlobalActionsProvider.GlobalActionsListener mGlobalActionListener;
+    private volatile StatusBarManagerInternal.StatusBarTripleTapListener mStatusBarTripleTapListener;
 
     @GuardedBy("mShowPowerMenuCallbacks")
     private final ArraySet<AndroidFuture<Integer>> mShowPowerMenuCallbacks = new ArraySet<>();
@@ -553,6 +554,12 @@ public class StatusBarManagerService extends IStatusBarService.Stub implements D
      * Private API used by NotificationManagerService and other system services.
      */
     private final StatusBarManagerInternal mInternalService = new StatusBarManagerInternal() {
+        @Override
+        public void setStatusBarTripleTapListener(
+                StatusBarManagerInternal.StatusBarTripleTapListener listener) {
+            mStatusBarTripleTapListener = listener;
+        }
+
         @Override
         public void setNotificationDelegate(NotificationDelegate delegate) {
             mNotificationDelegate = delegate;
@@ -1870,6 +1877,22 @@ public class StatusBarManagerService extends IStatusBarService.Stub implements D
 
         Slog.i(TAG, "restartSystemUI requested by uid " + Binder.getCallingUid());
         mHandler.post(this::requestSystemUiRestart);
+    }
+
+    @Override
+    public void onStatusBarTripleTap(int displayId) {
+        enforceStatusBarService();
+        enforceValidCallingUser();
+        final long identity = Binder.clearCallingIdentity();
+        try {
+            final StatusBarManagerInternal.StatusBarTripleTapListener listener =
+                    mStatusBarTripleTapListener;
+            if (listener != null) {
+                listener.onStatusBarTripleTap(displayId);
+            }
+        } finally {
+            Binder.restoreCallingIdentity(identity);
+        }
     }
 
     @Override
