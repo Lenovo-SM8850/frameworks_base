@@ -2450,9 +2450,17 @@ public class PhoneWindowManager implements WindowManagerPolicy {
             case LAST_APP:
                 ActionUtils.switchToLastApp(mContext, mCurrentUserId);
                 break;
-            case SPLIT_SCREEN:
-                toggleSplitScreen();
+            case SPLIT_SCREEN: {
+                final int displayId = event.getDisplayId() != Display.INVALID_DISPLAY
+                        ? event.getDisplayId() : DEFAULT_DISPLAY;
+                final Display display = mDisplayManager.getDisplay(displayId);
+                final Context displayContext = display != null
+                        ? mContext.createDisplayContext(display) : mContext;
+                final boolean leftOrTop = displayContext.getResources().getConfiguration()
+                        .orientation == Configuration.ORIENTATION_PORTRAIT;
+                moveFocusedTaskToStageSplit(displayId, leftOrTop);
                 break;
+            }
             case KILL_APP:
                 ActionUtils.killForegroundApp(mContext, mCurrentUserId);
                 break;
@@ -5089,13 +5097,6 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
         if (statusbar != null) {
             statusbar.toggleRecentApps();
-        }
-    }
-
-    private void toggleSplitScreen() {
-        StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
-        if (statusbar != null) {
-            statusbar.toggleSplitScreen();
         }
     }
 
