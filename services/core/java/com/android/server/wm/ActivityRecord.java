@@ -7716,7 +7716,8 @@ final class ActivityRecord extends WindowToken {
 
         // Bubble activities should always fill their parent and should not be letterboxed.
         final boolean isFixedOrientationLetterboxAllowed = !getLaunchedFromBubble()
-                && (parentWindowingMode == WINDOWING_MODE_MULTI_WINDOW
+                && ((parentWindowingMode == WINDOWING_MODE_MULTI_WINDOW
+                        && !shouldFillSplitPane())
                         || parentWindowingMode == WINDOWING_MODE_FULLSCREEN
                         || (task != null && task.isFloatingWindow())
                         || AppCompatCameraPolicy.isFreeformLetterboxingForCameraAllowed(this)
@@ -8064,6 +8065,31 @@ final class ActivityRecord extends WindowToken {
         final AppCompatSizeCompatModePolicy scmPolicy =
                 mAppCompatController.getSizeCompatModePolicy();
         return scmPolicy.replaceResolvedBoundsIfNeeded(resolvedBounds);
+    }
+
+    /** Whether this activity belongs to a Shell split stage rather than another organizer. */
+    boolean isInSplitPane() {
+        final Task task = getTask();
+        if (isEmbedded() || task == null || !task.isLeafTask()
+                || task.getWindowingMode() != WINDOWING_MODE_MULTI_WINDOW) {
+            return false;
+        }
+        final Task stage = task.getCreatedByOrganizerTask();
+        return stage != null && stage != task
+                && stage.getWindowingMode() == WINDOWING_MODE_MULTI_WINDOW
+                && (stage.hasAdjacentTaskFragment()
+                        // Flexible stages enforce inheritance even without adjacency.
+                        || (!task.isOverrideBoundsAllowed()
+                                && !task.isOverrideWindowingModeAllowed()));
+    }
+
+    private boolean shouldFillSplitPane() {
+        if (!ActivityInfo.isResizeableMode(info.resizeMode)
+                || getAppCompatDisplayInsets() != null || !isInSplitPane()) {
+            return false;
+        }
+        final SplitPaneRatioSettings settings = mAtmService.mSplitPaneRatioSettings;
+        return settings == null || !settings.keepsRatioInSplit(packageName, mUserId);
     }
 
     void recomputeConfiguration() {
