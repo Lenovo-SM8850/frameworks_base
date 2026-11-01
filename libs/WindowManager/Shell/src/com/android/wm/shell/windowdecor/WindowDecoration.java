@@ -605,7 +605,8 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         }
 
         if (params.mShouldSetBackground) {
-            final int backgroundColorInt = Color.BLACK;
+            final int backgroundColorInt = mTaskInfo.isFloatingWindow
+                    ? getFloatingWindowBackgroundColor() : Color.BLACK;
             mTmpColor[0] = (float) Color.red(backgroundColorInt) / 255.f;
             mTmpColor[1] = (float) Color.green(backgroundColorInt) / 255.f;
             mTmpColor[2] = (float) Color.blue(backgroundColorInt) / 255.f;
@@ -615,6 +616,16 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
         }
 
         updateTaskSurfaceOutline(params, startT, finishT, outResult);
+    }
+
+    private int getFloatingWindowBackgroundColor() {
+        if (mTaskInfo.taskDescription != null && mTaskInfo.taskDescription.getBackgroundColor() != 0) {
+            return mTaskInfo.taskDescription.getBackgroundColor();
+        }
+        // Shell's theme is fixed light; use the task's night mode for the backing surface.
+        final int nightMode = mTaskInfo.configuration.uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        return mContext.getColor(nightMode == Configuration.UI_MODE_NIGHT_YES
+                ? android.R.color.system_surface_dark : android.R.color.system_surface_light);
     }
 
     private void loadTaskSurfaceOutline(RelayoutParams params, Context context,
