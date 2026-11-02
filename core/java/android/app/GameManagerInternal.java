@@ -31,6 +31,9 @@ public abstract class GameManagerInternal {
     /** Whether the package is a managed game or declares the game category. */
     public boolean isGame(String packageName, int userId) { return false; }
 
-    /** Visible-task session after the existing transition grace has been applied. */
+    /** Suppress foreground game power requests while the retained task session is suspended. */
+    public void setGameSessionSuspended(String packageName, int userId, boolean suspended) {}
+
+    /** Active-task policy session; null releases policy without destroying retained choices. */
     public void setGamePolicySession(String packageName, int userId) {}
 }

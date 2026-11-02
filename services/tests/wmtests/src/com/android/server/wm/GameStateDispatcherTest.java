@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -52,10 +53,12 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockitoSession;
 import org.mockito.quality.Strictness;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @SmallTest
@@ -241,6 +244,51 @@ public class GameStateDispatcherTest {
         mDispatcher.dispatchGameState(true, "test.game");
         mDispatcher.dispatchGameState(false, null);
         assertEquals(original, mSettings);
+    }
+
+    @Test
+    public void processRestartInSameTask_startsFreshSessionAndKeepsOldStopScoped() throws Exception {
+        mDispatcher.setSessionIdentity(156, 100);
+        enterGame();
+        final ServiceConnection old = mConnection;
+        // The task relaunches, the old process dies, then a new process runs in the same task.
+        mDispatcher.dispatchGameState(false, null);
+        verify(mContext).unbindService(old);
+        mDispatcher.setSessionIdentity(156, 200);
+        mDispatcher.dispatchGameState(true, "test.game");
+        assertNotSame(old, mConnection);
+        mConnection.onServiceConnected(SESSION, new Binder());
+        assertBypass();
+
+        final ArgumentCaptor<Intent> captor = ArgumentCaptor.forClass(Intent.class);
+        verify(mActivityManager, atLeastOnce()).startService(any(), captor.capture(), any(),
+                eq(false), any(), any(), anyInt());
+        final List<Intent> sent = captor.getAllValues();
+        boolean ended = false;
+        for (Intent intent : sent) {
+            if ("game_end".equals(intent.getAction())) {
+                // The stop names the old incarnation, so the new session rejects it.
+                assertEquals(100, intent.getIntExtra("game_process_id", 0));
+                assertEquals(156, intent.getIntExtra("game_task_id", -1));
+                ended = true;
+            }
+        }
+        assertTrue(ended);
+        final Intent last = sent.get(sent.size() - 1);
+        assertEquals("game_start", last.getAction());
+        assertEquals(200, last.getIntExtra("game_process_id", 0));
+        assertEquals(156, last.getIntExtra("game_task_id", -1));
+    }
+
+    @Test
+    public void newProcessInVisibleTask_isNewIncarnation() {
+        // No session after the old process died: the new process must start one.
+        assertTrue(GameSpaceService.isNewGameIncarnation(false, 0, 200));
+        // The old process was replaced before its death was processed.
+        assertTrue(GameSpaceService.isNewGameIncarnation(true, 100, 200));
+        // The running session's own process, or a process without a pid, changes nothing.
+        assertFalse(GameSpaceService.isNewGameIncarnation(true, 200, 200));
+        assertFalse(GameSpaceService.isNewGameIncarnation(false, 0, 0));
     }
 
     private void setGameVisible(boolean visible) {
