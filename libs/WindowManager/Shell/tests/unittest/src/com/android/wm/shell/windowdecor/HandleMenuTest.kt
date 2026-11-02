@@ -654,6 +654,43 @@ class HandleMenuTest : ShellTestCase() {
         org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
     }
 
+    @Test fun windowingPillWidthsAndGapsFollowVisibleButtons() {
+        val maxWidth = mContext.resources.getDimensionPixelSize(R.dimen.desktop_mode_handle_menu_width)
+        val height = mContext.resources.getDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
+        for (mode in listOf(WINDOWING_MODE_FULLSCREEN, WINDOWING_MODE_FREEFORM,
+            android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW)) {
+            for (canSplit in listOf(true, false)) {
+                for (canMinimize in listOf(true, false)) {
+                    val root = LayoutInflater.from(context)
+                        .inflate(R.layout.desktop_mode_window_decor_handle_menu, null)
+                    val pill = root.requireViewById<WindowingPillView>(R.id.windowing_pill)
+                    val task = TestRunningTaskInfoBuilder().setDisplayId(DEFAULT_DISPLAY)
+                        .setWindowingMode(mode).build().apply {
+                            isFloatingWindow = mode == WINDOWING_MODE_FREEFORM
+                        }
+                    val actions = mock<WindowDecorationActions>()
+                    whenever(actions.canMinimizeTask(task)).thenReturn(canMinimize)
+                    pill.desktopModeCompatPolicy = mock()
+                    pill.initialize(actions, mock(), false, {})
+                    pill.bind(task, mode == android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW,
+                        canEnterSplitScreen = canSplit, showTaskActions = true)
+                    pill.measure(View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
+                        View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+                    pill.layout(0, 0, pill.measuredWidth, pill.measuredHeight)
+                    val buttons = (0 until pill.childCount).map { pill.getChildAt(it) }
+                        .filter { it.visibility != View.GONE }.sortedBy { it.left }
+                    assertEquals(buttons.sumOf { it.width } + pill.paddingLeft + pill.paddingRight,
+                        pill.measuredWidth)
+                    assertThat(pill.measuredWidth).isAtMost(maxWidth)
+                    assertThat(buttons.zipWithNext { a, b -> b.left - a.right }.distinct().size)
+                        .isAtMost(1)
+                    assertEquals(pill.paddingLeft, buttons.first().left)
+                    assertEquals(pill.paddingRight, pill.width - buttons.last().right)
+                }
+            }
+        }
+    }
+
     @Test fun fullscreenHasMinimizeAndCloseInWindowingPill() = runTest {
         createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
         val task = mockDesktopWindowDecoration.mTaskInfo

@@ -392,6 +392,21 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
                     drawableInsets = iconButtonDrawableInsetEnd,
                 )
         }
+        layoutParams?.let { it.width = contentWidth; layoutParams = it }
+    }
+
+    val contentWidth: Int
+        get() = minOf(context.resources.getDimensionPixelSize(
+            R.dimen.desktop_mode_handle_menu_width),
+            listOf(rotateBtn, fullscreenBtn, splitscreenBtn, floatingBtn, desktopBtn,
+                minimizeBtn, closeBtn).filter { !it.isGone }.sumOf { it.layoutParams.width } +
+                paddingLeft + paddingRight)
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(MeasureSpec.makeMeasureSpec(
+            minOf(contentWidth, MeasureSpec.getSize(widthMeasureSpec).takeIf {
+                MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED
+            } ?: contentWidth), MeasureSpec.EXACTLY), heightMeasureSpec)
     }
 
     /** Update the split screen button (horizontal vs. vertical split) orientation. */
@@ -438,11 +453,4 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
                 ),
         )
     }
-
-    val contentWidth: Int
-        get() = minOf(context.resources.getDimensionPixelSize(
-            R.dimen.desktop_mode_handle_menu_width),
-            listOf(rotateBtn, fullscreenBtn, splitscreenBtn, floatingBtn, desktopBtn,
-                minimizeBtn, closeBtn).filter { !it.isGone }.sumOf { it.layoutParams.width } +
-                paddingLeft + paddingRight)
 }
