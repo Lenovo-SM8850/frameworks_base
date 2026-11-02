@@ -177,6 +177,60 @@ class SidebarDragPolicyTest : ShellTestCase() {
         verify(pm, times(1)).getResourcesForApplication(info.applicationInfo)
     }
 
+    @Test fun minimizedTaskDropOnPickerUsesTheExactPendingTask() {
+        val component = ComponentName("test.minimized", "Main")
+        val user = UserHandle.SYSTEM
+        val host = spy(context)
+        val userContext = mock<Context>()
+        val pm = mock<PackageManager>()
+        doReturn(userContext).whenever(host).createContextAsUser(user, 0)
+        whenever(userContext.packageManager).thenReturn(pm)
+        val info = ActivityInfo().apply {
+            packageName = component.packageName
+            name = component.className
+            resizeMode = ActivityInfo.RESIZE_MODE_RESIZEABLE
+            applicationInfo = ApplicationInfo()
+        }
+        whenever(pm.getActivityInfo(component, 0)).thenReturn(info)
+        val minimized = task().apply {
+            taskId = 42
+            userId = 0
+            isFloatingWindow = true
+            isVisible = false
+            baseActivity = component
+            baseIntent = Intent().setComponent(component)
+        }
+        val data = ClipData("task", arrayOf(ClipDescription.MIMETYPE_APPLICATION_TASK),
+            ClipData.Item(Intent().putExtra(Intent.EXTRA_TASK_ID, minimized.taskId)
+                .putExtra(Intent.EXTRA_USER, user)
+                .putExtra(SidebarDragPolicy.EXTRA_MINIMIZED_TASK_DRAG, true)))
+        val tasks = mock<ActivityTaskManager>()
+        whenever(tasks.getTasks(100, false)).thenReturn(emptyList())
+        val split = mock<SplitScreenController>()
+        val slot = AppDragSlot(0, 0, Rect(0, 0, 495, 500), Rect(0, 0, 495, 500), false)
+        whenever(split.getPendingSidebarSplitSlot(0)).thenReturn(slot)
+        // The picker panel can extend beyond the empty slot.
+        whenever(split.isPendingSplitDropTarget(0, 800, 800)).thenReturn(true)
+        whenever(split.startTaskInPendingSplit(minimized, slot)).thenReturn(true)
+        val floating = mock<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>()
+        whenever(floating.getMinimizedTask(42)).thenReturn(minimized)
+        whenever(floating.canDragMinimizedTask(42)).thenReturn(true)
+        val session = DragSession(tasks, mock(), data, 0).apply {
+            appData = data.getItemAt(0).intent
+            activityInfo = info
+        }
+        val policy = SidebarDragPolicy(host, split, floating, tasks)
+        policy.start(session, 0)
+        val destination = requireNotNull(policy.resolve(800, 800))
+        assertThat(destination.pendingSplit).isTrue()
+        assertThat(destination.bounds).isEqualTo(slot.bounds)
+        assertThat(policy.launch(destination)).isTrue()
+        verify(split).startTaskInPendingSplit(minimized, slot)
+        whenever(floating.canDragMinimizedTask(42)).thenReturn(false)
+        policy.refreshSnapshot()
+        assertThat(policy.resolve(800, 800)).isNull()
+    }
+
     private fun clip(pending: PendingIntent, marked: Boolean): ClipData = ClipData(
         ClipDescription("app", arrayOf(ClipDescription.MIMETYPE_APPLICATION_ACTIVITY)).apply {
             extras = PersistableBundle().apply { putBoolean(EXTRA_SIDEBAR_APP_DRAG, marked) }

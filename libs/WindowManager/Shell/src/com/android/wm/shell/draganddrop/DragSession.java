@@ -68,12 +68,14 @@ public class DragSession {
     boolean dragItemSupportsSplitscreen;
     final int hideDragSourceTaskId;
     final boolean isSidebarAppDrag;
+    final boolean isMinimizedTaskDrag;
 
     DragSession(ActivityTaskManager activityTaskManager,
             DisplayLayout dispLayout, ClipData data, int dragFlags) {
         mActivityTaskManager = activityTaskManager;
         mInitialDragData = data;
         isSidebarAppDrag = SidebarDragPolicy.isSidebarDrag(data);
+        isMinimizedTaskDrag = SidebarDragPolicy.isMinimizedTaskDrag(data);
         mInitialDragFlags = dragFlags;
         displayLayout = dispLayout;
         hideDragSourceTaskId = data != null && data.getDescription().getExtras() != null

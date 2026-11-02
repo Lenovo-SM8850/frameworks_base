@@ -55,6 +55,7 @@ class SidebarDragPolicy(
         val running: List<RunningTaskInfo>, val pendingSlot: AppDragSlot?)
 
     private var sidebarSource = false
+    private var minimizedSource = false
     private val disallowHitRegion = RectF()
     private var app: AppDrag? = null
     val handlesAppDrag: Boolean get() = app != null
@@ -65,7 +66,8 @@ class SidebarDragPolicy(
     /** Resolves app identity, metadata, and eligibility once for this drag. */
     fun start(session: DragSession, displayId: Int) {
         app = null
-        sidebarSource = session.isSidebarAppDrag
+        minimizedSource = session.isMinimizedTaskDrag
+        sidebarSource = session.isSidebarAppDrag || minimizedSource
         snapshot = null
         this.displayId = displayId
         displayLayout = session.displayLayout
@@ -77,6 +79,7 @@ class SidebarDragPolicy(
             ?: resolved?.applicationInfo?.uid?.let { UserHandle.of(UserHandle.getUserId(it)) }
             ?: return
         val taskId = appData.getIntExtra(Intent.EXTRA_TASK_ID, -1)
+        if (minimizedSource && floating?.canDragMinimizedTask(taskId) != true) return
         val pending = if (session.clipDescription.hasMimeType(
                 ClipDescription.MIMETYPE_APPLICATION_SHORTCUT)) {
             val pkg = appData.getStringExtra(Intent.EXTRA_PACKAGE_NAME) ?: return
@@ -114,9 +117,16 @@ class SidebarDragPolicy(
         val front = running.firstOrNull { it.displayId == displayId && it.isVisible &&
             it.windowingMode != WINDOWING_MODE_PINNED && !it.isFloatingWindow &&
             !it.configuration.windowConfiguration.isAlwaysOnTop }
-        val existing = running.firstOrNull { it.taskId == app.taskId } ?: running.firstOrNull { it.displayId == displayId &&
-            it.userId == app.user.identifier && (it.baseActivity == app.component ||
-                it.realActivity == app.component || it.baseIntent?.component == app.component) }
+        val existing = if (minimizedSource) floating?.getMinimizedTask(app.taskId)
+            else running.firstOrNull { it.taskId == app.taskId } ?: running.firstOrNull { it.displayId == displayId &&
+                it.userId == app.user.identifier && (it.baseActivity == app.component ||
+                    it.realActivity == app.component || it.baseIntent?.component == app.component) }
+        if (minimizedSource && (existing == null || existing.taskId != app.taskId ||
+                existing.userId != app.user.identifier || existing.displayId != displayId ||
+                floating?.canDragMinimizedTask(app.taskId) != true)) {
+            snapshot = null
+            return
+        }
         val activeSplit = split?.isSplitScreenVisible == true
         val capacity = split?.getSplitCapacity(displayId) ?: 0
         val occupied = split?.getOccupiedSplitSlots(displayId) ?: 0
@@ -143,11 +153,17 @@ class SidebarDragPolicy(
             if (sidebarSource) split?.getPendingSidebarSplitSlot(displayId) else null)
     }
 
-    /** Hit-tests cached state and calculates floating geometry without querying task/app services. */
+    /** Hit-tests destinations, revalidating pending picker bounds for minimized task drags. */
     fun resolve(x: Int, y: Int): Destination? {
         if (disallowHitRegion.contains(x.toFloat(), y.toFloat())) return null
         val app = app ?: return null
         val state = snapshot ?: return null
+        if (minimizedSource) {
+            val slot = state.pendingSlot ?: return null
+            if (!app.supportsSplit || split?.isPendingSplitDropTarget(displayId, x, y) != true)
+                return null
+            return Destination(Rect(slot.bounds), slot = slot, pendingSplit = true)
+        }
         state.pendingSlot?.takeIf { app.supportsSplit && it.hitBounds.contains(x, y) }?.let {
             return Destination(Rect(it.bounds), slot = it, pendingSplit = true)
         }
@@ -275,6 +291,13 @@ class SidebarDragPolicy(
 
     fun launch(destination: Destination): Boolean {
         val app = app ?: return false
+        if (minimizedSource) {
+            val task = snapshot?.existing ?: return false
+            val slot = destination.slot ?: return false
+            if (!destination.pendingSplit || task.taskId != app.taskId ||
+                floating?.canDragMinimizedTask(task.taskId) != true) return false
+            return split?.startTaskInPendingSplit(task, slot) == true
+        }
         if (destination.pendingSplit) return split?.launchSidebarIntoPendingSplit(
             app.component, app.user, displayId) == true
         val pending = app.pending
@@ -366,6 +389,11 @@ class SidebarDragPolicy(
     companion object {
         private const val TAG = "SidebarDragPolicy"
         const val EXTRA_MINIMIZED_TASK_DRAG = "io.github.miner7222.extra.MINIMIZED_TASK_DRAG"
+
+        @JvmStatic
+        fun isMinimizedTaskDrag(data: ClipData?): Boolean = data != null && data.itemCount == 1 &&
+            data.description.hasMimeType(ClipDescription.MIMETYPE_APPLICATION_TASK) &&
+            data.getItemAt(0).intent?.getBooleanExtra(EXTRA_MINIMIZED_TASK_DRAG, false) == true
 
         @JvmStatic
         fun isSidebarDrag(data: ClipData?): Boolean {

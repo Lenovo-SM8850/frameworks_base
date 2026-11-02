@@ -97,6 +97,7 @@ class PinnedLayerController(
     private val minimizedTasks = mutableSetOf<Int>()
     private val minimizeState = FloatingMinimizeState()
     private var minimizeHandles: FloatingMinimizeHandles? = null
+    private var hasPendingSplit: (Int) -> Boolean = { false }
     private var visibleTaskOrder = emptyList<Int>()
 
     @JvmOverloads
@@ -104,8 +105,16 @@ class PinnedLayerController(
         task.isFloatingWindow || presentationController.isTaskSupportedForPinning(task) &&
             (isInSplitScreen || task.windowingMode == WINDOWING_MODE_FULLSCREEN && !task.hasParentTask())
 
+    fun setPendingSplitProvider(provider: (Int) -> Boolean) { hasPendingSplit = provider }
+
     fun getMinimizedTask(taskId: Int): RunningTaskInfo? =
         if (taskId in minimizeState.entries) shellTaskOrganizer.getRunningTaskInfo(taskId) else null
+
+    fun canDragMinimizedTask(taskId: Int): Boolean {
+        val task = getMinimizedTask(taskId) ?: return false
+        return task.isFloatingWindow && task.displayId == DEFAULT_DISPLAY &&
+            !keyguardShowing && !recentsRunning && !overviewShowing && hasPendingSplit(task.displayId)
+    }
 
     private var miniInteractions: FloatingMiniController? = null
     private var frameRates: FloatingFrameRateController? = null
@@ -1475,15 +1484,5 @@ class PinnedLayerController(
         fun onPinnedTasksAdded(taskInfo: TaskInfo)
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
-    }
-
-    fun setPendingSplitProvider(provider: (Int) -> Boolean) { hasPendingSplit = provider }
-
-    private var hasPendingSplit: (Int) -> Boolean = { false }
-
-    fun canDragMinimizedTask(taskId: Int): Boolean {
-        val task = getMinimizedTask(taskId) ?: return false
-        return task.isFloatingWindow && task.displayId == DEFAULT_DISPLAY &&
-            !keyguardShowing && !recentsRunning && !overviewShowing && hasPendingSplit(task.displayId)
     }
 }

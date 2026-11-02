@@ -353,7 +353,9 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
         ProtoLog.v(ShellProtoLogGroup.WM_SHELL_DRAG_AND_DROP,
                 "Handling vanished task: id=%d component=%s", taskInfo.taskId,
                 taskInfo.baseIntent.getComponent());
-        if (!pd.dragSession.isSidebarAppDrag) pd.dragSession.updateRunningTask();
+        if (!pd.dragSession.isSidebarAppDrag && !pd.dragSession.isMinimizedTaskDrag) {
+            pd.dragSession.updateRunningTask();
+        }
         pd.dragLayout.updateSession(pd.dragSession);
     }
 
@@ -383,6 +385,7 @@ public class DragAndDropController implements RemoteCallable<DragAndDropControll
             final ActivityManager.RunningTaskInfo taskInfo = dragSession.runningTaskInfo;
             // Desktop tasks will have their own drag handling.
             final boolean isDesktopDrag = !dragSession.isSidebarAppDrag
+                    && !dragSession.isMinimizedTaskDrag
                     && taskInfo != null && taskInfo.isFreeform()
                     && mDesktopState.canEnterDesktopMode();
             pd.isHandlingDrag = DragUtils.canHandleDrag(event) && !isDesktopDrag;
