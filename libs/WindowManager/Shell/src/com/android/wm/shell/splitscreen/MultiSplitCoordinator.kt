@@ -1400,6 +1400,10 @@ class MultiSplitCoordinator(
 
     fun closeTask(taskId: Int): Boolean = removeTask(taskId, null)
 
+    fun minimizeTask(taskId: Int,
+        prepareMinimize: Function<RunningTaskInfo, WindowContainerTransaction?>): Boolean =
+        removeTask(taskId, prepareMinimize)
+
     private fun removeTask(taskId: Int,
         prepareMinimize: Function<RunningTaskInfo, WindowContainerTransaction?>?): Boolean {
         if (isBusy) return false

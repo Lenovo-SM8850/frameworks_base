@@ -131,6 +131,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 /**
  * Class manages split-screen multitasking mode and implements the main interface
@@ -800,6 +801,13 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
      */
     public void closeTask(int taskId) {
         mStageCoordinator.closeTask(taskId);
+    }
+
+    /** Removes a pane through the close path while retaining its task in the floating layer. */
+    public void minimizeTask(int taskId,
+            Function<ActivityManager.RunningTaskInfo, WindowContainerTransaction> prepareMinimize) {
+        if (!canMutateSplitTask(taskId)) return;
+        mStageCoordinator.minimizeTask(taskId, prepareMinimize);
     }
 
     @Override

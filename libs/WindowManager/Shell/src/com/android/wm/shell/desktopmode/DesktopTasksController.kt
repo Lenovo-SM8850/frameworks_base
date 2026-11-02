@@ -2276,6 +2276,16 @@ class DesktopTasksController(
     }
 
     fun minimizeTask(taskInfo: RunningTaskInfo, minimizeReason: MinimizeReason) {
+        if (splitScreenController.isTaskInSplitScreen(taskInfo.taskId)) {
+            if (lockTaskChangeListener.isTaskLocked || keyguardManager.isKeyguardLocked) return
+            val controller = pinnedLayerController ?: return
+            splitScreenController.minimizeTask(taskInfo.taskId) { task ->
+                WindowContainerTransaction().takeIf {
+                    controller.prepareFloatingTask(task, it, null, minimized = true)
+                }
+            }
+            return
+        }
         if (pinnedLayerController?.minimizeTask(taskInfo) == true) return
         val wct = WindowContainerTransaction()
         val taskId = taskInfo.taskId

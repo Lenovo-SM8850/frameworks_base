@@ -365,6 +365,7 @@ class SidebarDragPolicy(
 
     companion object {
         private const val TAG = "SidebarDragPolicy"
+        const val EXTRA_MINIMIZED_TASK_DRAG = "io.github.miner7222.extra.MINIMIZED_TASK_DRAG"
 
         @JvmStatic
         fun isSidebarDrag(data: ClipData?): Boolean {

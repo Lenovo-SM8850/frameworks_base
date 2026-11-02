@@ -3,18 +3,24 @@ package com.android.wm.shell.pinnedlayer.phone
 
 import android.app.TaskInfo
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Binder
 import android.os.UserHandle
 import android.view.Display.DEFAULT_DISPLAY
 import android.view.Gravity
+import android.view.DragEvent
+import android.view.View
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.ImageView
 import com.android.wm.shell.R
 import com.android.wm.shell.common.DisplayController
+import com.android.wm.shell.draganddrop.SidebarDragPolicy
 import kotlin.math.abs
 
 /** Small trusted Shell windows whose touch regions are limited to their visible handles. */
@@ -24,6 +30,7 @@ class FloatingMinimizeHandles(
     private val state: FloatingMinimizeState,
     private val taskForId: (Int) -> TaskInfo?,
     private val onRestore: (Int) -> Unit,
+    private val canDragToSplit: (TaskInfo) -> Boolean = { false },
 ) {
     private data class Handle(val view: ImageView, val params: WindowManager.LayoutParams) {
         // A view only reports attachment after its next traversal, so track it ourselves.
@@ -110,6 +117,22 @@ class FloatingMinimizeHandles(
         var startRight = true
         var startFraction = .5f
         var dragging = false
+        var splitDragging = false
+        view.setOnDragListener { _, event ->
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> splitDragging
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    if (splitDragging) {
+                        splitDragging = false
+                        view.alpha = 1f
+                        state.move(task.taskId, startRight, startFraction)
+                        update()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
         val slop = ViewConfiguration.get(windowContext).scaledTouchSlop
         view.setOnTouchListener { _, event ->
             val entry = state.entries[task.taskId] ?: return@setOnTouchListener false
@@ -119,8 +142,22 @@ class FloatingMinimizeHandles(
                     startRight = entry.right; startFraction = entry.fractionY; dragging = false
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    val wasDragging = dragging
                     dragging = dragging || abs(event.rawX - startX) > slop || abs(event.rawY - startY) > slop
-                    if (dragging) {
+                    if (dragging && !wasDragging && canDragToSplit(task)) {
+                        val intent = Intent().putExtra(Intent.EXTRA_TASK_ID, task.taskId)
+                            .putExtra(Intent.EXTRA_USER, UserHandle.of(task.userId))
+                            .putExtra(SidebarDragPolicy.EXTRA_MINIMIZED_TASK_DRAG, true)
+                        val data = ClipData(label, arrayOf(ClipDescription.MIMETYPE_APPLICATION_TASK),
+                            ClipData.Item(intent))
+                        splitDragging = true
+                        val started = try {
+                            view.startDragAndDrop(data, View.DragShadowBuilder(view), null,
+                                View.DRAG_FLAG_GLOBAL or View.DRAG_FLAG_OPAQUE)
+                        } catch (e: RuntimeException) { false }
+                        if (started) view.alpha = 0f else splitDragging = false
+                    }
+                    if (dragging && !splitDragging) {
                         val layout = displayController.getDisplayLayout(DEFAULT_DISPLAY)
                         val stable = Rect().also { layout?.getStableBounds(it) }
                         if (!stable.isEmpty && layout != null) {
@@ -130,8 +167,11 @@ class FloatingMinimizeHandles(
                         }
                     }
                 }
-                MotionEvent.ACTION_UP -> if (!dragging) view.performClick()
-                MotionEvent.ACTION_CANCEL -> { state.move(task.taskId, startRight, startFraction); update() }
+                MotionEvent.ACTION_UP -> if (!dragging && !splitDragging) view.performClick()
+                MotionEvent.ACTION_CANCEL -> if (!splitDragging) {
+                    state.move(task.taskId, startRight, startFraction)
+                    update()
+                }
             }
             true
         }
