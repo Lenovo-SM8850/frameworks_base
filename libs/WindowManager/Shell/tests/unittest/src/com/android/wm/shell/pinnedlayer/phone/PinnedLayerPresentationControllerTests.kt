@@ -866,7 +866,7 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
         assertThat(controller.entryScale(task)).isEqualTo(.8f)
     }
 
-    @Test fun customRatio_fullscreenAndSplitEntryUseCurrentAspect() {
+    @Test fun customRatio_fullscreenUsesCurrentAspectAndSplitUsesRequestedOrientation() {
         for (mode in listOf(WindowConfiguration.WINDOWING_MODE_FULLSCREEN,
             WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW)) {
             val task = createTaskInfo(Rect(100, 200, 900, 800)).apply {
@@ -883,6 +883,12 @@ class PinnedLayerPresentationControllerTests : ShellTestCase() {
             task.configuration.windowConfiguration.setWindowingMode(mode)
             task.configuration.windowConfiguration.setBounds(Rect(0, 0, 960, 540))
             task.configuration.orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            if (mode == WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW) {
+                task.topActivityRequestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                task.configuration.orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+                task.configuration.windowConfiguration.setBounds(Rect(0, 0, 540, 960))
+                task.topActivityMainWindowFrame = Rect(0, 0, 540, 960)
+            }
             val bounds = requireNotNull(controller.getPinEntryDestinationBounds(task))
             assertThat(bounds.width().toFloat() / bounds.height()).isWithin(.005f).of(16f / 9f)
         }

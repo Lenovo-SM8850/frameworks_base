@@ -166,11 +166,19 @@ class PinnedLayerPresentationController(
         val details = getDisplayDetails(displayId) ?: return null
         val stable = details.stableBounds()
         if (stable.isEmpty) return null
-        val appFrame = task.appCompatTaskInfo.topActivityLetterboxBounds?.takeUnless { it.isEmpty }
-            ?: task.topActivityMainWindowFrame?.takeUnless { it.isEmpty }
+        val fromSplit = !task.isFloatingWindow &&
+            (task.windowingMode == WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW ||
+                task.windowingMode == WindowConfiguration.WINDOWING_MODE_FULLSCREEN && task.hasParentTask())
+        val appFrame = if (fromSplit) null else {
+            task.appCompatTaskInfo.topActivityLetterboxBounds?.takeUnless { it.isEmpty }
+                ?: task.topActivityMainWindowFrame?.takeUnless { it.isEmpty }
+        }
         val current = appFrame ?: task.configuration.windowConfiguration.bounds
         val orientation = task.configuration.orientation
+        val requestedLandscape = FloatingWindowGeometry.fixedLandscape(
+            task.topActivityRequestedOrientation, current)
         val landscape = when {
+            fromSplit -> requestedLandscape ?: (details.layout.width() > details.layout.height())
             appFrame != null -> current.width() > current.height()
             orientation == Configuration.ORIENTATION_LANDSCAPE -> true
             orientation == Configuration.ORIENTATION_PORTRAIT -> false
@@ -180,9 +188,10 @@ class PinnedLayerPresentationController(
                 ?: if (!task.isFloatingWindow && !current.isEmpty) current.width() > current.height()
                 else details.layout.width() > details.layout.height()
         }
-        val hasCurrentAspect = appFrame != null || orientation != Configuration.ORIENTATION_UNDEFINED ||
-            (!task.isFloatingWindow && task.windowingMode != WindowConfiguration.WINDOWING_MODE_UNDEFINED)
-        val aspect = if (hasCurrentAspect && !current.isEmpty &&
+        val hasCurrentAspect = fromSplit || (appFrame != null ||
+            orientation != Configuration.ORIENTATION_UNDEFINED ||
+            (!task.isFloatingWindow && task.windowingMode != WindowConfiguration.WINDOWING_MODE_UNDEFINED))
+        val aspect = if (!fromSplit && hasCurrentAspect && !current.isEmpty &&
             (current.width() > current.height()) == landscape) {
             current.width().toFloat() / current.height()
         } else displayAspect(details.layout.width(), details.layout.height(), landscape)
