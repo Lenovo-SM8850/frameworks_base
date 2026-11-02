@@ -702,7 +702,10 @@ public class TaskbarDelegate implements CommandQueue.Callbacks,
     }
 
     private boolean allowSystemGestureIgnoringBarVisibility() {
-        return mBehavior != BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE;
+        return (mDefaultDisplayId == android.view.Display.DEFAULT_DISPLAY
+                && android.view.GameGestureLock.isGestureNavigation(mNavigationMode)
+                && com.android.systemui.gaming.GameGestureLockController.isActive())
+                || mBehavior != BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE;
     }
 
     @Override

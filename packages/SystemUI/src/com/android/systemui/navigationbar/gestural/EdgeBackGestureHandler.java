@@ -1236,8 +1236,56 @@ public class EdgeBackGestureHandler implements TunerService.Tunable {
                         : SysUiStatsLog.BACK_GESTURE__INPUT_TYPE__TOUCH);
     }
 
+    private static final class BlockedGameBack {
+        final int display;
+        final int device;
+        final long down;
+        final long generation;
+        final float x;
+        final float y;
+        final boolean left;
+        boolean recognized;
+        boolean rejected;
+        BlockedGameBack(MotionEvent event, boolean left, long generation) {
+            display = event.getDisplayId(); device = event.getDeviceId(); down = event.getDownTime();
+            this.generation = generation;
+            rejected = generation < 0;
+            x = event.getX(); y = event.getY(); this.left = left;
+        }
+    }
+    private final java.util.ArrayList<BlockedGameBack> mBlockedGameBacks = new java.util.ArrayList<>();
+
     private void onMotionEvent(MotionEvent ev) {
         int action = ev.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            mBlockedGameBacks.removeIf(c -> c.display == ev.getDisplayId() && c.device == ev.getDeviceId());
+        }
+        for (int i = mBlockedGameBacks.size() - 1; i >= 0; i--) {
+            BlockedGameBack candidate = mBlockedGameBacks.get(i);
+            if (!android.view.GameGestureLock.matchesStream(ev, candidate.display, candidate.device,
+                    candidate.down, 0, 0)) continue;
+            if (!android.view.GameGestureLock.matchesStream(ev, candidate.display, candidate.device,
+                    candidate.down, candidate.generation, android.view.GameGestureLock.generation())) {
+                candidate.rejected = true;
+            }
+            float dx = candidate.left ? ev.getX() - candidate.x : candidate.x - ev.getX();
+            float dy = Math.abs(ev.getY() - candidate.y);
+            if (!candidate.recognized && (action == MotionEvent.ACTION_POINTER_DOWN
+                    || ev.getEventTime() - ev.getDownTime() > mLongPressTimeout
+                    || (dy > Math.abs(dx) && dy > mTouchSlop))) candidate.rejected = true;
+            if (!candidate.recognized && !candidate.rejected && action == MotionEvent.ACTION_MOVE
+                    && ev.getPointerCount() == 1 && dx > mTouchSlop && dx > dy) {
+                candidate.recognized = true;
+                pilferPointers(candidate.display);
+                android.view.GameGestureLock.recognize(android.view.GameGestureLock.BACK, ev);
+            }
+            android.view.GameGestureLock.end(android.view.GameGestureLock.BACK, ev);
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                mBlockedGameBacks.remove(i);
+            }
+            return;
+        }
+        android.view.GameGestureLock.end(android.view.GameGestureLock.BACK, ev);
         DisplayBackGestureHandler displayBackGestureHandler = mDisplayBackGestureHandlers.get(
                 ev.getDisplayId());
         if (displayBackGestureHandler == null) {
@@ -1282,6 +1330,19 @@ public class EdgeBackGestureHandler implements TunerService.Tunable {
             } else {
                 mAllowGesture = isBackAllowedCommon && !mUsingThreeButtonNav && isWithinInsets
                         && isWithinTouchRegion(ev) && !isButtonPressFromTrackpadOrMouse(ev);
+            }
+            boolean gameGestureEligible = mAllowGesture && !mIsTrackpadThreeFingerSwipe
+                    && (mSysUiFlags & (QuickStepContract.SYSUI_STATE_IME_VISIBLE
+                            | QuickStepContract.SYSUI_STATE_ONE_HANDED_ACTIVE)) == 0;
+            long gameGestureGeneration = gameGestureEligible ? android.view.GameGestureLock.generation() : -1;
+            boolean gameGestureBlocked = gameGestureEligible
+                    && android.view.GameGestureLock.begin(android.view.GameGestureLock.BACK, ev)
+                            == android.view.GameGestureLock.BLOCK;
+            if (gameGestureBlocked) {
+                mBlockedGameBacks.add(new BlockedGameBack(ev, mIsOnLeftEdge, gameGestureGeneration));
+                mAllowGesture = false;
+                mLogGesture = false;
+                return;
             }
             if (mAllowGesture) {
                 displayBackGestureHandler.setIsLeftPanel(mIsOnLeftEdge);
@@ -1368,6 +1429,7 @@ public class EdgeBackGestureHandler implements TunerService.Tunable {
                                 pilferPointers(ev.getDisplayId());
                             }
                             mThresholdCrossed = true;
+                            android.view.GameGestureLock.recognize(android.view.GameGestureLock.BACK, ev);
                         } else {
                             logGesture(SysUiStatsLog.BACK_GESTURE__TYPE__INCOMPLETE_FAR_FROM_EDGE);
                         }
