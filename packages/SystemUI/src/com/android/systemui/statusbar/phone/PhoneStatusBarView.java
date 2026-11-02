@@ -271,8 +271,12 @@ public class PhoneStatusBarView extends FrameLayout {
         return super.dispatchHoverEvent(event);
     }
 
+    private final com.android.systemui.gaming.GameGestureGate mGameGestureGate =
+            new com.android.systemui.gaming.GameGestureGate();
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        if (mGameGestureGate.onTouch(getContext(), event, this::dispatchTouchEvent)) return true;
         if (mIsStatusBarInteractiveSupplier != null
                 && !mIsStatusBarInteractiveSupplier.getAsBoolean()) {
             // Consume the event to prevent any calls to #onTouchEvent on status bar view or its

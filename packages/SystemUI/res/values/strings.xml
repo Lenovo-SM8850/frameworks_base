@@ -5071,4 +5071,6 @@
     <!-- Notification guts action to open the app in a floating window. -->
     <string name="notification_open_floating">Open in floating window</string>
     <string name="dolby_atmos" translatable="false">Dolby Atmos</string>
+    <string name="game_gesture_lock_swipe_again">Swipe again</string>
+    <string name="game_gesture_lock_turn_off">Turn off</string>
 </resources>

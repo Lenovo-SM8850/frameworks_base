@@ -26,6 +26,13 @@ import dagger.multibindings.IntoMap
 
 @Module
 interface StartCentralSurfacesModule {
+    @Binds
+    @IntoMap
+    @ClassKey(com.android.systemui.gaming.GameGestureLockController::class)
+    fun bindsGameGestureLock(
+        controller: com.android.systemui.gaming.GameGestureLockController
+    ): CoreStartable
+
     /** Start the CentralSurfaces   */
     @Binds
     @IntoMap

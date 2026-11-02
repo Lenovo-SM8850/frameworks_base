@@ -1704,8 +1704,13 @@ public class QuickSettingsControllerImpl implements QuickSettingsController, Dum
     }
 
     /** handles touches in Qs panel area */
+    private final com.android.systemui.gaming.GameGestureGate mGameGestureGate =
+            new com.android.systemui.gaming.GameGestureGate();
+
     boolean handleTouch(MotionEvent event, boolean isFullyCollapsed,
             boolean isShadeOrQsHeightAnimationRunning) {
+        if (mGameGestureGate.onTouch(mPanelView.getContext(), event,
+                replay -> handleTouch(replay, isFullyCollapsed, isShadeOrQsHeightAnimationRunning))) return true;
         if (isTrackpadThreeFingerSwipe(event)) {
             return false;
         }

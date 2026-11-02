@@ -67,6 +67,7 @@ class GesturePointerEventListener @Inject constructor(context: Context) :
     private var mMouseHoveringAtRight = false
     private var mMouseHoveringAtBottom = false
     private var mLastFlingTime: Long = 0
+    private val gameGestures = android.view.GameGestureLock.TransientTracker()
 
     init {
         onConfigurationChanged()
@@ -160,6 +161,10 @@ class GesturePointerEventListener @Inject constructor(context: Context) :
         if (ev !is MotionEvent) {
             return
         }
+        val completedKind = gameGestures.finish(ev)
+        if (completedKind != android.view.GameGestureLock.NONE) {
+            android.view.GameGestureLock.end(completedKind, ev)
+        }
         if (DEBUG) Log.d(TAG, "Received motion event $ev")
         if (!com.android.window.flags.Flags.enableTransientGestureInSystemUi()) return
         if (ev.isTouchEvent) {
@@ -220,6 +225,12 @@ class GesturePointerEventListener @Inject constructor(context: Context) :
                     } else {
                         val swipe = detectSwipe(ev)
                         mSwipeFireable = swipe == SWIPE_NONE
+                        val kind = if (swipe == SWIPE_NONE) android.view.GameGestureLock.NONE
+                            else android.view.GameGestureLock.transientKind(mContext, swipe)
+                        if (kind != android.view.GameGestureLock.NONE) {
+                            gameGestures.record(kind, ev)
+                            if (android.view.GameGestureLock.recognize(kind, ev)) return
+                        }
                         if (swipe == SWIPE_FROM_TOP) {
                             if (DEBUG) Log.d(TAG, "Firing onSwipeFromTop")
                             mCallbacks?.onSwipeFromTop()

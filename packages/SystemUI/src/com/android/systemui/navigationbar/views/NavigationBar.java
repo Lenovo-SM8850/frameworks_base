@@ -1125,6 +1125,7 @@ public class NavigationBar extends ViewController<NavigationBarView> implements 
         if (displayId != mDisplayId) {
             return;
         }
+        updateSystemUiStateFlags();
         // Navigation bar flags are in both state1 and state2.
         final int masked = state1 & (StatusBarManager.DISABLE_HOME
                 | StatusBarManager.DISABLE_RECENT
@@ -1566,7 +1567,10 @@ public class NavigationBar extends ViewController<NavigationBarView> implements 
     }
 
     private boolean allowSystemGestureIgnoringBarVisibility() {
-        return mBehavior != BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE;
+        return (mDisplayId == android.view.Display.DEFAULT_DISPLAY
+                && android.view.GameGestureLock.isGestureNavigation(mNavBarMode)
+                && com.android.systemui.gaming.GameGestureLockController.isActive())
+                || mBehavior != BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE;
     }
 
     /**

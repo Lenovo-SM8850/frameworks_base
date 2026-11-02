@@ -391,9 +391,12 @@ public class NotificationShadeWindowViewController implements Dumpable {
         mView.setWindowRootViewKeyEventHandler(mWindowRootViewKeyEventHandler);
         mView.setInteractionEventHandler(new NotificationShadeWindowView.InteractionEventHandler() {
             boolean mLastInterceptWasDragDownHelper = false;
+            final com.android.systemui.gaming.GameGestureGate mGameGestureGate =
+                    new com.android.systemui.gaming.GameGestureGate();
 
             @Override
             public Boolean handleDispatchTouchEvent(MotionEvent ev) {
+                if (mGameGestureGate.onTouch(mView.getContext(), ev, mView::dispatchTouchEvent)) return true;
                 PhoneStatusBarViewController phoneStatusBarViewController =
                         statusBarViewController();
                 if (phoneStatusBarViewController == null) { // Fix for b/192490822
