@@ -574,6 +574,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun onDragPositioningEnd(displayId: Int, x: Float, y: Float): Rect {
+        // Pilfering cancels an edge input receiver, which then calls End after Cancel.
+        if (floatingPinchSpan > 0f) return Rect(repositionTaskBounds)
         allowFloatingFeedback = false
         resizeFeedback.reset()
         windowDecoration.floatingMiniPreviewCancellation = null
@@ -775,6 +777,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
             if (task.minHeight > 0) task.minHeight else defaultMin)
     }
 
+    fun isFloatingPinchActive() = floatingPinchSpan > 0f
+
+    fun isFloatingMoveActive() = floatingDragActive && !isResizing
+
     fun getFloatingHandlePinchBounds() = Rect(repositionTaskBounds)
 
     fun startFloatingHandlePinch(displayId: Int, span: Float, x: Float, y: Float,
@@ -786,6 +792,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
         taskBoundsAtDragStart.set(bounds)
         repositionTaskBounds.set(bounds)
         floatingPinchSpan = span
+        windowDecoration.floatingMiniPreviewCancellation = { endFloatingHandlePinch(true) }
         floatingPinchCenter.set(x, y)
         lastFloatingX = x
         lastFloatingY = y
@@ -920,7 +927,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     override fun isDragPositioningCancelled() = floatingDragCancelled || floatingDismissPending
 
     override fun onDragPositioningCancel() {
-        if (!floatingDragActive) return
+        // The pinch monitor owns cancellation now; the old edge receiver is only draining.
+        if (floatingPinchSpan > 0f || !floatingDragActive) return
         cancelFloatingDragForTransition()
         floatingDragActive = false
         SurfaceFrameRate.setInteracting(this, false)
@@ -944,6 +952,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private fun cancelFloatingDragForTransition() {
         floatingDismissTarget?.cancel()
         floatingDismissPending = false
+        floatingPinchSpan = 0f
         allowFloatingFeedback = false
         resizeFeedback.reset()
         miniPreview.close()
@@ -1279,13 +1288,13 @@ class MultiDisplayVeiledResizeTaskPositioner(
 
     override fun onDisplayConfigurationChanged(displayId: Int,
         configuration: android.content.res.Configuration) {
-        if (displayId != startDisplayId) return
-        onDragPositioningCancel()
+        if (displayId != startDisplayId || !floatingDragActive) return
+        cancelFloatingDragForTransition()
     }
 
     override fun onDisplayRemoved(displayId: Int) {
-        if (displayId != startDisplayId) return
-        onDragPositioningCancel()
+        if (displayId != startDisplayId || !floatingDragActive) return
+        cancelFloatingDragForTransition()
     }
 
     override fun onTopologyChanged(topology: DisplayTopology?) {

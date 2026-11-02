@@ -8,8 +8,8 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
-/** Recognizes only a second finger landing on the opposite handle. */
-class FloatingHandlePinch {
+/** Tracks two fingers and drains the stream after either tracked pointer lifts. */
+class FloatingHandlePinch(private val oppositeHandlesOnly: Boolean = true) {
     data class Pointer(val id: Int, val x: Float, val y: Float, val handle: Int)
     enum class Kind { START, MOVE, FINISH, CANCEL, CONSUME }
     data class Change(val kind: Kind, val span: Float = 0f, val x: Float = 0f, val y: Float = 0f)
@@ -57,7 +57,7 @@ class FloatingHandlePinch {
             if (action != MotionEvent.ACTION_POINTER_DOWN || pointers.size != 2 ||
                 first == null || first.handle != firstHandle) return null
             val second = pointers.firstOrNull { it.id == actionId } ?: return null
-            if (second.id == firstId || second.handle == 0 || second.handle == firstHandle ||
+            if (second.id == firstId || second.handle == 0 || oppositeHandlesOnly && second.handle == firstHandle ||
                 hypot(second.x - first.x, second.y - first.y) <= 0f) return null
             secondId = second.id
             draining = true

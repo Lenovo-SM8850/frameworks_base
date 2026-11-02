@@ -101,7 +101,27 @@ private constructor(
         }
     }
 
+    val floatingInteractionBounds: Rect
+        get() = floatingTouchListener?.floatingInteractionBounds ?: decorTaskInfo.presentationBounds
+
     fun closeFloatingTask() { floatingTouchListener?.closeFloatingTask() }
+
+    fun canPinchFloatingWindow(): Boolean = decorTaskInfo.isFloatingWindow &&
+        decorTaskInfo.isVisible && decorTaskInfo.displayId == Display.DEFAULT_DISPLAY &&
+        floatingController?.isMini(decorTaskInfo) != true &&
+        floatingController?.canResolveSidebarSplit() != false && floatingTouchListener != null
+
+    fun startFloatingPinch(event: MotionEvent, span: Float, x: Float, y: Float): Boolean =
+        canPinchFloatingWindow() &&
+            floatingTouchListener?.startFloatingWindowPinch(event, span, x, y) == true
+
+    fun moveFloatingPinch(span: Float, x: Float, y: Float) {
+        floatingTouchListener?.moveFloatingHandlePinch(span, x, y)
+    }
+
+    fun endFloatingPinch(cancelled: Boolean) {
+        floatingTouchListener?.endFloatingHandlePinch(cancelled)
+    }
 
     fun performFloatingTargetHapticFeedback() {
         val view = floatingBottomHandle?.getTargetFeedbackView()
@@ -500,6 +520,8 @@ private constructor(
 
     /** Closes the window decoration. */
     fun close() {
+        floatingTouchListener?.closeFloatingGestures()
+        floatingTouchListener = null
         floatingFocusIndicator.close()
         floatingController?.removeMiniListener(miniListener)
         floatingMiniInput?.close()
