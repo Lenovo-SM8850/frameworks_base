@@ -611,7 +611,7 @@ class HandleMenuTest : ShellTestCase() {
     }
 
 
-    @Test fun floatingCloseUsesDismissRowBelowIcons_withoutAppName() = runTest {
+    @Test fun floatingActionsUseWindowingPill_withoutAppName() = runTest {
         createTaskInfo(windowingMode = WINDOWING_MODE_FREEFORM, displayId = DEFAULT_DISPLAY)
         val task = mockDesktopWindowDecoration.mTaskInfo
         task.isFloatingWindow = true
@@ -620,47 +620,38 @@ class HandleMenuTest : ShellTestCase() {
         handleMenu = createAndShowHandleMenu()
         val root = handleMenu.handleMenuView!!.windowingPillView.parent as View
         val pill = root.requireViewById<View>(R.id.windowing_pill)
-        val row = root.requireViewById<View>(R.id.floating_close_pill)
-        val parent = row.parent as android.view.ViewGroup
-        assertEquals(parent.indexOfChild(pill) + 1, parent.indexOfChild(row))
-        assertEquals(View.VISIBLE, row.visibility)
-        val button = root.requireViewById<View>(R.id.floating_close_button)
-        val label = mContext.getString(R.string.floating_window_close)
+        val minimize = root.requireViewById<View>(R.id.windowing_minimize_button)
+        val button = root.requireViewById<View>(R.id.windowing_close_button)
+        assertEquals(pill, minimize.parent)
+        assertEquals(pill, button.parent)
+        val windowing = pill as WindowingPillView
+        val visibleButtons = (0 until windowing.childCount).map { windowing.getChildAt(it) }
+            .filter { it.visibility != View.GONE }
+        val expectedWidth = visibleButtons.sumOf { it.layoutParams.width } +
+            windowing.paddingLeft + windowing.paddingRight
+        assertEquals(expectedWidth, windowing.contentWidth)
+        windowing.measure(View.MeasureSpec.makeMeasureSpec(expectedWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(200, View.MeasureSpec.EXACTLY))
+        windowing.layout(0, 0, windowing.measuredWidth, windowing.measuredHeight)
+        val gaps = visibleButtons.zipWithNext { a, b -> b.left - a.right }
+        assertThat(gaps.distinct().size).isAtMost(1)
+        assertThat(windowing.contentWidth).isAtMost(mContext.resources.getDimensionPixelSize(
+            R.dimen.desktop_mode_handle_menu_width))
+        assertEquals(View.VISIBLE, minimize.visibility)
+        assertEquals(View.VISIBLE, button.visibility)
+        val params = button.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        assertEquals(R.id.windowing_minimize_button, params.startToEnd)
+        assertEquals(androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID,
+            params.endToEnd)
+        minimize.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onMinimize(task)
+        val label = mContext.getString(R.string.app_header_talkback_action_close_button_text)
         assertEquals(label, button.contentDescription.toString())
         assertEquals(label, button.tooltipText.toString())
         assertThat(label).doesNotContain("%")
         assertThat(label).doesNotContain("Test app")
         button.performClick()
         org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
-    }
-
-    @Test fun fullscreenHasNoCloseRow() = runTest {
-        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
-        handleMenu = createAndShowHandleMenu()
-        assertEquals(View.GONE, (handleMenu.handleMenuView!!.windowingPillView.parent as View)
-            .requireViewById<View>(R.id.floating_close_pill).visibility)
-    }
-
-    @Test fun splitClose_rechecksMembershipAndPreservesFloatingCloseLabel() = runTest {
-        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
-        val task = mockDesktopWindowDecoration.mTaskInfo
-        whenever(splitScreenController.isTaskInSplitScreenForeground(task.taskId)).thenReturn(true)
-        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(true)
-        handleMenu = createAndShowHandleMenu()
-        val root = handleMenu.handleMenuView!!.rootView
-        assertEquals(View.VISIBLE, root.requireViewById<View>(R.id.split_actions_pill).visibility)
-        assertEquals(View.GONE, root.requireViewById<View>(R.id.floating_close_pill).visibility)
-        val close = root.requireViewById<HandleMenuActionButton>(R.id.split_close_button)
-        assertEquals(mContext.getString(R.string.handle_menu_close_app), close.textView.text.toString())
-        handleMenu.handleMenuView!!.setAppName("Test app")
-        assertEquals(mContext.getString(R.string.handle_menu_close_named_app, "Test app"),
-            close.contentDescription.toString())
-        close.performClick()
-        org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
-
-        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(false)
-        close.performClick()
-        org.mockito.kotlin.verify(mockWindowDecorationActions, org.mockito.kotlin.times(1)).onClose(task)
     }
 
     @Test fun fullscreen_hidesSplitActions() = runTest {

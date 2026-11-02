@@ -110,8 +110,8 @@ private constructor(
     private var captionView: View,
     private val captionWidth: Int,
     private val captionHeight: Int,
-    captionX: Int,
-    captionY: Int,
+    private val captionX: Int,
+    private val captionY: Int,
     private val surfaceControlBuilderSupplier: () -> SurfaceControl.Builder,
     private val surfaceControlTransactionSupplier: () -> SurfaceControl.Transaction,
     private val surfaceControlViewHostFactory: SurfaceControlViewHostFactory,
@@ -125,7 +125,9 @@ private constructor(
         loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_pill_spacing_margin)
     private val menuWidth = loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_width)
     private val shouldShowSplitActions =
-        splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId)
+        splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId) &&
+            (splitScreenController.getAddBelowSlot(taskInfo.taskId) != null ||
+                splitScreenController.getReplaceSplitSlot(taskInfo.taskId) != null)
     private val menuHeight = getHandleMenuHeight()
     private val marginMenuTop = loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_margin_top)
     private val marginMenuPadding =
@@ -261,6 +263,8 @@ private constructor(
                 handleMenuView.setAppName(name)
                 handleMenuView.setAppIcon(icon)
             }
+        menuWidth = handleMenuView.contentWidth
+        updateHandleMenuPillPositions(captionX, captionY)
         val x = handleMenuPosition.x.toInt()
         val y = handleMenuPosition.y.toInt()
         val lpFlags = LayoutParams.FLAG_NOT_FOCUSABLE or LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
@@ -434,9 +438,14 @@ private constructor(
         captionY: Int,
     ) {
         handleMenuViewContainer?.let { container ->
+            handleMenuView?.updateSplitScreenButtonOrientation(configuration)
+            val width = handleMenuView?.contentWidth ?: menuWidth
+            if (width != menuWidth) {
+                menuWidth = width
+                container.setSize(t, menuWidth + 2 * marginMenuPadding, menuHeight + marginMenuPadding)
+            }
             updateHandleMenuPillPositions(captionX, captionY)
             container.setPosition(t, handleMenuPosition.x, handleMenuPosition.y)
-            handleMenuView?.updateSplitScreenButtonOrientation(configuration)
         }
     }
 
@@ -548,19 +557,13 @@ private constructor(
             menuHeight -= pillTopMargin
         }
         if (shouldShowSplitActions) {
-            menuHeight +=
-                loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height) +
-                    pillTopMargin
+            menuHeight += pillTopMargin
         }
         if (splitScreenController.getAddBelowSlot(taskInfo.taskId) != null) {
             menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
         }
         if (splitScreenController.getReplaceSplitSlot(taskInfo.taskId) != null) {
             menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height)
-        }
-        if (taskInfo.isFloatingWindow) {
-            menuHeight += loadDimensionPixelSize(R.dimen.desktop_mode_handle_menu_windowing_pill_height) +
-                pillTopMargin
         }
         return menuHeight
     }
@@ -590,7 +593,7 @@ private constructor(
         private val context: Context,
         private val windowDecorationActions: WindowDecorationActions,
         private val desktopModeUiEventLogger: DesktopModeUiEventLogger,
-        menuWidth: Int,
+        private val menuWidth: Int,
         private val captionView: View,
         captionHeight: Int,
         private val shouldShowWindowingPill: Boolean,
@@ -670,18 +673,11 @@ private constructor(
             rootView.requireViewById<WindowingPillView>(R.id.windowing_pill)
 
         private val splitActionsPill = rootView.requireViewById<ViewGroup>(R.id.split_actions_pill)
-        private val splitCloseButton =
-            splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_close_button)
-
         private val splitReplaceButton =
             splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_replace_button)
 
         private val splitAddButton =
             splitActionsPill.requireViewById<HandleMenuActionButton>(R.id.split_add_button)
-
-        private val floatingClosePill = rootView.requireViewById<View>(R.id.floating_close_pill)
-        private val floatingCloseButton =
-            floatingClosePill.requireViewById<HandleMenuActionButton>(R.id.floating_close_button)
 
         // More Actions Pill.
         private val moreActionsPill = rootView.requireViewById<View>(R.id.more_actions_pill)
@@ -713,10 +709,8 @@ private constructor(
 
         private val menuButtons =
             listOf(
-                splitCloseButton,
                 splitAddButton,
                 splitReplaceButton,
-                floatingCloseButton,
                 newWindowBtn,
                 changeAspectRatioBtn,
                 gameControlsBtn,
@@ -728,8 +722,15 @@ private constructor(
             )
 
         private val decorThemeUtil = decorThemeUtilFactory.create(context)
-        private val animator =
-            HandleMenuAnimator(context, rootView, menuWidth, captionHeight.toFloat())
+        val contentWidth: Int
+            get() = listOf(windowingPillView, splitActionsPill, moreActionsPill,
+                openInAppOrBrowserPill).filter { !it.isGone }
+                .maxOfOrNull { if (it === windowingPillView) windowingPillView.contentWidth
+                    else it.layoutParams.width } ?: menuWidth
+
+        private val animator by lazy {
+            HandleMenuAnimator(context, rootView, contentWidth, captionHeight.toFloat())
+        }
 
         private lateinit var style: MenuStyle
 
@@ -770,14 +771,6 @@ private constructor(
                         windowDecorationActions.onReplaceSplitApp(taskInfo.taskId)
                     }
                 }
-                R.id.split_close_button -> {
-                    if (splitScreenController.canMutateSplitTask(taskInfo.taskId)) {
-                        windowDecorationActions.onClose(taskInfo)
-                    }
-                }
-                R.id.floating_close_button -> {
-                    if (taskInfo.isFloatingWindow) windowDecorationActions.onClose(taskInfo)
-                }
                 R.id.new_window_button -> {
                     windowDecorationActions.onNewWindow(taskInfo.taskId)
                 }
@@ -814,7 +807,6 @@ private constructor(
             bindAppInfoPill(style)
             val isInSplitScreen =
                 splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId)
-            splitActionsPill.isGone = !isInSplitScreen
             val addSlot = splitScreenController.getAddBelowSlot(taskInfo.taskId)
             splitAddButton.isGone = !isInSplitScreen || addSlot == null
             splitReplaceButton.isGone = !isInSplitScreen ||
@@ -822,7 +814,8 @@ private constructor(
             splitAddButton.setText(getString(if (addSlot?.splitBelow != false) {
                 R.string.split_picker_add_below
             } else R.string.split_picker_add_to_side))
-            if (isInSplitScreen) {
+            splitActionsPill.isGone = splitAddButton.isGone && splitReplaceButton.isGone
+            if (!splitActionsPill.isGone) {
                 splitActionsPill.background.setTint(style.backgroundColor)
                 splitAddButton.setTextColor(style.textColor)
                 splitAddButton.setDrawableTint(style.textColor)
@@ -838,24 +831,6 @@ private constructor(
                     cornerRadius = handleMenuCornerRadius,
                     drawableInsets = DrawableInsets(),
                 )
-                splitCloseButton.setTextColor(style.textColor)
-                splitCloseButton.setDrawableTint(style.textColor)
-                splitCloseButton.background = createBackgroundDrawable(
-                    color = style.textColor,
-                    cornerRadius = handleMenuCornerRadius,
-                    drawableInsets = DrawableInsets(),
-                )
-            }
-            floatingClosePill.isGone = !taskInfo.isFloatingWindow
-            if (taskInfo.isFloatingWindow) {
-                floatingClosePill.background.setTint(style.backgroundColor)
-                floatingCloseButton.setTextColor(style.textColor)
-                floatingCloseButton.setDrawableTint(style.textColor)
-                floatingCloseButton.background = createBackgroundDrawable(
-                    color = style.textColor,
-                    cornerRadius = handleMenuCornerRadius,
-                    drawableInsets = DrawableInsets(),
-                )
             }
             windowingPillView.isGone = !shouldShowWindowingPill
             if (shouldShowWindowingPill) {
@@ -863,6 +838,10 @@ private constructor(
                     taskInfo,
                     isInSplitScreen,
                     splitScreenController.canEnterSplitScreen(taskInfo),
+                    showTaskActions = true,
+                    canPerformTaskActions = {
+                        !isInSplitScreen || splitScreenController.canMutateSplitTask(taskInfo.taskId)
+                    },
                 )
             }
             moreActionsPill.isGone = !shouldShowMoreActionsPill
@@ -872,7 +851,7 @@ private constructor(
             bindOpenInAppOrBrowserPill(style)
             // The first visible pill takes the menu's top margin; subsequent pills keep the gap.
             var firstPill = true
-            listOf(windowingPillView, floatingClosePill, splitActionsPill, moreActionsPill,
+            listOf(windowingPillView, splitActionsPill, moreActionsPill,
                 openInAppOrBrowserPill)
                 .filter { !it.isGone }
                 .forEach { pill ->
@@ -888,8 +867,6 @@ private constructor(
         /** Sets the app's name. */
         fun setAppName(name: CharSequence) {
             appNameView.text = name
-            splitCloseButton.contentDescription =
-                context.getString(R.string.handle_menu_close_named_app, name)
         }
 
         /** Sets the app's icon. */
@@ -975,10 +952,16 @@ private constructor(
         /** Update the split screen button (horizontal vs. vertical split) orientation. */
         fun updateSplitScreenButtonOrientation(configuration: Configuration) {
             if (shouldShowWindowingPill) {
+                val isInSplitScreen =
+                    splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId)
                 windowingPillView.bind(
                     taskInfo,
-                    splitScreenController.isTaskInSplitScreenForeground(taskInfo.taskId),
+                    isInSplitScreen,
                     splitScreenController.canEnterSplitScreen(taskInfo),
+                    showTaskActions = true,
+                    canPerformTaskActions = {
+                        !isInSplitScreen || splitScreenController.canMutateSplitTask(taskInfo.taskId)
+                    },
                 )
                 windowingPillView.updateSplitScreenButtonOrientation(configuration)
             }

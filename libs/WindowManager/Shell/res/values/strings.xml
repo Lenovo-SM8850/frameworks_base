@@ -416,12 +416,9 @@
     <string name="floating_window_restore">Restore %1$s floating window</string>
     <string name="floating_window_handle">Floating window handle</string>
     <!-- Action to close the floating window from its handle menu. -->
-    <string name="floating_window_close">Close floating window</string>
     <!-- Split handle menu actions. -->
     <string name="handle_menu_swap_horizontal">Swap apps left and right</string>
     <string name="handle_menu_swap_vertical">Swap apps above and below</string>
-    <string name="handle_menu_close_app">Close this app</string>
-    <string name="handle_menu_close_named_app">Close %1$s</string>
     <!-- Shell-owned destination app picker. -->
     <string name="split_picker_add_below">Add split below</string>
     <string name="split_picker_add_to_side">Add split to the side</string>

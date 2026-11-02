@@ -130,6 +130,58 @@ class SplitPickerController(
         it.displayId == displayId && !it.replace && valid(it)
     }?.slot
 
+    /** Reuses the picker selection transaction without substituting another recent instance. */
+    fun startTask(task: RunningTaskInfo, slot: AppDragSlot): Boolean {
+        val selection = session ?: return false
+        if (committing || pendingSidebarSlot(task.displayId) !== slot || !task.isFloatingWindow ||
+            task.isVisible || !task.supportsMultiWindow || task.minWidth > slot.bounds.width() ||
+            task.minHeight > slot.bounds.height()) return false
+        val component = task.baseIntent.component ?: task.baseActivity ?: return false
+        val taskId = task.taskId
+        val taskToken = task.token.asBinder()
+        val user = UserHandle.of(task.userId)
+        committing = true
+        panel?.launching()
+        background.execute {
+            val candidate = try {
+                resolveProfileActivity(component, user, selection.currentUser)?.let {
+                    app(it, selection, emptyList())
+                }
+            } catch (e: RuntimeException) { null }
+            main.execute { transitions.runOnIdle commit@{
+                if (session !== selection) return@commit
+                if (!valid(selection) || pendingSidebarSlot(selection.displayId) !== slot) {
+                    dismiss()
+                    return@commit
+                }
+                val live = organizer.getRunningTaskInfo(taskId)
+                val checked = candidate?.let { currentAvailability(it) }
+                if (checked?.availability != Availability.AVAILABLE ||
+                    user !in profileUsers(selection.currentUser) || live == null ||
+                    live.token.asBinder() != taskToken || live.userId != user.identifier ||
+                    live.displayId != selection.displayId ||
+                    (live.baseIntent.component ?: live.baseActivity) != component ||
+                    !live.isFloatingWindow || live.isVisible || !live.supportsMultiWindow ||
+                    live.minWidth > slot.bounds.width() || live.minHeight > slot.bounds.height()) {
+                    committing = false
+                    Toast.makeText(context, R.string.split_picker_unavailable, Toast.LENGTH_SHORT).show()
+                    load()
+                    return@commit
+                }
+                dismiss()
+                val launched = try {
+                    split.startTaskInSplitSlot(live, selection.slot)
+                } catch (e: RuntimeException) {
+                    Log.w(TAG, "Unable to insert selected split task", e)
+                    false
+                }
+                if (!launched) Toast.makeText(context, R.string.split_picker_unavailable,
+                    Toast.LENGTH_SHORT).show()
+            } }
+        }
+        return true
+    }
+
     fun launchSidebarApp(component: ComponentName, user: UserHandle, displayId: Int): Boolean {
         val selection = session ?: return false
         if (pendingSidebarSlot(displayId) == null || committing) return false

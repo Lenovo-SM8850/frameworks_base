@@ -360,6 +360,10 @@ class DesktopTasksController(
 
     fun setPinnedLayerController(controller: PinnedLayerController) {
         pinnedLayerController = controller
+        controller.setPendingSplitProvider { displayId ->
+            !lockTaskChangeListener.isTaskLocked && !keyguardManager.isKeyguardLocked &&
+                splitScreenController.getPendingSidebarSplitSlot(displayId) != null
+        }
     }
 
     private fun registerFloatingReceiver() {

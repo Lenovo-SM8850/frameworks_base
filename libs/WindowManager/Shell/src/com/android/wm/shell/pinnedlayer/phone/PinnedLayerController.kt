@@ -1423,4 +1423,8 @@ class PinnedLayerController(
 
         fun onPinnedTasksRemoved(taskInfo: TaskInfo)
     }
+
+    fun setPendingSplitProvider(provider: (Int) -> Boolean) { hasPendingSplit = provider }
+
+    private var hasPendingSplit: (Int) -> Boolean = { false }
 }

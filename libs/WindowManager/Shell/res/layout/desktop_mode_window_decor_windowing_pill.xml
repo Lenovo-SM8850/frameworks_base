@@ -72,8 +72,32 @@
         android:tint="@color/materialColorOnSurface"
         style="@style/DesktopModeHandleMenuWindowingButton"
         app:layout_constraintStart_toEndOf="@id/floating_button"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/windowing_minimize_button"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintHorizontal_chainStyle="spread"/>
+
+    <ImageButton
+        android:id="@+id/windowing_minimize_button"
+        android:contentDescription="@string/pip_phone_minimize"
+        android:tooltipText="@string/pip_phone_minimize"
+        android:src="@drawable/desktop_mode_header_ic_minimize"
+        android:tint="@color/materialColorOnSurface"
+        android:visibility="gone"
+        style="@style/DesktopModeHandleMenuWindowingButton"
+        app:layout_constraintStart_toEndOf="@id/desktop_button"
+        app:layout_constraintEnd_toStartOf="@id/windowing_close_button"
+        app:layout_constraintTop_toTopOf="parent"/>
+
+    <ImageButton
+        android:id="@+id/windowing_close_button"
+        android:contentDescription="@string/close_text"
+        android:tooltipText="@string/close_text"
+        android:src="@drawable/desktop_mode_header_ic_close"
+        android:tint="@color/materialColorOnSurface"
+        android:visibility="gone"
+        style="@style/DesktopModeHandleMenuWindowingButton"
+        app:layout_constraintStart_toEndOf="@id/windowing_minimize_button"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"/>
 
 </merge>
