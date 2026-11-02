@@ -707,10 +707,18 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             return;
         }
         if (oldTaskInfo.isFloatingWindow != taskInfo.isFloatingWindow) {
-            try (SurfaceControl.Transaction t = mTransactionFactory.get()) {
-                recreateWindowDecoration(taskInfo, decoration.getTaskSurface(), t, t);
-                t.apply();
-            }
+            // The transition must create the floating handle together with the task transform.
+            final int taskId = taskInfo.taskId;
+            mTransitions.runOnIdle(() -> {
+                final WindowDecorationWrapper current = mWindowDecorByTaskId.get(taskId);
+                final RunningTaskInfo latest = mTaskOrganizer.getRunningTaskInfo(taskId);
+                if (current == null || latest == null
+                        || current.getTaskInfo().isFloatingWindow == latest.isFloatingWindow) return;
+                try (SurfaceControl.Transaction t = mTransactionFactory.get()) {
+                    recreateWindowDecoration(latest, current.getTaskSurface(), t, t);
+                    t.apply();
+                }
+            });
             return;
         }
 
