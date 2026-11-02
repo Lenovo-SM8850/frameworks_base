@@ -15,11 +15,11 @@
     limitations under the License.
 -->
 <resources>
-    <dimen name="dismiss_circle_size">96dp</dimen>
-    <dimen name="dismiss_circle_small">60dp</dimen>
+    <dimen name="dismiss_circle_size">80dp</dimen>
+    <dimen name="dismiss_circle_small">50dp</dimen>
 
     <!-- The height of the gradient indicating the dismiss edge when moving a PIP or bubble. -->
-    <dimen name="floating_dismiss_gradient_height">548dp</dimen>
+    <dimen name="floating_dismiss_gradient_height">456dp</dimen>
 
     <!-- The padding around a PiP actions. -->
     <dimen name="pip_action_padding">16dp</dimen>

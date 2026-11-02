@@ -398,6 +398,11 @@ public class DesktopModeTouchEventListener
         }
     }
 
+    public void closeFloatingTask() {
+        final WindowDecorationWrapper decoration = mWindowDecorationFinder.apply(mTaskId);
+        if (decoration != null) mWindowDecorationActions.onClose(decoration.getTaskInfo());
+    }
+
     public boolean startFloatingHandlePinch(View view, MotionEvent event,
             float span, float x, float y) {
         if (!(mDragPositioningCallback instanceof MultiDisplayVeiledResizeTaskPositioner)) {
@@ -911,4 +916,5 @@ public class DesktopModeTouchEventListener
     private boolean isPinned(ActivityManager.RunningTaskInfo taskInfo) {
         return mPinnedLayerController != null && mPinnedLayerController.isPinned(taskInfo.taskId);
     }
+
 }

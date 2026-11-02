@@ -1122,7 +1122,11 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         verify(mockTransaction).setPosition(mockSurfaceControl, 350f, 250f)
         verify(mockTransaction, times(2)).apply()
         verify(mockTransitions, never()).startTransition(any(), any(), any())
-        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        verify(mockShellTaskOrganizer).applyTransaction(argThat {
+            changes[taskBinder]?.let {
+                it.dragResizing && it.windowSetMask and WindowConfiguration.WINDOW_CONFIG_BOUNDS == 0
+            } == true
+        })
         runOnUiThread {
             val settled = taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 650f, 270f)
             Assert.assertEquals(Rect(350, 250, 950, 1150), settled)
@@ -1140,6 +1144,48 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
         taskPositioner.onDragPositioningStart(CTRL_TYPE_RIGHT or CTRL_TYPE_BOTTOM,
             DISPLAY_ID_0, 700f, 1000f, INPUT_METHOD_TYPE_UNKNOWN)
+    }
+
+    @Test
+    fun floatingResize_releasedSurfaceSkipsPendingFrame() = runOnUiThread {
+        beginFloatingCorner()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 1100f, 1600f)
+        whenever(mockSurfaceControl.isValid).thenReturn(false)
+        org.mockito.Mockito.clearInvocations(mockTransaction, mockWindowDecoration)
+
+        taskPositioner.flushFloatingResizePreview()
+
+        verify(mockWindowDecoration, never()).updateFloatingWindowPreview(any(), any(), any())
+        verify(mockTransaction, never()).apply()
+        taskPositioner.onDragPositioningCancel()
+    }
+
+    @Test
+    fun floatingMove_releasedSurfaceSkipsPendingFrame() = runOnUiThread {
+        beginFloatingMove()
+        whenever(mockSurfaceControl.isValid).thenReturn(false)
+        org.mockito.Mockito.clearInvocations(mockTransaction, mockWindowDecoration)
+
+        taskPositioner.flushFloatingMove()
+
+        verify(mockWindowDecoration, never()).setFloatingWindowMovePreview(any(), any())
+        verify(mockTransaction, never()).apply()
+        taskPositioner.onDragPositioningCancel()
+    }
+
+    @Test
+    fun floatingBoundsTransition_releasedSurfaceStillCleansUp() = runOnUiThread {
+        beginFloatingCorner()
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1100f, 1600f)
+        whenever(mockSurfaceControl.isValid).thenReturn(false)
+        org.mockito.Mockito.clearInvocations(mockTransaction, mockWindowDecoration)
+
+        taskPositioner.onTransitionConsumed(mockResizeBinder, false, mockTransaction)
+
+        verify(mockTransaction, never()).apply()
+        verify(mockWindowDecoration).finishFloatingWindowPreview()
+        verify(mockWindowDecoration, never()).updateFloatingWindowChildScale(any(), any())
+        Assert.assertFalse(taskPositioner.isResizingOrAnimating)
     }
 
     @Test
@@ -1443,9 +1489,156 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
     }
 
     @Test
-    fun floatingMove_displayChangeCancelsPreviewAndReleaseTogether() = runOnUiThread {
+    fun floatingMove_magneticPreviewScalesRestoresAndClosesWithoutLogicalResize() = runOnUiThread {
+        val target = mock<io.github.miner7222.windowdecor.FloatingDismissTarget>()
+        val field = taskPositioner.javaClass.getDeclaredField("floatingDismissTarget")
+        field.isAccessible = true
+        field.set(taskPositioner, target)
+        whenever(mockSurfaceControl.isValid).thenReturn(true)
+        lateinit var move: (Rect) -> Unit
+        lateinit var dismiss: () -> Unit
+        doAnswer {
+            move = it.getArgument(3)
+            dismiss = it.getArgument(4)
+            null
+        }.whenever(target).begin(any(), any(), any(), any(), any())
         beginFloatingMove()
+        verify(mockShellTaskOrganizer).applyTransaction(argThat {
+            changes[taskBinder]?.dragResizing == true
+        })
+        val task = mockWindowDecoration.taskInfo
+        val initial = Rect(task.configuration.windowConfiguration.bounds)
+        var magneticBounds = Rect(500, 1400, 540, 1460)
+        doAnswer {
+            move(magneticBounds)
+            true
+        }.whenever(target).onMotionEvent(any(), any())
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 520f, 1430f)
+        taskPositioner.flushFloatingMove()
+        verify(mockWindowDecoration).setFloatingWindowMovePreview(
+            eq(magneticBounds), eq(.05f))
+        verify(mockTransaction).setMatrix(mockSurfaceControl, .05f, 0f, 0f, .05f)
+        magneticBounds = Rect(800, 1000, 1400, 1900)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 1100f, 1010f)
+        taskPositioner.flushFloatingMove()
+        verify(mockWindowDecoration).setFloatingWindowMovePreview(
+            eq(magneticBounds), eq(.75f))
+        verify(mockTransaction).setMatrix(mockSurfaceControl, .75f, 0f, 0f, .75f)
+        magneticBounds = Rect(500, 1400, 540, 1460)
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 520f, 1430f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 520f, 1430f)
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+        dismiss()
+        verify(mockWindowDecoration).closeFloatingTask()
+        verify(mockShellTaskOrganizer).applyTransaction(argThat {
+            changes[taskBinder]?.let {
+                !it.dragResizing && it.floatingWindowPosition == Point(500, 1400) &&
+                    kotlin.math.abs(it.floatingWindowScale - .05f) < .001f &&
+                    it.windowSetMask and WindowConfiguration.WINDOW_CONFIG_BOUNDS == 0
+            } == true
+        })
+        Assert.assertEquals(initial, task.configuration.windowConfiguration.bounds)
+    }
+
+    @Test
+    fun floatingMove_magneticPreviewUsesMiniCornerRadiusAndRestoresIt() = runOnUiThread {
+        val target = mock<io.github.miner7222.windowdecor.FloatingDismissTarget>()
+        taskPositioner.javaClass.getDeclaredField("floatingDismissTarget")
+            .apply { isAccessible = true }.set(taskPositioner, target)
+        whenever(mockSurfaceControl.isValid).thenReturn(true)
+        lateinit var move: (Rect) -> Unit
+        doAnswer { move = it.getArgument(3); null }
+            .whenever(target).begin(any(), any(), any(), any(), any())
+        val radius = mContext.resources.getDimension(
+            com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius)
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.floatingWindowPosition.set(100, 100)
+        for (logical in listOf(Rect(0, 0, 800, 1200), Rect(0, 0, 1200, 800))) {
+            task.configuration.windowConfiguration.setBounds(logical)
+            val original = Rect(task.presentationBounds)
+            taskPositioner.onDragPositioningStart(CTRL_TYPE_UNDEFINED, DISPLAY_ID_0,
+                original.exactCenterX(), original.top.toFloat(), INPUT_METHOD_TYPE_UNKNOWN)
+            val preview = io.github.miner7222.windowdecor.FloatingDismissTarget.dismissBounds(
+                original, android.graphics.PointF(520f, 1430f),
+                mContext.resources.getDimensionPixelSize(com.android.wm.shell.R.dimen.dismiss_circle_size))
+            val scale = .75f * preview.width() / original.width()
+            org.mockito.Mockito.clearInvocations(mockTransaction)
+            move(preview)
+            taskPositioner.flushFloatingMove()
+            verify(mockTransaction).setMatrix(mockSurfaceControl, scale, 0f, 0f, scale)
+            verify(mockTransaction).setCornerRadius(mockSurfaceControl, radius / scale)
+            Assert.assertEquals(original.width().toFloat() / original.height(),
+                preview.width().toFloat() / preview.height(), .03f)
+            move(original)
+            taskPositioner.flushFloatingMove()
+            verify(mockTransaction).setCornerRadius(mockSurfaceControl, radius / .75f)
+            move(preview)
+            taskPositioner.flushFloatingMove()
+            org.mockito.Mockito.clearInvocations(mockTransaction)
+            taskPositioner.onDragPositioningCancel()
+            verify(mockTransaction).setCornerRadius(mockSurfaceControl, radius / .75f)
+        }
+    }
+
+    @Test
+    fun floatingMove_relayoutReappliesMiniCornerRadius() = runOnUiThread {
+        val decor = mock<DefaultWindowDecoration>()
+        whenever(decor.taskSurface).thenReturn(mockSurfaceControl)
+        whenever(decor.decorWindowContext).thenReturn(mContext)
+        val wrapper = WindowDecorationWrapper.Factory().fromDefaultDecoration(decor)
+        val radius = mContext.resources.getDimension(
+            com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius)
+        wrapper.setFloatingWindowMovePreview(Rect(500, 1400, 540, 1460), .05f)
+        wrapper.javaClass.getDeclaredMethod("applyFloatingWindowMovePreview",
+            SurfaceControl.Transaction::class.java).apply { isAccessible = true }
+            .invoke(wrapper, mockTransaction)
+        verify(mockTransaction).setCornerRadius(mockSurfaceControl, radius / .05f)
+        verify(mockTransaction).setMatrix(mockSurfaceControl, .05f, 0f, 0f, .05f)
+    }
+
+    @Test
+    fun floatingMove_endCannotRecreateCornerPreview() = runOnUiThread {
+        val pinned = mock<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>()
+        val indicator = mock<com.android.wm.shell.desktopmode.VisualIndicatorViewContainer>()
+        whenever(mockWindowDecoration.pinnedLayerController).thenReturn(pinned)
+        whenever(pinned.getMiniDragTarget(any(), any(), any())).thenReturn(
+            com.android.wm.shell.pinnedlayer.phone.FloatingMiniController.DragTarget(
+                Rect(8, 108, 368, 648), .45f, 24f))
+        whenever(mockDesktopTasksController.createFloatingMiniPreview(any(), any()))
+            .thenReturn(indicator)
+        beginFloatingMove()
+        taskPositioner.flushFloatingMove()
+        verify(indicator).updateMiniPreview(Rect(8, 108, 368, 648), 24f)
+        org.mockito.Mockito.clearInvocations(pinned, mockDesktopTasksController, indicator)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1000f, 30f)
+        taskPositioner.flushFloatingMove()
+        verify(indicator).releaseVisualIndicator()
+        verify(indicator, never()).updateMiniPreview(any(), any())
+        verify(pinned, never()).getMiniDragTarget(any(), any(), any())
+        verify(mockDesktopTasksController, never()).createFloatingMiniPreview(any(), any())
+        verify(mockWindowDecoration, org.mockito.Mockito.atLeastOnce())
+            .finishFloatingWindowMovePreview()
+    }
+
+    @Test
+    fun floatingMove_displayChangeCancelsPreviewAndReleaseTogether() = runOnUiThread {
+        val pinned = mock<com.android.wm.shell.pinnedlayer.phone.PinnedLayerController>()
+        val indicator = mock<com.android.wm.shell.desktopmode.VisualIndicatorViewContainer>()
+        whenever(mockWindowDecoration.pinnedLayerController).thenReturn(pinned)
+        whenever(pinned.getMiniDragTarget(any(), any(), any())).thenReturn(
+            com.android.wm.shell.pinnedlayer.phone.FloatingMiniController.DragTarget(
+                Rect(8, 108, 368, 648), .45f, 24f))
+        whenever(mockDesktopTasksController.createFloatingMiniPreview(any(), any()))
+            .thenReturn(indicator)
+        beginFloatingMove()
+        taskPositioner.flushFloatingMove()
+        org.mockito.Mockito.clearInvocations(indicator)
         taskPositioner.onDisplayConfigurationChanged(DISPLAY_ID_0, Configuration())
+        taskPositioner.flushFloatingMove()
+        verify(indicator).releaseVisualIndicator()
+        verify(indicator, never()).updateMiniPreview(any(), any())
         Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
         Assert.assertFalse(com.android.wm.shell.common.SurfaceFrameRate.isInteracting)
         org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer, mockTransaction)

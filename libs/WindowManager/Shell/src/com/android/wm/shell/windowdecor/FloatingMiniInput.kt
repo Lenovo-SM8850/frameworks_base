@@ -19,6 +19,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.WindowlessWindowManager
+import io.github.miner7222.windowdecor.FloatingDismissTarget
 import com.android.internal.annotations.VisibleForTesting
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import kotlin.math.abs
@@ -45,8 +46,10 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var blockedGesture = false
     private var touchGesture = false
     private val stashFeedback = FloatingTargetFeedback()
+    private var dismissTarget: FloatingDismissTarget? = null
 
     fun cancelTargetFeedback() {
+        dismissTarget?.cancel()
         stashFeedback.reset()
         touchGesture = false
     }
@@ -177,6 +180,19 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             downX = event.rawX
                             downY = event.rawY
                             dragging = false
+                            this@FloatingMiniInput.parent?.let { leash ->
+                                val target = dismissTarget ?: FloatingDismissTarget(context).also {
+                                    dismissTarget = it
+                                }
+                                target.begin(event, start, leash, { bounds ->
+                                    moved.set(bounds)
+                                    controller.moveMini(current, moved)
+                                }, {
+                                    gestureActive = false
+                                    dragging = false
+                                    controller.dismissMini(current)
+                                })
+                            }
                         }
                         MotionEvent.ACTION_MOVE -> {
                             if (!gestureActive) return@setOnTouchListener true
@@ -192,6 +208,10 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                                     cancel.recycle()
                                 }
                                 dragging = true
+                                if (dismissTarget?.onMotionEvent(event, moved) == true) {
+                                    stashFeedback.reset()
+                                    return@setOnTouchListener true
+                                }
                                 moved.set(start)
                                 moved.offset(dx.roundToInt(), dy.roundToInt())
                                 val edge = controller.getMiniStashTarget(current, moved)
@@ -205,8 +225,16 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             }
                         }
                         MotionEvent.ACTION_UP -> {
-                            cancelTargetFeedback()
+                            stashFeedback.reset()
+                            touchGesture = false
                             if (!gestureActive) return@setOnTouchListener true
+                            if (dragging && dismissTarget?.onMotionEvent(event, moved) == true) {
+                                velocityTracker?.recycle()
+                                velocityTracker = null
+                                dragging = false
+                                return@setOnTouchListener true
+                            }
+                            dismissTarget?.cancel()
                             trackVelocity(event)
                             val velocity = PointF()
                             velocityTracker?.let {
@@ -256,6 +284,8 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
 
     override fun close() {
         cancelTargetFeedback()
+        dismissTarget?.close()
+        dismissTarget = null
         velocityTracker?.recycle()
         velocityTracker = null
         dragging = false

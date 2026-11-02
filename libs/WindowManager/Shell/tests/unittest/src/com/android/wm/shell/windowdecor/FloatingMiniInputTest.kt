@@ -38,6 +38,22 @@ class FloatingMiniInputTest : ShellTestCase() {
         }
     }
 
+    @Test fun dismissPreview_fitsPortraitAndLandscapeWindowsAtTheTargetCenter() {
+        val center = android.graphics.PointF(500f, 1800f)
+        for (original in listOf(Rect(100, 200, 1300, 1000), Rect(100, 200, 900, 1400),
+            Rect(100, 200, 700, 800))) {
+            val target = io.github.miner7222.windowdecor.FloatingDismissTarget.dismissBounds(
+                original, center, 80)
+            org.junit.Assert.assertTrue(target.width() <= 68 && target.height() <= 68)
+            org.junit.Assert.assertTrue(kotlin.math.hypot(target.width().toFloat(),
+                target.height().toFloat()) <= 69f)
+            org.junit.Assert.assertEquals(center.x, target.exactCenterX(), .5f)
+            org.junit.Assert.assertEquals(center.y, target.exactCenterY(), .5f)
+            org.junit.Assert.assertEquals(original.width().toFloat() / original.height(),
+                target.width().toFloat() / target.height(), .025f)
+        }
+    }
+
     @Test fun singleTap_doesNotRestoreButDoubleTapDoes() {
         val view = view()
         val time = SystemClock.uptimeMillis()

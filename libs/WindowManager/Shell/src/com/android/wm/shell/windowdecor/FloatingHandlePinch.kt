@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.android.wm.shell.windowdecor
 
+import android.graphics.Rect
 import android.view.MotionEvent
+import android.view.SurfaceControl
+import androidx.dynamicanimation.animation.FloatPropertyCompat
+import androidx.dynamicanimation.animation.SpringForce
+import com.android.wm.shell.shared.animation.PhysicsAnimator
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /** Recognizes only a second finger landing on the opposite handle. */
 class FloatingHandlePinch {
@@ -76,4 +83,56 @@ class FloatingHandlePinch {
     private fun sample(kind: Kind, first: Pointer, second: Pointer) = Change(kind,
         hypot(second.x - first.x, second.y - first.y),
         (first.x + second.x) / 2f, (first.y + second.y) / 2f)
+}
+
+class FloatingPinchRotation(private val onUpdate: () -> Unit) {
+    // Hundredths of a degree keep the spring's threshold below a visible tilt.
+    private var units = 0f
+    val angle: Float get() = units / 100f
+    private val animator = PhysicsAnimator.getInstance(this)
+
+    fun update(angle: Float) {
+        animator.cancel()
+        units = angle * 100f
+        onUpdate()
+    }
+
+    fun reset(finish: () -> Unit) {
+        animator.cancel()
+        if (units == 0f) { finish(); return }
+        animator.spring(ROTATION, 0f,
+            PhysicsAnimator.SpringConfig(700f, SpringForce.DAMPING_RATIO_NO_BOUNCY))
+            .addUpdateListener { _, _ -> onUpdate() }
+            .withEndActions(Runnable { units = 0f; onUpdate(); finish() })
+            .start()
+    }
+
+    fun cancel() {
+        animator.cancel()
+        units = 0f
+    }
+
+    companion object {
+        private val ROTATION = object : FloatPropertyCompat<FloatingPinchRotation>("pinchRotation") {
+            override fun getValue(target: FloatingPinchRotation) = target.units
+            override fun setValue(target: FloatingPinchRotation, value: Float) { target.units = value }
+        }
+
+        fun apply(t: SurfaceControl.Transaction, leash: SurfaceControl, bounds: Rect,
+            sx: Float, sy: Float, angle: Float) {
+            if (angle == 0f) {
+                t.setMatrix(leash, sx, 0f, 0f, sy)
+                    .setPosition(leash, bounds.left.toFloat(), bounds.top.toFloat())
+                return
+            }
+            val radians = Math.toRadians(angle.toDouble())
+            val c = cos(radians).toFloat()
+            val s = sin(radians).toFloat()
+            val halfWidth = bounds.width() / 2f
+            val halfHeight = bounds.height() / 2f
+            t.setMatrix(leash, sx * c, sx * s, -sy * s, sy * c)
+                .setPosition(leash, bounds.left + halfWidth - c * halfWidth + s * halfHeight,
+                    bounds.top + halfHeight - s * halfWidth - c * halfHeight)
+        }
+    }
 }

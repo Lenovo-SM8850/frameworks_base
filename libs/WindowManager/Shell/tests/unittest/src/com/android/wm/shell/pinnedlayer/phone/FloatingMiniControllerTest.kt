@@ -85,8 +85,10 @@ class FloatingMiniControllerTest : ShellTestCase() {
             doAnswer { animatorListener = it.getArgument(0); null }.whenever(animator).addListener(any())
             doAnswer { updateListener = it.getArgument(0); null }.whenever(animator).addUpdateListener(any())
             doAnswer {
-                animatorListener.onAnimationCancel(animator)
-                animatorListener.onAnimationEnd(animator)
+                if (::animatorListener.isInitialized) {
+                    animatorListener.onAnimationCancel(animator)
+                    animatorListener.onAnimationEnd(animator)
+                }
                 null
             }.whenever(animator).cancel()
             state.enter(task.userId, task.taskId,
@@ -456,6 +458,24 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(entry.scale).isEqualTo(.45f)
         assertThat(entry.restore.bounds).isEqualTo(h.normal)
         assertThat(h.state.get(h.task.userId, h.task.taskId)).isSameInstanceAs(entry)
+    }
+
+    @Test fun dismissAfterShrink_commitsThePreviewScaleWithoutRestoringTheMini() {
+        val h = Harness()
+        val original = Rect(h.task.configuration.windowConfiguration.bounds)
+        h.controller.beginDrag(h.task)
+        clearInvocations(h.organizer)
+        h.controller.move(h.task, Rect(400, 1700, 464, 1796))
+
+        h.controller.finishDismiss(h.task)
+
+        val wct = argumentCaptor<android.window.WindowContainerTransaction>()
+        verify(h.organizer).applyTransaction(wct.capture())
+        val change = wct.firstValue.changes[h.task.token.asBinder()]!!
+        assertThat(change.floatingWindowScale).isWithin(.001f).of(.08f)
+        assertThat(change.floatingWindowPosition).isEqualTo(Point(400, 1700))
+        assertThat(h.task.configuration.windowConfiguration.bounds).isEqualTo(original)
+        verify(h.transaction).setMatrix(h.leash, .08f, 0f, 0f, .08f)
     }
 
     @Test fun tapWithoutDrag_releasesInteractionOwner() {

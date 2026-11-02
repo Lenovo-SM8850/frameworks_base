@@ -119,6 +119,10 @@ class PinnedLayerController(
     fun restoreMini(task: TaskInfo) {
         if (isMiniStashed(task)) miniInteractions?.unstash(task) else miniInteractions?.restore(task)
     }
+    fun dismissMini(task: TaskInfo) {
+        miniInteractions?.finishDismiss(task)
+        closeTask(task)
+    }
     fun beginMiniDrag(task: TaskInfo): Rect = miniInteractions?.beginDrag(task) ?: task.presentationBounds
     fun moveMini(task: TaskInfo, bounds: Rect) { miniInteractions?.move(task, bounds) }
     fun getMiniStashTarget(task: TaskInfo, bounds: Rect): FloatingMiniState.Edge =

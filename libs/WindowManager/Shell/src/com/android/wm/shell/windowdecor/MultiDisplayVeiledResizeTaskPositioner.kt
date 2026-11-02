@@ -16,6 +16,9 @@
 package com.android.wm.shell.windowdecor
 
 import android.app.ActivityManager.RunningTaskInfo
+import io.github.miner7222.windowdecor.FloatingDismissTarget
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.graphics.PointF
 import com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometry
 import kotlin.math.max
@@ -109,6 +112,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var floatingNaturalWidth = 1
     private var floatingNaturalHeight = 1
     private var floatingStartScale = 1f
+    private var floatingDismissTarget: FloatingDismissTarget? = null
+    private var floatingDismissDownTime = 0L
+    private var floatingDismissPending = false
     private var floatingPinchSpan = 0f
     private val floatingPinchCenter = PointF()
     private var floatingMinimumScale = .5f
@@ -188,6 +194,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
         y: Float,
         inputMethodType: Int,
     ): Rect {
+        floatingDismissTarget?.cancel()
+        cancelFloatingFrame()
+        windowDecoration.finishFloatingWindowMovePreview()
+        floatingDismissPending = false
         miniPreview.close()
         miniPreviewCancelled = false
         resizeFeedback.reset()
@@ -234,11 +244,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
                 floatingObserverRegistered = true
             }
             windowDecoration.floatingWindowTransitionListener = ::cancelFloatingDragForTransition
+            taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
             if (isResizing) {
                 val (minWidth, minHeight) = floatingMinimums()
                 floatingMinWidth = minWidth
                 floatingMinHeight = minHeight
-                taskOrganizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
             }
         }
         logD(
@@ -320,7 +330,51 @@ class MultiDisplayVeiledResizeTaskPositioner(
                     floatingLogicalBounds.height()) * floatingMinimumScale).roundToInt()
             }
         }
+        if (task.isFloatingWindow && !isResizing && windowDecoration.taskSurface.isValid &&
+            task.displayId == android.view.Display.DEFAULT_DISPLAY) {
+            val target = floatingDismissTarget ?: FloatingDismissTarget(
+                windowDecoration.decorWindowContext).also { floatingDismissTarget = it }
+            floatingDismissDownTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(floatingDismissDownTime, floatingDismissDownTime,
+                MotionEvent.ACTION_DOWN, x, y, 0)
+            try {
+                target.begin(down, repositionTaskBounds, windowDecoration.taskSurface, { bounds ->
+                    repositionTaskBounds.set(bounds)
+                    scheduleFloatingMove()
+                }, {
+                    // Keep the task at the magnetic target while its ordinary close transition runs.
+                    cancelFloatingFrame()
+                    miniPreview.close()
+                    stopFloatingObserver()
+                    floatingDismissPending = false
+                    floatingDragCancelled = true
+                    interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
+                    taskOrganizer.applyTransaction(WindowContainerTransaction()
+                        .setDragResizing(task.token, false)
+                        .setFloatingWindowPresentation(task.token,
+                            android.graphics.Point(repositionTaskBounds.left, repositionTaskBounds.top),
+                            floatingStartScale * repositionTaskBounds.width() /
+                                taskBoundsAtDragStart.width().coerceAtLeast(1)))
+                    windowDecoration.closeFloatingTask()
+                })
+            } finally { down.recycle() }
+        }
         return Rect(repositionTaskBounds)
+    }
+
+    private fun consumeFloatingDismiss(action: Int, x: Float, y: Float): Boolean {
+        val target = floatingDismissTarget ?: return false
+        val event = MotionEvent.obtain(floatingDismissDownTime, SystemClock.uptimeMillis(),
+            action, x, y, 0)
+        return try { target.onMotionEvent(event, repositionTaskBounds) }
+        finally { event.recycle() }
+    }
+
+    private fun scheduleFloatingMove() {
+        if (!floatingMovePending) {
+            floatingMovePending = true
+            Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
+        }
     }
 
     override fun onDragPositioningMove(displayId: Int, x: Float, y: Float): Rect {
@@ -338,6 +392,12 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (floatingDragCancelled) return Rect(repositionTaskBounds)
         if (windowDecoration.taskInfo.isFloatingWindow) {
             if (isResizing) return moveFloatingResize(x, y)
+            if (consumeFloatingDismiss(MotionEvent.ACTION_MOVE, x, y)) {
+                miniPreview.close()
+                miniPreviewCancelled = true
+                return Rect(repositionTaskBounds)
+            }
+            miniPreviewCancelled = false
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
             if (!miniPreviewCancelled) {
@@ -347,10 +407,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
                     allowFloatingFeedback && inputMethod == InputMethod.TOUCH,
                     windowDecoration::performFloatingTargetHapticFeedback)
             }
-            if (!floatingMovePending) {
-                floatingMovePending = true
-                Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
-            }
+            scheduleFloatingMove()
             return Rect(repositionTaskBounds)
         }
         // If the window needs to be resized to its bounds before snap or maximize, then wait until
@@ -518,9 +575,12 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun onDragPositioningEnd(displayId: Int, x: Float, y: Float): Rect {
+        // Pilfering cancels an edge input receiver, which then calls End after Cancel.
+        if (floatingPinchSpan > 0f) return Rect(repositionTaskBounds)
         allowFloatingFeedback = false
         resizeFeedback.reset()
         windowDecoration.floatingMiniPreviewCancellation = null
+        miniPreviewCancelled = true
         miniPreview.close()
         logD(
             TAG,
@@ -538,9 +598,22 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
         if (windowDecoration.taskInfo.isFloatingWindow) {
             if (isResizing) return endFloatingResize(x, y)
+            if (consumeFloatingDismiss(MotionEvent.ACTION_UP, x, y)) {
+                floatingDismissPending = true
+                return Rect(repositionTaskBounds)
+            }
             cancelFloatingFrame()
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
+            // Restore the surface scale before handing the full-size bounds back to drag.
+            floatingMovePending = true
+            flushFloatingMove()
+            val task = windowDecoration.taskInfo
+            taskOrganizer.applyTransaction(WindowContainerTransaction()
+                .setFloatingWindowPresentation(task.token,
+                    android.graphics.Point(repositionTaskBounds.left, repositionTaskBounds.top),
+                    floatingStartScale)
+                .setDragResizing(task.token, false))
             val edgeMove = floatingEdgeMove
             val startBounds = Rect(taskBoundsAtDragStart)
             floatingEdgeMove = false
@@ -680,6 +753,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun close() {
+        floatingDismissTarget?.close()
+        floatingDismissTarget = null
         allowFloatingFeedback = false
         resizeFeedback.reset()
         windowDecoration.floatingMiniPreviewCancellation = null
@@ -703,6 +778,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
             if (task.minHeight > 0) task.minHeight else defaultMin)
     }
 
+    fun isFloatingPinchActive() = floatingPinchSpan > 0f
+
+    fun isFloatingMoveActive() = floatingDragActive && !isResizing
+
     fun getFloatingHandlePinchBounds() = Rect(repositionTaskBounds)
 
     fun startFloatingHandlePinch(displayId: Int, span: Float, x: Float, y: Float,
@@ -714,6 +793,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
         taskBoundsAtDragStart.set(bounds)
         repositionTaskBounds.set(bounds)
         floatingPinchSpan = span
+        windowDecoration.floatingMiniPreviewCancellation = { endFloatingHandlePinch(true) }
         floatingPinchCenter.set(x, y)
         lastFloatingX = x
         lastFloatingY = y
@@ -806,18 +886,35 @@ class MultiDisplayVeiledResizeTaskPositioner(
         } else resetVeilIfVisible()
     }
 
-    private fun flushFloatingMove() {
+    @VisibleForTesting
+    fun flushFloatingMove() {
         if (!floatingMovePending) return
         floatingMovePending = false
-        if (!miniPreviewCancelled) {
+        if (!floatingDragActive || floatingDragCancelled || closing ||
+            !windowDecoration.taskSurface.isValid) return
+        if (allowFloatingFeedback && !miniPreviewCancelled) {
             miniPreview.update(windowDecoration.taskInfo, windowDecoration.taskSurface,
                 windowDecoration.pinnedLayerController?.getMiniDragTarget(windowDecoration.taskInfo,
                     taskBoundsAtDragStart, repositionTaskBounds))
         }
         val t = floatingPreviewTransaction ?: transactionSupplier().also { floatingPreviewTransaction = it }
-        t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
-            repositionTaskBounds.top.toFloat())
+        val scale = floatingStartScale * repositionTaskBounds.width() /
+            taskBoundsAtDragStart.width().coerceAtLeast(1)
+        windowDecoration.setFloatingWindowMovePreview(repositionTaskBounds, scale)
+        setFloatingMoveCornerRadius(t, scale)
+        t.setMatrix(windowDecoration.taskSurface, scale, 0f, 0f, scale)
+            .setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
+                repositionTaskBounds.top.toFloat())
             .setFrameTimeline(Choreographer.getInstance().vsyncId).apply()
+    }
+
+    private fun setFloatingMoveCornerRadius(t: SurfaceControl.Transaction, scale: Float) {
+        if (!windowDecoration.taskSurface.isValid) return
+        val radius = windowDecoration.decorWindowContext.resources.getDimension(
+            com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius)
+        t.setWindowCrop(windowDecoration.taskSurface, floatingLogicalBounds.width(),
+            floatingLogicalBounds.height())
+            .setCornerRadius(windowDecoration.taskSurface, radius / scale)
     }
 
     private fun cancelFloatingFrame() {
@@ -828,10 +925,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
     }
 
-    override fun isDragPositioningCancelled() = floatingDragCancelled
+    override fun isDragPositioningCancelled() = floatingDragCancelled || floatingDismissPending
 
     override fun onDragPositioningCancel() {
-        if (!floatingDragActive) return
+        // The pinch monitor owns cancellation now; the old edge receiver is only draining.
+        if (floatingPinchSpan > 0f || !floatingDragActive) return
         cancelFloatingDragForTransition()
         floatingDragActive = false
         SurfaceFrameRate.setInteracting(this, false)
@@ -839,6 +937,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
 
     private fun stopFloatingObserver() {
         allowFloatingFeedback = false
+        miniPreviewCancelled = true
+        miniPreview.close()
+        windowDecoration.finishFloatingWindowMovePreview()
         resizeFeedback.reset()
         floatingDragActive = false
         SurfaceFrameRate.setInteracting(this, false)
@@ -850,6 +951,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun cancelFloatingDragForTransition() {
+        floatingDismissTarget?.cancel()
+        floatingDismissPending = false
+        floatingPinchSpan = 0f
         allowFloatingFeedback = false
         resizeFeedback.reset()
         miniPreview.close()
@@ -861,10 +965,17 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (pendingFloatingTransition == null) {
             floatingDragCancelled = true
             repositionTaskBounds.set(windowDecoration.taskInfo.presentationBounds)
-            if (!isResizing && windowDecoration.taskSurface.isValid) {
+            if (windowDecoration.taskSurface.isValid) {
                 transactionSupplier().use { t ->
-                    t.setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
-                        repositionTaskBounds.top.toFloat()).apply()
+                    if (isResizing) windowDecoration.cancelFloatingWindowPreview(t)
+                    else {
+                        setFloatingMoveCornerRadius(t, floatingStartScale)
+                        t.setMatrix(windowDecoration.taskSurface, floatingStartScale, 0f, 0f,
+                            floatingStartScale)
+                            .setPosition(windowDecoration.taskSurface, repositionTaskBounds.left.toFloat(),
+                                repositionTaskBounds.top.toFloat())
+                    }
+                    t.apply()
                 }
             }
             floatingResize = null
@@ -947,11 +1058,12 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun restoreFloatingPresentation() {
+        val moving = floatingDragActive && !isResizing
         cancelFloatingFrame()
         stopFloatingObserver()
         val task = windowDecoration.taskInfo
         if (!task.isFloatingWindow) return
-        if (floatingPreviewActive) {
+        if (floatingPreviewActive || moving) {
             transactionSupplier().use {
                 if (closing) windowDecoration.cancelFloatingWindowPreview(it)
                 else windowDecoration.updateFloatingWindowPreview(task.presentationBounds,
@@ -1177,13 +1289,13 @@ class MultiDisplayVeiledResizeTaskPositioner(
 
     override fun onDisplayConfigurationChanged(displayId: Int,
         configuration: android.content.res.Configuration) {
-        if (displayId != startDisplayId) return
-        onDragPositioningCancel()
+        if (displayId != startDisplayId || !floatingDragActive) return
+        cancelFloatingDragForTransition()
     }
 
     override fun onDisplayRemoved(displayId: Int) {
-        if (displayId != startDisplayId) return
-        onDragPositioningCancel()
+        if (displayId != startDisplayId || !floatingDragActive) return
+        cancelFloatingDragForTransition()
     }
 
     override fun onTopologyChanged(topology: DisplayTopology?) {

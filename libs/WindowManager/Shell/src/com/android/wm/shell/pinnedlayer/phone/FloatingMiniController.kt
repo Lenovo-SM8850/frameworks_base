@@ -361,6 +361,17 @@ class FloatingMiniController(
         }
     }
 
+    fun finishDismiss(task: TaskInfo) {
+        dragFrames[key(task)]?.let { if (it.pending) { it.pending = false; it.draw() } }
+        clearDrag(task)
+        val entry = state.get(task.userId, task.taskId) ?: return
+        val scale = entry.bounds.width().toFloat() /
+            task.configuration.windowConfiguration.bounds.width().coerceAtLeast(1)
+        organizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, false)
+            .setFloatingWindowPresentation(task.token,
+                Point(entry.bounds.left, entry.bounds.top), scale))
+    }
+
     fun restore(task: TaskInfo) { restore(task, null) }
 
     /** Prepares an expanded restore in the caller's launch transaction. */
