@@ -29,4 +29,6 @@ abstract class AdditionalViewContainer internal constructor() {
 
     /** Reposition the view container using provided coordinates. */
     abstract fun setPosition(t: SurfaceControl.Transaction, x: Float, y: Float)
+
+    abstract fun setSize(t: SurfaceControl.Transaction, width: Int, height: Int)
 }

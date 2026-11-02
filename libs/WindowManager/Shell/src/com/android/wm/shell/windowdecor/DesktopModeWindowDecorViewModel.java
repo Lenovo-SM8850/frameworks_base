@@ -584,6 +584,26 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             public boolean isContentReady(int taskId) {
                 return !mTaskOrganizer.hasStartingWindow(taskId);
             }
+
+            @Override
+            @Nullable
+            public SurfaceControl getDecorationSurface(int taskId) {
+                final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskId);
+                return decoration == null ? null : decoration.getFloatingDecorationSurface();
+            }
+
+            @Override
+            @Nullable
+            public SurfaceControl getHandleSurface(int taskId) {
+                final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskId);
+                return decoration == null ? null : decoration.getFloatingHandleSurface();
+            }
+
+            @Override
+            public int getHandleWidth(int taskId) {
+                final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskId);
+                return decoration == null ? 0 : decoration.getFloatingHandleWidth();
+            }
         });
         mShellController.addKeyguardChangeListener(mDesktopModeKeyguardChangeListener);
         mShellCommandHandler.addDumpCallback(this::dump, this);

@@ -648,6 +648,7 @@ class DragToDesktopTransitionHandlerTest : ShellTestCase() {
 
     @Test
     fun mergeAnimation_endTransition_mergesAnimation() {
+        val floatingDecoration = mock<Transitions.FloatingDecoration>()
         val playingFinishTransaction = mock<SurfaceControl.Transaction>()
         val mergedStartTransaction = mock<SurfaceControl.Transaction>()
         val mergedFinishTransaction = mock<SurfaceControl.Transaction>()
@@ -655,6 +656,9 @@ class DragToDesktopTransitionHandlerTest : ShellTestCase() {
         val task = createTask()
         val startTransition =
             startDrag(springHandler, task, finishTransaction = playingFinishTransaction)
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        whenever(transitions.captureFloatingDecoration(task.taskId)).thenReturn(floatingDecoration)
         springHandler.onTaskResizeAnimationListener = mock()
 
         springHandler.mergeAnimation(
@@ -677,6 +681,7 @@ class DragToDesktopTransitionHandlerTest : ShellTestCase() {
         verify(mergedStartTransaction).setLayer(eq(draggedTaskLeash), anyInt())
         // Should merge animation
         verify(finishCallback).onTransitionFinished(null)
+        verify(floatingDecoration).applyScale(eq(mergedStartTransaction), anyInt(), anyFloat(), anyFloat())
     }
 
     @Test

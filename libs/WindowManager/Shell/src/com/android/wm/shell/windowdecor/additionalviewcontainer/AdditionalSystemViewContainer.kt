@@ -127,6 +127,13 @@ class AdditionalSystemViewContainer(
         windowManagerWrapper.updateViewLayout(view, lp)
     }
 
+    override fun setSize(t: SurfaceControl.Transaction, width: Int, height: Int) {
+        val params = view.layoutParams as WindowManager.LayoutParams
+        params.width = width
+        params.height = height
+        windowManagerWrapper.updateViewLayout(view, params)
+    }
+
     class Factory {
         fun create(
             windowManagerWrapper: WindowManagerWrapper,

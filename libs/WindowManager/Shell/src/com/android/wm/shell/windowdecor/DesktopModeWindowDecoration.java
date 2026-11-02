@@ -1473,6 +1473,11 @@ public class DesktopModeWindowDecoration extends WindowDecoration<WindowDecorLin
         if (mResizeVeil != null) mResizeVeil.updateParentScale(t, scale);
     }
 
+    @Nullable
+    SurfaceControl getFloatingDecorationSurface() {
+        return mDecorationContainerSurface;
+    }
+
     public void hideResizeVeil() {
         mResizeVeil.hideVeil();
     }

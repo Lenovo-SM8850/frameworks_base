@@ -85,7 +85,7 @@ import kotlin.math.max
  */
 sealed class DragToDesktopTransitionHandler(
     private val context: Context,
-    private val transitions: Transitions,
+    protected val transitions: Transitions,
     private val taskDisplayAreaOrganizer: RootTaskDisplayAreaOrganizer,
     private val desksOrganizer: DesksOrganizer,
     private val desktopUserRepositories: DesktopUserRepositories,
@@ -1424,6 +1424,7 @@ constructor(
         val startBounds = draggedTaskChange.startAbsBounds
         val floatingTask = draggedTaskChange.taskInfo?.takeIf { it.isFloatingWindow }
         val endScale = floatingTask?.floatingWindowScale ?: 1f
+        val floatingDecoration = floatingTask?.let { transitions.captureFloatingDecoration(it.taskId) }
         val endBounds = Rect(draggedTaskChange.endAbsBounds).apply {
             floatingTask?.let { offsetTo(it.positionInParent.x, it.positionInParent.y) }
         }
@@ -1452,6 +1453,10 @@ constructor(
         // Accept the merge by applying the merging transaction (applied by #showResizeVeil)
         // and finish callback. Show the veil and position the task at the first frame before
         // starting the final animation.
+        if (floatingTask != null) {
+            startTransaction.setScale(draggedTaskLeash, startScale, startScale)
+            floatingDecoration?.applyScale(startTransaction, startBounds.width(), startScale, startScale)
+        }
         val startTransactionApplied =
             onTaskResizeAnimationListener.onAnimationStart(
                 state.draggedTaskId,
@@ -1524,6 +1529,7 @@ constructor(
                         setAlpha(it.leash, freeformAnimFraction)
                     }
                 }
+                floatingDecoration?.applyScale(tx, animBounds.width(), animScale, animScale)
                 val updateTransactionApplied =
                     onTaskResizeAnimationListener.onBoundsChange(
                         state.draggedTaskId,

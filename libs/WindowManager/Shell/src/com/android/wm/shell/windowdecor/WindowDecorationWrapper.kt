@@ -231,6 +231,14 @@ private constructor(
         desktopWindowDecor?.updateFloatingWindowChildScale(t, scale)
     }
 
+    fun getFloatingHandleSurface(): SurfaceControl? = floatingBottomHandle?.getSurface()
+
+    fun getFloatingHandleWidth(): Int = floatingBottomHandle?.getWidth() ?: 0
+
+    fun getFloatingDecorationSurface(): SurfaceControl? =
+        defaultWindowDecor?.floatingDecorationSurface()
+            ?: desktopWindowDecor?.getFloatingDecorationSurface()
+
     fun cancelFloatingWindowPreview(t: SurfaceControl.Transaction) {
         val original = taskInfo
         val scale = original.floatingWindowScale
@@ -487,6 +495,7 @@ private constructor(
             if (!floatingFocusIndicator.initialized) updateFloatingFocus(taskInfo, focusFinishT)
             updateFloatingBottomHandle(startT)
             if (inSyncWithTransition && taskInfo.isFloatingWindow) {
+                updateFloatingBottomHandle(finishT)
                 updateFloatingWindowChildScale(startT, taskInfo.floatingWindowScale)
                 updateFloatingWindowChildScale(finishT, taskInfo.floatingWindowScale)
             }
