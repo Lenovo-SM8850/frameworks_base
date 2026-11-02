@@ -58,6 +58,7 @@ private constructor(
     private var floatingBottomHandle: FloatingBottomHandle? = null
     private var floatingMiniInput: FloatingMiniInput? = null
     private var floatingController: PinnedLayerController? = null
+    private var floatingTouchListener: DesktopModeTouchEventListener? = null
     private var floatingFocusActive = false
     private val floatingFocusIndicator = FloatingFocusIndicator { radius, alpha ->
         defaultWindowDecor?.updateFloatingFocusShadow(radius)
@@ -90,6 +91,7 @@ private constructor(
 
     fun setFloatingHandleListener(listener: DesktopModeTouchEventListener) {
         if (captionWindowDecoration == null) {
+            floatingTouchListener = listener
             floatingController = listener.pinnedLayerController
             floatingController?.let {
                 it.addMiniListener(miniListener)
@@ -98,6 +100,8 @@ private constructor(
             floatingBottomHandle = FloatingBottomHandle({ currentDecorWindowContext }, listener)
         }
     }
+
+    fun closeFloatingTask() { floatingTouchListener?.closeFloatingTask() }
 
     fun performFloatingTargetHapticFeedback() {
         val view = floatingBottomHandle?.getTargetFeedbackView()
@@ -126,6 +130,9 @@ private constructor(
     private var floatingPreviewSource: RunningTaskInfo? = null
     private var floatingPreviewBounds: Rect? = null
     private var floatingPreviewScale = 1f
+    private var floatingMovePreviewBounds: Rect? = null
+    private var floatingMovePreviewScale = 1f
+    private var floatingMovePreviewAngle = 0f
     private val floatingPreviewRect = Rect()
     private val floatingPreviewLogical = Rect()
     private var floatingPreviewInfo: RunningTaskInfo? = null
@@ -174,6 +181,29 @@ private constructor(
         t.setMatrix(taskSurface, scale, 0f, 0f, scale)
             .setPosition(taskSurface, bounds.left.toFloat(), bounds.top.toFloat())
             .setWindowCrop(taskSurface, logical.width(), logical.height())
+    }
+
+    @JvmOverloads
+    fun setFloatingWindowMovePreview(bounds: Rect, scale: Float, angle: Float = 0f) {
+        val preview = floatingMovePreviewBounds ?: Rect().also { floatingMovePreviewBounds = it }
+        preview.set(bounds)
+        floatingMovePreviewScale = scale
+        floatingMovePreviewAngle = angle
+    }
+
+    private fun applyFloatingWindowMovePreview(t: SurfaceControl.Transaction) {
+        val bounds = floatingMovePreviewBounds ?: return
+        FloatingPinchRotation.apply(t, taskSurface, bounds, floatingMovePreviewScale,
+            floatingMovePreviewScale, floatingMovePreviewAngle)
+        val radius = decorWindowContext.resources.getDimension(
+            com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius)
+        val logical = decorTaskInfo.configuration.windowConfiguration.bounds
+        t.setWindowCrop(taskSurface, logical.width(), logical.height())
+            .setCornerRadius(taskSurface, radius / floatingMovePreviewScale)
+    }
+
+    fun finishFloatingWindowMovePreview() {
+        floatingMovePreviewBounds = null
     }
 
     fun updateFloatingWindowChildScale(t: SurfaceControl.Transaction, scale: Float) {
@@ -337,6 +367,13 @@ private constructor(
 
     /** Updates all window decorations, including any existing caption. */
     fun relayout(taskInfo: RunningTaskInfo, isFocused: Boolean, exclusionRegion: Region) {
+        if (floatingMovePreviewBounds != null) {
+            SurfaceControl.Transaction().use { t ->
+                relayout(taskInfo, t, t, false, true, isFocused, exclusionRegion, false, null)
+                t.apply()
+            }
+            return
+        }
         updateFloatingFocus(taskInfo)
         val focused = if (taskInfo.isFloatingWindow && floatingController?.isMini(taskInfo) != true)
             taskInfo.isFocused else isFocused
@@ -432,6 +469,10 @@ private constructor(
             if (inSyncWithTransition && taskInfo.isFloatingWindow) {
                 updateFloatingWindowChildScale(startT, taskInfo.floatingWindowScale)
                 updateFloatingWindowChildScale(finishT, taskInfo.floatingWindowScale)
+            }
+            if (!inSyncWithTransition) {
+                applyFloatingWindowMovePreview(startT)
+                if (startT !== finishT) applyFloatingWindowMovePreview(finishT)
             }
         }
     }
