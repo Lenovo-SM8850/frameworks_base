@@ -105,6 +105,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private val splitscreenBtn: ImageButton
     private val floatingBtn: ImageButton
     private val desktopBtn: ImageButton
+    private val minimizeBtn: ImageButton
     private val closeBtn: ImageButton
 
     @VisibleForTesting var desktopModeCompatPolicy = DesktopModeCompatPolicy(context)
@@ -271,6 +272,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         if ((v.id == R.id.windowing_minimize_button || v.id == R.id.windowing_close_button) &&
             !canPerformTaskActions()) return
         when (v.id) {
+            R.id.windowing_minimize_button -> windowDecorationActions.onMinimize(taskInfo)
             R.id.windowing_close_button -> windowDecorationActions.onClose(taskInfo)
             R.id.rotate_window_button -> windowDecorationActions.onRotate(taskInfo)
             R.id.fullscreen_button -> {
@@ -308,7 +310,8 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         background.setTint(style.backgroundColor)
         val showActions = showTaskActions &&
             (taskInfo.isFullscreen || taskInfo.isFloatingWindow || isInSplitScreen)
-        minimizeBtn.isGone = true
+        minimizeBtn.isGone = !showActions ||
+            (!taskInfo.isFloatingWindow && !windowDecorationActions.canMinimizeTask(taskInfo))
         closeBtn.isGone = !showActions
         listOf(minimizeBtn, closeBtn).forEach { button ->
             button.imageTintList = style.buttonColor
@@ -442,6 +445,4 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
             listOf(rotateBtn, fullscreenBtn, splitscreenBtn, floatingBtn, desktopBtn,
                 minimizeBtn, closeBtn).filter { !it.isGone }.sumOf { it.layoutParams.width } +
                 paddingLeft + paddingRight)
-
-    private val minimizeBtn: ImageButton
 }

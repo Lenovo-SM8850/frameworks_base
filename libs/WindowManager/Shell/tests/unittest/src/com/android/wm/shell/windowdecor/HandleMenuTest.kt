@@ -654,6 +654,55 @@ class HandleMenuTest : ShellTestCase() {
         org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
     }
 
+    @Test fun fullscreenHasMinimizeAndCloseInWindowingPill() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(mockWindowDecorationActions.canMinimizeTask(task)).thenReturn(true)
+        handleMenu = createAndShowHandleMenu()
+        val pill = handleMenu.handleMenuView!!.windowingPillView
+        val minimize = pill.requireViewById<View>(R.id.windowing_minimize_button)
+        val close = pill.requireViewById<View>(R.id.windowing_close_button)
+        assertEquals(View.VISIBLE, minimize.visibility)
+        assertEquals(View.VISIBLE, close.visibility)
+        minimize.performClick()
+        close.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onMinimize(task)
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
+        whenever(mockWindowDecorationActions.canMinimizeTask(task)).thenReturn(false)
+        handleMenu.handleMenuView!!.bind(task, false)
+        assertEquals(View.GONE, minimize.visibility)
+        assertEquals(View.VISIBLE, close.visibility)
+    }
+
+    @Test fun splitTaskActions_recheckMembershipAndUseWindowingPill() = runTest {
+        createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
+        val task = mockDesktopWindowDecoration.mTaskInfo
+        whenever(mockWindowDecorationActions.canMinimizeTask(task)).thenReturn(true)
+        whenever(splitScreenController.isTaskInSplitScreenForeground(task.taskId)).thenReturn(true)
+        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(true)
+        handleMenu = createAndShowHandleMenu()
+        val root = handleMenu.handleMenuView!!.rootView
+        assertEquals(View.GONE, root.requireViewById<View>(R.id.split_actions_pill).visibility)
+        val minimize = root.requireViewById<View>(R.id.windowing_minimize_button)
+        val close = root.requireViewById<View>(R.id.windowing_close_button)
+        assertEquals(View.VISIBLE, minimize.visibility)
+        assertEquals(View.VISIBLE, close.visibility)
+        assertEquals(handleMenu.handleMenuView!!.windowingPillView, close.parent)
+        assertEquals(mContext.getString(R.string.app_header_talkback_action_close_button_text),
+            close.contentDescription.toString())
+        minimize.performClick()
+        close.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onMinimize(task)
+        org.mockito.kotlin.verify(mockWindowDecorationActions).onClose(task)
+
+        whenever(splitScreenController.canMutateSplitTask(task.taskId)).thenReturn(false)
+        minimize.performClick()
+        close.performClick()
+        org.mockito.kotlin.verify(mockWindowDecorationActions, org.mockito.kotlin.times(1))
+            .onMinimize(task)
+        org.mockito.kotlin.verify(mockWindowDecorationActions, org.mockito.kotlin.times(1)).onClose(task)
+    }
+
     @Test fun fullscreen_hidesSplitActions() = runTest {
         createTaskInfo(windowingMode = WINDOWING_MODE_FULLSCREEN, displayId = DEFAULT_DISPLAY)
         handleMenu = createAndShowHandleMenu()

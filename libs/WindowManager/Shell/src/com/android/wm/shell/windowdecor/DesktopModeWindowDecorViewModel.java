@@ -2308,11 +2308,20 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         }
 
         @Override
+        public boolean canMinimizeTask(@NonNull RunningTaskInfo taskInfo) {
+            return mViewModel.mPinnedLayerController != null
+                    && mViewModel.mPinnedLayerController.canMinimizeTask(taskInfo,
+                            mViewModel.isTaskInSplitScreen(taskInfo.taskId));
+        }
+
+        @Override
         public void onMinimize(@NonNull RunningTaskInfo taskInfo) {
             WdLog.logD(TAG, "Using DefaultWindowDecorationActions to minimize task=%d",
                     taskInfo.taskId);
             if (mViewModel.mPinnedLayerController != null
-                    && taskInfo.isFloatingWindow
+                    && !mViewModel.isTaskInSplitScreen(taskInfo.taskId)
+                    && (taskInfo.isFloatingWindow
+                            || taskInfo.getWindowingMode() == WINDOWING_MODE_FULLSCREEN)
                     && mViewModel.mPinnedLayerController.minimizeTask(taskInfo)) {
                 return;
             }

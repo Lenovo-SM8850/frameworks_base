@@ -207,6 +207,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
@@ -5037,8 +5038,21 @@ public class StageCoordinator extends StageCoordinatorAbstract {
      * @return Result of the close operation.
      */
     CloseTaskResult closeTask(int taskId) {
+        return removeTaskFromSplit(taskId, null);
+    }
+
+    void minimizeTask(int taskId,
+            Function<RunningTaskInfo, WindowContainerTransaction> prepareMinimize) {
+        removeTaskFromSplit(taskId, prepareMinimize);
+    }
+
+    @Nullable
+    private CloseTaskResult removeTaskFromSplit(int taskId,
+            @Nullable Function<RunningTaskInfo, WindowContainerTransaction> prepareMinimize) {
         if (isMultiSplitActive()) {
-            if (!mMultiSplit.closeTask(taskId)) return CloseTaskResult.PENDING_DISMISS;
+            final boolean removed = prepareMinimize == null ? mMultiSplit.closeTask(taskId)
+                    : mMultiSplit.minimizeTask(taskId, prepareMinimize);
+            if (!removed) return CloseTaskResult.PENDING_DISMISS;
             return isMultiSplitActive() ? CloseTaskResult.CLOSED_TASK_SPLIT_REMAINED
                     : CloseTaskResult.CLOSED_TASK_SPLIT_DISMISSED;
         }
@@ -5085,19 +5099,28 @@ public class StageCoordinator extends StageCoordinatorAbstract {
             return CloseTaskResult.STAGE_POSITION_UNKNOWN;
         }
 
-        final WindowContainerTransaction wct = new WindowContainerTransaction();
-        wct.removeTask(taskInfo.token);
+        final WindowContainerTransaction wct = prepareMinimize == null
+                ? new WindowContainerTransaction().removeTask(taskInfo.token)
+                : prepareMinimize.apply(taskInfo);
+        if (wct == null) return null;
         stage.markToBeVanished(taskId);
         if (!stage.areAllTasksToBeVanished()) {
-            mTransitions.startTransition(TRANSIT_CLOSE, wct, null);
+            mTransitions.startTransition(prepareMinimize == null ? TRANSIT_CLOSE : TRANSIT_TO_BACK,
+                    wct, null);
             ProtoLog.i(WM_SHELL_SPLIT_SCREEN, "closeTask: taskId=%d: %s", taskId,
                     CloseTaskResult.CLOSED_TASK_SPLIT_REMAINED);
             return CloseTaskResult.CLOSED_TASK_SPLIT_REMAINED;
         }
 
-        mSplitLayout.flingDividerToDismiss(
-                /* toEnd= */ closingStagePosition == SPLIT_POSITION_BOTTOM_OR_RIGHT,
-                EXIT_REASON_APP_FINISHED, wct);
+        if (prepareMinimize == null) {
+            mSplitLayout.flingDividerToDismiss(
+                    /* toEnd= */ closingStagePosition == SPLIT_POSITION_BOTTOM_OR_RIGHT,
+                    EXIT_REASON_APP_FINISHED, wct);
+        } else {
+            // Commit the minimize before the new handle can receive a restore tap.
+            onSnappedToDismiss(closingStagePosition == SPLIT_POSITION_BOTTOM_OR_RIGHT,
+                    EXIT_REASON_APP_FINISHED, wct);
+        }
         ProtoLog.i(WM_SHELL_SPLIT_SCREEN, "closeTask: taskId=%d: %s", taskId,
                 CloseTaskResult.CLOSED_TASK_SPLIT_DISMISSED);
         return CloseTaskResult.CLOSED_TASK_SPLIT_DISMISSED;

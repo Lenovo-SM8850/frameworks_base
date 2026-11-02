@@ -52,6 +52,7 @@ import com.android.wm.shell.pinnedlayer.phone.PinnedLayerUiState
 import com.android.wm.shell.pinnedlayer.phone.PinnedWindowRepositionAnimationHandler
 import com.android.wm.shell.pinnedlayer.phone.PinnedWindowRepositionAnimator
 import com.android.wm.shell.recents.RecentsTransitionHandler
+import com.android.wm.shell.recents.TaskStackTransitionObserver
 import com.android.wm.shell.shared.TransactionPool
 import com.android.wm.shell.shared.annotations.ShellMainThread
 import com.android.wm.shell.sysui.ConfigurationChangeListener
@@ -196,6 +197,7 @@ object PinnedLayerModule {
         transactionPool: TransactionPool,
         rootTaskDisplayAreaOrganizer: RootTaskDisplayAreaOrganizer,
         multiDisplayDragMoveIndicatorController: MultiDisplayDragMoveIndicatorController,
+        taskStackTransitionObserver: TaskStackTransitionObserver,
     ): Optional<PinnedLayerController> {
         if (PinnedLayerFlags.isPinnedLayerEnabled()) {
             return Optional.of(
@@ -215,7 +217,10 @@ object PinnedLayerModule {
                     desktopState = desktopState,
                     multiDisplayDragMoveIndicatorController =
                         multiDisplayDragMoveIndicatorController,
-                ).also { it.configureInteractions(context, displayController, mainExecutor) }
+                ).also {
+                    it.configureInteractions(context, displayController, mainExecutor,
+                        taskStackTransitionObserver)
+                }
             )
         }
         return Optional.empty()

@@ -33,6 +33,9 @@ interface WindowDecorationActions {
     /** Rotates the floating task presentation. */
     fun onRotate(taskInfo: RunningTaskInfo)
 
+    /** Whether the task can enter the minimized floating layer. */
+    fun canMinimizeTask(taskInfo: RunningTaskInfo): Boolean = false
+
     /** Minimizes the task. */
     fun onMinimize(taskInfo: RunningTaskInfo)
 
