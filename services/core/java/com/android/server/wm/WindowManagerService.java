@@ -10108,7 +10108,10 @@ public class WindowManagerService extends IWindowManager.Stub
             // Only ignore root home task if the requested focus home Task is in the same
             // TaskDisplayArea or RootDisplayArea as the current focus window.
             final WindowState curFocusedWindow = getFocusedWindow();
-            if (curFocusedWindow != null) {
+            final Task focusedTask = curFocusedWindow != null ? curFocusedWindow.getTask() : null;
+            final Task focusedRootTask = focusedTask != null ? focusedTask.getRootTask() : null;
+            if (curFocusedWindow != null
+                    && (focusedRootTask == null || !focusedRootTask.isFloatingWindow())) {
                 final DisplayArea commonParent = curFocusedWindow.isActivityWindow()
                         ? curFocusedWindow.getDisplayArea()
                         : curFocusedWindow.getRootDisplayArea();

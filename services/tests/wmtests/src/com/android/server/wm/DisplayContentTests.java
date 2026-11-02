@@ -1722,6 +1722,66 @@ public class DisplayContentTests extends WindowTestsBase {
         assertEquals(expected, calculateSystemGestureExclusion(dc));
     }
 
+    @Test
+    public void testCalculateSystemGestureExclusion_floatingFocusAboveHome() {
+        final DisplayContent dc = mDisplayContent;
+        final var home = newWindowBuilder("home", TYPE_BASE_APPLICATION)
+                .setActivityType(ACTIVITY_TYPE_HOME).build();
+        final var floating = newWindowBuilder("floating", TYPE_BASE_APPLICATION)
+                .setWindowingMode(WINDOWING_MODE_FREEFORM).build();
+        final Task floatingTask = floating.getTask();
+        floatingTask.setFloatingWindow(true, false /* initialize */);
+        floatingTask.setAlwaysOnTop(true);
+        floatingTask.setBounds(dc.getBounds());
+        final var sidebar = newWindowBuilder("sidebar", TYPE_APPLICATION_OVERLAY).build();
+        sidebar.mAttrs.flags |= FLAG_NOT_FOCUSABLE;
+        final Rect homeRect = new Rect(0, 20, 20, 40);
+        final Rect floatingRect = new Rect(0, 50, 20, 70);
+        final Rect sidebarRect = new Rect(0, 80, 20, 100);
+        home.setSystemGestureExclusion(List.of(homeRect));
+        floating.setSystemGestureExclusion(List.of(floatingRect));
+        sidebar.setSystemGestureExclusion(List.of(sidebarRect));
+        makeWindowVisibleAndDrawn(home, floating, sidebar);
+        for (WindowState window : List.of(home, floating, sidebar)) {
+            spyOn(window);
+            window.getWindowFrames().mFrame.set(dc.getBounds());
+        }
+        doAnswer(invocation -> {
+            ((Region) invocation.getArgument(0)).set(dc.getBounds());
+            return null;
+        }).when(home).getEffectiveTouchableRegion(any());
+        doAnswer(invocation -> {
+            ((Region) invocation.getArgument(0)).set(floatingRect);
+            return null;
+        }).when(floating).getEffectiveTouchableRegion(any());
+        doAnswer(invocation -> {
+            ((Region) invocation.getArgument(0)).set(sidebarRect);
+            return null;
+        }).when(sidebar).getEffectiveTouchableRegion(any());
+        doReturn(true).when(home.getTask()).isVisible();
+        doReturn(true).when(floatingTask).isVisible();
+        doReturn(floatingTask).when(mWm.mRoot).getTopDisplayFocusedRootTask();
+
+        dc.setFocusedApp(floating.mActivityRecord);
+        final Region expected = new Region(floatingRect);
+        expected.op(sidebarRect, Region.Op.UNION);
+        assertEquals(expected, calculateSystemGestureExclusion(dc));
+
+        dc.setFocusedApp(home.mActivityRecord);
+        expected.op(homeRect, Region.Op.UNION);
+        assertEquals(expected, calculateSystemGestureExclusion(dc));
+
+        dc.setFocusedApp(floating.mActivityRecord);
+        final var fullscreen = newWindowBuilder("fullscreen", TYPE_BASE_APPLICATION).build();
+        doReturn(true).when(fullscreen.getTask()).isVisible();
+        dc.setFocusedApp(floating.mActivityRecord);
+        assertEquals(expected, calculateSystemGestureExclusion(dc));
+
+        doReturn(false).when(fullscreen.getTask()).isVisible();
+        doReturn(null).when(mWm.mRoot).getTopDisplayFocusedRootTask();
+        assertEquals(expected, calculateSystemGestureExclusion(dc));
+    }
+
     @NonNull
     private static Region calculateSystemGestureExclusion(@NonNull DisplayContent dc) {
         final var out = Region.obtain();
@@ -3326,6 +3386,45 @@ public class DisplayContentTests extends WindowTestsBase {
             assertEquals("Window is the focused one when the IME is not visible",
                     window, mDisplayContent.findFocusedWindow());
         }
+    }
+
+    @Test
+    @DisableFlags(Flags.FLAG_ENABLE_INTERACTIVE_PICTURE_IN_PICTURE)
+    public void testFindFocusedWindowBelowFloatingWindow() {
+        assertFocusBelowFloatingWindow();
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_INTERACTIVE_PICTURE_IN_PICTURE)
+    public void testFindFocusedWindowBelowFloatingWindow_interactivePip() {
+        assertFocusBelowFloatingWindow();
+    }
+
+    private void assertFocusBelowFloatingWindow() {
+        final var home = newWindowBuilder("home", TYPE_BASE_APPLICATION)
+                .setActivityType(ACTIVITY_TYPE_HOME).build();
+        final var floating = newWindowBuilder("floating", TYPE_BASE_APPLICATION)
+                .setWindowingMode(WINDOWING_MODE_FREEFORM).build();
+        final Task floatingTask = floating.getTask();
+        floatingTask.setFloatingWindow(true);
+        floatingTask.setAlwaysOnTop(true);
+        makeWindowVisibleAndDrawn(home, floating);
+
+        mDisplayContent.setFocusedApp(home.mActivityRecord);
+        assertEquals(home, mDisplayContent.findFocusedWindow());
+
+        home.mAttrs.flags |= FLAG_NOT_FOCUSABLE;
+        assertEquals(floating, mDisplayContent.findFocusedWindow());
+        home.mAttrs.flags &= ~FLAG_NOT_FOCUSABLE;
+
+        final var fullscreen = newWindowBuilder("fullscreen", TYPE_BASE_APPLICATION).build();
+        makeWindowVisibleAndDrawn(fullscreen);
+        mDisplayContent.setFocusedApp(fullscreen.mActivityRecord);
+        assertEquals(fullscreen, mDisplayContent.findFocusedWindow());
+        assertTrue(floatingTask.compareTo(fullscreen.getTask()) > 0);
+
+        mDisplayContent.setFocusedApp(floating.mActivityRecord);
+        assertEquals(floating, mDisplayContent.findFocusedWindow());
     }
 
     @EnableFlags(FLAG_FIX_TF_ADJACENT_FOCUS)

@@ -1007,7 +1007,11 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             }
         }
 
-        if (DesktopExperienceFlags.ENABLE_INTERACTIVE_PICTURE_IN_PICTURE.isTrue()) {
+        final Task candidateTask = mTmpWindow != null ? mTmpWindow.getTask() : w.getTask();
+        final Task candidateRootTask = candidateTask != null ? candidateTask.getRootTask() : null;
+        if (DesktopExperienceFlags.ENABLE_INTERACTIVE_PICTURE_IN_PICTURE.isTrue()
+                || (candidateRootTask != null && candidateRootTask.isAlwaysOnTop()
+                        && candidateRootTask.isFloatingWindow())) {
             if (focusedApp == activity) {
                 ProtoLog.v(WM_DEBUG_FOCUS_LIGHT,
                         "findFocusedWindow: Found new focus (matches focusedApp) @ %s", w);
@@ -4451,6 +4455,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 mCurrentFocus, newFocus, getDisplayId(), Debug.getCallers(4));
         final WindowState oldFocus = mCurrentFocus;
         mCurrentFocus = newFocus;
+        mWmService.mWindowPlacerLocked.requestTraversal();
 
         if (newFocus != null) {
             mWinAddedSinceNullFocus.clear();
@@ -4541,6 +4546,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         final Task oldTask = mFocusedApp != null ? mFocusedApp.getTask() : null;
         final Task newTask = newFocus != null ? newFocus.getTask() : null;
         mFocusedApp = newFocus;
+        mWmService.mWindowPlacerLocked.requestTraversal();
         if (oldTask != newTask) {
             if (oldTask != null) oldTask.onAppFocusChanged(false);
             if (newTask != null) newTask.onAppFocusChanged(true);
@@ -6295,6 +6301,20 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         }
     }
 
+    private boolean shouldIgnoreHomeGestureExclusion() {
+        final Task focusedRootTask = mWmService.mRoot.getTopDisplayFocusedRootTask();
+        if (focusedRootTask == null || focusedRootTask.getDisplayContent() != this
+                || !focusedRootTask.isFloatingWindow() || !focusedRootTask.isVisible()
+                || focusedRootTask.isForceHidden() || !focusedRootTask.isFocused()) {
+            return false;
+        }
+        final Task backgroundTask = getTask(task -> task.isLeafTask()
+                && task.getTopNonFinishingActivity() != null && task.isVisible()
+                && !task.isForceHidden() && !task.isFloatingWindow()
+                && !task.inPinnedWindowingMode());
+        return backgroundTask != null && backgroundTask.isActivityTypeHome();
+    }
+
     /**
      * Calculates the system gesture exclusion.
      *
@@ -6326,6 +6346,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         final int[] remainingLeftRight =
                 {mSystemGestureExclusionLimit, mSystemGestureExclusionLimit};
 
+        final boolean ignoreHomeExclusion = shouldIgnoreHomeGestureExclusion();
+
         // Traverse all windows top down to assemble the gesture exclusion rects.
         // For each window, we only take the rects that fall within its touchable region.
         forAllWindows(w -> {
@@ -6344,7 +6366,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             }
             touchableRegion.op(unhandled, Op.INTERSECT);
 
-            if (w.isImplicitlyExcludingAllSystemGestures()) {
+            if (ignoreHomeExclusion && w.mActivityRecord != null
+                    && w.mActivityRecord.isActivityTypeHome()) {
+                local.setEmpty();
+            } else if (w.isImplicitlyExcludingAllSystemGestures()) {
                 local.set(touchableRegion);
             } else {
                 rectListToRegion(w.getSystemGestureExclusion(), local);

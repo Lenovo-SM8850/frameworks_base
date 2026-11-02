@@ -307,9 +307,9 @@ public class WindowManagerServiceTests extends WindowTestsBase {
     }
 
     @Test
-    public void testTaskFocusChange_rootTaskHomeTypeWithSameTaskDisplayArea_focusDoesNotChange()
+    public void testTaskFocusChange_rootTaskHomeTypeWithSameTaskDisplayArea_onlyFloatingFocusChanges()
             throws RemoteException {
-        DisplayContent display = createNewDisplay();
+        DisplayContent display = mDefaultDisplay;
         // Current focused window
         Task focusedRootTask = createTask(
                 display, WINDOWING_MODE_FREEFORM, ACTIVITY_TYPE_STANDARD);
@@ -325,6 +325,12 @@ public class WindowManagerServiceTests extends WindowTestsBase {
         mWm.handleTaskFocusChange(tappedTask, null /* window */);
 
         verify(mWm.mAtmService, never()).setFocusedTask(tappedTask.mTaskId, null);
+
+        focusedRootTask.setFloatingWindow(true);
+        assertTrue(focusedRootTask.isFloatingWindow());
+        mWm.handleTaskFocusChange(tappedTask, null /* window */);
+
+        verify(mWm.mAtmService).setFocusedTask(tappedTask.mTaskId, null);
     }
 
     @Test
