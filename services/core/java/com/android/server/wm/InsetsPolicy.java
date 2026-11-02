@@ -798,26 +798,38 @@ class InsetsPolicy {
 
     void updateSystemBars(@Nullable WindowState win, @InsetsType int displayForciblyShowingTypes,
             @InsetsType int displayForciblyHidingTypes, boolean showSystemBarsByLegacyPolicy) {
+        updateSystemBars(win, displayForciblyShowingTypes, displayForciblyHidingTypes,
+                showSystemBarsByLegacyPolicy, true /* consumeLegacyShownBars */);
+    }
+
+    void updateSystemBars(@Nullable WindowState win, @InsetsType int displayForciblyShowingTypes,
+            @InsetsType int displayForciblyHidingTypes, boolean showSystemBarsByLegacyPolicy,
+            boolean consumeLegacyShownBars) {
         final boolean hasDisplayOverride = displayForciblyShowingTypes != 0
                 || displayForciblyHidingTypes != 0;
-        mForciblyShowingTypes =
+        final @InsetsType int forciblyShowingNavigationBars =
                 // Force showing navigation bar as long as forceShowingNavigationBars returns true.
-                (forceShowingNavigationBars(win)
-                        ? Type.navigationBars()
-                        : 0)
+                forceShowingNavigationBars(win) ? Type.navigationBars() : 0;
+        final @InsetsType int legacyShowingTypes = !hasDisplayOverride
+                && showSystemBarsByLegacyPolicy
+                        ? (Type.statusBars() | Type.navigationBars())
+                        : 0;
+        mForciblyShowingTypes = forciblyShowingNavigationBars
                 | (hasDisplayOverride
                         // Add types forcibly shown by the display if there is any.
                         ? displayForciblyShowingTypes
                         // Otherwise, fallback to the legacy policy.
-                        : showSystemBarsByLegacyPolicy
-                                ? (Type.statusBars() | Type.navigationBars())
-                                : 0);
+                        : legacyShowingTypes);
         mForciblyHidingTypes = displayForciblyHidingTypes;
 
         // The client app won't be able to control these types of system bars. Here makes the client
-        // forcibly consume these types to prevent the app content from getting obscured.
+        // forcibly consume these types to prevent the app content from getting obscured, unless
+        // the caller lets apps keep drawing behind the bars shown by the legacy policy.
+        final @InsetsType int consumingTypes = consumeLegacyShownBars
+                ? mForciblyShowingTypes
+                : (mForciblyShowingTypes & ~legacyShowingTypes) | forciblyShowingNavigationBars;
         mStateController.setForcedConsumingTypes(
-                mForciblyShowingTypes | (remoteInsetsControllerControlsSystemBars(win)
+                consumingTypes | (remoteInsetsControllerControlsSystemBars(win)
                         ? (Type.statusBars() | Type.navigationBars())
                         : 0));
 
