@@ -35,6 +35,7 @@ import static java.util.stream.Collectors.joining;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.app.ActivityManager;
+import android.app.ActivityTaskManager;
 import android.companion.virtualdevice.flags.Flags;
 import android.content.ComponentName;
 import android.content.Context;
