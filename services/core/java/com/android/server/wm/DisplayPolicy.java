@@ -2899,11 +2899,13 @@ public class DisplayPolicy {
         final boolean showSystemBarsByLegacyPolicy = adjacentTasksVisible
                 || inNonFullscreenFreeformMode;
 
+        // Split-screen tasks keep filling their bounds behind the bars they cannot hide.
         getInsetsPolicy().updateSystemBars(
                 win,
                 mShowingPermanentInsetsTypes,
                 mHidingPermanentInsetsTypes,
-                showSystemBarsByLegacyPolicy);
+                showSystemBarsByLegacyPolicy,
+                inNonFullscreenFreeformMode /* consumeLegacyShownBars */);
 
         final boolean topAppHidesStatusBar = topAppHidesSystemBar(Type.statusBars());
         if (getStatusBar() != null) {
