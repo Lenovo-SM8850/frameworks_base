@@ -153,6 +153,23 @@ class DesktopModeWindowDecorViewModelTests : DesktopModeWindowDecorViewModelTest
     }
 
     @Test
+    fun floatingEntry_waitsForTheTransitionBeforeRecreatingTheHandle() {
+        val original = createTask(windowingMode = WINDOWING_MODE_FULLSCREEN)
+        val decoration = mock<WindowDecorationWrapper>()
+        whenever(decoration.taskInfo).thenReturn(original)
+        windowDecorByTaskIdSpy.put(original.taskId, decoration)
+        val entering = RunningTaskInfo().apply {
+            taskId = original.taskId
+            isFloatingWindow = true
+        }
+
+        desktopModeWindowDecorViewModel.onTaskInfoChanged(entering)
+
+        verify(mockTransitions).runOnIdle(any())
+        verify(decoration, never()).close()
+    }
+
+    @Test
     fun floatingRootBack_usesPinnedLayerExit() {
         val task = RunningTaskInfo().apply { isFloatingWindow = true }
         desktopModeWindowDecorViewModel.onBackOnTaskRoot(task)
