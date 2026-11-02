@@ -40,6 +40,11 @@ class AdditionalViewHostViewContainer(
         t.apply()
     }
 
+    override fun setSize(t: SurfaceControl.Transaction, width: Int, height: Int) {
+        windowViewHost.relayout(width, height)
+        t.setWindowCrop(windowSurface, width, height)
+    }
+
     override fun setPosition(t: SurfaceControl.Transaction, x: Float, y: Float) {
         t.setPosition(windowSurface, x, y)
     }

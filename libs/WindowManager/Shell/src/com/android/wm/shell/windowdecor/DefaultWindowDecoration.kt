@@ -994,6 +994,8 @@ constructor(
         resizeVeil?.updateParentScale(t, scale)
     }
 
+    fun floatingDecorationSurface(): SurfaceControl? = decorationContainerSurface
+
     fun hideResizeVeil() {
         resizeVeil?.hideVeil()
     }

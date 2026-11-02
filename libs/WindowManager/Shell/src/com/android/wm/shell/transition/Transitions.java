@@ -596,10 +596,52 @@ public class Transitions implements RemoteCallable<Transitions>,
         @Nullable com.android.wm.shell.windowdecor.ResizeVeil createVeil(
                 int taskId, SurfaceControl parent);
         boolean isContentReady(int taskId);
+
+        /** Returns the task's decoration container surface; call on the Shell main thread. */
+        @Nullable
+        default SurfaceControl getDecorationSurface(int taskId) { return null; }
+
+        @Nullable
+        default SurfaceControl getHandleSurface(int taskId) { return null; }
+
+        default int getHandleWidth(int taskId) { return 0; }
     }
 
+    @Nullable private FloatingRotationVeilProvider mFloatingRotationVeilProvider;
+
     public void setFloatingRotationVeilProvider(FloatingRotationVeilProvider provider) {
+        mFloatingRotationVeilProvider = provider;
         mDefaultTransitionHandler.setFloatingRotationVeilProvider(provider);
+    }
+
+    /** Captures surfaces on Shell main before an animation starts. */
+    public FloatingDecoration captureFloatingDecoration(int taskId) {
+        return new FloatingDecoration(mFloatingRotationVeilProvider, taskId);
+    }
+
+    public static class FloatingDecoration {
+        private final SurfaceControl mDecoration;
+        private final SurfaceControl mHandle;
+        private final int mHandleWidth;
+
+        FloatingDecoration(@Nullable FloatingRotationVeilProvider provider, int taskId) {
+            mDecoration = provider == null ? null : provider.getDecorationSurface(taskId);
+            mHandle = provider == null ? null : provider.getHandleSurface(taskId);
+            mHandleWidth = provider == null ? 0 : provider.getHandleWidth(taskId);
+        }
+
+        public void applyScale(SurfaceControl.Transaction t, int taskWidth,
+                float scaleX, float scaleY) {
+            final float inverseX = 1f / Math.max(.001f, scaleX);
+            final float inverseY = 1f / Math.max(.001f, scaleY);
+            if (mDecoration != null && mDecoration.isValid()) {
+                t.setMatrix(mDecoration, inverseX, 0, 0, inverseY);
+            }
+            if (mHandle != null && mHandle.isValid()) {
+                t.setMatrix(mHandle, inverseX, 0, 0, inverseY)
+                        .setPosition(mHandle, (taskWidth - mHandleWidth * inverseX) / 2f, 0);
+            }
+        }
     }
 
     /**

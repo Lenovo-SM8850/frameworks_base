@@ -594,6 +594,16 @@ public class DefaultTransitionHandlerTest extends ShellTestCase {
         when(mDisplayController.getDisplayLayout(anyInt())).thenReturn(layout);
         when(layout.width()).thenReturn(2400);
         when(layout.height()).thenReturn(1600);
+        final Transitions.FloatingRotationVeilProvider provider =
+                mock(Transitions.FloatingRotationVeilProvider.class);
+        final SurfaceControl decor = mock(SurfaceControl.class);
+        final SurfaceControl handle = mock(SurfaceControl.class);
+        when(decor.isValid()).thenReturn(true);
+        when(handle.isValid()).thenReturn(true);
+        when(provider.getDecorationSurface(101)).thenReturn(decor);
+        when(provider.getHandleSurface(101)).thenReturn(handle);
+        when(provider.getHandleWidth(101)).thenReturn(120);
+        mTransitionHandler.setFloatingRotationVeilProvider(provider);
         final RunningTaskInfo task = createTaskInfo(101);
         task.isFloatingWindow = true;
         task.floatingWindowScale = .75f;
@@ -620,6 +630,11 @@ public class DefaultTransitionHandlerTest extends ShellTestCase {
         assertEquals(1600f, bottomRight[1], .01f);
         verify(startT).setWindowCrop(change.getLeash(), 800, 1200);
         verify(startT).setCornerRadius(change.getLeash(), 0f);
+        verify(startT).setMatrix(decor, 1f / 3f, 0f, 0f, .75f);
+        verify(startT).setMatrix(handle, 1f / 3f, 0f, 0f, .75f);
+        verify(startT).setPosition(handle, 380f, 0f);
+        verify(finishT).setMatrix(handle, 1f / .75f, 0f, 0f, 1f / .75f);
+        verify(finishT).setPosition(handle, 320f, 0f);
         verify(finishT).setMatrix(change.getLeash(), .75f, 0f, 0f, .75f);
         mergeSync(mTransitionHandler, token);
         flushHandlers();

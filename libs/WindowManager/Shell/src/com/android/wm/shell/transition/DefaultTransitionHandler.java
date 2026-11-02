@@ -1112,6 +1112,10 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
             TransitionInfo.Change change, SurfaceControl.Transaction startT,
             SurfaceControl.Transaction finishT, Consumer<WindowAnimation> onFinish) {
         final boolean opening = TransitionUtil.isOpeningType(change.getMode());
+        final Transitions.FloatingRotationVeilProvider provider = mFloatingRotationVeilProvider;
+        final int taskId = change.getTaskInfo().taskId;
+        final Transitions.FloatingDecoration decoration =
+                new Transitions.FloatingDecoration(provider, taskId);
         final Rect end = new Rect(change.getTaskInfo().getPresentationBounds());
         final Rect start = opening ? new Rect(end) : new Rect(change.getStartAbsBounds());
         if (opening || start.isEmpty()) {
@@ -1160,6 +1164,9 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
             transformation.getMatrix().getValues(matrix);
             final float progress = duration == 0 ? 1f : animation.getInterpolator()
                     .getInterpolation(Math.min(1f, (float) time / duration));
+            decoration.applyScale(t, width,
+                    matrix[android.graphics.Matrix.MSCALE_X],
+                    matrix[android.graphics.Matrix.MSCALE_Y]);
             final float visibleRadius = radius * progress;
             t.setMatrix(leash, transformation.getMatrix(), matrix)
                     .setPosition(leash, matrix[android.graphics.Matrix.MTRANS_X],
@@ -1175,6 +1182,9 @@ public class DefaultTransitionHandler implements Transitions.TransitionHandler {
         Transitions.applyFloatingWindowTransform(change, finishT);
         finishT.setAlpha(leash, 1f).setCornerRadius(leash,
                 radius / change.getTaskInfo().floatingWindowScale);
+        decoration.applyScale(finishT, width,
+                change.getTaskInfo().floatingWindowScale,
+                change.getTaskInfo().floatingWindowScale);
         animator.addUpdateListener(value -> {
             final SurfaceControl.Transaction t = mTransactionPool.acquire();
             applyFrame.accept(t, value.getCurrentPlayTime());

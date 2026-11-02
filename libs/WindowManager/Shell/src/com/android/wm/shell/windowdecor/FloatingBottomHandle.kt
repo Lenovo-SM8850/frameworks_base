@@ -144,6 +144,10 @@ class FloatingBottomHandle(private val contextProvider: () -> Context?,
         }
     }
 
+    fun getSurface(): SurfaceControl? = surface
+
+    fun getWidth(): Int = hostWidth
+
     fun getTargetFeedbackView(): View? = topPill?.takeIf { it.isAttachedToWindow }
 
     fun setFocusAlpha(alpha: Float) {
