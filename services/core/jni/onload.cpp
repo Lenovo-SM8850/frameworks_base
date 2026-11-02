@@ -24,6 +24,7 @@
 #include "BroadcastRadio/Tuner.h"
 
 namespace android {
+int register_android_server_ActivityTriggerService(JNIEnv* env);
 int register_android_server_BatteryStatsService(JNIEnv* env);
 int register_android_server_InputManager(JNIEnv* env);
 int register_android_server_input_VirtualInputDeviceController(JNIEnv* env);
@@ -109,6 +110,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* /* reserved */)
     register_android_server_SystemServer(env);
     register_android_server_location_GnssLocationProvider(env);
     register_android_server_devicepolicy_CryptoTestHelper(env);
+    register_android_server_ActivityTriggerService(env);
     register_android_server_BatteryStatsService(env);
     register_android_server_tv_TvInputHal(env);
     register_android_server_pdb_PersistentDataBlockService(env);

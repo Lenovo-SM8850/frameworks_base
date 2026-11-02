@@ -498,6 +498,7 @@ import com.android.internal.util.MemInfoReader;
 import com.android.internal.util.NamedLock;
 import com.android.internal.util.Preconditions;
 import com.android.internal.util.function.pooled.PooledLambda;
+import com.android.server.ActivityTriggerService;
 import com.android.server.AlarmManagerInternal;
 import com.android.server.AxExtServiceFactory;
 import com.android.server.BootReceiver;
@@ -1151,6 +1152,12 @@ public class ActivityManagerService extends IActivityManager.Stub
                 sActiveProcessInfoSelfLocked.remove(pid);
             }
         }
+        final ActivityTriggerService activityTriggerService =
+                LocalServices.getService(ActivityTriggerService.class);
+        if (activityTriggerService != null) {
+            activityTriggerService.updateRecord(app.getHostingRecord(), app.info, pid,
+                    ActivityTriggerService.PROC_ADDED_NOTIFICATION);
+        }
         mAtmInternal.onProcessMapped(pid, app.getWindowProcessController());
     }
 
@@ -1168,6 +1175,12 @@ public class ActivityManagerService extends IActivityManager.Stub
         if (removed) {
             synchronized (sActiveProcessInfoSelfLocked) {
                 sActiveProcessInfoSelfLocked.remove(pid);
+            }
+            final ActivityTriggerService activityTriggerService =
+                    LocalServices.getService(ActivityTriggerService.class);
+            if (activityTriggerService != null) {
+                activityTriggerService.updateRecord(app.getHostingRecord(), app.info, pid,
+                        ActivityTriggerService.PROC_REMOVED_NOTIFICATION);
             }
             mAtmInternal.onProcessUnMapped(pid);
         }

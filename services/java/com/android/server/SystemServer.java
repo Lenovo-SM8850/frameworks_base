@@ -1902,6 +1902,10 @@ public final class SystemServer implements Dumpable {
             mSystemServiceManager.startService(PinnerService.class);
             t.traceEnd();
 
+            t.traceBegin("StartActivityTriggerService");
+            mSystemServiceManager.startService(ActivityTriggerService.class);
+            t.traceEnd();
+
             if (Build.IS_DEBUGGABLE && ProfcollectForwardingService.enabled()) {
                 t.traceBegin("ProfcollectForwardingService");
                 mSystemServiceManager.startService(ProfcollectForwardingService.class);
