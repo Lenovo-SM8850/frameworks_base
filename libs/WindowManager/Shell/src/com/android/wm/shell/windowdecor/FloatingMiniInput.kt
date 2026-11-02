@@ -45,6 +45,8 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var blockedGesture = false
     private var touchGesture = false
     private val stashFeedback = FloatingTargetFeedback()
+    private val pinch = FloatingHandlePinch(false)
+    private var pinching = false
     private var dismissTarget: FloatingDismissTarget? = null
 
     fun cancelTargetFeedback() {
@@ -162,6 +164,47 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                     if (blockedGesture) {
                         if (event.actionMasked == MotionEvent.ACTION_UP ||
                             event.actionMasked == MotionEvent.ACTION_CANCEL) blockedGesture = false
+                        return@setOnTouchListener true
+                    }
+                    val pointers = if (event.isFromSource(android.view.InputDevice.SOURCE_TOUCHSCREEN)) {
+                        (0 until event.pointerCount).map { i ->
+                            FloatingHandlePinch.Pointer(event.getPointerId(i), event.getRawX(i),
+                                event.getRawY(i), if (event.getToolType(i) == MotionEvent.TOOL_TYPE_FINGER &&
+                                    event.getX(i) >= 0 && event.getX(i) < v.width &&
+                                    event.getY(i) >= 0 && event.getY(i) < v.height) 1 else 0)
+                        }
+                    } else emptyList()
+                    val change = pinch.onEvent(event.actionMasked,
+                        event.getPointerId(event.actionIndex), pointers)
+                    if (change != null) {
+                        when (change.kind) {
+                            FloatingHandlePinch.Kind.START -> {
+                                val cancel = MotionEvent.obtain(event)
+                                cancel.action = MotionEvent.ACTION_CANCEL
+                                taps.onTouchEvent(cancel)
+                                cancel.recycle()
+                                cancelTargetFeedback()
+                                velocityTracker?.recycle()
+                                velocityTracker = null
+                                gestureActive = false
+                                dragging = false
+                                controller.endMiniTap(current)
+                                pinching = controller.beginMiniPinch(current, change.span, change.x, change.y)
+                            }
+                            FloatingHandlePinch.Kind.MOVE -> if (pinching) {
+                                controller.moveMiniPinch(current, change.span, change.x, change.y)
+                            }
+                            FloatingHandlePinch.Kind.FINISH -> if (pinching) {
+                                pinching = false
+                                controller.moveMiniPinch(current, change.span, change.x, change.y)
+                                controller.endMiniPinch(current, false)
+                            }
+                            FloatingHandlePinch.Kind.CANCEL -> if (pinching) {
+                                pinching = false
+                                controller.endMiniPinch(current, true)
+                            }
+                            FloatingHandlePinch.Kind.CONSUME -> Unit
+                        }
                         return@setOnTouchListener true
                     }
                     if (event.actionMasked == MotionEvent.ACTION_DOWN) taps.onTouchEvent(event)
@@ -283,6 +326,11 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
 
     override fun close() {
         cancelTargetFeedback()
+        pinch.cancel()
+        if (pinching) {
+            pinching = false
+            task?.let { controller.endMiniPinch(it, true) }
+        }
         dismissTarget?.close()
         dismissTarget = null
         velocityTracker?.recycle()
