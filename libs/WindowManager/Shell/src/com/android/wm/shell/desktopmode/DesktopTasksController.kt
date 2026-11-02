@@ -4501,6 +4501,11 @@ class DesktopTasksController(
                 /* options= */ null,
                 userHandle,
             )
+        // A floating window opens its new window as another floating window.
+        if (callingTaskInfo.isFloatingWindow) {
+            launchNewFloatingWindow(callingTaskInfo, launchIntent, fillIn)
+            return
+        }
         if (callingTaskInfo.isMultiWindow &&
             splitScreenController.splitLeafTaskIds.contains(callingTaskInfo.taskId)) {
             val slot = splitScreenController.getNewWindowSlot(callingTaskInfo.taskId)
