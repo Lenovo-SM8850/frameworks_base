@@ -62,6 +62,7 @@ import android.view.MotionEvent;
 import android.view.InputChannel;
 import android.view.InputDevice;
 import android.view.IInputFilter;
+import android.view.IGameGestureLockListener;
 import android.view.inputmethod.ImeTracker;
 import android.view.AppTransitionAnimationSpec;
 import android.view.WindowContentFrameStats;
@@ -1260,4 +1261,25 @@ interface IWindowManager
      * Returns whether the display with {@code displayId} ignores orientation request.
      */
     boolean getIgnoreOrientationRequest(int displayId);
+
+    // Internal Game Space gesture protocol. The caller must be trusted SystemUI.
+    /** @hide */
+    @EnforcePermission("STATUS_BAR_SERVICE")
+    long getGameGestureLockGeneration();
+    /** @hide */
+    @EnforcePermission("STATUS_BAR_SERVICE")
+    int beginGameGesture(int kind, int displayId, int deviceId, long downTime);
+    /** @hide */
+    @EnforcePermission("STATUS_BAR_SERVICE")
+    boolean recognizeGameGesture(int kind, int displayId, int deviceId, long downTime);
+    /** @hide */
+    @EnforcePermission("STATUS_BAR_SERVICE")
+    void endGameGesture(int kind, int displayId, int deviceId, long downTime,
+            long endTime, boolean cancelled);
+    /** @hide */
+    @EnforcePermission("STATUS_BAR_SERVICE")
+    void setGameGestureLockListener(@nullable IGameGestureLockListener listener);
+    /** @hide */
+    @EnforcePermission("STATUS_BAR_SERVICE")
+    void turnOffGameGestureLock(long generation, int userId);
 }

@@ -127,6 +127,15 @@ public class ThreeFingersSwipeListener {
     }
 
     private void onPointerEvent(MotionEvent event) {
+        final com.android.server.wm.GameGestureLockController lock =
+                com.android.server.wm.GameGestureLockController.get();
+        if (lock != null && (event.getActionMasked() == MotionEvent.ACTION_UP
+                || event.getActionMasked() == MotionEvent.ACTION_CANCEL)) {
+            lock.end(android.view.GameGestureLock.THREE_FINGER, event.getDisplayId(), event.getDeviceId(), event.getDownTime(),
+                    event.getEventTime(), event.getActionMasked() == MotionEvent.ACTION_CANCEL);
+            changeThreeGestureState(THREE_GESTURE_STATE_NONE);
+            return;
+        }
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
             changeThreeGestureState(THREE_GESTURE_STATE_NONE);
         } else if (mThreeGestureState == THREE_GESTURE_STATE_NONE && event.getPointerCount() == 3) {
@@ -157,7 +166,10 @@ public class ThreeFingersSwipeListener {
                 }
                 if (distance >= ((float) mThreeGestureThreshold)) {
                     changeThreeGestureState(THREE_GESTURE_STATE_DETECTED_TRUE);
-                    mCallbacks.onSwipeThreeFingers();
+                    if (lock == null || !lock.recognize(android.view.GameGestureLock.THREE_FINGER,
+                            event.getDisplayId(), event.getDeviceId(), event.getDownTime())) {
+                        mCallbacks.onSwipeThreeFingers();
+                    }
                 }
             }
         }

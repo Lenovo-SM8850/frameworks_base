@@ -175,8 +175,17 @@ class SystemGesturesPointerEventListener implements PointerEventListener {
         });
     }
 
+    private final android.view.GameGestureLock.TransientTracker mGameGestures =
+            new android.view.GameGestureLock.TransientTracker();
+
     @Override
     public void onPointerEvent(MotionEvent event) {
+        final GameGestureLockController gameLock = GameGestureLockController.get();
+        final int completedKind = mGameGestures.finish(event);
+        if (completedKind != android.view.GameGestureLock.NONE && gameLock != null) {
+            gameLock.end(completedKind, event.getDisplayId(), event.getDeviceId(), event.getDownTime(),
+                    event.getEventTime(), event.getActionMasked() == MotionEvent.ACTION_CANCEL);
+        }
         if (mGestureDetector != null && event.isTouchEvent()) {
             mGestureDetector.onTouchEvent(event);
         }
@@ -237,6 +246,14 @@ class SystemGesturesPointerEventListener implements PointerEventListener {
 
                     final int swipe = detectSwipe(event);
                     mSwipeFireable = swipe == SWIPE_NONE;
+                    if (swipe != SWIPE_NONE && gameLock != null) {
+                        final int kind = android.view.GameGestureLock.transientKind(mContext, swipe);
+                        if (kind != android.view.GameGestureLock.NONE) {
+                            mGameGestures.record(kind, event);
+                            if (gameLock.recognize(kind, event.getDisplayId(), event.getDeviceId(),
+                                    event.getDownTime())) break;
+                        }
+                    }
                     if (swipe == SWIPE_FROM_TOP) {
                         if (DEBUG) Slog.d(TAG, "Firing onSwipeFromTop");
                         mCallbacks.onSwipeFromTop();

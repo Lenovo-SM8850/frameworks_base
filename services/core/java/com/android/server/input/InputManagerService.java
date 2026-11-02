@@ -299,6 +299,8 @@ public class InputManagerService extends IInputManager.Stub
     @GuardedBy("mInputFilterLock")
     IInputFilter mInputFilter;
     @GuardedBy("mInputFilterLock")
+    private GameGestureInputFilter mGameGestureFilter;
+    @GuardedBy("mInputFilterLock")
     InputFilterHost mInputFilterHost;
 
     // The associations of input devices to displays by port. Maps from input device port (String)
@@ -650,6 +652,14 @@ public class InputManagerService extends IInputManager.Stub
     public void start() {
         Slog.i(TAG, "Starting input manager");
         mNative.start();
+        synchronized (mInputFilterLock) {
+            mGameGestureFilter = new GameGestureInputFilter(mContext, (event, flags) ->
+                    mNative.injectInputEvent(event, false, -1,
+                            InputManager.INJECT_INPUT_EVENT_MODE_ASYNC, 0,
+                            flags | WindowManagerPolicy.FLAG_FILTERED), mHandler, mInputFilterLock);
+            // Keep the callback installed across sessions: toggling it cancels live streams.
+            mNative.setInputFilterEnabled(true);
+        }
 
         // Add ourselves to the Watchdog monitors.
         Watchdog.getInstance().addMonitor(this);
@@ -1010,6 +1020,9 @@ public class InputManagerService extends IInputManager.Stub
                 return; // nothing to do
             }
 
+            // Accessibility still gets the documented cancellation boundary when its owner
+            // changes. Game sessions never install/uninstall this always-composed callback.
+            mNative.setInputFilterEnabled(false);
             if (oldFilter != null) {
                 mInputFilter = null;
                 mInputFilterHost.disconnectLocked();
@@ -1031,7 +1044,11 @@ public class InputManagerService extends IInputManager.Stub
                 }
             }
 
-            mNative.setInputFilterEnabled(filter != null);
+            if (mGameGestureFilter != null) mGameGestureFilter.reset();
+            final com.android.server.wm.GameGestureLockController gestureLock =
+                    com.android.server.wm.GameGestureLockController.get();
+            if (gestureLock != null) gestureLock.setAccessibilityInputFilter(filter != null);
+            mNative.setInputFilterEnabled(true);
         }
     }
 
@@ -2857,12 +2874,20 @@ public class InputManagerService extends IInputManager.Stub
     @SuppressWarnings("unused")
     final boolean filterInputEvent(InputEvent event, int policyFlags) {
         synchronized (mInputFilterLock) {
+            final com.android.server.wm.GameGestureLockController gestureLock =
+                    com.android.server.wm.GameGestureLockController.get();
+            if (gestureLock != null) gestureLock.setAccessibilityInputFilter(mInputFilter != null);
             if (mInputFilter != null) {
                 try {
                     mInputFilter.filterInputEvent(event, policyFlags);
                 } catch (RemoteException e) {
                     /* ignore */
                 }
+                return false;
+            }
+            if (mGameGestureFilter != null && event instanceof MotionEvent
+                    && mGameGestureFilter.filter((MotionEvent) event, policyFlags)) {
+                event.recycle();
                 return false;
             }
         }

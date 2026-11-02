@@ -178,6 +178,10 @@ class GameStateDispatcher {
         updateBypassCharge();
     }
 
+    void turnOffGestureLock() {
+        sendSessionCommand("game_gesture_lock_off");
+    }
+
     private void sendSessionCommand(String action) {
         if (mGamePackage == null) return;
         final Intent intent = new Intent(action).setComponent(GAME_SPACE_SESSION_COMPONENT)
@@ -295,6 +299,7 @@ class GameStateDispatcher {
                     }
                     cancelGameSessionRetry();
                     mSessionReady = true;
+                    updateGestureBinding();
                     updateBypassCharge();
                     if (!mGameVisible) sendSessionCommand(ACTION_GAME_SUSPEND);
                 }
@@ -305,6 +310,7 @@ class GameStateDispatcher {
                         return;
                     }
                     mSessionReady = false;
+                    updateGestureBinding();
                     updateBypassCharge();
                     // Keep a reconnectable binding; START_NOT_STICKY still needs a start request.
                     scheduleGameSessionRetry();
@@ -353,8 +359,14 @@ class GameStateDispatcher {
         mSessionRetryPending = false;
     }
 
+    private void updateGestureBinding() {
+        final GameGestureLockController lock = GameGestureLockController.get();
+        if (lock != null) lock.setBindingAlive(mSessionReady);
+    }
+
     private void clearSessionConnection() {
         mSessionReady = false;
+        updateGestureBinding();
         final ServiceConnection connection = mSessionConnection;
         mSessionConnection = null;
         if (connection != null) {
