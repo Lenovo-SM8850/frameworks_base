@@ -47,7 +47,7 @@ import lineageos.providers.LineageSettings;
 
 class GameStateDispatcher {
     private static final String TAG = "GameStateDispatcher";
-    static final long GAME_VISIBILITY_GRACE_MS = 1500;
+    static final long GAME_VISIBILITY_GRACE_MS = 300;
     static final long SESSION_RETRY_DELAY_MS = 1000;
     private static final String GAME_SPACE_PACKAGE = "io.chaldeaprjkt.gamespace";
     private static final String GAME_SPACE_SESSION_SERVICE =
@@ -55,6 +55,12 @@ class GameStateDispatcher {
     private static final ComponentName GAME_SPACE_SESSION_COMPONENT =
             new ComponentName(GAME_SPACE_PACKAGE, GAME_SPACE_SESSION_SERVICE);
     private static final String ACTION_GAME_START = "game_start";
+    // Ordered commands on the started/bound service: visibility only hides UI;
+    // suspend releases effects without unbinding, resume retains choices, end tears down.
+    // Commands identify the task/process incarnation; the binding selects the session user.
+    private static final String ACTION_GAME_SUSPEND = "game_suspend";
+    private static final String ACTION_GAME_RESUME = "game_resume";
+    private static final String ACTION_GAME_END = "game_end";
     private static final String ACTION_GAME_VISIBILITY = "game_visibility";
     private static final String EXTRA_GAME_VISIBLE = "game_visible";
     private static final String EXTRA_PACKAGE_NAME = "package_name";
@@ -78,6 +84,8 @@ class GameStateDispatcher {
     private ServiceConnection mSessionConnection;
     private String mGamePackage;
     private int mGameUserId = UserHandle.USER_SYSTEM;
+    private int mGameTaskId = -1;
+    private int mGamePid;
     private boolean mGameVisible;
     private boolean mGameUiVisible;
     private boolean mSessionReady;
@@ -126,10 +134,15 @@ class GameStateDispatcher {
         updateBypassCharge();
     }
 
+    void setSessionIdentity(int taskId, int pid) {
+        mGameTaskId = taskId;
+        mGamePid = pid;
+    }
+
     void dispatchGameState(boolean active, String packageName) {
         cancelPendingGameHidden();
         Settings.Secure.putIntForUser(mContext.getContentResolver(), KEY_GAMING_MODE_ACTIVE,
-                active ? 1 : 0, UserHandle.USER_CURRENT);
+                active ? 1 : 0, active ? ActivityManager.getCurrentUser() : mGameUserId);
         mGameVisible = active;
         if (active) {
             mGameUiVisible = true;
@@ -139,8 +152,43 @@ class GameStateDispatcher {
         } else {
             setGameUiVisible(false);
             updateBypassCharge();
+            sendSessionCommand(ACTION_GAME_END);
             stopGameSession();
             mGamePackage = null;
+        }
+    }
+
+    void suspendGameSession() {
+        cancelPendingGameHidden();
+        mGameVisible = false;
+        cancelGameSessionRetry();
+        setGameUiVisible(false);
+        updateBypassCharge();
+        sendSessionCommand(ACTION_GAME_SUSPEND);
+        Settings.Secure.putIntForUser(mContext.getContentResolver(), KEY_GAMING_MODE_ACTIVE,
+                0, mGameUserId);
+    }
+
+    void resumeGameSession() {
+        mGameVisible = true;
+        sendSessionCommand(ACTION_GAME_RESUME);
+        Settings.Secure.putIntForUser(mContext.getContentResolver(), KEY_GAMING_MODE_ACTIVE,
+                1, mGameUserId);
+        startGameSession();
+        updateBypassCharge();
+    }
+
+    private void sendSessionCommand(String action) {
+        if (mGamePackage == null) return;
+        final Intent intent = new Intent(action).setComponent(GAME_SPACE_SESSION_COMPONENT)
+                .putExtra(EXTRA_PACKAGE_NAME, mGamePackage)
+                .putExtra("game_task_id", mGameTaskId)
+                .putExtra("game_process_id", mGamePid);
+        try {
+            mActivityManager.startService(null, intent, null, false,
+                    mContext.getOpPackageName(), mContext.getAttributionTag(), mGameUserId);
+        } catch (RemoteException | RuntimeException e) {
+            Slog.w(TAG, "Failed to update GameSpace session", e);
         }
     }
 
@@ -180,6 +228,8 @@ class GameStateDispatcher {
         final Intent intent = new Intent(ACTION_GAME_VISIBILITY)
                 .setComponent(GAME_SPACE_SESSION_COMPONENT)
                 .putExtra(EXTRA_PACKAGE_NAME, mGamePackage)
+                .putExtra("game_task_id", mGameTaskId)
+                .putExtra("game_process_id", mGamePid)
                 .putExtra(EXTRA_GAME_VISIBLE, visible);
         try {
             mActivityManager.startService(null, intent, null, false,
@@ -212,6 +262,8 @@ class GameStateDispatcher {
         return new Intent(ACTION_GAME_START)
                 .setComponent(GAME_SPACE_SESSION_COMPONENT)
                 .putExtra(EXTRA_PACKAGE_NAME, mGamePackage)
+                .putExtra("game_task_id", mGameTaskId)
+                .putExtra("game_process_id", mGamePid)
                 .putExtra(EXTRA_GAME_VISIBLE, mGameUiVisible)
                 .putExtra(EXTRA_BYPASS_CHARGE_ACTIVE, mBypassChargeActive);
     }
@@ -244,6 +296,7 @@ class GameStateDispatcher {
                     cancelGameSessionRetry();
                     mSessionReady = true;
                     updateBypassCharge();
+                    if (!mGameVisible) sendSessionCommand(ACTION_GAME_SUSPEND);
                 }
 
                 @Override
@@ -273,7 +326,8 @@ class GameStateDispatcher {
                 }
             };
             mSessionConnection = connection;
-            if (!mContext.bindServiceAsUser(gameSessionIntent(), connection, 0,
+            // The retained binding must also recreate a killed session service.
+            if (!mContext.bindServiceAsUser(gameSessionIntent(), connection, Context.BIND_AUTO_CREATE,
                     mHandler, UserHandle.of(mGameUserId))) {
                 mSessionConnection = null;
             }

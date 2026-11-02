@@ -173,6 +173,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
     final Handler mHandler;
     private final GamePolicyClient mGamePolicyClient;
+    @GuardedBy("mLock")
+    private final Map<Integer, Set<String>> mSuspendedGameSessions = new ArrayMap<>();
     private final PackageManager mPackageManager;
     private final UserManager mUserManager;
     private final PowerManagerInternal mPowerManagerInternal;
@@ -396,7 +398,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
                     final int userId = data.getInt(USER_ID_MSG_KEY);
 
                     // Restrict to games only. Requires performance mode to be enabled.
-                    final boolean boostEnabled = !isGameModeNone(packageName, userId)
+                    final boolean boostEnabled = !isGameSessionSuspended(packageName, userId)
+                            && !isGameModeNone(packageName, userId)
                             && getGameMode(packageName, userId) == GameManager.GAME_MODE_PERFORMANCE;
                     int uid;
                     try {
@@ -410,7 +413,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
                             isLoading, gameState.getLabel(), gameState.getQuality());
 
                     synchronized (mLock) {
-                        if (boostEnabled && !isGameModeNone(packageName, userId)) {
+                        if (boostEnabled && !isGameSessionSuspended(packageName, userId)
+                                && !isGameModeNone(packageName, userId)) {
                             if (mPowerManagerInternal == null) {
                                 Slog.d(TAG, "Error setting loading mode for package " + packageName
                                         + " and userId " + userId);
@@ -970,10 +974,63 @@ public final class GameManagerService extends IGameManagerService.Stub {
         }
     }
 
+    private boolean isGameSessionSuspended(String packageName, int userId) {
+        synchronized (mLock) {
+            final Set<String> packages = mSuspendedGameSessions.get(userId);
+            return packages != null && packages.contains(packageName);
+        }
+    }
+
     private final class LocalService extends GameManagerInternal implements CompatScaleProvider {
         @Override
         public boolean isGame(String packageName, int userId) {
             return isPackageGame(packageName, userId);
+        }
+
+        @Override
+        public void setGameSessionSuspended(String packageName, int userId, boolean suspended) {
+            if (packageName == null) return;
+            synchronized (mLock) {
+                final Set<String> packages = mSuspendedGameSessions.computeIfAbsent(
+                        userId, key -> new HashSet<>());
+                if (suspended) packages.add(packageName);
+                else packages.remove(packageName);
+                if (packages.isEmpty()) mSuspendedGameSessions.remove(userId);
+                if (suspended && packageName.equals(mLoadingBoostPackage)
+                        && userId == mLoadingBoostUserId) {
+                    mHandler.removeMessages(CANCEL_GAME_LOADING_MODE);
+                    mPowerManagerInternal.setPowerMode(Mode.GAME_LOADING, false);
+                    mLoadingBoostPackage = null;
+                }
+            }
+            updateInterventions(packageName, getGameModeFromSettingsUnchecked(packageName, userId), userId);
+            if (suspended) {
+                try {
+                    setGameDefaultFrameRateOverride(
+                            mPackageManager.getPackageUidAsUser(packageName, userId), 0.0f);
+                } catch (NameNotFoundException e) {
+                    // A removed package has no remaining frame-rate request.
+                }
+            }
+            synchronized (mUidObserverLock) {
+                final Set<Integer> foregroundUids = new HashSet<>(mGameForegroundUids);
+                foregroundUids.addAll(mNonGameForegroundUids);
+                for (int uid : foregroundUids) {
+                    final String[] names = mPackageManager.getPackagesForUid(uid);
+                    if (names == null || UserHandle.getUserId(uid) != userId
+                            || !Arrays.asList(names).contains(packageName)) continue;
+                    mGameForegroundUids.remove(uid);
+                    mNonGameForegroundUids.remove(uid);
+                    final boolean game = mUidObserver.isGameUid(names, uid);
+                    if (game) mGameForegroundUids.add(uid);
+                    else mNonGameForegroundUids.add(uid);
+                    setGameDefaultFrameRateOverride(uid, game ? getGameDefaultFrameRate(
+                            !mSysProps.getBoolean(PROPERTY_DEBUG_GFX_GAME_DEFAULT_FRAME_RATE_DISABLED,
+                                    false)) : 0.0f);
+                }
+                mPowerManagerInternal.setPowerMode(Mode.GAME, !mGameForegroundUids.isEmpty()
+                        && mNonGameForegroundUids.isEmpty());
+            }
         }
 
         @Override
@@ -1442,7 +1499,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
             return;
         }
         synchronized (mLock) {
-            if (isGameModeNone(packageName, userId)) return;
+            if (isGameModeNone(packageName, userId)
+                    || isGameSessionSuspended(packageName, userId)) return;
             int loadingBoostDuration = getLoadingBoostDuration(packageName, userId);
             if (loadingBoostDuration != -1) {
                 mLoadingBoostPackage = packageName;
@@ -1533,7 +1591,9 @@ public final class GameManagerService extends IGameManagerService.Stub {
     }
 
     float getResolutionScalingFactorInternal(String packageName, int gameMode, int userId) {
-        if (isGameModeNone(packageName, userId)) {
+        if (isGameModeNone(packageName, userId) || isGameSessionSuspended(packageName, userId)) {
+            // Scaling is consumed at process start: this gate affects new reads only.
+            // Suspending cannot remove downscaling already applied to a running process.
             return GamePackageConfiguration.GameModeConfiguration.DEFAULT_SCALING;
         }
         final GamePackageConfiguration packageConfig = getConfig(packageName, userId);
@@ -1865,7 +1925,7 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
     private void updateInterventions(String packageName,
             @GameMode int gameMode, @UserIdInt int userId) {
-        if (isGameModeNone(packageName, userId)) {
+        if (isGameModeNone(packageName, userId) || isGameSessionSuspended(packageName, userId)) {
             resetFps(packageName, userId);
             return;
         }
@@ -2418,27 +2478,29 @@ public final class GameManagerService extends IGameManagerService.Stub {
 
     @VisibleForTesting
     void setGameModeFrameRateOverride(int uid, float frameRate) {
-        if (frameRate != 0.0f) {
-            final String[] packages = mPackageManager.getPackagesForUid(uid);
-            if (packages != null && Arrays.stream(packages).anyMatch(
-                    p -> isGameModeNone(p, UserHandle.getUserId(uid)))) {
-                frameRate = 0.0f;
-            }
+        synchronized (mLock) {
+            // Share the lifecycle lock through the native write: an in-flight update
+            // must either finish before suspension/end, or observe its inactive gate.
+            if (frameRate != 0.0f && isFrameRateOverrideBlockedLocked(uid)) frameRate = 0.0f;
+            nativeSetGameModeFrameRateOverride(uid, frameRate);
         }
-        nativeSetGameModeFrameRateOverride(uid, frameRate);
+    }
+
+    @GuardedBy("mLock")
+    private boolean isFrameRateOverrideBlockedLocked(int uid) {
+        final String[] packages = mPackageManager.getPackagesForUid(uid);
+        final int userId = UserHandle.getUserId(uid);
+        return packages != null && Arrays.stream(packages).anyMatch(
+                p -> isGameModeNone(p, userId) || isGameSessionSuspended(p, userId));
     }
 
     @VisibleForTesting
     void setGameDefaultFrameRateOverride(int uid, float frameRate) {
-        if (frameRate != 0.0f) {
-            final String[] packages = mPackageManager.getPackagesForUid(uid);
-            if (packages != null && Arrays.stream(packages).anyMatch(
-                    p -> isGameModeNone(p, UserHandle.getUserId(uid)))) {
-                frameRate = 0.0f;
-            }
+        synchronized (mLock) {
+            if (frameRate != 0.0f && isFrameRateOverrideBlockedLocked(uid)) frameRate = 0.0f;
+            Slog.v(TAG, "setDefaultFrameRateOverride : " + uid + " , " + frameRate);
+            nativeSetGameDefaultFrameRateOverride(uid, frameRate);
         }
-        Slog.v(TAG, "setDefaultFrameRateOverride : " + uid + " , " + frameRate);
-        nativeSetGameDefaultFrameRateOverride(uid, frameRate);
     }
 
     private float getGameDefaultFrameRate(boolean isEnabled) {
@@ -2558,7 +2620,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
         private boolean isGameUid(String[] packages, int uid) {
             final int userId = UserHandle.getUserId(uid);
             // A shared UID containing a None game must also be free of UID-wide overrides.
-            return Arrays.stream(packages).noneMatch(p -> isGameModeNone(p, userId))
+            return Arrays.stream(packages).noneMatch(p -> isGameModeNone(p, userId)
+                    || isGameSessionSuspended(p, userId))
                     && Arrays.stream(packages).anyMatch(p -> isPackageGame(p, userId));
         }
 

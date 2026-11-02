@@ -2184,6 +2184,10 @@ final class ActivityRecord extends WindowToken {
         }
         proc.addActivityIfNeeded(this);
         mInputDispatchingTimeoutMillis = getInputDispatchingTimeoutMillisLocked(this);
+        final GameSpaceService gameSpaceService = LocalServices.getService(GameSpaceService.class);
+        if (gameSpaceService != null && task != null) {
+            gameSpaceService.onActivityProcessSet(task, proc.getPid());
+        }
 
         // Update the associated task fragment after setting the process, since it's required for
         // filtering to only report activities that belong to the same process.
