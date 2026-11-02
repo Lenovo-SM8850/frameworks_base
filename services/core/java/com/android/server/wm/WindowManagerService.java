@@ -7383,6 +7383,8 @@ public class WindowManagerService extends IWindowManager.Stub
     private void dumpPolicyLocked(PrintWriter pw, String[] args) {
         pw.println("WINDOW MANAGER POLICY STATE (dumpsys window policy)");
         mPolicy.dump("    ", pw, args);
+        final GameGestureLockController gestureLock = GameGestureLockController.get();
+        if (gestureLock != null) gestureLock.dump(pw, "    ");
     }
 
     private void dumpAnimatorLocked(PrintWriter pw, boolean dumpAll) {
@@ -11817,4 +11819,59 @@ public class WindowManagerService extends IWindowManager.Stub
             }
         }
     }
+
+    @Override
+    @EnforcePermission(android.Manifest.permission.STATUS_BAR_SERVICE)
+    public long getGameGestureLockGeneration() {
+        getGameGestureLockGeneration_enforcePermission();
+        final GameGestureLockController lock = GameGestureLockController.get();
+        return lock != null ? lock.generation() : -1;
+    }
+
+    @Override
+    @EnforcePermission(android.Manifest.permission.STATUS_BAR_SERVICE)
+    public int beginGameGesture(int kind, int display, int device, long down) {
+        beginGameGesture_enforcePermission();
+        final GameGestureLockController lock = GameGestureLockController.get();
+        return lock != null ? lock.begin(kind, display, device, down) : 0;
+    }
+
+    @Override
+    @EnforcePermission(android.Manifest.permission.STATUS_BAR_SERVICE)
+    public boolean recognizeGameGesture(int kind, int display, int device, long down) {
+        recognizeGameGesture_enforcePermission();
+        final GameGestureLockController lock = GameGestureLockController.get();
+        return lock != null && lock.recognize(kind, display, device, down);
+    }
+
+    @Override
+    @EnforcePermission(android.Manifest.permission.STATUS_BAR_SERVICE)
+    public void endGameGesture(int kind, int display, int device, long down, long end,
+            boolean cancelled) {
+        endGameGesture_enforcePermission();
+        final GameGestureLockController lock = GameGestureLockController.get();
+        if (lock != null) lock.end(kind, display, device, down, end, cancelled);
+    }
+
+    @Override
+    @EnforcePermission(android.Manifest.permission.STATUS_BAR_SERVICE)
+    public void setGameGestureLockListener(android.view.IGameGestureLockListener listener) {
+        setGameGestureLockListener_enforcePermission();
+        final GameGestureLockController lock = GameGestureLockController.get();
+        if (lock != null) lock.setListener(listener);
+    }
+
+    @Override
+    @EnforcePermission(android.Manifest.permission.STATUS_BAR_SERVICE)
+    public void turnOffGameGestureLock(long generation, int user) {
+        turnOffGameGestureLock_enforcePermission();
+        final long identity = android.os.Binder.clearCallingIdentity();
+        try {
+            final GameGestureLockController lock = GameGestureLockController.get();
+            if (lock != null) lock.turnOff(generation, user);
+        } finally {
+            android.os.Binder.restoreCallingIdentity(identity);
+        }
+    }
+
 }

@@ -217,6 +217,13 @@ class InsetsPolicy {
             notifyRemoteInsetsController(focusedWin, requestedVisibleTypes[0]);
         }
 
+        final GameGestureLockController gameLock = GameGestureLockController.get();
+        if (gameLock != null) {
+            gameLock.setStatusBarVisible(mDisplayContent.getDisplayId(),
+                    statusControlTarget == null || statusControlTarget.isRequestedVisible(Type.statusBars()));
+            gameLock.setNavigationBarVisible(mDisplayContent.getDisplayId(),
+                    navControlTarget == null || navControlTarget.isRequestedVisible(Type.navigationBars()));
+        }
         mStatusBar.updateVisibility(statusControlTarget, Type.statusBars());
         mNavBar.updateVisibility(navControlTarget, Type.navigationBars());
 

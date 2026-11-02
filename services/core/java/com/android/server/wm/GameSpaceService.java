@@ -48,6 +48,7 @@ public final class GameSpaceService extends SystemService {
     private static final long SESSION_TIMEOUT_MS = 5 * 60 * 1000L;
     private static final long BOOST_DELAY_MS = 500L;
 
+    private final GameGestureLockController mGestureLock;
     private final GameListManager mGameListManager;
     private final GameStateDispatcher mGameStateDispatcher;
     private final GamePackageHandler mGamePackageHandler;
@@ -117,8 +118,11 @@ public final class GameSpaceService extends SystemService {
         mThread = new ServiceThread(TAG, Process.THREAD_PRIORITY_BACKGROUND, true);
         mThread.start();
         mHandler = new Handler(mThread.getLooper());
+        mGestureLock = new GameGestureLockController(context, mHandler);
+        LocalServices.addService(GameGestureLockController.class, mGestureLock);
         mGameListManager = new GameListManager(context);
         mGameStateDispatcher = new GameStateDispatcher(context, mHandler);
+        mGestureLock.setTurnOffCallback(mGameStateDispatcher::turnOffGestureLock);
         mGamePackageHandler = new GamePackageHandler(context, mGameListManager, mHandler);
     }
 
@@ -138,6 +142,7 @@ public final class GameSpaceService extends SystemService {
 
     @Override
     public void onUserSwitching(TargetUser from, TargetUser to) {
+        mGestureLock.release();
         mHandler.post(() -> {
             stopOverlay();
             mCurrentGame = null;
@@ -200,6 +205,7 @@ public final class GameSpaceService extends SystemService {
     }
 
     public void onKeyguardChanged(boolean showing) {
+        if (showing) mGestureLock.release();
         mHandler.post(() -> {
             mKeyguardShowing = showing;
             if (showing) {
@@ -282,6 +288,9 @@ public final class GameSpaceService extends SystemService {
         final Task gameTask;
         final String gamePackage;
         final boolean visible;
+        final boolean gestureEligible;
+        final int gestureDisplay;
+        final int gestureRotation;
         final boolean transientCover;
         final boolean otherForegroundApp;
         final int gamePid;
@@ -329,6 +338,12 @@ public final class GameSpaceService extends SystemService {
                 incarnationChanged = true;
             }
             visible = gameTask != null && isGameTaskVisible(gameTask);
+            final DisplayContent display = gameTask != null ? gameTask.getDisplayContent() : null;
+            gestureDisplay = display != null ? display.getDisplayId() : -1;
+            gestureRotation = display != null ? display.getRotation() : -1;
+            // Window focus can settle after this session snapshot. DisplayPolicy checks the
+            // live input task, fullscreen mode and IME separately before enabling the lock.
+            gestureEligible = visible && display != null;
             setCurrentGameTask(gameTask);
         }
         if (incarnationChanged || (mCurrentGame != null && !mCurrentGame.equals(gamePackage))) {
@@ -370,6 +385,19 @@ public final class GameSpaceService extends SystemService {
         } else if (mOverlayStarted) {
             mGameStateDispatcher.setGameVisible(false, this::suspendOverlay);
         }
+        updateGestureSession(gestureEligible, gestureDisplay, gestureRotation);
+    }
+
+    private void updateGestureSession(boolean eligible, int display, int rotation) {
+        if (mOverlayStarted && !mSuspended && mManagedSession && mCurrentGameTask != null) {
+            mGestureLock.setSession(mCurrentGameTask.mTaskId, mSessionUserId, display, rotation,
+                    eligible && !mKeyguardShowing && !mScreenOff
+                            && getContext().getSystemService(PowerManager.class).isInteractive()
+                            && !getContext().getSystemService(android.app.KeyguardManager.class)
+                                    .isKeyguardLocked());
+        } else {
+            mGestureLock.release();
+        }
     }
 
     private boolean isTransientGameCover(ActivityRecord record, String permissionController) {
@@ -390,6 +418,7 @@ public final class GameSpaceService extends SystemService {
     }
 
     private void suspendOverlay() {
+        mGestureLock.release();
         if (!mOverlayStarted || mSuspended) return;
         mSuspended = true;
         mSuspendedAt = SystemClock.elapsedRealtime();
@@ -446,6 +475,7 @@ public final class GameSpaceService extends SystemService {
             mPendingBoost = () -> mGameStateDispatcher.boostGame(true);
             mHandler.postDelayed(mPendingBoost, BOOST_DELAY_MS);
         }
+        mGestureLock.startSession();
         mOverlayStarted = true;
         mSessionUserId = ActivityManager.getCurrentUser();
         mSuspended = false;
@@ -458,6 +488,7 @@ public final class GameSpaceService extends SystemService {
     }
 
     private void stopOverlay() {
+        mGestureLock.release();
         if (!mOverlayStarted) {
             return;
         }
