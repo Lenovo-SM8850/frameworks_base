@@ -15,8 +15,8 @@
   -->
 
 <resources>
-    <dimen name="floating_dismiss_icon_size">32dp</dimen>
-    <dimen name="floating_dismiss_background_size">96dp</dimen>
+    <dimen name="floating_dismiss_icon_size">28dp</dimen>
+    <dimen name="floating_dismiss_background_size">80dp</dimen>
 
     <!-- Bubble drag zone dimensions -->
     <dimen name="drag_zone_dismiss_radius">96dp</dimen>
