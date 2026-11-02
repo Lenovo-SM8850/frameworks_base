@@ -168,6 +168,8 @@ import kotlinx.coroutines.MainCoroutineDispatcher;
 
 import org.jetbrains.annotations.NotNull;
 
+import io.github.miner7222.windowdecor.FloatingWindowPinchInput;
+
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
@@ -234,6 +236,7 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
             new DesktopModeDragEventListener();
 
     private final SparseArray<WindowDecorationWrapper> mWindowDecorByTaskId;
+    private FloatingWindowPinchInput mFloatingWindowPinchInput;
     private final Function<Integer, WindowDecorationWrapper> mWindowDecorationFinder =
             new Function<>() {
                 @Override
@@ -2025,6 +2028,11 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
         windowDecoration.setCaptionListeners(
                 touchEventListener, touchEventListener, touchEventListener, touchEventListener);
         windowDecoration.setFloatingHandleListener(touchEventListener);
+        if (taskInfo.isFloatingWindow && taskInfo.displayId == android.view.Display.DEFAULT_DISPLAY
+                && taskSurface.isValid() && mFloatingWindowPinchInput == null) {
+            mFloatingWindowPinchInput = new FloatingWindowPinchInput(
+                    mContext, mMainHandler, mWindowDecorByTaskId);
+        }
         windowDecoration.setExclusionRegionListener(mExclusionRegionListener);
         windowDecoration.setDragPositioningCallback(taskPositioner);
         windowDecoration.addDragResizeListener(mDragEventListener);

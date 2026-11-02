@@ -669,7 +669,8 @@ class DragResizeInputListener implements AutoCloseable {
                                 e.getRawX(dragPointerIndex), e.getRawY(dragPointerIndex));
                         // If taskBounds has changed, setGeometry will be called and update the
                         // sink region. Otherwise, we should revert it here.
-                        if (taskBounds.equals(mDragStartTaskBounds)) {
+                        if (e.getActionMasked() == MotionEvent.ACTION_CANCEL
+                                || taskBounds.equals(mDragStartTaskBounds)) {
                             mTouchRegionConsumer.accept(mTouchRegion);
                         }
                     }

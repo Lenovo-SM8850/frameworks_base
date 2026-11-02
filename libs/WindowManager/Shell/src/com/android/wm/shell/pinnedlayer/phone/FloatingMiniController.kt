@@ -35,6 +35,18 @@ class FloatingMiniController(
     },
     private val changed: (TaskInfo) -> Unit,
 ) {
+    private inner class Pinch(val task: TaskInfo, val span: Float, val x: Float, val y: Float,
+        val stable: Rect, val reference: Rect, val logical: Rect, val minimumScale: Float,
+        val minimumVisibleSize: Int, val minWidth: Int, val minHeight: Int, val touchSlop: Int) {
+        val origin = Rect(state.get(task.userId, task.taskId)!!.bounds)
+        val originScale = state.get(task.userId, task.taskId)!!.scale
+        val frame = Frame(task).apply { bounds.set(origin) }
+        val result = FloatingWindowGeometry.ScaledResize(Rect(reference), Rect(logical), 1f, false)
+        val animator = animators()
+        var expanded = false
+        var progress = 0f
+    }
+    private val pinches = mutableMapOf<FloatingMiniState.Key, Pinch>()
     private val pendingResize = mutableMapOf<FloatingMiniState.Key, Pair<Int, Int>>()
     private class Operation(val animator: ValueAnimator, val task: TaskInfo,
         val target: Rect, val scale: Float, val logical: Rect?, val radius: Float, val finish: () -> Unit)
@@ -378,6 +390,7 @@ class FloatingMiniController(
     fun prepareRestore(task: TaskInfo, wct: WindowContainerTransaction): Boolean = restore(task, wct)
 
     private fun restore(task: TaskInfo, wct: WindowContainerTransaction?): Boolean {
+        if (pinches.containsKey(key(task))) cancel(task)
         val entry = state.get(task.userId, task.taskId) ?: return false
         val stable = stable(task)
         if (stable.isEmpty) return false
@@ -450,9 +463,114 @@ class FloatingMiniController(
         }
     }
 
-    fun isAnimating(task: TaskInfo) = animations.containsKey(key(task))
+    fun beginPinch(task: TaskInfo, span: Float, x: Float, y: Float): Boolean {
+        val entry = state.get(task.userId, task.taskId) ?: return false
+        val context = displays.getDisplayContext(task.displayId) ?: return false
+        val area = stable(task)
+        val layout = displays.getDisplayLayout(task.displayId) ?: return false
+        val logical = Rect(task.configuration.windowConfiguration.bounds)
+        if (span <= 0f || entry.bounds.isEmpty || logical.isEmpty || area.isEmpty ||
+            isAnimating(task)) return false
+        clearDrag(task)
+        val scale = minOf(entry.restore.scale, area.width().toFloat() / logical.width(),
+            area.height().toFloat() / logical.height())
+        val reference = FloatingMiniState.sized(logical, scale, 0, 0).apply {
+            val factor = width().toFloat() / entry.bounds.width()
+            offsetTo((x + (entry.bounds.left - x) * factor).roundToInt(),
+                (y + (entry.bounds.top - y) * factor).roundToInt())
+        }
+        val minimumScale = min(scale, FloatingMiniState.scale(logical, area,
+            min(layout.width(), layout.height()), (8 * density(task)).toInt()))
+        val defaultMin = (task.defaultMinSize.coerceAtLeast(1) * density(task)).roundToInt()
+        val pinch = Pinch(task, span, x, y, area, reference, logical, minimumScale,
+            (min(logical.width(), logical.height()) * minimumScale).roundToInt(),
+            task.minWidth.takeIf { it > 0 } ?: defaultMin,
+            task.minHeight.takeIf { it > 0 } ?: defaultMin,
+            android.view.ViewConfiguration.get(context).scaledTouchSlop)
+        pinches[key(task)] = pinch
+        dragFrames[key(task)] = pinch.frame
+        SurfaceFrameRate.setInteracting(pinch.frame, true)
+        organizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
+        pinch.animator.duration = 300
+        pinch.animator.interpolator = Interpolators.FAST_OUT_SLOW_IN
+        pinch.animator.addUpdateListener {
+            pinch.progress = it.animatedValue as Float
+            drawPinch(pinch)
+        }
+        return true
+    }
+
+    fun movePinch(task: TaskInfo, span: Float, x: Float, y: Float) {
+        val pinch = pinches[key(task)] ?: return
+        if (!pinch.expanded && span <= pinch.span + pinch.touchSlop) return
+        FloatingWindowGeometry.pinch(pinch.reference, pinch.logical, pinch.stable,
+            span / pinch.span, pinch.x, pinch.y, x, y, pinch.minWidth, pinch.minHeight,
+            pinch.minimumScale, pinch.minimumVisibleSize, pinch.result)
+        if (!pinch.expanded) {
+            pinch.expanded = true
+            pinch.animator.start()
+        }
+        drawPinch(pinch)
+    }
+
+    private fun drawPinch(pinch: Pinch) {
+        val p = pinch.progress
+        val from = pinch.origin
+        val to = pinch.result.visible
+        val left = (from.left + (to.left - from.left) * p).roundToInt()
+        val top = (from.top + (to.top - from.top) * p).roundToInt()
+        pinch.frame.bounds.set(left, top,
+            left + (from.width() + (to.width() - from.width()) * p).roundToInt(),
+            top + (from.height() + (to.height() - from.height()) * p).roundToInt())
+        state.get(pinch.task.userId, pinch.task.taskId)?.let {
+            it.bounds.set(pinch.frame.bounds)
+            it.scale = pinch.frame.bounds.width().toFloat() / pinch.logical.width()
+        }
+        pinch.frame.pending = true
+        if (!frameScheduled) {
+            frameScheduled = true
+            choreographer.postFrameCallback(dragCallback)
+        }
+    }
+
+    fun endPinch(task: TaskInfo, cancelled: Boolean) {
+        val pinch = pinches[key(task)] ?: return
+        if (cancelled || !pinch.expanded) {
+            cancel(task)
+            return
+        }
+        pinches.remove(key(task))
+        pinch.animator.cancel()
+        val expand = !pinch.result.atMinimum
+        val target = if (expand) pinch.result.visible else pinch.origin
+        val scale = if (expand) pinch.result.scale else pinch.originScale
+        val logical = if (expand) pinch.result.logical else null
+        val from = Rect(pinch.frame.bounds)
+        val fromScale = from.width().toFloat() / pinch.logical.width()
+        pinch.frame.draw()
+        animate(task, from, fromScale, target, scale, logical) {
+            if (expand) state.remove(task.userId, task.taskId)
+        }
+    }
+
+    fun isAnimating(task: TaskInfo) = animations.containsKey(key(task)) || pinches.containsKey(key(task))
 
     fun cancel(task: TaskInfo) {
+        pinches.remove(key(task))?.let { pinch ->
+            pinch.animator.cancel()
+            pinch.frame.bounds.set(pinch.origin)
+            pinch.frame.draw()
+            state.get(task.userId, task.taskId)?.let {
+                it.bounds.set(pinch.origin)
+                it.scale = pinch.originScale
+            }
+            clearDrag(task)
+            if (organizer.getRunningTaskInfo(task.taskId)?.isFloatingWindow == true) {
+                organizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, false)
+                    .setFloatingWindowPresentation(task.token,
+                        Point(pinch.origin.left, pinch.origin.top), pinch.originScale))
+            }
+        }
         animations.remove(key(task))?.animator?.cancel()
     }
 
@@ -473,6 +591,9 @@ class FloatingMiniController(
 
     fun onTransitionReady(info: TransitionInfo, startT: SurfaceControl.Transaction,
         finishT: SurfaceControl.Transaction) {
+        info.changes.forEach { change ->
+            change.taskInfo?.takeIf { pinches.containsKey(key(it)) }?.let(::cancel)
+        }
         info.changes.forEach { change ->
             val task = change.taskInfo ?: return@forEach
             val entry = state.get(task.userId, task.taskId) ?: return@forEach
@@ -571,6 +692,7 @@ class FloatingMiniController(
     }
 
     fun rotate(task: TaskInfo, from: Int, to: Int, wct: WindowContainerTransaction): Boolean {
+        if (pinches.containsKey(key(task))) cancel(task)
         animations[key(task)]?.let { operation ->
             cancel(task)
             complete(operation)

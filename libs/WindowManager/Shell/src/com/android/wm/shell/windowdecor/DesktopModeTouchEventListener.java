@@ -116,6 +116,7 @@ public class DesktopModeTouchEventListener
     private boolean mLongClickDisabled;
     private int mDragPointerId = -1;
     private @Nullable VelocityTracker mFloatingVelocityTracker;
+    private @Nullable View mFloatingDragView;
     private final PointF mFloatingCaptionDragStart = new PointF();
     private DesktopModeEventLogger.Companion.InputMethod mInputMethod =
             getInputMethodType(UNKNOWN_INPUT_METHOD);
@@ -338,6 +339,7 @@ public class DesktopModeTouchEventListener
 
     @Override
     public boolean onInterceptTouchEvent(ViewGroup v, MotionEvent e) {
+        if (isFloatingPinchActive()) return true;
         final WindowDecorationWrapper decoration =
                 updateStateOnTouchEvent(v, e, "onInterceptTouchEvent");
         if (decoration == null) {
@@ -365,6 +367,7 @@ public class DesktopModeTouchEventListener
 
     @Override
     public boolean onTouch(View v, MotionEvent e) {
+        if (isFloatingPinchActive()) return true;
         final WindowDecorationWrapper decoration = updateStateOnTouchEvent(v, e, "onTouch");
         if (decoration == null) {
             return false;
@@ -398,9 +401,52 @@ public class DesktopModeTouchEventListener
         }
     }
 
+    private boolean isFloatingPinchActive() {
+        return mDragPositioningCallback instanceof MultiDisplayVeiledResizeTaskPositioner
+                && ((MultiDisplayVeiledResizeTaskPositioner) mDragPositioningCallback)
+                        .isFloatingPinchActive();
+    }
+
+    public Rect getFloatingInteractionBounds() {
+        if (mDragPositioningCallback instanceof MultiDisplayVeiledResizeTaskPositioner) {
+            final MultiDisplayVeiledResizeTaskPositioner positioner =
+                    (MultiDisplayVeiledResizeTaskPositioner) mDragPositioningCallback;
+            if (positioner.isFloatingMoveActive()) return positioner.getFloatingHandlePinchBounds();
+        }
+        final WindowDecorationWrapper decoration = mWindowDecorationFinder.apply(mTaskId);
+        return decoration == null ? new Rect() : decoration.getTaskInfo().getPresentationBounds();
+    }
+
+    public boolean startFloatingWindowPinch(MotionEvent event, float span, float x, float y) {
+        final WindowDecorationWrapper decoration = mWindowDecorationFinder.apply(mTaskId);
+        if (decoration == null || !(mDragPositioningCallback
+                instanceof MultiDisplayVeiledResizeTaskPositioner)) return false;
+        final boolean started;
+        if (mFloatingDragView != null) {
+            started = startFloatingHandlePinch(mFloatingDragView, event, span, x, y);
+        } else {
+            final MultiDisplayVeiledResizeTaskPositioner positioner =
+                    (MultiDisplayVeiledResizeTaskPositioner) mDragPositioningCallback;
+            final Rect bounds = positioner.isFloatingMoveActive()
+                    ? positioner.getFloatingHandlePinchBounds()
+                    : decoration.getTaskInfo().getPresentationBounds();
+            positioner.onDragPositioningCancel();
+            positioner.startFloatingHandlePinch(event.getDisplayId(), span, x, y, bounds);
+            started = true;
+        }
+        return started;
+    }
+
     public void closeFloatingTask() {
         final WindowDecorationWrapper decoration = mWindowDecorationFinder.apply(mTaskId);
         if (decoration != null) mWindowDecorationActions.onClose(decoration.getTaskInfo());
+    }
+
+    public void closeFloatingGestures() {
+        mFloatingDragView = null;
+        if (mFloatingVelocityTracker != null) mFloatingVelocityTracker.recycle();
+        mFloatingVelocityTracker = null;
+        endFloatingHandlePinch(true);
     }
 
     public boolean startFloatingHandlePinch(View view, MotionEvent event,
@@ -627,6 +673,9 @@ public class DesktopModeTouchEventListener
                     updateDragStatus(decoration, e);
                     mOnDragStartInitialBounds.set(initialBounds);
                     mCurrentBounds.set(initialBounds);
+                    if (taskInfo.isFloatingWindow) {
+                        mFloatingDragView = v;
+                    }
                     WdLog.motionEventLogD(TAG, mTaskId, "handleFreeformMotionEvent(%s) "
                                     + "action=%s dispatched |onDragPositioningStart| "
                                     + "dragAllowed=%b isDragging=%b mOnDragStartInitialBounds=%s "
@@ -720,6 +769,7 @@ public class DesktopModeTouchEventListener
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 final PointF releaseVelocity = finishFloatingCaptionVelocity(e);
+                mFloatingDragView = null;
                 if (taskInfo.isFloatingWindow
                         && (!dragAllowed || e.getActionMasked() == ACTION_CANCEL)) {
                     mDragPositioningCallback.onDragPositioningCancel();
@@ -916,5 +966,4 @@ public class DesktopModeTouchEventListener
     private boolean isPinned(ActivityManager.RunningTaskInfo taskInfo) {
         return mPinnedLayerController != null && mPinnedLayerController.isPinned(taskInfo.taskId);
     }
-
 }
