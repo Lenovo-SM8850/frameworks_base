@@ -18,6 +18,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import java.io.PrintWriter
+import java.util.function.Function
 import android.window.RemoteTransition
 import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
 import android.view.InsetsState
@@ -1397,14 +1398,19 @@ class MultiSplitCoordinator(
         return swapLeaves(id.value, other.value)
     }
 
-    fun closeTask(taskId: Int): Boolean {
+    fun closeTask(taskId: Int): Boolean = removeTask(taskId, null)
+
+    private fun removeTask(taskId: Int,
+        prepareMinimize: Function<RunningTaskInfo, WindowContainerTransaction?>?): Boolean {
         if (isBusy) return false
         val id = leafOfTask(taskId) ?: return false
         val task = organizer.getRunningTaskInfo(taskId) ?: return false
-        val wct = WindowContainerTransaction().removeTask(task.token)
+        val wct = if (prepareMinimize == null) WindowContainerTransaction().removeTask(task.token)
+            else prepareMinimize.apply(task) ?: return false
         stages.getValue(id).markToBeVanished(taskId)
         removeLeaf(id, wct, taskId)
-        pending = transitions.startTransition(TRANSIT_CLOSE, wct, this)
+        pending = transitions.startTransition(
+            if (prepareMinimize == null) TRANSIT_CLOSE else TRANSIT_TO_BACK, wct, this)
         setInteractive(false)
         return true
     }

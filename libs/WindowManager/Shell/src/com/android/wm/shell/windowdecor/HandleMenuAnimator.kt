@@ -111,10 +111,12 @@ class HandleMenuAnimator(
         // There is no app info row above the actions to use as their animation pivot.
         listOf(windowingPill, splitActionsPill, moreActionsPill, openInAppOrBrowserPill).forEach {
             it.alpha = 0f
-            it.pivotX = menuWidth / 2f
+            it.pivotX = (it.width.takeIf { width -> width > 0 }
+                ?: it.layoutParams.width.takeIf { width -> width > 0 } ?: menuWidth) / 2f
             it.pivotY = 0f
         }
-        handleMenu.pivotX = menuWidth / 2f
+        handleMenu.pivotX = (handleMenu.width.takeIf { it > 0 }
+            ?: (menuWidth + handleMenu.paddingLeft + handleMenu.paddingRight)) / 2f
         handleMenu.pivotY = 0f
     }
 

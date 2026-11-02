@@ -25,7 +25,6 @@
     android:paddingLeft="@dimen/desktop_mode_handle_menu_padding_left_bottom_right"
     android:paddingRight="@dimen/desktop_mode_handle_menu_padding_left_bottom_right"
     android:paddingBottom="@dimen/desktop_mode_handle_menu_pill_elevation_padding"
-    android:paddingEnd="@dimen/desktop_mode_handle_menu_pill_elevation_padding"
     android:orientation="vertical">
 
     <LinearLayout
@@ -35,7 +34,6 @@
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="@dimen/desktop_mode_handle_menu_app_info_pill_height"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_margin_top"
-        android:layout_marginStart="1dp"
         android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
         android:orientation="horizontal"
         android:background="@drawable/desktop_mode_decor_handle_menu_background"
@@ -66,41 +64,20 @@
 
     <com.android.wm.shell.windowdecor.WindowingPillView
         android:id="@+id/windowing_pill"
-        android:layout_width="@dimen/desktop_mode_handle_menu_width"
+        android:layout_gravity="center_horizontal"
+        android:layout_width="wrap_content"
         android:layout_height="@dimen/desktop_mode_handle_menu_windowing_pill_height"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_pill_spacing_margin"
-        android:layout_marginStart="1dp"
         android:orientation="horizontal"
         android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
         android:background="@drawable/desktop_mode_decor_handle_menu_background"
         android:gravity="center_vertical"/>
 
     <LinearLayout
-        android:id="@+id/floating_close_pill"
-        android:layout_width="@dimen/desktop_mode_handle_menu_width"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/desktop_mode_handle_menu_pill_spacing_margin"
-        android:layout_marginStart="1dp"
-        android:orientation="vertical"
-        android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
-        android:background="@drawable/desktop_mode_decor_handle_menu_background"
-        android:visibility="gone">
-
-        <com.android.wm.shell.windowdecor.HandleMenuActionButton
-            android:id="@+id/floating_close_button"
-            android:contentDescription="@string/floating_window_close"
-            android:tooltipText="@string/floating_window_close"
-            android:text="@string/floating_window_close"
-            android:src="@drawable/ic_remove_no_shadow"
-            style="@style/DesktopModeHandleMenuActionButton"/>
-    </LinearLayout>
-
-    <LinearLayout
         android:id="@+id/split_actions_pill"
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_pill_spacing_margin"
-        android:layout_marginStart="1dp"
         android:orientation="vertical"
         android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
         android:background="@drawable/desktop_mode_decor_handle_menu_background"
@@ -120,13 +97,6 @@
             android:text="@string/handle_menu_replace_app"
             android:src="@drawable/desktop_mode_ic_handle_menu_replace_app"
             style="@style/DesktopModeHandleMenuActionButton"/>
-
-        <com.android.wm.shell.windowdecor.HandleMenuActionButton
-            android:id="@+id/split_close_button"
-            android:contentDescription="@string/handle_menu_close_app"
-            android:text="@string/handle_menu_close_app"
-            android:src="@drawable/ic_remove_no_shadow"
-            style="@style/DesktopModeHandleMenuActionButton"/>
     </LinearLayout>
 
     <LinearLayout
@@ -134,7 +104,6 @@
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_pill_spacing_margin"
-        android:layout_marginStart="1dp"
         android:orientation="vertical"
         android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
         android:background="@drawable/desktop_mode_decor_handle_menu_background">
@@ -210,7 +179,6 @@
         android:layout_width="@dimen/desktop_mode_handle_menu_width"
         android:layout_height="@dimen/desktop_mode_handle_menu_open_in_browser_pill_height"
         android:layout_marginTop="@dimen/desktop_mode_handle_menu_pill_spacing_margin"
-        android:layout_marginStart="1dp"
         android:orientation="horizontal"
         android:elevation="@dimen/desktop_mode_handle_menu_pill_elevation"
         android:background="@drawable/desktop_mode_decor_handle_menu_background">

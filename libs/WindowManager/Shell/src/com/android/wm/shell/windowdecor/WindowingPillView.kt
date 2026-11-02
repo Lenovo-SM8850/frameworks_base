@@ -105,6 +105,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private val splitscreenBtn: ImageButton
     private val floatingBtn: ImageButton
     private val desktopBtn: ImageButton
+    private val closeBtn: ImageButton
 
     @VisibleForTesting var desktopModeCompatPolicy = DesktopModeCompatPolicy(context)
 
@@ -114,6 +115,7 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     private var shouldShowDesktopModeButton = false
 
     private lateinit var onPillItemClicked: (() -> Unit)
+    private var canPerformTaskActions: () -> Boolean = { true }
 
     init {
         LayoutInflater.from(context)
@@ -135,6 +137,10 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
             null,
         )
         desktopBtn = requireViewById<ImageButton>(R.id.desktop_button)
+        minimizeBtn = requireViewById(R.id.windowing_minimize_button)
+        closeBtn = requireViewById(R.id.windowing_close_button)
+        val edge = (8 * context.resources.displayMetrics.density).toInt()
+        setPaddingRelative(edge, paddingTop, edge, paddingBottom)
     }
 
     /**
@@ -166,7 +172,8 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         this.onPillItemClicked = onPillItemClicked
         this.showFloatingButton = showFloatingButton
 
-        listOf(rotateBtn, fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn).forEach {
+        listOf(rotateBtn, fullscreenBtn, splitscreenBtn, desktopBtn, floatingBtn,
+            minimizeBtn, closeBtn).forEach {
             it.setOnClickListener(this)
         }
 
@@ -261,7 +268,10 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
     }
 
     override fun onClick(v: View) {
+        if ((v.id == R.id.windowing_minimize_button || v.id == R.id.windowing_close_button) &&
+            !canPerformTaskActions()) return
         when (v.id) {
+            R.id.windowing_close_button -> windowDecorationActions.onClose(taskInfo)
             R.id.rotate_window_button -> windowDecorationActions.onRotate(taskInfo)
             R.id.fullscreen_button -> {
                 windowDecorationActions.onToFullscreen(taskInfo.taskId)
@@ -288,11 +298,26 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
         taskInfo: RunningTaskInfo,
         isInSplitScreen: Boolean,
         canEnterSplitScreen: Boolean = true,
+        showTaskActions: Boolean = false,
+        canPerformTaskActions: () -> Boolean = { true },
     ) {
         this.taskInfo = taskInfo
+        this.canPerformTaskActions = canPerformTaskActions
         this.style = calculateMenuStyle(taskInfo)
 
         background.setTint(style.backgroundColor)
+        val showActions = showTaskActions &&
+            (taskInfo.isFullscreen || taskInfo.isFloatingWindow || isInSplitScreen)
+        minimizeBtn.isGone = true
+        closeBtn.isGone = !showActions
+        listOf(minimizeBtn, closeBtn).forEach { button ->
+            button.imageTintList = style.buttonColor
+            button.background = createBackgroundDrawable(
+                color = style.textColor,
+                cornerRadius = iconButtonRippleRadius,
+                drawableInsets = iconButtonDrawableInsetsBase,
+            )
+        }
         rotateBtn.isGone = !taskInfo.isFloatingWindow || taskInfo.displayId != DEFAULT_DISPLAY ||
             rotateDescriptionId == 0
         rotateBtn.apply {
@@ -410,4 +435,13 @@ class WindowingPillView(private val context: Context, attrs: AttributeSet) :
                 ),
         )
     }
+
+    val contentWidth: Int
+        get() = minOf(context.resources.getDimensionPixelSize(
+            R.dimen.desktop_mode_handle_menu_width),
+            listOf(rotateBtn, fullscreenBtn, splitscreenBtn, floatingBtn, desktopBtn,
+                minimizeBtn, closeBtn).filter { !it.isGone }.sumOf { it.layoutParams.width } +
+                paddingLeft + paddingRight)
+
+    private val minimizeBtn: ImageButton
 }

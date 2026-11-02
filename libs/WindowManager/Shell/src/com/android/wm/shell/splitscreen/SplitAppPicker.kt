@@ -140,6 +140,14 @@ class SplitAppPicker(
             context.getString(R.string.split_picker_loading)))
     }
 
+    fun contains(x: Int, y: Int): Boolean {
+        if (!attached || !root.isLaidOut) return false
+        val location = IntArray(2)
+        root.getLocationOnScreen(location)
+        return x >= location[0] && x < location[0] + root.width &&
+            y >= location[1] && y < location[1] + root.height
+    }
+
     fun show(destination: Rect) {
         try {
             val outlineParams = params(-1, -1, LayoutParams.FLAG_NOT_FOCUSABLE or
