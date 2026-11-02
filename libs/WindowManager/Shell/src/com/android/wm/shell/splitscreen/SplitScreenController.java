@@ -548,6 +548,47 @@ public class SplitScreenController implements SplitDragPolicy.Starter,
         return mStageCoordinator.getPendingSidebarSplitSlot(displayId);
     }
 
+    public boolean isPendingSplitDropTarget(int displayId, int x, int y) {
+        if (mSplitPicker != null && mSplitPicker.pendingSidebarSlot(displayId) != null) {
+            return mSplitPicker.isPendingDropTarget(displayId, x, y);
+        }
+        final AppDragSlot slot = mStageCoordinator.getPendingSidebarSplitSlot(displayId);
+        return slot != null && slot.hitBounds.contains(x, y);
+    }
+
+    /** Fills only the current pending selection with this exact live task. */
+    public boolean startTaskInPendingSplit(TaskInfo task, AppDragSlot expected) {
+        final ActivityManager.RunningTaskInfo live = mTaskOrganizer.getRunningTaskInfo(task.taskId);
+        if (live == null || live.userId != task.userId || live.displayId != task.displayId
+                || !live.token.equals(task.token)
+                || !live.isFloatingWindow || live.isVisible || !live.supportsMultiWindow
+                || live.minWidth > expected.bounds.width()
+                || live.minHeight > expected.bounds.height()) return false;
+        if (mSplitPicker != null && mSplitPicker.pendingSidebarSlot(live.displayId) != null) {
+            return mSplitPicker.startTask(live, expected);
+        }
+        final AppDragSlot slot = mStageCoordinator.getPendingSidebarSplitSlot(live.displayId);
+        final ActivityManager.RunningTaskInfo selected = mStageCoordinator.getPendingSidebarSplitSelect();
+        final ComponentName component = live.baseIntent.getComponent();
+        if (slot == null || selected == null || component == null
+                || live.taskId == selected.taskId || !mStageCoordinator.canStartSplitEntry()
+                || slot.position != expected.position || slot.index != expected.index
+                || slot.leafId != expected.leafId || slot.occupied != expected.occupied
+                || slot.newTaskFirst != expected.newTaskFirst || slot.splitBelow != expected.splitBelow
+                || slot.threeColumns != expected.threeColumns
+                || slot.layoutVersion != expected.layoutVersion || !slot.bounds.equals(expected.bounds)
+                || !canStartSidebarSplit(component, live.userId, selected)) return false;
+        mStageCoordinator.clearPendingSidebarSplitSelect();
+        try {
+            startTasks(live.taskId, null, selected.taskId, null, slot.position,
+                    com.android.wm.shell.shared.split.SplitScreenConstants.SNAP_TO_2_50_50, null, null);
+            return true;
+        } catch (RuntimeException e) {
+            Slog.w(TAG, "Unable to fill pending split with task", e);
+            return false;
+        }
+    }
+
     public boolean launchSidebarIntoPendingSplit(ComponentName component, UserHandle user, int displayId) {
         if (mSplitPicker != null && mSplitPicker.launchSidebarApp(component, user, displayId)) return true;
         final AppDragSlot slot = getPendingSidebarSplitSlot(displayId);

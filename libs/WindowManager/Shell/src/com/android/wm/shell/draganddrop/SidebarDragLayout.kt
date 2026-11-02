@@ -142,7 +142,7 @@ class SidebarDragLayout(
         policy = SidebarDragPolicy(context, split, floating.get()).also {
             it.start(session, context.displayId)
         }
-        sidebarSource = session.isSidebarAppDrag
+        sidebarSource = session.isSidebarAppDrag || session.isMinimizedTaskDrag
         sidebar = sidebarSource || policy?.handlesAppDrag == true
         preview.visibility = if (sidebar) View.VISIBLE else View.INVISIBLE
         preview.animate().cancel()

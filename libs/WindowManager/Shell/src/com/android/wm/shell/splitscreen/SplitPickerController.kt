@@ -130,6 +130,11 @@ class SplitPickerController(
         it.displayId == displayId && !it.replace && valid(it)
     }?.slot
 
+    fun isPendingDropTarget(displayId: Int, x: Int, y: Int): Boolean {
+        val slot = pendingSidebarSlot(displayId) ?: return false
+        return !committing && (slot.hitBounds.contains(x, y) || panel?.contains(x, y) == true)
+    }
+
     /** Reuses the picker selection transaction without substituting another recent instance. */
     fun startTask(task: RunningTaskInfo, slot: AppDragSlot): Boolean {
         val selection = session ?: return false
