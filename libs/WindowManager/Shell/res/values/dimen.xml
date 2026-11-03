@@ -784,6 +784,7 @@
     <dimen name="floating_minimize_handle_size">48dp</dimen>
     <dimen name="floating_minimize_handle_peek">24dp</dimen>
     <dimen name="floating_minimize_handle_gap">8dp</dimen>
+    <dimen name="floating_minimize_handle_snap_distance">48dp</dimen>
     <dimen name="floating_minimize_handle_padding">8dp</dimen>
     <dimen name="floating_minimize_handle_elevation">6dp</dimen>
 

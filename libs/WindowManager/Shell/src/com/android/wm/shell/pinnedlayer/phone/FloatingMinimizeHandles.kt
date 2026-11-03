@@ -22,6 +22,7 @@ import com.android.wm.shell.R
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.draganddrop.SidebarDragPolicy
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Small trusted Shell windows whose touch regions are limited to their visible handles. */
 class FloatingMinimizeHandles(
@@ -35,6 +36,7 @@ class FloatingMinimizeHandles(
     private data class Handle(val view: ImageView, val params: WindowManager.LayoutParams) {
         // A view only reports attachment after its next traversal, so track it ourselves.
         var added = false
+        var dragBounds: Rect? = null
     }
     private val windowContext = context.createWindowContext(
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
@@ -42,6 +44,13 @@ class FloatingMinimizeHandles(
     private val handles = mutableMapOf<Int, Handle>()
     private var users = setOf(UserHandle.myUserId())
     private var visible = true
+    private val stableBounds = Rect()
+    private var displayWidth = 0
+    private var layoutGeneration = 0
+
+    private fun wanted() = state.entries.values.filter {
+        visible && it.userId in users && taskForId(it.taskId) != null
+    }
 
     fun setUsers(userIds: Set<Int>) { users = userIds; update() }
     fun setVisible(value: Boolean) { visible = value; update() }
@@ -50,32 +59,39 @@ class FloatingMinimizeHandles(
         val layout = displayController.getDisplayLayout(DEFAULT_DISPLAY) ?: return
         val stable = Rect().also { layout.getStableBounds(it) }
         if (stable.isEmpty) return
+        if (stable != stableBounds || displayWidth != layout.width()) {
+            stableBounds.set(stable)
+            displayWidth = layout.width()
+            layoutGeneration++
+            handles.values.forEach { it.dragBounds = null }
+        }
         val resources = windowContext.resources
         val size = resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_size)
         val peek = resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_peek)
-        val wanted = state.entries.values.filter { visible && it.userId in users && taskForId(it.taskId) != null }
+        val wanted = wanted()
         handles.keys.toList().filter { id -> wanted.none { it.taskId == id } }.forEach { id ->
             handles.remove(id)?.let { if (it.added) wm.removeViewImmediate(it.view) }
         }
-        for (right in listOf(false, true)) {
-            val ordered = wanted.filter { it.right == right }.sortedBy { it.fractionY }
-            val positions = state.stackPositions(ordered, stable.top, stable.bottom,
-                size, size + resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_gap))
-            ordered.forEachIndexed { index, entry ->
-                val task = taskForId(entry.taskId) ?: return@forEachIndexed
-                val handle = handles.getOrPut(entry.taskId) { create(task, size) }
-                handle.params.apply {
-                    width = size
-                    height = size
-                    x = if (right) layout.width() - peek else peek - size
-                    y = positions[index]
-                }
-                if (handle.added) {
-                    wm.updateViewLayout(handle.view, handle.params)
-                } else {
-                    wm.addView(handle.view, handle.params)
-                    handle.added = true
-                }
+        val positions = state.positions(wanted, stable, layout.width(), size, peek,
+            resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_gap))
+        wanted.forEach { entry ->
+            val task = taskForId(entry.taskId) ?: return@forEach
+            val handle = handles.getOrPut(entry.taskId) { create(task, size) }
+            val bounds = handle.dragBounds?.let { Rect(it).apply {
+                offsetTo(left.coerceIn(stable.left, (stable.right - size).coerceAtLeast(stable.left)),
+                    top.coerceIn(stable.top, (stable.bottom - size).coerceAtLeast(stable.top)))
+            } } ?: positions.getValue(entry.taskId)
+            handle.params.apply {
+                width = size
+                height = size
+                x = bounds.left
+                y = bounds.top
+            }
+            if (handle.added) {
+                wm.updateViewLayout(handle.view, handle.params)
+            } else {
+                wm.addView(handle.view, handle.params)
+                handle.added = true
             }
         }
     }
@@ -114,8 +130,10 @@ class FloatingMinimizeHandles(
         view.setOnClickListener { onRestore(task.taskId) }
         var startX = 0f
         var startY = 0f
-        var startRight = true
-        var startFraction = .5f
+        val handle = Handle(view, params)
+        var startLeft = 0
+        var startTop = 0
+        var startGeneration = 0
         var dragging = false
         var splitDragging = false
         view.setOnDragListener { _, event ->
@@ -125,7 +143,7 @@ class FloatingMinimizeHandles(
                     if (splitDragging) {
                         splitDragging = false
                         view.alpha = 1f
-                        state.move(task.taskId, startRight, startFraction)
+                        handle.dragBounds = null
                         update()
                     }
                     true
@@ -135,11 +153,16 @@ class FloatingMinimizeHandles(
         }
         val slop = ViewConfiguration.get(windowContext).scaledTouchSlop
         view.setOnTouchListener { _, event ->
-            val entry = state.entries[task.taskId] ?: return@setOnTouchListener false
+            if (task.taskId !in state.entries) return@setOnTouchListener false
+            if (event.actionMasked != MotionEvent.ACTION_DOWN && startGeneration != layoutGeneration) {
+                handle.dragBounds = null
+                return@setOnTouchListener true
+            }
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     startX = event.rawX; startY = event.rawY
-                    startRight = entry.right; startFraction = entry.fractionY; dragging = false
+                    startLeft = params.x; startTop = params.y
+                    startGeneration = layoutGeneration; dragging = false
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val wasDragging = dragging
@@ -158,23 +181,33 @@ class FloatingMinimizeHandles(
                         if (started) view.alpha = 0f else splitDragging = false
                     }
                     if (dragging && !splitDragging) {
-                        val layout = displayController.getDisplayLayout(DEFAULT_DISPLAY)
-                        val stable = Rect().also { layout?.getStableBounds(it) }
-                        if (!stable.isEmpty && layout != null) {
-                            state.move(task.taskId, event.rawX >= layout.width() / 2f,
-                                startFraction + (event.rawY - startY) / (stable.height() - size).coerceAtLeast(1))
-                            update()
-                        }
+                        handle.dragBounds = Rect(startLeft, startTop, startLeft + size, startTop + size)
+                            .apply { offset((event.rawX - startX).roundToInt(),
+                                (event.rawY - startY).roundToInt()) }
+                        update()
                     }
                 }
-                MotionEvent.ACTION_UP -> if (!dragging && !splitDragging) view.performClick()
+                MotionEvent.ACTION_UP -> if (!splitDragging) {
+                    if (dragging) {
+                        val requested = Rect(startLeft, startTop, startLeft + size, startTop + size)
+                            .apply { offset((event.rawX - startX).roundToInt(),
+                                (event.rawY - startY).roundToInt()) }
+                        val resources = windowContext.resources
+                        handle.dragBounds = null
+                        state.drop(task.taskId, requested, wanted(), stableBounds, displayWidth, size,
+                            resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_peek),
+                            resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_gap),
+                            resources.getDimensionPixelSize(R.dimen.floating_minimize_handle_snap_distance))
+                        update()
+                    } else view.performClick()
+                }
                 MotionEvent.ACTION_CANCEL -> if (!splitDragging) {
-                    state.move(task.taskId, startRight, startFraction)
+                    handle.dragBounds = null
                     update()
                 }
             }
             true
         }
-        return Handle(view, params)
+        return handle
     }
 }
