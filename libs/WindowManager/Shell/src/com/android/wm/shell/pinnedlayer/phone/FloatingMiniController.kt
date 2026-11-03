@@ -18,6 +18,7 @@ import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.DisplayLayout
 import com.android.wm.shell.common.SurfaceFrameRate
 import com.android.wm.shell.shared.animation.Interpolators
+import com.android.wm.shell.windowdecor.FloatingPinchRotation
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -45,6 +46,7 @@ class FloatingMiniController(
         val animator = animators()
         var expanded = false
         var progress = 0f
+        var ending = false
     }
     private val pinches = mutableMapOf<FloatingMiniState.Key, Pinch>()
     private val pendingResize = mutableMapOf<FloatingMiniState.Key, Pair<Int, Int>>()
@@ -53,6 +55,7 @@ class FloatingMiniController(
     private val animations = mutableMapOf<FloatingMiniState.Key, Operation>()
     private val leashes = mutableMapOf<Int, SurfaceControl>()
     private val dragFrames = mutableMapOf<FloatingMiniState.Key, Frame>()
+    private val frames = mutableMapOf<FloatingMiniState.Key, Frame>()
     private var frameScheduled = false
     private val dragCallback = Choreographer.FrameCallback {
         frameScheduled = false
@@ -65,13 +68,19 @@ class FloatingMiniController(
         organizer.initialTasks.forEach { leashes[it.first.taskId] = it.second }
         organizer.addTaskAppearedListener(object : ShellTaskOrganizer.TaskAppearedListener {
             override fun onTaskAppeared(taskInfo: android.app.ActivityManager.RunningTaskInfo,
-                leash: SurfaceControl) { leashes[taskInfo.taskId] = leash }
+                leash: SurfaceControl) {
+                if (leashes[taskInfo.taskId] !== leash) {
+                    cancel(taskInfo, false)
+                    clearDrag(taskInfo)
+                }
+                leashes[taskInfo.taskId] = leash
+            }
         })
         organizer.addTaskVanishedListener(object : ShellTaskOrganizer.TaskVanishedListener {
             override fun onTaskVanished(taskInfo: android.app.ActivityManager.RunningTaskInfo) {
-                cancel(taskInfo)
-                clearDrag(taskInfo)
                 leashes.remove(taskInfo.taskId)
+                cancel(taskInfo, false)
+                clearDrag(taskInfo)
             }
         })
     }
@@ -81,28 +90,55 @@ class FloatingMiniController(
     private inner class Frame(task: TaskInfo) : AutoCloseable {
         val bounds = Rect()
         var pending = false
-        private val leash = leashes[task.taskId]
+        private val taskId = task.taskId
+        private val owner = key(task)
+        private val leash = leashes[taskId]
         private val width = task.configuration.windowConfiguration.bounds.width()
         private val height = task.configuration.windowConfiguration.bounds.height()
         val radius = displays.getDisplayContext(task.displayId)?.resources?.getDimension(
             com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius) ?: 0f
-        private val transaction = transactions()
+        private val transaction = run {
+            frames[owner]?.close()
+            transactions()
+        }
         private var closed = false
+        val active: Boolean get() = !closed && frames[owner] === this &&
+            leashes[taskId] === leash && leash?.isValid == true
+        val rotation = FloatingPinchRotation {
+            if (active) {
+                pending = true
+                if (!frameScheduled) {
+                    frameScheduled = true
+                    choreographer.postFrameCallback(dragCallback)
+                }
+            } else close()
+        }
+
+        init { frames[owner] = this }
 
         fun draw() {
-            val surface = leash?.takeIf { it.isValid } ?: return
-            if (closed || width <= 0 || height <= 0) return
+            if (closed) return
+            if (!active) {
+                close()
+                return
+            }
+            val surface = leash ?: return
+            if (width <= 0 || height <= 0 || bounds.isEmpty) return
             val sx = bounds.width().toFloat() / width
             val sy = bounds.height().toFloat() / height
-            transaction.setMatrix(surface, sx, 0f, 0f, sy)
-                .setPosition(surface, bounds.left.toFloat(), bounds.top.toFloat())
-                .setWindowCrop(surface, width, height)
+            FloatingPinchRotation.apply(transaction, surface, bounds, sx, sy, rotation.angle)
+            transaction.setWindowCrop(surface, width, height)
                 .setCornerRadius(surface, radius / min(sx, sy))
                 .setFrameTimeline(choreographer.vsyncId).apply()
         }
 
         override fun close() {
-            if (!closed) { closed = true; transaction.close() }
+            if (closed) return
+            closed = true
+            pending = false
+            rotation.cancel()
+            if (frames[owner] === this) frames.remove(owner)
+            transaction.close()
         }
     }
 
@@ -470,7 +506,7 @@ class FloatingMiniController(
         val layout = displays.getDisplayLayout(task.displayId) ?: return false
         val logical = Rect(task.configuration.windowConfiguration.bounds)
         if (span <= 0f || entry.bounds.isEmpty || logical.isEmpty || area.isEmpty ||
-            isAnimating(task)) return false
+            isAnimating(task) || leashes[task.taskId]?.isValid != true) return false
         clearDrag(task)
         val scale = minOf(entry.restore.scale, area.width().toFloat() / logical.width(),
             area.height().toFloat() / logical.height())
@@ -500,8 +536,12 @@ class FloatingMiniController(
         return true
     }
 
-    fun movePinch(task: TaskInfo, span: Float, x: Float, y: Float) {
+    @JvmOverloads
+    fun movePinch(task: TaskInfo, span: Float, x: Float, y: Float, angle: Float = 0f) {
         val pinch = pinches[key(task)] ?: return
+        if (!pinch.frame.active) { cancel(task, false); return }
+        if (pinch.ending) return
+        pinch.frame.rotation.update(angle)
         if (!pinch.expanded && span <= pinch.span + pinch.touchSlop) return
         FloatingWindowGeometry.pinch(pinch.reference, pinch.logical, pinch.stable,
             span / pinch.span, pinch.x, pinch.y, x, y, pinch.minWidth, pinch.minHeight,
@@ -514,6 +554,8 @@ class FloatingMiniController(
     }
 
     private fun drawPinch(pinch: Pinch) {
+        if (pinches[key(pinch.task)] !== pinch || dragFrames[key(pinch.task)] !== pinch.frame ||
+            !pinch.frame.active) return
         val p = pinch.progress
         val from = pinch.origin
         val to = pinch.result.visible
@@ -535,6 +577,16 @@ class FloatingMiniController(
 
     fun endPinch(task: TaskInfo, cancelled: Boolean) {
         val pinch = pinches[key(task)] ?: return
+        if (!pinch.frame.active) { cancel(task, false); return }
+        if (pinch.ending) return
+        pinch.ending = true
+        pinch.animator.cancel()
+        pinch.frame.rotation.reset { finishPinch(pinch, cancelled) }
+    }
+
+    private fun finishPinch(pinch: Pinch, cancelled: Boolean) {
+        val task = pinch.task
+        if (pinches[key(task)] !== pinch) return
         if (cancelled || !pinch.expanded) {
             cancel(task)
             return
@@ -555,17 +607,20 @@ class FloatingMiniController(
 
     fun isAnimating(task: TaskInfo) = animations.containsKey(key(task)) || pinches.containsKey(key(task))
 
-    fun cancel(task: TaskInfo) {
+    fun cancel(task: TaskInfo) { cancel(task, true) }
+
+    private fun cancel(task: TaskInfo, restoreSurface: Boolean) {
         pinches.remove(key(task))?.let { pinch ->
             pinch.animator.cancel()
+            pinch.frame.rotation.cancel()
             pinch.frame.bounds.set(pinch.origin)
-            pinch.frame.draw()
+            if (restoreSurface) pinch.frame.draw()
             state.get(task.userId, task.taskId)?.let {
                 it.bounds.set(pinch.origin)
                 it.scale = pinch.originScale
             }
             clearDrag(task)
-            if (organizer.getRunningTaskInfo(task.taskId)?.isFloatingWindow == true) {
+            if (restoreSurface && organizer.getRunningTaskInfo(task.taskId)?.isFloatingWindow == true) {
                 organizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, false)
                     .setFloatingWindowPresentation(task.token,
                         Point(pinch.origin.left, pinch.origin.top), pinch.originScale))
@@ -592,7 +647,10 @@ class FloatingMiniController(
     fun onTransitionReady(info: TransitionInfo, startT: SurfaceControl.Transaction,
         finishT: SurfaceControl.Transaction) {
         info.changes.forEach { change ->
-            change.taskInfo?.takeIf { pinches.containsKey(key(it)) }?.let(::cancel)
+            change.taskInfo?.let { task ->
+                if (pinches.containsKey(key(task))) cancel(task, false)
+                clearDrag(task)
+            }
         }
         info.changes.forEach { change ->
             val task = change.taskInfo ?: return@forEach
@@ -638,6 +696,11 @@ class FloatingMiniController(
     }
 
     fun onTaskInfoChanged(task: TaskInfo) {
+        if (!task.isFloatingWindow) {
+            cancel(task, false)
+            clearDrag(task)
+            return
+        }
         val entry = state.get(task.userId, task.taskId) ?: return
         if (isAnimating(task) || dragFrames.containsKey(key(task))) return
         val logical = task.configuration.windowConfiguration.bounds
@@ -768,6 +831,7 @@ class FloatingMiniController(
         animation.duration = 300
         animation.interpolator = Interpolators.FAST_OUT_SLOW_IN
         animation.addUpdateListener {
+            if (animations[key(task)] !== operation) return@addUpdateListener
             val p = it.animatedValue as Float
             val scale = fromScale + (toScale - fromScale) * p
             val left = (from.left + (to.left - from.left) * p).toInt()
@@ -784,9 +848,10 @@ class FloatingMiniController(
         animation.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationCancel(animation: Animator) { cancelled = true }
             override fun onAnimationEnd(animation: Animator) {
-                if (animations[key(task)] === operation) animations.remove(key(task))
+                val owned = animations[key(task)] === operation
+                if (owned) animations.remove(key(task))
                 frame.close()
-                if (!cancelled) complete(operation)
+                if (!cancelled && owned) complete(operation)
                 SurfaceFrameRate.setInteracting(operation, false)
             }
         })

@@ -470,9 +470,13 @@ public class DesktopModeTouchEventListener
     }
 
     public void moveFloatingHandlePinch(float span, float x, float y) {
+        moveFloatingHandlePinch(span, x, y, 0f);
+    }
+
+    public void moveFloatingHandlePinch(float span, float x, float y, float angle) {
         if (mDragPositioningCallback instanceof MultiDisplayVeiledResizeTaskPositioner) {
             ((MultiDisplayVeiledResizeTaskPositioner) mDragPositioningCallback)
-                    .moveFloatingHandlePinch(span, x, y);
+                    .moveFloatingHandlePinch(span, x, y, angle);
         }
     }
 

@@ -39,7 +39,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
 
     @org.junit.After
     fun clearInteractions() { active.forEach { it.controller.remove(it.task) } }
-    private inner class Harness {
+    private inner class Harness(val nextTransaction: SurfaceControl.Transaction? = null) {
         val organizer = mock<ShellTaskOrganizer>()
         val displays = mock<DisplayController>()
         val layout = mock<DisplayLayout>()
@@ -95,7 +95,7 @@ class FloatingMiniControllerTest : ShellTestCase() {
                 FloatingMiniState.Restore(normal, Rect(0, 0, 800, 1200), .75f),
                 task.presentationBounds, .45f)
             controller = FloatingMiniController(organizer, displays, state, choreographer,
-                { allocations++; transaction }, { animator }) { changes += it }
+                { if (allocations++ == 0) transaction else nextTransaction ?: transaction }, { animator }) { changes += it }
         }
 
         fun interrupt(mode: Int = TRANSIT_CHANGE): TransitionInfo.Change {
@@ -230,6 +230,88 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(requireNotNull(h.state.get(h.task.userId, h.task.taskId)).bounds)
             .isEqualTo(preview.bounds)
     }
+
+    @Test fun miniPinch_rendersTiltAndForcedCancelRestoresUprightMini() =
+        androidx.test.internal.runner.junit4.statement.UiThreadStatement.runOnUiThread {
+            val h = Harness()
+            val context = androidx.test.core.app.ApplicationProvider
+                .getApplicationContext<android.content.Context>()
+            whenever(h.displays.getDisplayContext(0)).thenReturn(context)
+            assertThat(h.controller.beginPinch(h.task, 300f, 400f, 500f)).isTrue()
+            h.controller.movePinch(h.task, 300f, 400f, 500f, 13f)
+            val frame = org.mockito.kotlin.argumentCaptor<Choreographer.FrameCallback>()
+            verify(h.choreographer).postFrameCallback(frame.capture())
+            frame.firstValue.doFrame(0)
+            val c = kotlin.math.cos(Math.toRadians(13.0)).toFloat()
+            val s = kotlin.math.sin(Math.toRadians(13.0)).toFloat()
+            verify(h.transaction).setMatrix(h.leash, .45f * c, .45f * s, -.45f * s, .45f * c)
+            h.controller.cancel(h.task)
+            verify(h.transaction).setMatrix(h.leash, .45f, 0f, 0f, .45f)
+            assertThat(h.state.get(h.task.userId, h.task.taskId)!!.bounds)
+                .isEqualTo(Rect(8, 108, 368, 648))
+            assertThat(h.controller.isAnimating(h.task)).isFalse()
+        }
+
+    @Test fun miniPinch_oldResetCannotDrawOrFinishTheNextOwner() =
+        androidx.test.internal.runner.junit4.statement.UiThreadStatement.runOnUiThread {
+            val next = mock<SurfaceControl.Transaction>()
+            whenever(next.setMatrix(any(), any(), any(), any(), any())).thenReturn(next)
+            whenever(next.setPosition(any(), any(), any())).thenReturn(next)
+            whenever(next.setWindowCrop(any(), any<Int>(), any<Int>())).thenReturn(next)
+            whenever(next.setCornerRadius(any(), any())).thenReturn(next)
+            whenever(next.setFrameTimeline(any())).thenReturn(next)
+            val h = Harness(next)
+            val context = androidx.test.core.app.ApplicationProvider
+                .getApplicationContext<android.content.Context>()
+            whenever(h.displays.getDisplayContext(0)).thenReturn(context)
+            assertThat(h.controller.beginPinch(h.task, 300f, 400f, 500f)).isTrue()
+            h.controller.movePinch(h.task, 300f, 400f, 500f, 13f)
+            val frames = h.controller.javaClass.getDeclaredField("dragFrames")
+                .apply { isAccessible = true }.get(h.controller) as Map<*, *>
+            val frame = frames.values.single()!!
+            val rotation = frame.javaClass.getDeclaredField("rotation").apply { isAccessible = true }
+                .get(frame) as com.android.wm.shell.windowdecor.FloatingPinchRotation
+            val animator = com.android.wm.shell.shared.animation.PhysicsAnimator.getInstance(rotation)
+            val start: () -> Unit = {}
+            animator.javaClass.getDeclaredField("startAction").apply { isAccessible = true }
+                .set(animator, start)
+            h.controller.endPinch(h.task, false)
+            @Suppress("UNCHECKED_CAST")
+            val end = (animator.javaClass.getDeclaredField("endActions").apply { isAccessible = true }
+                .get(animator) as List<() -> Unit>).last()
+            h.interrupt()
+            verify(h.transaction).close()
+            assertThat(h.controller.beginPinch(h.task, 300f, 400f, 500f)).isTrue()
+            h.controller.movePinch(h.task, 300f, 400f, 500f, -13f)
+            clearInvocations(h.transaction, next, h.organizer, h.choreographer)
+            end()
+            frame.javaClass.getDeclaredMethod("draw").apply { isAccessible = true }.invoke(frame)
+            verify(h.transaction, never()).apply()
+            verify(next, never()).apply()
+            verify(h.organizer, never()).applyTransaction(any())
+            verify(h.choreographer, never()).postFrameCallback(any())
+            assertThat(h.controller.isAnimating(h.task)).isTrue()
+        }
+
+    @Test fun miniPinch_releasedSurfaceDropsPendingFrameAndReset() =
+        androidx.test.internal.runner.junit4.statement.UiThreadStatement.runOnUiThread {
+            val h = Harness()
+            val context = androidx.test.core.app.ApplicationProvider
+                .getApplicationContext<android.content.Context>()
+            whenever(h.displays.getDisplayContext(0)).thenReturn(context)
+            assertThat(h.controller.beginPinch(h.task, 300f, 400f, 500f)).isTrue()
+            h.controller.movePinch(h.task, 300f, 400f, 500f, 13f)
+            val callback = argumentCaptor<Choreographer.FrameCallback>()
+            verify(h.choreographer).postFrameCallback(callback.capture())
+            whenever(h.leash.isValid).thenReturn(false)
+            clearInvocations(h.transaction)
+            callback.firstValue.doFrame(0)
+            verify(h.transaction, never()).apply()
+            verify(h.transaction).close()
+            h.controller.endPinch(h.task, false)
+            assertThat(h.controller.isAnimating(h.task)).isFalse()
+            verify(h.transaction, never()).apply()
+        }
 
     @Test fun miniFling_eachCornerPreservesMiniSizeScaleAndRestoreState() {
         for (corner in FloatingMiniState.Corner.values()) {

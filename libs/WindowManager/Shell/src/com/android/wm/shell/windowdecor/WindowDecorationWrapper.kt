@@ -115,8 +115,9 @@ private constructor(
         canPinchFloatingWindow() &&
             floatingTouchListener?.startFloatingWindowPinch(event, span, x, y) == true
 
-    fun moveFloatingPinch(span: Float, x: Float, y: Float) {
-        floatingTouchListener?.moveFloatingHandlePinch(span, x, y)
+    @JvmOverloads
+    fun moveFloatingPinch(span: Float, x: Float, y: Float, angle: Float = 0f) {
+        floatingTouchListener?.moveFloatingHandlePinch(span, x, y, angle)
     }
 
     fun endFloatingPinch(cancelled: Boolean) {

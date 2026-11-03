@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.android.wm.shell.windowdecor
 
+import android.graphics.PointF
 import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.SurfaceControl
 import androidx.dynamicanimation.animation.FloatPropertyCompat
 import androidx.dynamicanimation.animation.SpringForce
+import com.android.wm.shell.common.pip.PipPinchResizingAlgorithm
 import com.android.wm.shell.shared.animation.PhysicsAnimator
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -15,7 +17,13 @@ import kotlin.math.sin
 class FloatingHandlePinch(private val oppositeHandlesOnly: Boolean = true) {
     data class Pointer(val id: Int, val x: Float, val y: Float, val handle: Int)
     enum class Kind { START, MOVE, FINISH, CANCEL, CONSUME }
-    data class Change(val kind: Kind, val span: Float = 0f, val x: Float = 0f, val y: Float = 0f)
+    data class Change @JvmOverloads constructor(val kind: Kind, val span: Float = 0f, val x: Float = 0f, val y: Float = 0f,
+        val angle: Float = 0f)
+    private val algorithm = PipPinchResizingAlgorithm()
+    private val downFirst = PointF()
+    private val downSecond = PointF()
+    private val currentFirst = PointF()
+    private val currentSecond = PointF()
 
     private var firstId = -1
     private var secondId = -1
@@ -80,9 +88,17 @@ class FloatingHandlePinch(private val oppositeHandlesOnly: Boolean = true) {
             else Change(Kind.CONSUME)
     }
 
-    private fun sample(kind: Kind, first: Pointer, second: Pointer) = Change(kind,
-        hypot(second.x - first.x, second.y - first.y),
-        (first.x + second.x) / 2f, (first.y + second.y) / 2f)
+    private fun sample(kind: Kind, first: Pointer, second: Pointer): Change {
+        if (kind == Kind.START) {
+            downFirst.set(first.x, first.y)
+            downSecond.set(second.x, second.y)
+        }
+        currentFirst.set(first.x, first.y)
+        currentSecond.set(second.x, second.y)
+        return Change(kind, hypot(second.x - first.x, second.y - first.y),
+            (first.x + second.x) / 2f, (first.y + second.y) / 2f,
+            algorithm.calculateAngle(downFirst, downSecond, currentFirst, currentSecond))
+    }
 }
 
 class FloatingPinchRotation(private val onUpdate: () -> Unit) {
@@ -90,25 +106,42 @@ class FloatingPinchRotation(private val onUpdate: () -> Unit) {
     private var units = 0f
     val angle: Float get() = units / 100f
     private val animator = PhysicsAnimator.getInstance(this)
+    private var generation = 0L
+    private var resetFinish: (() -> Unit)? = null
+
+    private fun cancelAnimation() {
+        generation++
+        resetFinish = null
+        animator.cancel()
+    }
 
     fun update(angle: Float) {
-        animator.cancel()
+        cancelAnimation()
         units = angle * 100f
         onUpdate()
     }
 
     fun reset(finish: () -> Unit) {
-        animator.cancel()
+        cancelAnimation()
         if (units == 0f) { finish(); return }
+        val current = generation
+        resetFinish = finish
         animator.spring(ROTATION, 0f,
             PhysicsAnimator.SpringConfig(700f, SpringForce.DAMPING_RATIO_NO_BOUNCY))
-            .addUpdateListener { _, _ -> onUpdate() }
-            .withEndActions(Runnable { units = 0f; onUpdate(); finish() })
+            .addUpdateListener { _, _ -> if (current == generation) onUpdate() }
+            .withEndActions(Runnable {
+                if (current != generation) return@Runnable
+                val action = resetFinish ?: return@Runnable
+                resetFinish = null
+                units = 0f
+                onUpdate()
+                if (current == generation) action()
+            })
             .start()
     }
 
     fun cancel() {
-        animator.cancel()
+        cancelAnimation()
         units = 0f
     }
 

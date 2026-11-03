@@ -1723,6 +1723,49 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         }, eq(taskPositioner))
     }
 
+    @Test fun floatingHandlePinch_rendersTiltAndCancelsItForRotation() = runOnUiThread {
+        beginFloatingMove()
+        whenever(mockSurfaceControl.isValid).thenReturn(true)
+        taskPositioner.startFloatingHandlePinch(DISPLAY_ID_0, 800f, 400f, 550f)
+        taskPositioner.moveFloatingHandlePinch(800f, 400f, 550f, 13f)
+        taskPositioner.flushFloatingResizePreview()
+        verify(mockWindowDecoration).setFloatingWindowMovePreview(any(), any(), eq(13f))
+        verify(mockTransaction).setMatrix(eq(mockSurfaceControl), any<Float>(),
+            org.mockito.kotlin.argThat { this > 0f },
+            org.mockito.kotlin.argThat { this < 0f }, any())
+        taskPositioner.onDisplayConfigurationChanged(DISPLAY_ID_0, Configuration())
+        verify(mockWindowDecoration).cancelFloatingWindowPreview(mockTransaction)
+        Assert.assertFalse(taskPositioner.isFloatingPinchActive())
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+    }
+
+    @Test fun floatingHandlePinch_oldResetCannotFinishTheNextPinch() = runOnUiThread {
+        beginFloatingMove()
+        taskPositioner.startFloatingHandlePinch(DISPLAY_ID_0, 800f, 400f, 550f)
+        taskPositioner.moveFloatingHandlePinch(900f, 400f, 550f, 13f)
+        taskPositioner.flushFloatingResizePreview()
+        val rotation = taskPositioner.javaClass.getDeclaredField("floatingPinchRotation")
+            .apply { isAccessible = true }.get(taskPositioner) as FloatingPinchRotation
+        val animator = com.android.wm.shell.shared.animation.PhysicsAnimator.getInstance(rotation)
+        val start: () -> Unit = {}
+        animator.javaClass.getDeclaredField("startAction").apply { isAccessible = true }
+            .set(animator, start)
+        taskPositioner.endFloatingHandlePinch(false)
+        @Suppress("UNCHECKED_CAST")
+        val end = (animator.javaClass.getDeclaredField("endActions").apply { isAccessible = true }
+            .get(animator) as List<() -> Unit>).last()
+        taskPositioner.onDisplayConfigurationChanged(DISPLAY_ID_0, Configuration())
+        verify(mockTransaction).close()
+        taskPositioner.startFloatingHandlePinch(DISPLAY_ID_0, 800f, 400f, 550f)
+        taskPositioner.moveFloatingHandlePinch(1000f, 400f, 550f, -13f)
+        org.mockito.Mockito.clearInvocations(mockTransaction, mockShellTaskOrganizer, mockTransitions)
+        end()
+        verify(mockTransaction, never()).apply()
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        verify(mockTransitions, never()).startTransition(any(), any(), any())
+        Assert.assertTrue(taskPositioner.isFloatingPinchActive())
+    }
+
     @Test fun floatingHandlePinch_keepsLiveDragPositionAtHandoff() = runOnUiThread {
         beginFloatingMove()
         taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 450f, 550f)

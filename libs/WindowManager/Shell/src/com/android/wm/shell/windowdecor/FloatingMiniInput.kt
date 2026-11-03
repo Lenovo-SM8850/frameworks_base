@@ -193,11 +193,11 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                                 pinching = controller.beginMiniPinch(current, change.span, change.x, change.y)
                             }
                             FloatingHandlePinch.Kind.MOVE -> if (pinching) {
-                                controller.moveMiniPinch(current, change.span, change.x, change.y)
+                                controller.moveMiniPinch(current, change.span, change.x, change.y, change.angle)
                             }
                             FloatingHandlePinch.Kind.FINISH -> if (pinching) {
                                 pinching = false
-                                controller.moveMiniPinch(current, change.span, change.x, change.y)
+                                controller.moveMiniPinch(current, change.span, change.x, change.y, change.angle)
                                 controller.endMiniPinch(current, false)
                             }
                             FloatingHandlePinch.Kind.CANCEL -> if (pinching) {

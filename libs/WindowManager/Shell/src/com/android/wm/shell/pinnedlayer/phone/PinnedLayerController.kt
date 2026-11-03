@@ -146,8 +146,9 @@ class PinnedLayerController(
     fun beginMiniPinch(task: TaskInfo, span: Float, x: Float, y: Float): Boolean =
         !keyguardShowing && !recentsRunning && !overviewShowing &&
             miniInteractions?.beginPinch(task, span, x, y) == true
-    fun moveMiniPinch(task: TaskInfo, span: Float, x: Float, y: Float) {
-        miniInteractions?.movePinch(task, span, x, y)
+    @JvmOverloads
+    fun moveMiniPinch(task: TaskInfo, span: Float, x: Float, y: Float, angle: Float = 0f) {
+        miniInteractions?.movePinch(task, span, x, y, angle)
     }
     fun endMiniPinch(task: TaskInfo, cancelled: Boolean) {
         miniInteractions?.endPinch(task, cancelled)
