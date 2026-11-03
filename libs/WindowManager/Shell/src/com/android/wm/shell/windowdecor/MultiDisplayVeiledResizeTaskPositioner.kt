@@ -115,6 +115,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var floatingDismissDownTime = 0L
     private var floatingDismissPending = false
     private var floatingPinchSpan = 0f
+    private var floatingPinchTilted = false
+    private var floatingAppliedAngle = Float.NaN
     private val floatingPinchCenter = PointF()
     private var floatingMinimumScale = .5f
     private var floatingMinimumVisibleSize = 0
@@ -148,6 +150,13 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (floatingMovePending) flushFloatingMove() else flushFloatingResizePreview()
     }
     private var closing = false
+    private val floatingPinchRotation = FloatingPinchRotation {
+        if (floatingDragActive && floatingPreviewActive && !floatingFramePending &&
+            !floatingDragCancelled && !closing) {
+            floatingFramePending = true
+            Choreographer.getInstance().postFrameCallback(floatingFrameCallback)
+        }
+    }
     private var floatingResize: FloatingWindowGeometry.ScaledResize? = null
     private val displayIds = mutableSetOf<Int>()
     private var hasMovedTaskSurfaceOffScreen = false
@@ -193,8 +202,13 @@ class MultiDisplayVeiledResizeTaskPositioner(
         y: Float,
         inputMethodType: Int,
     ): Rect {
+        if (floatingPinchTilted && floatingDragActive) cancelFloatingDragForTransition()
         floatingDismissTarget?.cancel()
+        floatingPinchRotation.cancel()
+        floatingPinchTilted = false
         cancelFloatingFrame()
+        floatingPreviewTransaction?.close()
+        floatingPreviewTransaction = null
         windowDecoration.finishFloatingWindowMovePreview()
         floatingDismissPending = false
         miniPreview.close()
@@ -236,6 +250,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
         lastFloatingX = Float.NaN
         lastFloatingY = Float.NaN
         floatingAppliedScale = Float.NaN
+        floatingAppliedAngle = Float.NaN
         taskBoundsAtDragStart.set(task.presentationBounds)
         if (task.isFloatingWindow) {
             if (!floatingObserverRegistered) {
@@ -798,8 +813,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
         lastFloatingY = y
     }
 
-    fun moveFloatingHandlePinch(span: Float, x: Float, y: Float) {
+    @JvmOverloads
+    fun moveFloatingHandlePinch(span: Float, x: Float, y: Float, angle: Float = 0f) {
         if (!floatingDragActive || floatingDragCancelled || floatingPinchSpan <= 0f) return
+        floatingPinchTilted = floatingPinchTilted || angle != 0f
+        floatingPinchRotation.update(angle)
         val result = FloatingWindowGeometry.pinch(taskBoundsAtDragStart, floatingLogicalBounds,
             stableBounds, span / floatingPinchSpan, floatingPinchCenter.x, floatingPinchCenter.y,
             x, y, floatingMinWidth, floatingMinHeight, floatingMinimumScale,
@@ -810,8 +828,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
     fun endFloatingHandlePinch(cancelled: Boolean) {
         if (floatingPinchSpan <= 0f) return
         floatingPinchSpan = 0f
-        if (cancelled || floatingDragCancelled) onDragPositioningCancel()
-        else endFloatingResize(lastFloatingX, lastFloatingY)
+        floatingPinchRotation.reset {
+            if (cancelled || floatingDragCancelled) onDragPositioningCancel()
+            else endFloatingResize(lastFloatingX, lastFloatingY)
+        }
     }
 
     private fun moveFloatingResize(x: Float, y: Float): Rect {
@@ -867,14 +887,22 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (floatingDragCancelled || closing || !windowDecoration.taskSurface.isValid) return
         if (floatingAppliedBounds == floatingPreviewBounds &&
             floatingAppliedScale == floatingPreviewScale &&
-            floatingAppliedVeiled == floatingPreviewVeiled) return
+            floatingAppliedVeiled == floatingPreviewVeiled &&
+            floatingAppliedAngle == floatingPinchRotation.angle) return
         floatingAppliedBounds.set(floatingPreviewBounds)
         floatingAppliedScale = floatingPreviewScale
         floatingAppliedVeiled = floatingPreviewVeiled
+        floatingAppliedAngle = floatingPinchRotation.angle
         val t = floatingPreviewTransaction ?: transactionSupplier().also {
             floatingPreviewTransaction = it
         }
         windowDecoration.updateFloatingWindowPreview(floatingPreviewBounds, floatingPreviewScale, t)
+        if (floatingPinchTilted) {
+            windowDecoration.setFloatingWindowMovePreview(floatingPreviewBounds, floatingPreviewScale,
+                floatingPinchRotation.angle)
+            FloatingPinchRotation.apply(t, windowDecoration.taskSurface, floatingPreviewBounds,
+                floatingPreviewScale, floatingPreviewScale, floatingPinchRotation.angle)
+        }
         t.setFrameTimeline(Choreographer.getInstance().vsyncId).apply()
         if (floatingPreviewVeiled) {
             if (!isResizingOrAnimatingResize) {
@@ -935,6 +963,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun stopFloatingObserver() {
+        floatingPinchRotation.cancel()
+        cancelFloatingFrame()
+        floatingPreviewTransaction?.close()
+        floatingPreviewTransaction = null
         allowFloatingFeedback = false
         miniPreviewCancelled = true
         miniPreview.close()
@@ -950,6 +982,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun cancelFloatingDragForTransition() {
+        floatingPinchRotation.cancel()
         floatingDismissTarget?.cancel()
         floatingDismissPending = false
         floatingPinchSpan = 0f

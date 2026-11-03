@@ -99,9 +99,9 @@ class FloatingWindowPinchInput(context: Context, handler: Handler,
                     pinch.cancel()
                 }
             }
-            FloatingHandlePinch.Kind.MOVE -> target.moveFloatingPinch(change.span, change.x, change.y)
+            FloatingHandlePinch.Kind.MOVE -> target.moveFloatingPinch(change.span, change.x, change.y, change.angle)
             FloatingHandlePinch.Kind.FINISH -> {
-                target.moveFloatingPinch(change.span, change.x, change.y)
+                target.moveFloatingPinch(change.span, change.x, change.y, change.angle)
                 target.endFloatingPinch(false)
             }
             FloatingHandlePinch.Kind.CANCEL -> target.endFloatingPinch(true)

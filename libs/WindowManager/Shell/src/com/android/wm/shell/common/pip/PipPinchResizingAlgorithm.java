@@ -62,7 +62,12 @@ public class PipPinchResizingAlgorithm {
         resizeBoundsOut.offset((int) (mTmpLastCentroid.x - mTmpDownCentroid.x),
                 (int) (mTmpLastCentroid.y - mTmpDownCentroid.y));
 
-        // Calculate the angle
+        return calculateAngle(downPoint, downSecondPoint, lastPoint, lastSecondPoint);
+    }
+
+    /** Returns the damped pinch angle without changing resize bounds. */
+    public float calculateAngle(PointF downPoint, PointF downSecondPoint,
+            PointF lastPoint, PointF lastSecondPoint) {
         mTmpDownVector.set(downSecondPoint.x - downPoint.x,
                 downSecondPoint.y - downPoint.y);
         mTmpLastVector.set(lastSecondPoint.x - lastPoint.x,
