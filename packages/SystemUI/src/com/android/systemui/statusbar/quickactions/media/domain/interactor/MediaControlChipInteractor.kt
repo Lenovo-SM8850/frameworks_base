@@ -62,6 +62,7 @@ import com.android.systemui.plugins.FalsingManager
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.NotificationLockscreenUserManager
 import com.android.systemui.statusbar.chips.StatusBarChipsLog
+import com.android.systemui.statusbar.policy.ConfigurationController
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaOutputSwitcherAction
@@ -125,6 +126,7 @@ constructor(
     private val activityIntentHelper: ActivityIntentHelper,
     private val lockscreenUserManager: NotificationLockscreenUserManager,
     private val keyguardStateController: KeyguardStateController,
+    private val configurationController: ConfigurationController,
     private val activityManagerRepository: ActivityManagerRepository,
     @StatusBarChipsLog private val logBuffer: LogBuffer,
 ) {
@@ -231,6 +233,22 @@ constructor(
         trySend(read())
         awaitClose { context.contentResolver.unregisterContentObserver(observer) }
     }
+
+    /** The system language, which decides the language of the lyrics. */
+    private val systemLanguage: Flow<String> =
+        callbackFlow {
+                fun read() = context.resources.configuration.locales[0].language
+                val listener =
+                    object : ConfigurationController.ConfigurationListener {
+                        override fun onLocaleListChanged() {
+                            trySend(read())
+                        }
+                    }
+                configurationController.addCallback(listener)
+                trySend(read())
+                awaitClose { configurationController.removeCallback(listener) }
+            }
+            .distinctUntilChanged()
 
     private val baseMediaControlChipModel: Flow<MediaControlChipModel?> =
         combine(
@@ -403,7 +421,8 @@ constructor(
                         true,
                     ),
                     statusBarLyricsEnabled,
-                ) { state, playbackInfo, lyricsEnabled, statusBarLyrics ->
+                    systemLanguage,
+                ) { state, playbackInfo, lyricsEnabled, statusBarLyrics, language ->
                     val model = state.model
                     // The title, artist and length come from the one metadata snapshot of the
                     // player, so they always belong to the same song.
@@ -423,6 +442,7 @@ constructor(
                             artist = cleanArtistName(artist),
                             song = cleanSongTitle(song),
                             durationSec = (durationMs / 1000L).takeIf { it > 0L },
+                            language = language,
                         )
                     } else {
                         null
@@ -468,7 +488,13 @@ constructor(
         return artist.split(splitRegex)[0].trim()
     }
 
-    private data class LyricsRequest(val artist: String, val song: String, val durationSec: Long?)
+    private data class LyricsRequest(
+        val artist: String,
+        val song: String,
+        val durationSec: Long?,
+        /** The system language, which the lyrics are looked up again for when it changes. */
+        val language: String,
+    )
 
     private class LyricsResult(val item: org.json.JSONObject?, val conclusive: Boolean)
 
@@ -528,7 +554,18 @@ constructor(
                         continue
                     }
                     val items = org.json.JSONArray(response.body.orEmpty())
-                    val item = pickLyrics(items, durationSec)
+                    // The length and synced rules pick first, and the language of the lyrics
+                    // decides between the results they rank equal.
+                    val ordered =
+                        runCatching {
+                                LyricLanguagePolicy.order(
+                                    context, items, request.song, request.artist, request.language,
+                                    durationSec, LYRICS_DURATION_TOLERANCE_S,
+                                    ::cleanSongTitle, ::cleanArtistName,
+                                )
+                            }
+                            .getOrDefault(items)
+                    val item = pickLyrics(ordered, durationSec)
                     if (item != null &&
                         (exactFallback == null || item.lyric("syncedLyrics").isNotBlank())
                     ) {

@@ -44,6 +44,7 @@ import com.android.systemui.media.remedia.data.repository.mediaRepository
 import com.android.systemui.media.remedia.shared.flag.MediaControlsInComposeFlag
 import com.android.systemui.plugins.activityStarter
 import com.android.systemui.statusbar.notificationLockscreenUserManager
+import com.android.systemui.statusbar.policy.configurationController
 import com.android.systemui.statusbar.policy.keyguardStateController
 import com.android.systemui.statusbar.quickactions.media.domain.interactor.MediaControlChipInteractor
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
@@ -76,6 +77,7 @@ class MediaControlChipViewModelTest(flags: FlagsParameterization) : SysuiTestCas
                 activityIntentHelper = activityIntentHelper,
                 lockscreenUserManager = notificationLockscreenUserManager,
                 keyguardStateController = keyguardStateController,
+                configurationController = configurationController,
                 activityManagerRepository = activityManagerRepository,
                 logBuffer = logcatLogBuffer("MediaControlChipTest"),
             )

@@ -27,6 +27,7 @@ import com.android.systemui.media.mediaOutputDialogManager
 import com.android.systemui.media.remedia.data.repository.mediaRepository
 import com.android.systemui.plugins.activityStarter
 import com.android.systemui.statusbar.notificationLockscreenUserManager
+import com.android.systemui.statusbar.policy.configurationController
 import com.android.systemui.statusbar.policy.keyguardStateController
 
 val Kosmos.mediaControlChipInteractor: MediaControlChipInteractor by
@@ -41,6 +42,7 @@ val Kosmos.mediaControlChipInteractor: MediaControlChipInteractor by
             activityIntentHelper = activityIntentHelper,
             lockscreenUserManager = notificationLockscreenUserManager,
             keyguardStateController = keyguardStateController,
+            configurationController = configurationController,
             activityManagerRepository = activityManagerRepository,
             logBuffer = logcatLogBuffer("MediaControlChipInteractorKosmos"),
         )
