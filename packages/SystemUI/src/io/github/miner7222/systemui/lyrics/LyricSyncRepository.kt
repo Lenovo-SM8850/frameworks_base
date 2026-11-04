@@ -99,7 +99,7 @@ constructor(
     private val wakeReceiver =
         object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                update()
+                if (intent.action == Intent.ACTION_LOCALE_CHANGED) metadataChanged() else update()
             }
         }
     private val userCallback =
@@ -186,6 +186,7 @@ constructor(
                     IntentFilter().apply {
                         addAction(Intent.ACTION_SCREEN_ON)
                         addAction(Intent.ACTION_USER_PRESENT)
+                        addAction(Intent.ACTION_LOCALE_CHANGED)
                     },
                     Executor { main.post(it) },
                     UserHandle.ALL,
@@ -299,6 +300,7 @@ constructor(
                     artist,
                     metadata.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty(),
                     metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).coerceAtLeast(0),
+                    context.resources.configuration.locales[0].language,
                 )
         if (next == track) {
             update()
@@ -561,12 +563,34 @@ constructor(
         val artist: String,
         val album: String,
         val durationMs: Long,
+        val language: String,
     )
 
     private data class Lookup(val record: LyricRecord?)
 
     private suspend fun lookup(track: Track): Lookup {
         fun encode(value: String) = URLEncoder.encode(value, "UTF-8")
+        val systemLanguage = track.language
+        val classifier = runCatching {
+            context.getSystemService(android.view.textclassifier.TextClassificationManager::class.java)?.textClassifier
+        }.getOrNull()
+        val languages = mutableMapOf<String, String?>()
+        fun language(text: String): String? {
+            if (text.isBlank()) return null
+            if (languages.containsKey(text)) return languages[text]
+            val detected = LyricLanguagePolicy.scriptLanguage(text) ?: runCatching {
+                val result = classifier?.detectLanguage(
+                    android.view.textclassifier.TextLanguage.Request.Builder(text).build()
+                )
+                if (result != null && result.localeHypothesisCount > 0) {
+                    val locale = result.getLocale(0)
+                    locale.language.takeIf { result.getConfidenceScore(locale) >= 0.75f }
+                } else null
+            }.getOrNull()
+            languages[text] = detected
+            return detected
+        }
+        val records = mutableListOf<LyricRecord>()
         if (track.durationMs > 0) {
             val query =
                 "track_name=${encode(track.title)}&artist_name=${encode(track.artist)}" +
@@ -574,12 +598,9 @@ constructor(
             try {
                 request("get?$query")?.let { response ->
                     val exact = toRecord(JSONObject(response))
-                    if (
-                        kotlin.math.abs(exact.durationMs - track.durationMs) <= 2000 &&
-                            !exact.synced.isNullOrBlank()
-                    ) {
-                        return Lookup(exact)
-                    }
+                    if (kotlin.math.abs(exact.durationMs - track.durationMs) <= 2000 &&
+                        !exact.synced.isNullOrBlank()
+                    ) records += exact
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -589,10 +610,46 @@ constructor(
         }
         val title = LyricLookup.title(track.title, track.durationMs)
         val query = encode("${LyricLookup.artist(track.artist)} $title")
-        val response = request("search?q=$query") ?: error("Lyrics unavailable")
-        val array = JSONArray(response)
-        val results = (0 until array.length()).map { toRecord(array.getJSONObject(it)) }
-        return Lookup(LyricLookup.choose(results, track.durationMs))
+        val response = try {
+            request("search?q=$query")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (records.isEmpty()) throw failure else null
+        }
+        if (response == null && records.isEmpty()) error("Lyrics unavailable")
+        if (response != null) {
+            try {
+                val array = JSONArray(response)
+                records += (0 until array.length()).mapNotNull {
+                    val candidate = array.getJSONObject(it)
+                    val record = toRecord(candidate)
+                    record.takeIf {
+                        LyricLanguagePolicy.matchesTrack(
+                            track.title, track.artist, track.durationMs,
+                            candidate.optString("trackName"), candidate.optString("artistName"),
+                            record.durationMs,
+                        )
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (records.isEmpty()) throw failure
+            }
+        }
+        val original = LyricLanguagePolicy.original(records, track.title, ::language, track.artist, track.album)
+        val ranked = records.sortedBy { LyricLanguagePolicy.rank(it, original, systemLanguage, ::language) }
+        val selected = ranked.mapNotNull { raw ->
+            LyricLanguagePolicy.select(raw, original, systemLanguage, ::language)?.let {
+                LyricLanguagePolicy.rank(raw, original, systemLanguage, ::language) to it
+            }
+        }
+        // Keep the existing duration selector within each language tier.
+        val groups = selected.groupBy({ it.first }, { it.second })
+        return Lookup(groups.toSortedMap().values.firstNotNullOfOrNull {
+            LyricLookup.choose(it, track.durationMs)
+        })
     }
 
     private fun toRecord(json: JSONObject) =
@@ -603,6 +660,7 @@ constructor(
             else json.optString("syncedLyrics").takeIf { it.isNotBlank() },
             if (json.isNull("plainLyrics")) null
             else json.optString("plainLyrics").takeIf { it.isNotBlank() },
+            listOf("trackName", "artistName", "albumName").joinToString("\n") { json.optString(it) },
         )
 
     private suspend fun request(path: String): String? {

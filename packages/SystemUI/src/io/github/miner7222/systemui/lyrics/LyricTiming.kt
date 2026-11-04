@@ -115,6 +115,7 @@ data class LyricRecord(
     val durationMs: Long,
     val synced: String?,
     val plain: String?,
+    val metadata: String = "",
 )
 
 object LyricLookup {
