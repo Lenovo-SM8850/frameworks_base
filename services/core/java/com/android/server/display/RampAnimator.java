@@ -32,7 +32,7 @@ import com.android.internal.display.BrightnessUtils;
  * A custom animator that progressively updates a property value at
  * a given variable rate until it reaches a particular target value.
  * The ramping at the given rate is done in the perceptual space using
- * the HLG transfer functions.
+ * the HLG transfer functions, or optionally in linear brightness space.
  */
 class RampAnimator<T> {
     private final T mObject;
@@ -40,15 +40,16 @@ class RampAnimator<T> {
 
     private final Clock mClock;
 
-    // current brightness in HLG space
+    // Current brightness in the selected ramp space
     private float mCurrentValue;
 
-    // target in HLG space
-    private float mTargetHlgValue;
+    // Target in the selected ramp space
+    private float mTargetValue;
 
     // target in linear space
     private float mTargetLinearValue;
     private float mRate;
+    private boolean mLinearSpace;
     private float mAnimationIncreaseMaxTimeSecs;
     private float mAnimationDecreaseMaxTimeSecs;
 
@@ -117,6 +118,13 @@ class RampAnimator<T> {
      */
     boolean setAnimationTarget(float targetLinear, float rate, boolean ignoreAnimationLimits,
             float luxDelta) {
+        return setAnimationTarget(targetLinear, rate, ignoreAnimationLimits, luxDelta,
+                /* linearSpace= */ false);
+    }
+
+    /** Sets the target with a rate measured in the selected brightness space. */
+    boolean setAnimationTarget(float targetLinear, float rate, boolean ignoreAnimationLimits,
+            float luxDelta, boolean linearSpace) {
         float maxIncreaseTimeSecs = 0;
         float maxDecreaseTimeSecs = 0;
         if (!ignoreAnimationLimits) {
@@ -131,21 +139,31 @@ class RampAnimator<T> {
                 maxDecreaseTimeSecs = mAnimationDecreaseMaxTimeSecs;
             }
         }
-        return setAnimationTarget(targetLinear, rate, maxIncreaseTimeSecs, maxDecreaseTimeSecs);
+        return setAnimationTarget(targetLinear, rate, maxIncreaseTimeSecs, maxDecreaseTimeSecs,
+                linearSpace);
     }
 
     private boolean setAnimationTarget(float targetLinear, float rate,
-            float maxIncreaseTimeSecs, float maxDecreaseTimeSecs) {
-        mCurrentRampGamma = targetLinear > BrightnessUtils.convertGammaToLinear(mCurrentValue)
+            float maxIncreaseTimeSecs, float maxDecreaseTimeSecs, boolean linearSpace) {
+        final boolean spaceChanged = mLinearSpace != linearSpace;
+        final float currentLinear = spaceChanged ? mProperty.get(mObject) : 0;
+        mCurrentRampGamma = targetLinear > (spaceChanged ? currentLinear
+                : BrightnessUtils.convertGammaToLinear(mCurrentValue))
                 ? mBrighteningRampGamma : mDarkeningRampGamma;
-        final float target;
-        // Convert the target from the linear into the HLG space.
-        if (!Float.isNaN(mCurrentRampGamma)) {
-            target = BrightnessUtils.convertLinearToGamma(
-                    (float) Math.pow(targetLinear, 1.0f / mCurrentRampGamma));
-        } else {
+        if (linearSpace) {
             mCurrentRampGamma = 1.0f;
-            target = BrightnessUtils.convertLinearToGamma(targetLinear);
+        }
+        final float target = convertLinearToRampSpace(targetLinear, linearSpace);
+
+        if (spaceChanged) {
+            // Rebase both endpoints without changing the displayed brightness or frame time.
+            mCurrentValue = convertLinearToRampSpace(currentLinear, linearSpace);
+            mAnimatedValue = mCurrentValue;
+            mTargetValue = convertLinearToRampSpace(mTargetLinearValue, linearSpace);
+            mLinearSpace = linearSpace;
+        }
+        if (Float.isNaN(mCurrentRampGamma)) {
+            mCurrentRampGamma = 1.0f;
         }
 
         // Immediately jump to the target the first time.
@@ -153,7 +171,7 @@ class RampAnimator<T> {
             if (mFirstTime || target != mCurrentValue) {
                 mFirstTime = false;
                 mRate = 0;
-                mTargetHlgValue = target;
+                mTargetValue = target;
                 mTargetLinearValue = targetLinear;
                 mCurrentValue = target;
                 setPropertyValue(target);
@@ -180,14 +198,15 @@ class RampAnimator<T> {
         // we will be ramping in a different direction to get there.
         // Otherwise, continue at the previous rate.
         if (!mAnimating
+                || spaceChanged
                 || rate > mRate
-                || (target <= mCurrentValue && mCurrentValue <= mTargetHlgValue)
-                || (mTargetHlgValue <= mCurrentValue && mCurrentValue <= target)) {
+                || (target <= mCurrentValue && mCurrentValue <= mTargetValue)
+                || (mTargetValue <= mCurrentValue && mCurrentValue <= target)) {
             mRate = rate;
         }
 
-        final boolean changed = (mTargetHlgValue != target);
-        mTargetHlgValue = target;
+        final boolean changed = (mTargetValue != target);
+        mTargetValue = target;
         mTargetLinearValue = targetLinear;
 
         // Start animating.
@@ -200,6 +219,16 @@ class RampAnimator<T> {
         return changed;
     }
 
+    private float convertLinearToRampSpace(float value, boolean linearSpace) {
+        if (linearSpace) {
+            return value;
+        }
+        if (!Float.isNaN(mCurrentRampGamma)) {
+            value = (float) Math.pow(value, 1.0f / mCurrentRampGamma);
+        }
+        return BrightnessUtils.convertLinearToGamma(value);
+    }
+
     /**
      * Returns true if the animation is running.
      */
@@ -208,10 +237,13 @@ class RampAnimator<T> {
     }
 
     /**
-     * Sets the brightness property by converting the given value from HLG space
-     * into linear space.
+     * Sets the brightness property by converting the selected ramp space into linear space.
      */
     private void setPropertyValue(float val) {
+        if (mLinearSpace) {
+            mProperty.setValue(mObject, val == mTargetValue ? mTargetLinearValue : val);
+            return;
+        }
         float newValue = BrightnessUtils.convertGammaToLinear(val);
         if (!Float.isNaN(mCurrentRampGamma)) {
             newValue = (float) Math.pow(newValue, mCurrentRampGamma);
@@ -219,7 +251,7 @@ class RampAnimator<T> {
 
         // To avoid linearVal inconsistency when converting to HLG and back to linear space
         // used original target linear value for final animation step
-        float linearVal = val == mTargetHlgValue ? mTargetLinearValue : newValue;
+        float linearVal = val == mTargetValue ? mTargetLinearValue : newValue;
         mProperty.setValue(mObject, linearVal);
     }
 
@@ -234,13 +266,13 @@ class RampAnimator<T> {
         final float scale = ValueAnimator.getDurationScale();
         if (scale == 0) {
             // Animation off.
-            mAnimatedValue = mTargetHlgValue;
+            mAnimatedValue = mTargetValue;
         } else {
             final float amount = timeDelta * mRate / scale;
-            if (mTargetHlgValue > mCurrentValue) {
-                mAnimatedValue = Math.min(mAnimatedValue + amount, mTargetHlgValue);
+            if (mTargetValue > mCurrentValue) {
+                mAnimatedValue = Math.min(mAnimatedValue + amount, mTargetValue);
             } else {
-                mAnimatedValue = Math.max(mAnimatedValue - amount, mTargetHlgValue);
+                mAnimatedValue = Math.max(mAnimatedValue - amount, mTargetValue);
             }
         }
         final float oldCurrentValue = mCurrentValue;
@@ -248,7 +280,7 @@ class RampAnimator<T> {
         if (oldCurrentValue != mCurrentValue) {
             setPropertyValue(mCurrentValue);
         }
-        if (mTargetHlgValue == mCurrentValue) {
+        if (mTargetValue == mCurrentValue) {
             mAnimating = false;
         }
     }
@@ -318,10 +350,17 @@ class RampAnimator<T> {
          */
         public boolean animateTo(float linearFirstTarget, float linearSecondTarget, float rate,
                 boolean ignoreAnimationLimits, float luxDelta) {
+            return animateTo(linearFirstTarget, linearSecondTarget, rate, ignoreAnimationLimits,
+                    luxDelta, /* linearSpace= */ false);
+        }
+
+        /** Starts both ramps with a rate measured in the selected brightness space. */
+        public boolean animateTo(float linearFirstTarget, float linearSecondTarget, float rate,
+                boolean ignoreAnimationLimits, float luxDelta, boolean linearSpace) {
             boolean animationTargetChanged = mFirst.setAnimationTarget(linearFirstTarget, rate,
-                    ignoreAnimationLimits, luxDelta);
+                    ignoreAnimationLimits, luxDelta, linearSpace);
             animationTargetChanged |= mSecond.setAnimationTarget(linearSecondTarget, rate,
-                    ignoreAnimationLimits, luxDelta);
+                    ignoreAnimationLimits, luxDelta, linearSpace);
             boolean shouldBeAnimating = isAnimating();
 
             if (shouldBeAnimating != mAwaitingCallback) {

@@ -8120,4 +8120,7 @@
          Enable only where the display stack independently enforces safe operation. -->
     <bool name="config_allowHbmWithoutTimeLimit">false</bool>
 
+    <!-- Use linear brightness ramps except for slow darkening. -->
+    <bool name="config_brightnessRampLinearSpace">false</bool>
+
 </resources>

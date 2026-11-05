@@ -17,11 +17,15 @@
 package com.android.server.display;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import android.util.FloatProperty;
 import android.util.Spline;
 
 import androidx.test.filters.SmallTest;
+
+import com.android.internal.display.BrightnessUtils;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -201,6 +205,202 @@ public class RampAnimatorTest {
         // new_linear = convertGammaToLinear(0.92621222569)^3 = 0.3006848446
         mRampAnimator.performNextAnimationStep(2_000_000_000);
         assertEquals(0.30068484f, mTestObject.mValue, 0.000001f);
+    }
+
+    @Test
+    public void testLinearIncreaseTiming() {
+        mRampAnimator.setAnimationTarget(0.3f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.5f, 0.19921569f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        assertEquals(0.39960785f, mTestObject.mValue, FLOAT_TOLERANCE);
+        mRampAnimator.performNextAnimationStep(1_000_000_000);
+        assertEquals(0.49921569f, mTestObject.mValue, FLOAT_TOLERANCE);
+        assertTrue(mRampAnimator.isAnimating());
+        mRampAnimator.performNextAnimationStep(1_004_000_000);
+        assertEquals(0.5f, mTestObject.mValue, 0);
+        assertFalse(mRampAnimator.isAnimating());
+    }
+
+    @Test
+    public void testHlgSlowDecreaseTiming() {
+        mRampAnimator.setAnimationTarget(0.5f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.3f, 0.024601705f, false, 0, false);
+        mRampAnimator.performNextAnimationStep(3_950_000_000L);
+        assertTrue(mTestObject.mValue > 0.3f);
+        assertTrue(mRampAnimator.isAnimating());
+        mRampAnimator.performNextAnimationStep(3_970_000_000L);
+        assertEquals(0.3f, mTestObject.mValue, 0);
+        assertFalse(mRampAnimator.isAnimating());
+    }
+
+    @Test
+    public void testLinearFastDecreaseTiming() {
+        mRampAnimator.setAnimationTarget(0.5f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.3f, 0.70472443f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(100_000_000);
+        assertEquals(0.42952755f, mTestObject.mValue, FLOAT_TOLERANCE);
+        mRampAnimator.performNextAnimationStep(284_000_000);
+        assertEquals(0.3f, mTestObject.mValue, 0);
+    }
+
+    @Test
+    public void testMidRampSpaceAndTargetSwitchContinuity() {
+        mRampAnimator.setAnimationTarget(0.3f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.8f, 0.2f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        float current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.2f, 0.024601705f, false, 0, false);
+        assertEquals(current, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(600_000_000);
+        float expected = BrightnessUtils.convertGammaToLinear(
+                BrightnessUtils.convertLinearToGamma(current) - 0.0024601705f);
+        assertEquals(expected, mTestObject.mValue, FLOAT_TOLERANCE);
+        current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.7f, 0.19921569f, false, 0, true);
+        assertEquals(current, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(700_000_000);
+        assertEquals(current + 0.019921569f, mTestObject.mValue, FLOAT_TOLERANCE);
+        current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.6f, 0.1f, false, 0, true);
+        assertEquals(current, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(800_000_000);
+        // Retargeting within the same space preserves the existing faster-rate policy.
+        assertEquals(current + 0.019921569f, mTestObject.mValue, FLOAT_TOLERANCE);
+    }
+
+    @Test
+    public void testSameTargetSpaceSwitchUsesNewRate() {
+        mRampAnimator.setAnimationTarget(0.3f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.8f, 0.2f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        float current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.8f, 0.01f, false, 0, false);
+        assertEquals(current, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(600_000_000);
+        assertEquals(BrightnessUtils.convertGammaToLinear(
+                BrightnessUtils.convertLinearToGamma(current) + 0.001f),
+                mTestObject.mValue, FLOAT_TOLERANCE);
+    }
+
+    @Test
+    public void testSpaceSwitchPreservesRampGamma() {
+        mRampAnimator.setRampGammaValues(2.0f, 3.0f);
+        mRampAnimator.setAnimationTarget(0.3f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.8f, 0.2f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        float current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.2f, 0.02f, false, 0, false);
+        assertEquals(current, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(600_000_000);
+        float expected = (float) Math.pow(BrightnessUtils.convertGammaToLinear(
+                BrightnessUtils.convertLinearToGamma((float) Math.pow(current, 1.0f / 3))
+                        - 0.002f), 3);
+        assertEquals(expected, mTestObject.mValue, 0.000001f);
+        current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.7f, 0.2f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(700_000_000);
+        assertEquals(current + 0.02f, mTestObject.mValue, FLOAT_TOLERANCE);
+    }
+
+    @Test
+    public void testLinearTimeLimits() {
+        long[] now = {0};
+        mRampAnimator = new RampAnimator<>(mTestObject, mTestProperty, () -> now[0]);
+        mRampAnimator.setAnimationTimeLimits(1000, 1000, null, null);
+        mRampAnimator.setAnimationTarget(0.3f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.5f, 0.01f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        assertEquals(0.4f, mTestObject.mValue, FLOAT_TOLERANCE);
+        mRampAnimator.performNextAnimationStep(1_000_000_000);
+        assertEquals(0.5f, mTestObject.mValue, 0);
+        now[0] = 1_000_000_000;
+        mRampAnimator.setAnimationTarget(0.3f, 0.01f, true, 0, true);
+        mRampAnimator.performNextAnimationStep(2_000_000_000);
+        assertEquals(0.49f, mTestObject.mValue, FLOAT_TOLERANCE);
+    }
+
+    @Test
+    public void testLinearSpaceDisabledMatchesHlg() {
+        TestObject legacyObject = new TestObject();
+        RampAnimator<TestObject> legacy = new RampAnimator<>(legacyObject, mTestProperty, () -> 0);
+        for (float target : new float[]{0.3f, 0.5f, 0.2f, 0.7f}) {
+            legacy.setAnimationTarget(target, 0.19921569f, false, 0);
+            mRampAnimator.setAnimationTarget(target, 0.19921569f, false, 0, false);
+            for (long time = 100_000_000; time <= 2_000_000_000; time += 100_000_000) {
+                legacy.performNextAnimationStep(time);
+                mRampAnimator.performNextAnimationStep(time);
+                assertEquals(legacyObject.mValue, mTestObject.mValue, 0);
+                assertEquals(legacy.isAnimating(), mRampAnimator.isAnimating());
+            }
+        }
+    }
+
+    @Test
+    public void testNaNGammaLinearToHlgMidRamp() {
+        mRampAnimator.setRampGammaValues(Float.NaN, Float.NaN);
+        mRampAnimator.setAnimationTarget(0.3f, 0, false, 0, true);
+        mRampAnimator.setAnimationTarget(0.7f, 0.2f, false, 0, true);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        float current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.2f, 0.024601705f, false, 0, false);
+        assertFalse(Float.isNaN(mTestObject.mValue));
+        assertEquals(current, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(600_000_000);
+        assertEquals(BrightnessUtils.convertGammaToLinear(
+                BrightnessUtils.convertLinearToGamma(current) - 0.0024601705f),
+                mTestObject.mValue, FLOAT_TOLERANCE);
+        mRampAnimator.performNextAnimationStep(20_000_000_000L);
+        assertEquals(0.2f, mTestObject.mValue, 0);
+        assertFalse(mRampAnimator.isAnimating());
+    }
+
+    @Test
+    public void testNaNGammaHlgToLinearMidRamp() {
+        mRampAnimator.setRampGammaValues(Float.NaN, Float.NaN);
+        mRampAnimator.setAnimationTarget(0.5f, 0, false, 0, false);
+        mRampAnimator.setAnimationTarget(0.2f, 0.024601705f, false, 0, false);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        float current = mTestObject.mValue;
+        mRampAnimator.setAnimationTarget(0.7f, 0.19921569f, false, 0, true);
+        assertFalse(Float.isNaN(mTestObject.mValue));
+        assertEquals(current, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(600_000_000);
+        assertEquals(current + 0.019921569f, mTestObject.mValue, FLOAT_TOLERANCE);
+        mRampAnimator.performNextAnimationStep(5_000_000_000L);
+        assertEquals(0.7f, mTestObject.mValue, 0);
+        assertFalse(mRampAnimator.isAnimating());
+    }
+
+    @Test
+    public void testNaNGammaLinearToHlgAtRest() {
+        mRampAnimator.setRampGammaValues(Float.NaN, Float.NaN);
+        mRampAnimator.setAnimationTarget(0.5f, 0, false, 0, true);
+        assertFalse(mRampAnimator.isAnimating());
+        mRampAnimator.setAnimationTarget(0.3f, 0.024601705f, false, 0, false);
+        assertFalse(Float.isNaN(mTestObject.mValue));
+        assertEquals(0.5f, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(1_000_000_000);
+        assertEquals(BrightnessUtils.convertGammaToLinear(
+                BrightnessUtils.convertLinearToGamma(0.5f) - 0.024601705f),
+                mTestObject.mValue, FLOAT_TOLERANCE);
+        mRampAnimator.performNextAnimationStep(4_000_000_000L);
+        assertEquals(0.3f, mTestObject.mValue, 0);
+        assertFalse(mRampAnimator.isAnimating());
+    }
+
+    @Test
+    public void testNaNGammaHlgToLinearAtRest() {
+        mRampAnimator.setRampGammaValues(Float.NaN, Float.NaN);
+        mRampAnimator.setAnimationTarget(0.3f, 0, false, 0, false);
+        assertFalse(mRampAnimator.isAnimating());
+        mRampAnimator.setAnimationTarget(0.5f, 0.19921569f, false, 0, true);
+        assertFalse(Float.isNaN(mTestObject.mValue));
+        assertEquals(0.3f, mTestObject.mValue, 0);
+        mRampAnimator.performNextAnimationStep(500_000_000);
+        assertEquals(0.39960785f, mTestObject.mValue, FLOAT_TOLERANCE);
+        mRampAnimator.performNextAnimationStep(1_004_000_000);
+        assertEquals(0.5f, mTestObject.mValue, 0);
+        assertFalse(mRampAnimator.isAnimating());
     }
 
     private static class TestObject {
