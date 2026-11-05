@@ -1,5 +1,6 @@
 package com.android.systemui.axdynamicbar.ui.compose
 
+import com.android.systemui.statusbar.quickactions.ui.compose.collapsedIslandTextStyle
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterExitState
@@ -260,7 +261,7 @@ private fun AlertPillContent(event: IslandEvent, contentColor: Color) {
             }
             Text(
                 text = n.appName ?: "",
-                style = PillPrimary,
+                style = collapsedIslandTextStyle(PillPrimary, NowBarHeight),
                 color = contentColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -298,7 +299,7 @@ private fun EventPillContent(
         contentKey = { textKeyFor(it) },
         label = "nowbar_text",
     ) { e ->
-        PillEventText(e, Modifier, overrideColor = contentColor)
+        PillEventText(e, Modifier, overrideColor = contentColor, availableHeight = NowBarHeight)
     }
     if (chipState.eventCount > 1) {
         Spacer(Modifier.width(SpaceSm))

@@ -1,5 +1,8 @@
 package com.android.systemui.axdynamicbar.ui.compose
 
+import com.android.systemui.statusbar.quickactions.ui.compose.collapsedIslandTextStyle
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalCollapsedIslandTextHeight
+import androidx.compose.runtime.CompositionLocalProvider
 import android.graphics.drawable.Drawable
 import android.media.AudioManager
 import androidx.compose.ui.platform.LocalContext
@@ -1000,7 +1003,7 @@ private fun SportsText(event: IslandEvent.Sports, modifier: Modifier, overrideCo
         else -> "vs"
     }
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text(scoreText, color = color, style = PillAccent, maxLines = 1)
+        Text(scoreText, color = color, style = collapsedIslandTextStyle(PillAccent), maxLines = 1)
         event.team2Icon?.let { icon ->
             Box(modifier = Modifier.padding(start = 4.dp)) {
                 Image(
@@ -1203,61 +1206,64 @@ internal fun PillEventText(
     modifier: Modifier,
     notifCount: Int = 0,
     overrideColor: Color? = null,
+    availableHeight: Dp = LocalCollapsedIslandTextHeight.current,
 ) {
-    when (event) {
-        is IslandEvent.AudioRecording -> AudioRecText(event, modifier, overrideColor)
-        is IslandEvent.Media -> MediaTitleText(event, modifier, overrideColor)
-        is IslandEvent.PromotedOngoing -> PromotedOngoingText(event, modifier, overrideColor)
-        is IslandEvent.Sports -> SportsText(event, modifier, overrideColor)
-        is IslandEvent.NowPlaying -> MarqueeLabel(
-            "${event.songTitle} · ${event.artist}".trimEnd(' ', '·', ' '),
-            overrideColor ?: toneFor(event).tint,
-            modifier,
-        )
-        is IslandEvent.Bluetooth -> BtText(event, modifier, overrideColor)
-        is IslandEvent.Hotspot ->
-            MarqueeLabel(
-                if (event.numDevices > 0) "${stringResource(R.string.ax_dynamic_bar_hotspot)} · ${stringResource(R.string.ax_dynamic_bar_hotspot_devices, event.numDevices)}"
-                else stringResource(R.string.ax_dynamic_bar_hotspot),
+    CompositionLocalProvider(LocalCollapsedIslandTextHeight provides availableHeight) {
+        when (event) {
+            is IslandEvent.AudioRecording -> AudioRecText(event, modifier, overrideColor)
+            is IslandEvent.Media -> MediaTitleText(event, modifier, overrideColor)
+            is IslandEvent.PromotedOngoing -> PromotedOngoingText(event, modifier, overrideColor)
+            is IslandEvent.Sports -> SportsText(event, modifier, overrideColor)
+            is IslandEvent.NowPlaying -> MarqueeLabel(
+                "${event.songTitle} · ${event.artist}".trimEnd(' ', '·', ' '),
                 overrideColor ?: toneFor(event).tint,
                 modifier,
             )
-        is IslandEvent.Charging -> MarqueeLabel("${event.level}%", overrideColor ?: toneFor(event).tint, modifier)
-        is IslandEvent.Alarm ->
-            MarqueeLabel(event.label.ifEmpty { stringResource(R.string.ax_dynamic_bar_alarm) }, overrideColor ?: toneFor(event).tint, modifier)
-        is IslandEvent.Timer -> TimerText(event, modifier, overrideColor)
-        is IslandEvent.Stopwatch -> StopwatchText(event, modifier, overrideColor)
-        is IslandEvent.RingerMode -> MarqueeLabel(event.label, overrideColor ?: eventStyleFor(event).accent, modifier)
-        is IslandEvent.Vpn -> MarqueeLabel(stringResource(R.string.ax_dynamic_bar_vpn_active), overrideColor ?: toneFor(event).tint, modifier)
-        is IslandEvent.Clipboard ->
-            MarqueeLabel(event.preview.ifEmpty { stringResource(R.string.ax_dynamic_bar_copied) }, overrideColor ?: toneFor(event).tint, modifier)
-        is IslandEvent.Call -> {
-            if (event.callStartTimeMs > 0L) {
-                CallTimerText(event, modifier, overrideColor)
-            } else {
-                NotifBellBadge(modifier, notifCount)
+            is IslandEvent.Bluetooth -> BtText(event, modifier, overrideColor)
+            is IslandEvent.Hotspot ->
+                MarqueeLabel(
+                    if (event.numDevices > 0) "${stringResource(R.string.ax_dynamic_bar_hotspot)} · ${stringResource(R.string.ax_dynamic_bar_hotspot_devices, event.numDevices)}"
+                    else stringResource(R.string.ax_dynamic_bar_hotspot),
+                    overrideColor ?: toneFor(event).tint,
+                    modifier,
+                )
+            is IslandEvent.Charging -> MarqueeLabel("${event.level}%", overrideColor ?: toneFor(event).tint, modifier)
+            is IslandEvent.Alarm ->
+                MarqueeLabel(event.label.ifEmpty { stringResource(R.string.ax_dynamic_bar_alarm) }, overrideColor ?: toneFor(event).tint, modifier)
+            is IslandEvent.Timer -> TimerText(event, modifier, overrideColor)
+            is IslandEvent.Stopwatch -> StopwatchText(event, modifier, overrideColor)
+            is IslandEvent.RingerMode -> MarqueeLabel(event.label, overrideColor ?: eventStyleFor(event).accent, modifier)
+            is IslandEvent.Vpn -> MarqueeLabel(stringResource(R.string.ax_dynamic_bar_vpn_active), overrideColor ?: toneFor(event).tint, modifier)
+            is IslandEvent.Clipboard ->
+                MarqueeLabel(event.preview.ifEmpty { stringResource(R.string.ax_dynamic_bar_copied) }, overrideColor ?: toneFor(event).tint, modifier)
+            is IslandEvent.Call -> {
+                if (event.callStartTimeMs > 0L) {
+                    CallTimerText(event, modifier, overrideColor)
+                } else {
+                    NotifBellBadge(modifier, notifCount)
+                }
             }
-        }
-        is IslandEvent.Notification -> {
-            val name = event.title
-            if (name != null) {
-                MarqueeLabel(name, overrideColor ?: toneFor(event).tint, modifier)
-            } else {
-                NotifBellBadge(modifier, notifCount)
+            is IslandEvent.Notification -> {
+                val name = event.title
+                if (name != null) {
+                    MarqueeLabel(name, overrideColor ?: toneFor(event).tint, modifier)
+                } else {
+                    NotifBellBadge(modifier, notifCount)
+                }
             }
+            is IslandEvent.AppSwitch ->
+                MarqueeLabel(stringResource(R.string.ax_dynamic_bar_recents), overrideColor ?: SubtleGray, modifier)
+            is IslandEvent.Torch -> {
+                val label =
+                    if (event.supportsLevel)
+                        "${(event.level.toFloat() / event.maxLevel * 100).toInt()}%"
+                    else stringResource(R.string.ax_dynamic_bar_on)
+                MarqueeLabel(label, overrideColor ?: toneFor(event).tint, modifier)
+            }
+            is IslandEvent.BiometricUnlock -> MarqueeLabel(stringResource(R.string.ax_dynamic_bar_unlocked), overrideColor ?: toneFor(event).tint, modifier)
+            is IslandEvent.KeyguardIndication -> MarqueeLabel(event.text, overrideColor ?: toneFor(event).tint, modifier)
+            is IslandEvent.AospChip -> AospChipText(event, modifier, overrideColor)
         }
-        is IslandEvent.AppSwitch ->
-            MarqueeLabel(stringResource(R.string.ax_dynamic_bar_recents), overrideColor ?: SubtleGray, modifier)
-        is IslandEvent.Torch -> {
-            val label =
-                if (event.supportsLevel)
-                    "${(event.level.toFloat() / event.maxLevel * 100).toInt()}%"
-                else stringResource(R.string.ax_dynamic_bar_on)
-            MarqueeLabel(label, overrideColor ?: toneFor(event).tint, modifier)
-        }
-        is IslandEvent.BiometricUnlock -> MarqueeLabel(stringResource(R.string.ax_dynamic_bar_unlocked), overrideColor ?: toneFor(event).tint, modifier)
-        is IslandEvent.KeyguardIndication -> MarqueeLabel(event.text, overrideColor ?: toneFor(event).tint, modifier)
-        is IslandEvent.AospChip -> AospChipText(event, modifier, overrideColor)
     }
 }
 
@@ -1272,8 +1278,9 @@ private fun AospChipText(event: IslandEvent.AospChip, modifier: Modifier, overri
             Text(
                 formatCountdownLong(c.secondsUntilStarted * 1000L),
                 color = color,
-                style = PillMono,
+                style = collapsedIslandTextStyle(PillMono),
                 modifier = modifier,
+                maxLines = 1,
             )
         is OngoingActivityChipModel.Content.IconOnly -> {}
         is OngoingActivityChipModel.Content.TextVariants -> {
@@ -1325,7 +1332,7 @@ private fun MarqueeLabel(text: String, color: Color, modifier: Modifier = Modifi
     Text(
         text,
         color = color,
-        style = PillPrimary,
+        style = collapsedIslandTextStyle(PillPrimary),
         maxLines = 1,
         overflow = TextOverflow.Clip,
         modifier = modifier.basicMarquee(iterations = 1),
@@ -1383,7 +1390,7 @@ private fun AudioRecText(event: IslandEvent.AudioRecording, modifier: Modifier, 
                 }
             }
             val color = overrideColor ?: eventStyleFor(event).accent
-            Text(formatCountdownLong(elapsedMs), color = color, style = PillMono, modifier = modifier)
+            Text(formatCountdownLong(elapsedMs), color = color, style = collapsedIslandTextStyle(PillMono), maxLines = 1, modifier = modifier)
         }
         RecordingState.SAVED -> MarqueeLabel(stringResource(R.string.ax_dynamic_bar_saved), overrideColor ?: toneFor(event).tint, modifier)
     }
@@ -1400,7 +1407,7 @@ private fun MediaTitleText(event: IslandEvent.Media, modifier: Modifier, overrid
     Text(
         text = title,
         color = color,
-        style = PillPrimary,
+        style = collapsedIslandTextStyle(PillPrimary),
         maxLines = 1,
         overflow = TextOverflow.Clip,
         modifier = modifier
@@ -1430,7 +1437,7 @@ private fun BtText(event: IslandEvent.Bluetooth, modifier: Modifier, overrideCol
         Text(
             "${event.deviceName.take(8)} $summary",
             color = color,
-            style = MaterialTheme.typography.labelSmall,
+            style = collapsedIslandTextStyle(MaterialTheme.typography.labelSmall),
             maxLines = 1,
             overflow = TextOverflow.Clip,
             modifier = modifier.basicMarquee(iterations = 1),
@@ -1552,7 +1559,7 @@ private fun ChronometerLabel(text: String, color: Color, modifier: Modifier) {
     Text(
         text,
         color = color,
-        style = PillMono,
+        style = collapsedIslandTextStyle(PillMono),
         maxLines = 1,
         softWrap = false,
         overflow = TextOverflow.Clip,
@@ -1577,8 +1584,7 @@ private fun NotifBellBadge(modifier: Modifier, count: Int) {
                 Text(
                     if (count > 99) "99+" else "$count",
                     color = IslandTone.ALERT.onContainer,
-                    style = TsBadge,
-                    lineHeight = SpaceLg.value.sp,
+                    style = collapsedIslandTextStyle(TsBadge, SpaceLg),
                     maxLines = 1,
                 )
             }
