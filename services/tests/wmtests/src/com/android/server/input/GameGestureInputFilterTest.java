@@ -122,6 +122,15 @@ public class GameGestureInputFilterTest {
         event(MotionEvent.ACTION_UP, 100, 1000);
         assertTrue(mSent.isEmpty());
     }
+    @Test public void allowedStreamSurvivesGenerationChange() {
+        mDecision = GameGestureLock.ALLOW;
+        assertFalse(event(MotionEvent.ACTION_DOWN, 100, 1903));
+        mGeneration++;
+        assertFalse(event(MotionEvent.ACTION_MOVE, 100, 1800));
+        assertFalse(event(MotionEvent.ACTION_UP, 100, 1800));
+        assertTrue(mSent.isEmpty());
+    }
+
     @Test public void generationChangeDiscardsPendingStream() {
         event(MotionEvent.ACTION_DOWN, 100, 1000);
         mGeneration++;

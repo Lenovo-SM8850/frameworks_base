@@ -51,6 +51,7 @@ final class GameGestureInputFilter {
         boolean candidate = true;
         boolean dropping;
         boolean forwarded;
+        boolean allowed;
         boolean reinject;
         Runnable deadline;
         Stream(MotionEvent down, long generation) {
@@ -109,6 +110,7 @@ final class GameGestureInputFilter {
             if (decision == GameGestureLock.INACTIVE) return false;
             Stream stream = new Stream(event, generation);
             stream.forwarded = decision == GameGestureLock.ALLOW;
+            stream.allowed = stream.forwarded;
             mStreams.put(key, stream);
             if (!stream.forwarded) {
                 stream.deadline = () -> {
@@ -130,7 +132,10 @@ final class GameGestureInputFilter {
         if (stream == null) return false;
         boolean terminal = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL;
         boolean valid = stream.generation == mAuthority.generation();
-        if (!valid && !stream.dropping) {
+        if (!valid && stream.allowed) {
+            // A confirmed gesture may itself open Recents and end the lock; let it finish.
+            stream.candidate = false;
+        } else if (!valid && !stream.dropping) {
             if (stream.forwarded) cancel(event, flags);
             stream.dropping = true;
             clearHeld(stream);

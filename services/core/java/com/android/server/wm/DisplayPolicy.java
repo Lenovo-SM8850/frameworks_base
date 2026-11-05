@@ -2696,7 +2696,7 @@ public class DisplayPolicy {
         return bounds.equals(mDisplayContent.getBounds());
     }
 
-    private void updateGameGestureInputTarget() {
+    void updateGameGestureInputTarget() {
         final GameGestureLockController lock = GameGestureLockController.get();
         if (lock == null) return;
         final Task task = mFocusedWindow != null ? mFocusedWindow.getTask() : null;
@@ -2709,7 +2709,13 @@ public class DisplayPolicy {
         lock.setInputTarget(mDisplayContent.getDisplayId(), task != null ? task.mTaskId : -1,
                 task != null ? task.mUserId : -1, mDisplayContent.getRotation(),
                 task != null && task.getWindowingMode() == android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
-                        && (ime == null || !ime.isVisible()));
+                        && (ime == null || !ime.isVisible()) && !isRecentsOverGame());
+    }
+
+    /** Recents keeps the game in transient hide, and focus can stay with it for a live tile. */
+    private boolean isRecentsOverGame() {
+        return mDisplayContent.getRootTask(task -> task.isActivityTypeStandard()
+                && mDisplayContent.mTransitionController.isTransientHide(task)) != null;
     }
 
     void updateSystemBarAttributes() {
