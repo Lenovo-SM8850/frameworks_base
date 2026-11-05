@@ -167,6 +167,10 @@ public final class GameGestureLockController {
         if (display == Display.DEFAULT_DISPLAY) mState.setStatusBarVisible(visible);
     }
 
+    synchronized void setNavigationBarVisible(int display, boolean visible) {
+        if (display == Display.DEFAULT_DISPLAY) mState.setNavigationBarVisible(visible);
+    }
+
     synchronized void startSession() {
         ++mIncarnation;
         mTask = -1;
@@ -224,7 +228,8 @@ public final class GameGestureLockController {
         pw.println(prefix + "  navigationMode=" + mNavigationMode + " inputSize=" + mInputWidth
                 + "x" + mInputHeight + " bottomGestureHeight=" + mBottomGestureHeight
                 + " statusBarVisible=" + mState.isStatusBarVisible()
-                + " shadeUnlocked=" + mState.isShadeUnlocked());
+                + " shadeUnlocked=" + mState.isShadeUnlocked()
+                + " homeUnlocked=" + mState.isHomeUnlocked());
         pw.println(prefix + "  bound=" + mBound + " listenerPresent=" + (mListener != null)
                 + " accessibilityInputFilterInstalled=" + mInputFilterInstalled
                 + " accessibilityEnabled=" + mAccessibilityEnabled
@@ -239,6 +244,9 @@ public final class GameGestureLockController {
         }
         // The revealed bar owns shade input until it is hidden, including shade focus changes.
         if (kind == GameGestureLock.SHADE && mState.isShadeUnlocked(down)) return GameGestureLock.INACTIVE;
+        if (kind == GameGestureLock.HOME && mState.isHomeUnlocked(down)) {
+            return GameGestureLock.INACTIVE;
+        }
         return mState.begin(kind, device, down) ? GameGestureLock.ALLOW : GameGestureLock.BLOCK;
     }
 

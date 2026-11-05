@@ -80,6 +80,25 @@ public class GameGestureLockStateTest {
         assertFalse(mState.isShadeUnlocked());
     }
 
+    @Test public void confirmedHomeSwipeKeepsBottomOpenUntilTheBarHides() {
+        first(HOME, 1000, 1100);
+        assertFalse(mState.isHomeUnlocked(1200));
+        assertTrue(mState.begin(HOME, 0, 1350));
+        assertFalse(mState.recognize(HOME, 0, 1350));
+        assertTrue(mState.isHomeUnlocked(1400));
+        mState.setNavigationBarVisible(true);
+        assertTrue(mState.isHomeUnlocked(9000));
+        mState.setNavigationBarVisible(false);
+        assertFalse(mState.isHomeUnlocked(9100));
+    }
+
+    @Test public void homeSwipeWithoutARevealedBarExpires() {
+        first(HOME, 1000, 1100);
+        assertTrue(mState.begin(HOME, 0, 1350));
+        assertFalse(mState.recognize(HOME, 0, 1350));
+        assertFalse(mState.isHomeUnlocked(3351));
+    }
+
     @Test public void resetRevokesRevealedShadeAndVisibleBarAloneDoesNotUnlock() {
         reveal();
         mState.setStatusBarVisible(true);

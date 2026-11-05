@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.android.server.wm;
 
+import static android.view.GameGestureLock.HOME;
 import static android.view.GameGestureLock.REVEAL;
 import static android.view.GameGestureLock.SHADE;
 
@@ -17,6 +18,10 @@ final class GameGestureLockState {
     private boolean mShadeUnlocked;
     private boolean mRevealSeenVisible;
     private long mRevealDown;
+    private boolean mNavigationBarVisible;
+    private boolean mHomeUnlocked;
+    private boolean mHomeSeenVisible;
+    private long mHomeDown;
 
     private static final class Attempt {
         final int kind;
@@ -64,6 +69,11 @@ final class GameGestureLockState {
                 mRevealSeenVisible = mStatusBarVisible;
                 mRevealDown = down;
                 mCompleted[SHADE] = -1;
+            }
+            if (kind == HOME && attempt.allowed && !attempt.cancelled) {
+                mHomeUnlocked = true;
+                mHomeSeenVisible = false;
+                mHomeDown = down;
             }
             if (attempt.allowed && mCompleted[kind] == attempt.reservedEnd) mCompleted[kind] = -1;
             if (attempt.ended) complete(attempt, down);
@@ -114,9 +124,31 @@ final class GameGestureLockState {
         }
     }
 
+    boolean isHomeUnlocked() { return mHomeUnlocked; }
+
+    /** A confirmed bottom swipe owns bottom input until the bar it revealed is hidden. */
+    boolean isHomeUnlocked(long down) {
+        if (mHomeUnlocked && !mHomeSeenVisible && down - mHomeDown > MAX_REPEAT_MS) {
+            mHomeUnlocked = false;
+        }
+        return mHomeUnlocked;
+    }
+
+    void setNavigationBarVisible(boolean visible) {
+        final boolean shown = visible && !mNavigationBarVisible;
+        mNavigationBarVisible = visible;
+        if (shown && mHomeUnlocked) mHomeSeenVisible = true;
+        if (!visible && mHomeSeenVisible) {
+            mHomeUnlocked = false;
+            mHomeSeenVisible = false;
+        }
+    }
+
     void reset() {
         mShadeUnlocked = false;
         mRevealSeenVisible = false;
+        mHomeUnlocked = false;
+        mHomeSeenVisible = false;
         java.util.Arrays.fill(mCompleted, -1);
         mStreams.clear();
     }
