@@ -2,6 +2,9 @@
 
 package com.android.systemui.axdynamicbar.ui.compose
 
+import com.android.systemui.statusbar.quickactions.ui.compose.collapsedIslandTextStyle
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalCollapsedIslandTextHeight
+import androidx.compose.material3.LocalTextStyle
 import com.android.systemui.statusbar.chips.ui.model.OngoingActivityChipModel
 import com.android.systemui.statusbar.chips.ui.model.Chronometer
 import com.android.compose.animation.Expandable
@@ -79,7 +82,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -159,18 +161,20 @@ private fun GlassChip(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    Box(
-        // ShapeChip is a 50 % pill; the blur needs the matching radius explicitly.
-        modifier = modifier.islandBlur(
-            cornerRadius = height / 2,
-            fallbackColor = CardBg,
-            tint = chipFillColor(),
-            alpha = blurAlpha,
-            highlightWidth = ChipHighlightWidth,
-        ),
-        contentAlignment = Alignment.Center,
-    ) {
-        content()
+    CompositionLocalProvider(LocalCollapsedIslandTextHeight provides height) {
+        Box(
+            // ShapeChip is a 50 % pill; the blur needs the matching radius explicitly.
+            modifier = modifier.islandBlur(
+                cornerRadius = height / 2,
+                fallbackColor = CardBg,
+                tint = chipFillColor(),
+                alpha = blurAlpha,
+                highlightWidth = ChipHighlightWidth,
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            content()
+        }
     }
 }
 
@@ -591,7 +595,7 @@ private fun KeyguardChipBody(
                     ) {
                         Text(
                             ev.track.ifEmpty { stringResource(R.string.ax_dynamic_bar_music) },
-                            style = PillPrimary.copy(fontSize = 13.sp),
+                            style = collapsedIslandTextStyle(PillPrimary.copy(fontSize = 13.sp)),
                             color = contentColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -601,7 +605,7 @@ private fun KeyguardChipBody(
                         if (ev.artist.isNotBlank()) {
                             Text(
                                 ev.artist,
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                style = collapsedIslandTextStyle(MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp)),
                                 color = contentColor.copy(alpha = AlphaSecondary),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -637,7 +641,7 @@ private fun KeyguardChipBody(
                 Text(
                     if (event.score1.isNotEmpty()) "${event.score1} - ${event.score2}"
                         else stringResource(R.string.ax_dynamic_bar_sports_vs),
-                    style = PillPrimary,
+                    style = collapsedIslandTextStyle(PillPrimary),
                     color = contentColor,
                     maxLines = 1,
                 )
@@ -678,12 +682,13 @@ private fun KeyguardChipBody(
                         if (secondary != null) {
                             Text(
                                 " · ",
-                                style = MaterialTheme.typography.labelSmall,
+                                style = collapsedIslandTextStyle(MaterialTheme.typography.labelSmall),
                                 color = contentColor.copy(alpha = AlphaTertiary),
+                                maxLines = 1,
                             )
                             Text(
                                 secondary,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = collapsedIslandTextStyle(MaterialTheme.typography.labelSmall),
                                 color = contentColor.copy(alpha = AlphaSecondary),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -725,7 +730,7 @@ private fun KeyguardChipBody(
                 ) {
                     Text(
                         "$eventCount",
-                        style = TsBadge,
+                        style = collapsedIslandTextStyle(TsBadge, CountBadgeHeight),
                         color = contentColor,
                         maxLines = 1,
                     )
@@ -786,14 +791,14 @@ private fun KeyguardBatteryChip(
                     ) {
                         Text(
                             parts[0],
-                            style = BatteryChipText,
+                            style = collapsedIslandTextStyle(BatteryChipText, MultiLineChipHeight / 2),
                             color = contentColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             parts[1],
-                            style = BatteryChipText,
+                            style = collapsedIslandTextStyle(BatteryChipText, MultiLineChipHeight / 2),
                             color = contentColor.copy(alpha = AlphaSecondary),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -802,7 +807,7 @@ private fun KeyguardBatteryChip(
                 } else {
                     Text(
                         if (parts.isNotEmpty()) parts[0] else batteryString,
-                        style = BatteryChipText,
+                        style = collapsedIslandTextStyle(BatteryChipText),
                         color = contentColor.copy(alpha = AlphaSecondary),
                         maxLines = 1,
                         overflow = TextOverflow.Clip,
@@ -816,7 +821,7 @@ private fun KeyguardBatteryChip(
                 val timeRemaining = info.timeRemaining
                 val tertiaryColor = contentColor.copy(alpha = AlphaTertiary)
                 val secondaryColor = contentColor.copy(alpha = AlphaSecondary)
-                val infoFontSize = BatteryChipText.fontSize
+                val infoFontSize = collapsedIslandTextStyle(BatteryChipText).fontSize
                 val infoLine = remember(info.level, secondaryLabel, timeRemaining, contentColor, infoFontSize) {
                     buildAnnotatedString {
                         withStyle(SpanStyle(color = contentColor, fontSize = infoFontSize)) {
@@ -842,6 +847,7 @@ private fun KeyguardBatteryChip(
                 }
                 Text(
                     infoLine,
+                    style = collapsedIslandTextStyle(LocalTextStyle.current),
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     modifier = Modifier.widthIn(max = 180.dp).basicMarquee(iterations = 1),
@@ -980,14 +986,14 @@ private fun KeyguardPrimaryText(event: IslandEvent, color: Color, modifier: Modi
                 Column(modifier = modifier, verticalArrangement = Arrangement.Center) {
                     Text(
                         parts[0],
-                        style = BatteryChipText,
+                        style = collapsedIslandTextStyle(BatteryChipText, MultiLineChipHeight / 2),
                         color = color,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         parts[1],
-                        style = BatteryChipText,
+                        style = collapsedIslandTextStyle(BatteryChipText, MultiLineChipHeight / 2),
                         color = color.copy(alpha = AlphaSecondary),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1101,8 +1107,9 @@ private fun SportsChipTeamBadge(name: String, icon: Drawable?, contentColor: Col
         ) {
             Text(
                 name.take(2).uppercase(),
-                style = TsBadge,
+                style = collapsedIslandTextStyle(TsBadge, ChipIconSize),
                 color = contentColor,
+                maxLines = 1,
             )
         }
     }
@@ -1204,7 +1211,7 @@ private fun MarqueeText(text: String, color: Color, modifier: Modifier) {
     Text(
         text,
         color = color,
-        style = PillPrimary,
+        style = collapsedIslandTextStyle(PillPrimary),
         maxLines = 1,
         overflow = TextOverflow.Clip,
         modifier = modifier.widthIn(max = 120.dp).basicMarquee(iterations = 1),
@@ -1230,7 +1237,7 @@ private fun ElapsedTimeText(
                 .coerceAtLeast(0L)
         }
     }
-    Text(formatCountdownLong(elapsedMs), color = color, style = PillMono, modifier = modifier)
+    Text(formatCountdownLong(elapsedMs), color = color, style = collapsedIslandTextStyle(PillMono), maxLines = 1, modifier = modifier)
 }
 
 @Composable

@@ -1,5 +1,7 @@
 package com.android.systemui.axdynamicbar.ui.compose
 
+import com.android.systemui.statusbar.quickactions.ui.compose.collapsedIslandTextStyle
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterExitState
@@ -293,7 +295,8 @@ fun AxDynamicBarChip(
                     modifier = Modifier.fillMaxHeight(),
                     contentAlignment = Alignment.Center,
                 ) {
-                  Box(contentAlignment = Alignment.Center) {
+                  BoxWithConstraints(contentAlignment = Alignment.Center) {
+                    val textHeight = chipHeight.coerceAtMost(maxHeight)
                     Row(
                         modifier =
                             Modifier.onGloballyPositioned {
@@ -343,7 +346,7 @@ fun AxDynamicBarChip(
                         if (carrierName != null) {
                             Text(
                                 text = carrierName,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = collapsedIslandTextStyle(MaterialTheme.typography.labelSmall, textHeight),
                                 color = contentColor.copy(alpha = AlphaSecondary),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -351,8 +354,9 @@ fun AxDynamicBarChip(
                             )
                             Text(
                                 text = " · ",
-                                style = MaterialTheme.typography.labelSmall,
+                                style = collapsedIslandTextStyle(MaterialTheme.typography.labelSmall, textHeight),
                                 color = contentColor.copy(alpha = AlphaTertiary),
+                                maxLines = 1,
                             )
                         }
                         if (isAlert && event is IslandEvent.Notification) {
@@ -379,7 +383,7 @@ fun AxDynamicBarChip(
                                     }
                                     Text(
                                         text = notif.appName ?: "",
-                                        style = PillPrimary,
+                                        style = collapsedIslandTextStyle(PillPrimary, textHeight),
                                         color = contentColor,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -394,7 +398,7 @@ fun AxDynamicBarChip(
                             Text(
                                 if (sport.score1.isNotEmpty()) "${sport.score1} - ${sport.score2}"
                                     else stringResource(R.string.ax_dynamic_bar_sports_vs),
-                                style = PillPrimary,
+                                style = collapsedIslandTextStyle(PillPrimary, textHeight),
                                 color = contentColor,
                                 maxLines = 1,
                             )
@@ -427,6 +431,7 @@ fun AxDynamicBarChip(
                                     event,
                                     Modifier.widthIn(max = chipTextMaxWidth),
                                     overrideColor = contentColor,
+                                    availableHeight = textHeight,
                                 )
                             }
                             if (chipState.eventCount > 1) {
@@ -444,7 +449,7 @@ fun AxDynamicBarChip(
                                 ) {
                                     Text(
                                         text = "${chipState.eventCount}",
-                                        style = TsBadge,
+                                        style = collapsedIslandTextStyle(TsBadge, SizeBadge),
                                         color = contentColor,
                                         maxLines = 1,
                                     )
@@ -479,8 +484,9 @@ private fun StatusBarSportsTeamBadge(name: String, icon: Drawable?, contentColor
         ) {
             Text(
                 name.take(2).uppercase(),
-                style = TsBadge,
+                style = collapsedIslandTextStyle(TsBadge, badgeSize),
                 color = contentColor,
+                maxLines = 1,
             )
         }
     }
