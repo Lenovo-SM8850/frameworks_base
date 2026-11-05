@@ -95,6 +95,7 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
     private WindowManager.LayoutParams mLp;
     private final WindowManager.LayoutParams mLpChanged;
     private final Binder mInsetsSourceOwner = new Binder();
+    private boolean mInsetsChanged;
 
     private final ConfigurationController.ConfigurationListener mConfigurationListener =
             new ConfigurationController.ConfigurationListener() {
@@ -381,7 +382,9 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
             InsetsFrameProvider[] providers = mLpChanged.paramsForRotation[rot].providedInsets;
             if (providers != null) {
                 for (InsetsFrameProvider provider : providers) {
-                    provider.setInsetsSize(getInsets(height));
+                    final Insets insets = getInsets(height);
+                    mInsetsChanged |= !insets.equals(provider.getInsetsSize());
+                    provider.setInsetsSize(insets);
                 }
             }
         }
@@ -408,7 +411,10 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
         }
         applyForceStatusBarVisibleFlag(state);
         applyHeight(state);
-        if (mLp != null && mLp.copyFrom(mLpChanged) != 0) {
+        // The per-rotation insets change in place, which copyFrom() does not see, and the island
+        // can keep the window at the same height while they do.
+        if (mLp != null && (mLp.copyFrom(mLpChanged) != 0 || mInsetsChanged)) {
+            mInsetsChanged = false;
             mWindowManager.updateViewLayout(mStatusBarWindowView, mLp);
         }
     }
