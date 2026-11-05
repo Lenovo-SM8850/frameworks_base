@@ -199,10 +199,10 @@ class FloatingMiniController(
     }
 
     fun getDragTarget(task: TaskInfo, start: Rect, end: Rect): DragTarget? =
-        getDragTarget(task, start, end, false)
+        getDragTarget(task, start, end, false, requireTravel = true)
 
     private fun getDragTarget(task: TaskInfo, start: Rect, end: Rect,
-        allowUnmoved: Boolean): DragTarget? {
+        allowUnmoved: Boolean, requireTravel: Boolean = false): DragTarget? {
         if (!task.isFloatingWindow || (!allowUnmoved && start == end) ||
             task.taskId !in leashes) return null
         val entry = state.get(task.userId, task.taskId)
@@ -212,9 +212,15 @@ class FloatingMiniController(
         if (stable.isEmpty) return null
         val margin = (8 * density(task)).toInt()
         val threshold = (48 * density(task)).toInt()
-        val corner = if (entry == null) FloatingMiniState.dragCorner(end, stable, threshold)
-            else FloatingMiniState.corner(end, stable, threshold)
+        val travelX = (end.left - start.left).toFloat()
+        val travelY = (end.top - start.top).toFloat()
+        val corner = if (entry == null) {
+            FloatingMiniState.dragCorner(end, stable, threshold, travelX, travelY)
+        } else FloatingMiniState.corner(end, stable, threshold)
         if (corner == null) return null
+        // The preview shows only what a caption release, checked by onDragEnded, would accept.
+        if (requireTravel && entry == null && FloatingMiniState.needsCornerTravel(end, stable) &&
+            !hasCornerTravel(travelX, travelY, stable, corner)) return null
         val scale = entry?.scale ?: minimum(task, stable)
         val sized = if (entry == null) FloatingMiniState.sized(
             task.configuration.windowConfiguration.bounds, scale, end.left, end.top) else Rect(end)
@@ -230,14 +236,9 @@ class FloatingMiniController(
     private fun hasCornerTravel(dx: Float, dy: Float, stable: Rect,
         corner: FloatingMiniState.Corner?): Boolean {
         if (!dx.isFinite() || !dy.isFinite()) return false
-        val travel = when (corner) {
-            FloatingMiniState.Corner.TOP_LEFT -> -dx - dy
-            FloatingMiniState.Corner.TOP_RIGHT -> dx - dy
-            FloatingMiniState.Corner.BOTTOM_LEFT -> -dx + dy
-            FloatingMiniState.Corner.BOTTOM_RIGHT -> dx + dy
-            null -> return false
-        }
-        return travel >= min(stable.width(), stable.height()) / 4f
+        if (corner == null) return false
+        return FloatingMiniState.cornerTravel(corner, dx, dy) >=
+            min(stable.width(), stable.height()) / 4f
     }
 
     /** Docks expanded or mini windows using the same pointer fling and corner reservation. */
