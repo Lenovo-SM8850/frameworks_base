@@ -6645,4 +6645,5 @@
   <java-symbol type="string" name="next_button_label" id="0x0104070b" />
   <java-symbol type="string" name="skip_button_label" id="0x01040a64" />
   <java-symbol type="style" name="TextAppearance.DeviceDefault.Body1" id="0x0103039c" />
+  <java-symbol type="bool" name="config_brightnessRampLinearSpace" />
 </resources>

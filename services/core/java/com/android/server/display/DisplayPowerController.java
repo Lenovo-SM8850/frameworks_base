@@ -365,6 +365,7 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
     private final BrightnessReason mBrightnessReasonTemp = new BrightnessReason();
 
     // Brightness animation ramp rates in brightness units per second
+    private final boolean mBrightnessRampLinearSpace;
     private float mBrightnessRampRateFastDecrease;
     private float mBrightnessRampRateFastIncrease;
     private float mBrightnessRampRateSlowDecrease;
@@ -567,6 +568,7 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
         mScreenBrightnessDozeConfig = BrightnessUtils.clampAbsoluteBrightness(
                 mDisplayDeviceConfig.getDefaultDozeBrightness());
         loadBrightnessRampRates();
+        mBrightnessRampLinearSpace = resources.getBoolean(R.bool.config_brightnessRampLinearSpace);
         mSkipScreenOnBrightnessRamp = resources.getBoolean(
                 R.bool.config_skipScreenOnBrightnessRamp);
         mDozeScaleFactor = resources.getFraction(
@@ -1723,7 +1725,11 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
                     } else {
                         rampSpeed = mBrightnessRampRateFastDecrease;
                     }
-                    animateScreenBrightness(animateValue, sdrAnimateValue, rampSpeed);
+                    final boolean linearSpace = mBrightnessRampLinearSpace
+                            && (isIncreasing || !slowChange)
+                            && !(mFlags.isFastHdrTransitionsEnabled() && isHdrOnlyChange);
+                    animateScreenBrightness(animateValue, sdrAnimateValue, rampSpeed,
+                            /* ignoreAnimationLimits= */ false, linearSpace);
                 }
             }
 
@@ -2308,14 +2314,24 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
 
     private void animateScreenBrightness(float target, float sdrTarget, float rate,
             boolean ignoreAnimationLimits) {
+        animateScreenBrightness(target, sdrTarget, rate, ignoreAnimationLimits,
+                /* linearSpace= */ false);
+    }
+
+    private void animateScreenBrightness(float target, float sdrTarget, float rate,
+            boolean ignoreAnimationLimits, boolean linearSpace) {
         if (DEBUG) {
             Slog.d(mTag, "Animating brightness: target=" + target + ", sdrTarget=" + sdrTarget
                     + ", rate=" + rate);
         }
         float luxDelta = mAutomaticBrightnessController == null ? INVALID_LUX
                 : mAutomaticBrightnessController.getLuxDelta();
-        if (mScreenBrightnessRampAnimator.animateTo(target, sdrTarget, rate,
-                ignoreAnimationLimits, luxDelta)) {
+        final boolean changed = linearSpace
+                ? mScreenBrightnessRampAnimator.animateTo(target, sdrTarget, rate,
+                        ignoreAnimationLimits, luxDelta, /* linearSpace= */ true)
+                : mScreenBrightnessRampAnimator.animateTo(target, sdrTarget, rate,
+                        ignoreAnimationLimits, luxDelta);
+        if (changed) {
             Trace.traceCounter(Trace.TRACE_TAG_POWER, "TargetScreenBrightness", (int) target);
 
             String propertyKey = "debug.tracing.screen_brightness";
