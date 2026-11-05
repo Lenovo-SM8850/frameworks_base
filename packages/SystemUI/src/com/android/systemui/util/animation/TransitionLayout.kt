@@ -112,6 +112,15 @@ class TransitionLayout @JvmOverloads constructor(
         }
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // A state set before the last detach is still waiting for its predraw.
+        if (updateScheduled && !isPreDrawApplicatorRegistered) {
+            viewTreeObserver.addOnPreDrawListener(preDrawApplicator)
+            isPreDrawApplicatorRegistered = true
+        }
+    }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         if (isPreDrawApplicatorRegistered) {
