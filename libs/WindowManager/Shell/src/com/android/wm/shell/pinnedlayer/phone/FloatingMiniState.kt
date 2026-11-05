@@ -29,18 +29,35 @@ class FloatingMiniState {
             bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(),
             bounds.bottom.toFloat(), stable, threshold)
 
-        /** Large expanded windows must carry an inward reference into the corner zone. */
-        fun dragCorner(bounds: Rect, stable: Rect, threshold: Int): Corner? {
+        /** Expanded windows use their own edges; the drag direction picks among reached corners. */
+        fun dragCorner(bounds: Rect, stable: Rect, threshold: Int, travelX: Float = 0f,
+            travelY: Float = 0f): Corner? {
             if (bounds.isEmpty || stable.isEmpty) return null
-            val coverage = bounds.width().toFloat() * bounds.height() /
-                stable.width() / stable.height()
-            // Keep small windows unchanged; cap the inward reference at 15% of each side.
-            val inward = ((coverage - .2f) / .6f).coerceIn(0f, .3f)
-            val dx = bounds.width() * inward / 2f
-            val dy = bounds.height() * inward / 2f
-            return corner(bounds.left + dx, bounds.top + dy, bounds.right - dx,
-                bounds.bottom - dy, stable, threshold)
+            val left = bounds.left <= stable.left + threshold
+            val right = bounds.right >= stable.right - threshold
+            val top = bounds.top <= stable.top + threshold
+            val bottom = bounds.bottom >= stable.bottom - threshold
+            return Corner.entries.filter {
+                when (it) {
+                    Corner.TOP_LEFT -> left && top
+                    Corner.TOP_RIGHT -> right && top
+                    Corner.BOTTOM_LEFT -> left && bottom
+                    Corner.BOTTOM_RIGHT -> right && bottom
+                }
+            }.maxByOrNull { cornerTravel(it, travelX, travelY) }
         }
+
+        /** Signed travel toward [corner]. */
+        fun cornerTravel(corner: Corner, x: Float, y: Float): Float = when (corner) {
+            Corner.TOP_LEFT -> -x - y
+            Corner.TOP_RIGHT -> x - y
+            Corner.BOTTOM_LEFT -> -x + y
+            Corner.BOTTOM_RIGHT -> x + y
+        }
+
+        /** Large windows sit near corners anyway, so reaching one also takes a deliberate drag. */
+        fun needsCornerTravel(bounds: Rect, stable: Rect): Boolean =
+            bounds.width().toFloat() * bounds.height() / stable.width() / stable.height() > .2f
 
         private fun corner(left: Float, top: Float, right: Float, bottom: Float,
             stable: Rect, threshold: Int): Corner? {

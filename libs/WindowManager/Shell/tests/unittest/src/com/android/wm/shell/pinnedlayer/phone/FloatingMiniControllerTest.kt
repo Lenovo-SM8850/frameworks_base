@@ -212,17 +212,18 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(resized.visible).isNotEqualTo(restored.presentationBounds)
     }
 
-    @Test fun largeCaptionDrag_previewAndReleaseUseTheSameInwardReference() {
+    @Test fun largeCaptionDrag_previewAndReleaseNeedTheSameCornerTravel() {
         val h = Harness()
         h.state.remove(h.task.userId, h.task.taskId)
         h.task.configuration.windowConfiguration.setBounds(Rect(0, 0, 1000, 1200))
         h.task.floatingWindowScale = 1f
         h.task.floatingWindowPosition.set(100, 300)
         val start = Rect(h.task.presentationBounds)
+        val near = Rect(190, 690, 1190, 1890)
         val early = Rect(200, 700, 1200, 1900)
-        assertThat(h.controller.getDragTarget(h.task, start, early)).isNull()
-        assertThat(h.controller.onDragEnded(h.task, start, early,
-            android.graphics.PointF(100f, 400f))).isFalse()
+        assertThat(h.controller.getDragTarget(h.task, near, early)).isNull()
+        assertThat(h.controller.onDragEnded(h.task, near, early,
+            android.graphics.PointF(10f, 10f))).isFalse()
         val end = Rect(500, 1100, 1500, 2300)
         val preview = requireNotNull(h.controller.getDragTarget(h.task, start, end))
         assertThat(h.controller.onDragEnded(h.task, start, end,

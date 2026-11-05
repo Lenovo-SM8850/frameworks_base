@@ -24,32 +24,25 @@ class FloatingMiniStateTest {
         }
     }
 
-    @Test fun dragCorner_halfDisplayCapsReferenceAtFifteenPercent() {
+    @Test fun dragCorner_largeWindowsFollowTheDragDirection() {
         val stable = Rect(0, 0, 1000, 1000)
-        for (corner in FloatingMiniState.Corner.values()) {
-            val bounds = FloatingMiniState.snap(Rect(0, 0, 1000, 500), stable, corner, 48)
-            assertThat(FloatingMiniState.dragCorner(bounds, stable, 48)).isNull()
-            val left = corner == FloatingMiniState.Corner.TOP_LEFT ||
-                corner == FloatingMiniState.Corner.BOTTOM_LEFT
-            val top = corner == FloatingMiniState.Corner.TOP_LEFT ||
-                corner == FloatingMiniState.Corner.TOP_RIGHT
-            bounds.offset(if (left) -150 else 150, if (top) -75 else 75)
-            assertThat(FloatingMiniState.dragCorner(bounds, stable, 48)).isEqualTo(corner)
-            bounds.offset(if (left) 1 else -1, 0)
-            assertThat(FloatingMiniState.dragCorner(bounds, stable, 48)).isNull()
-        }
-    }
-
-    @Test fun dragCorner_coverageOfEightyPercentCapsReferenceAtFifteenPercent() {
-        // Keep the 80% window's capped reference on whole-pixel boundaries.
-        val stable = Rect(0, 0, 1000, 1250)
-        val bounds = Rect(-102, -102, 898, 898)
-        assertThat(FloatingMiniState.dragCorner(bounds, stable, 48))
+        val bounds = Rect(10, 10, 990, 990)
+        assertThat(FloatingMiniState.dragCorner(bounds, stable, 48, -100f, -100f))
             .isEqualTo(FloatingMiniState.Corner.TOP_LEFT)
-        bounds.offset(1, 1)
-        assertThat(FloatingMiniState.dragCorner(bounds, stable, 48)).isNull()
+        assertThat(FloatingMiniState.dragCorner(bounds, stable, 48, 100f, -100f))
+            .isEqualTo(FloatingMiniState.Corner.TOP_RIGHT)
+        assertThat(FloatingMiniState.dragCorner(bounds, stable, 48, -100f, 100f))
+            .isEqualTo(FloatingMiniState.Corner.BOTTOM_LEFT)
+        assertThat(FloatingMiniState.dragCorner(bounds, stable, 48, 100f, 100f))
+            .isEqualTo(FloatingMiniState.Corner.BOTTOM_RIGHT)
         assertThat(FloatingMiniState.dragCorner(Rect(), stable, 48)).isNull()
         assertThat(FloatingMiniState.dragCorner(bounds, Rect(), 48)).isNull()
+    }
+
+    @Test fun needsCornerTravel_onlyAboveOneFifthOfTheDisplay() {
+        val stable = Rect(0, 0, 1000, 1000)
+        assertThat(FloatingMiniState.needsCornerTravel(Rect(0, 0, 400, 500), stable)).isFalse()
+        assertThat(FloatingMiniState.needsCornerTravel(Rect(0, 0, 500, 500), stable)).isTrue()
     }
 
     @Test fun cornerThreshold_requiresBothEdgesAndIncludesBoundary() {
