@@ -15017,6 +15017,13 @@ public final class Settings {
         public static final String PI_SNAPCHAT_SPOOF = "pi_snapchat_spoof";
 
         /**
+         * Whether to use a device profile spoof for Netflix
+         * @hide
+         */
+        @Readable
+        public static final String PI_NETFLIX_SPOOF = "pi_netflix_spoof";
+
+        /**
          * Whether to show privacy indicator for location
          * @hide
          */

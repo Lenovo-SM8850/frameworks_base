@@ -53,8 +53,13 @@ import java.util.concurrent.ConcurrentHashMap;
  *      PerAppsPropsUtils, maps a package name to a named device profile (e.g. "ROG8P").
  *      Requires a Context to read Settings.Secure at spoof time.
  *
+ *   3. Built-in per-app override (Settings.Secure.PI_NETFLIX_SPOOF) — applies a built-in
+ *      profile to a fixed package while its switch is on (default on).
+ *
  * Source (1) takes priority: if a package has a JSON game-props entry that entry is applied
- * and per-app lookup is skipped for that package.
+ * and per-app lookup is skipped for that package. An entry for the package in the per-app
+ * map (2) wins over the built-in override (3), which applies only to packages the map
+ * leaves out.
  *
  * @hide
  */
@@ -72,6 +77,11 @@ public final class GamePropsSpoofService {
     private static final String SETTING_PER_APPS_ENABLED = "per_apps_device_spoof_enabled";
     /** JSON array of custom user-defined profiles. */
     private static final String SETTING_CUSTOM_PROFILES  = "custom_spoof_profiles";
+
+    /** Package that receives the built-in override while its switch is on. */
+    private static final String OVERRIDE_PACKAGE = "com.netflix.mediaclient";
+    /** Built-in profile id applied to {@link #OVERRIDE_PACKAGE}. */
+    private static final String OVERRIDE_PROFILE = "OP15";
 
     // -------------------------------------------------------------------------
     // Singleton
@@ -322,14 +332,27 @@ public final class GamePropsSpoofService {
     private void applyPerAppSpoof(String packageName, Context context) {
         if (TextUtils.isEmpty(packageName) || context == null) return;
 
+        // An explicit entry in the per-app map is the more specific choice, so it
+        // wins over the built-in override even when its profile cannot be resolved.
+        if (applyPerAppMapSpoof(packageName, context)) return;
+
+        applyOverrideSpoof(packageName, context);
+    }
+
+    /**
+     * Applies the per-app map entry for the package, if the map is enabled.
+     *
+     * @return true when the map has an entry for the package
+     */
+    private boolean applyPerAppMapSpoof(String packageName, Context context) {
         // Check master enable flag
         try {
             int enabled = Settings.Secure.getInt(
                     context.getContentResolver(), SETTING_PER_APPS_ENABLED, 1);
-            if (enabled == 0) return;
+            if (enabled == 0) return false;
         } catch (Throwable e) {
             if (mDebug) Log.d(TAG, "Could not read per-apps enabled flag: " + e.getMessage());
-            return;
+            return false;
         }
 
         // Read active map: "pkg1:profileId1,pkg2:profileId2,..."
@@ -339,10 +362,10 @@ public final class GamePropsSpoofService {
                     context.getContentResolver(), SETTING_PER_APPS);
         } catch (Throwable e) {
             if (mDebug) Log.d(TAG, "Failed to read per-apps setting: " + e.getMessage());
-            return;
+            return false;
         }
 
-        if (TextUtils.isEmpty(spoofedApps)) return;
+        if (TextUtils.isEmpty(spoofedApps)) return false;
 
         // Find this package's assigned profile ID
         String profileId = null;
@@ -353,7 +376,7 @@ public final class GamePropsSpoofService {
                 break;
             }
         }
-        if (profileId == null) return;
+        if (profileId == null) return false;
 
         // Build combined profile map: built-ins + custom user profiles
         Map<String, Map<String, Object>> allProfiles = new HashMap<>(BUILTIN_PROFILES);
@@ -363,10 +386,38 @@ public final class GamePropsSpoofService {
         if (props == null) {
             if (mDebug) Log.d(TAG, "Unknown profile id '" + profileId
                     + "' for package " + packageName);
-            return;
+            return true;
         }
 
         if (mDebug) Log.d(TAG, "Per-app spoof: " + packageName + " → " + profileId);
+        spoofProfile(props, packageName);
+        return true;
+    }
+
+    /**
+     * Applies the built-in override profile to {@link #OVERRIDE_PACKAGE} while
+     * Settings.Secure.PI_NETFLIX_SPOOF is on (default on).
+     */
+    private void applyOverrideSpoof(String packageName, Context context) {
+        if (!OVERRIDE_PACKAGE.equals(packageName)) return;
+
+        try {
+            int enabled = Settings.Secure.getInt(
+                    context.getContentResolver(), Settings.Secure.PI_NETFLIX_SPOOF, 1);
+            if (enabled == 0) return;
+        } catch (Throwable e) {
+            if (mDebug) Log.d(TAG, "Could not read override flag: " + e.getMessage());
+            return;
+        }
+
+        Map<String, Object> props = BUILTIN_PROFILES.get(OVERRIDE_PROFILE);
+        if (props == null) return;
+
+        if (mDebug) Log.d(TAG, "Override spoof: " + packageName + " → " + OVERRIDE_PROFILE);
+        spoofProfile(props, packageName);
+    }
+
+    private void spoofProfile(Map<String, Object> props, String packageName) {
         for (Map.Entry<String, Object> prop : props.entrySet()) {
             Object v = prop.getValue();
             if (v != null) spoofField(prop.getKey(), v.toString(), packageName);
