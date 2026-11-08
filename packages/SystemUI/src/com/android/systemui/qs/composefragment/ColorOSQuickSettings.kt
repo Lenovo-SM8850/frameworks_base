@@ -284,7 +284,7 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     brightnessViewModel: BrightnessSliderViewModel,
     audioVolumeInteractor: AudioVolumeInteractor,
     showMedia: Boolean,
-    media: @Composable (Modifier) -> Unit,
+    media: @Composable (Modifier, Dp) -> Unit,
     listening: () -> Boolean,
     modifier: Modifier = Modifier,
     availableHeight: Dp = Dp.Unspecified,
@@ -388,9 +388,12 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (showMedia) {
-                            media(Modifier.fillMaxSize())
+                            media(Modifier.fillMaxSize(), 0.dp)
                         } else {
-                            ColorOSIdleMediaCard(Modifier.fillMaxSize())
+                            ColorOSIdleMediaCard(
+                                modifier = Modifier.fillMaxSize(),
+                                extraHeight = 0.dp,
+                            )
                         }
                     }
                 }

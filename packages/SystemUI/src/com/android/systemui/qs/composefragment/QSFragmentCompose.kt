@@ -1216,7 +1216,7 @@ constructor(
                                         showMedia =
                                             viewModel.qsMediaVisible &&
                                                 colorOSMedia != null,
-                                        media = { mediaModifier ->
+                                        media = { mediaModifier, extraHeight ->
                                             colorOSMedia?.let { data ->
                                                 val colorOSArtFill by
                                                     qsPanelStyleRepository.colorOSMediaArtFill
@@ -1224,6 +1224,7 @@ constructor(
                                                 ColorOSMediaCard(
                                                     data = data,
                                                     artFill = colorOSArtFill,
+                                                    extraHeight = extraHeight,
                                                     onOpen = { intent ->
                                                         activityStarter
                                                             .postStartActivityDismissingKeyguard(

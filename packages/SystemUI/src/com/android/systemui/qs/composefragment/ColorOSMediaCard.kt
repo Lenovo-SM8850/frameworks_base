@@ -12,11 +12,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -25,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.produceState
@@ -92,8 +96,27 @@ class ColorOSMediaSessions : MediaDataManager.Listener {
     }
 }
 
-private val ColorOSMediaArtSize = 50.dp
-private val ColorOSMediaArtShape = RoundedCornerShape(10.dp)
+/** Height of the card the sizes below are drawn for, the two tile rows of a phone. */
+private val ColorOSMediaBaseHeight = 145.dp
+
+/** Text and buttons grow at half the rate of the card, to stay near the labels around it. */
+private fun colorOSMediaScale(extraHeight: Dp): Float =
+    1f + extraHeight / ColorOSMediaBaseHeight / 2f
+
+private val LocalColorOSMediaScale = compositionLocalOf { 1f }
+
+/** Card insets and artwork dimensions. */
+private class ColorOSMediaLayoutDimensions(extraHeight: Dp) {
+    val top = 14.dp
+    val start = 16.dp + extraHeight * 0.10f
+    val end = 12.dp + extraHeight * 0.10f
+    val bottom = 8.dp
+    val artSize = 50.dp
+    val controlsInset = 5.dp + extraHeight * 0.10f
+    val outputTop = 8.dp + extraHeight * 0.15f
+    val artShape = RoundedCornerShape(10.dp + extraHeight * 0.05f)
+}
+
 private val ColorOSMediaButtonSize = 44.dp
 private val ColorOSMediaOutputIconSize = 24.dp
 
@@ -138,6 +161,7 @@ internal fun ColorOSMediaCard(
     onOutputSwitcher: (MediaData) -> Unit,
     modifier: Modifier = Modifier,
     artFill: Boolean = false,
+    extraHeight: Dp = 0.dp,
 ) {
     val context = LocalContext.current
     val artwork by
@@ -153,7 +177,8 @@ internal fun ColorOSMediaCard(
     val buttons = data.semanticActions
     val playing = data.isPlaying == true
     val outputEnabled = data.device?.enabled != false && !data.resumption
-    val deviceIcon = rememberDrawableBitmap(data.device?.icon, ColorOSMediaDeviceIconSize)
+    val scale = colorOSMediaScale(extraHeight)
+    val deviceIcon = rememberDrawableBitmap(data.device?.icon, ColorOSMediaDeviceIconSize * scale)
     val headphones = rememberColorOSHeadphonesOutput()
     // With the art filling the card the text and icons sit on the art and not on the glass, so they
     // are light whatever the theme is. Without art there is nothing to fill, the thumbnail layout
@@ -170,7 +195,7 @@ internal fun ColorOSMediaCard(
                     }
                 }
         }
-    val appIconBitmap = rememberDrawableBitmap(appIcon, ColorOSMediaAppIconSize)
+    val appIconBitmap = rememberDrawableBitmap(appIcon, ColorOSMediaAppIconSize * scale)
     val scheme = MaterialTheme.colorScheme
     val contentScheme =
         if (fillArt) {
@@ -197,13 +222,15 @@ internal fun ColorOSMediaCard(
     // The light in the color of the art starts from the thumbnail. With the art over the whole
     // card the art is the light, so it has none.
     val density = LocalDensity.current
-    val thumbnailCenter =
+    val dimensions = ColorOSMediaLayoutDimensions(extraHeight)
+    val thumbnailCenter: (Float) -> Offset = { cardHeight ->
         with(density) {
-            Offset(
-                (16.dp + ColorOSMediaArtSize / 2).toPx(),
-                (14.dp + ColorOSMediaArtSize / 2).toPx(),
-            )
+            val tall = extraHeight > 0.dp
+            val artSize = if (tall) cardHeight * 0.30f else dimensions.artSize.toPx()
+            val top = if (tall) cardHeight * 0.10f else dimensions.top.toPx()
+            Offset(dimensions.start.toPx() + artSize / 2, top + artSize / 2)
         }
+    }
     Box(
         modifier
             // The sweep goes round the card over the art and the light, when the track changes.
@@ -242,6 +269,7 @@ internal fun ColorOSMediaCard(
         MaterialTheme(colorScheme = contentScheme) {
             ColorOSMediaLayout(
                 modifier = Modifier.fillMaxSize(),
+                extraHeight = extraHeight,
                 showThumbnail = !fillArt,
                 appIcon = appIconBitmap.takeIf { fillArt },
                 description = listOfNotNull(data.song, data.artist, data.app).joinToString(", "),
@@ -263,7 +291,7 @@ internal fun ColorOSMediaCard(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier =
-                            Modifier.size(ColorOSMediaButtonSize)
+                            Modifier.size(ColorOSMediaButtonSize * scale)
                                 .clip(CircleShape)
                                 .clickable(enabled = outputEnabled) { onOutputSwitcher(data) }
                                 .semantics {
@@ -277,21 +305,21 @@ internal fun ColorOSMediaCard(
                                 painter = painterResource(R.drawable.ic_coloros_volume_headphones),
                                 contentDescription = null,
                                 tint = tint,
-                                modifier = Modifier.size(ColorOSMediaHeadphonesIconSize),
+                                modifier = Modifier.size(ColorOSMediaHeadphonesIconSize * scale),
                             )
                         } else if (deviceIcon != null) {
                             Icon(
                                 bitmap = deviceIcon,
                                 contentDescription = null,
                                 tint = tint,
-                                modifier = Modifier.size(ColorOSMediaDeviceIconSize),
+                                modifier = Modifier.size(ColorOSMediaDeviceIconSize * scale),
                             )
                         } else {
                             Icon(
                                 painter = painterResource(R.drawable.ic_media_home_devices),
                                 contentDescription = null,
                                 tint = tint,
-                                modifier = Modifier.size(ColorOSMediaDeviceIconSize),
+                                modifier = Modifier.size(ColorOSMediaDeviceIconSize * scale),
                             )
                         }
                     }
@@ -302,17 +330,17 @@ internal fun ColorOSMediaCard(
                     ColorOSMediaButton(
                         action = prev,
                         glyph = if (prevIsStandard) previousGlyph else null,
-                        iconSize = 22.dp,
+                        baseIconSize = 22.dp,
                     )
                     ColorOSMediaButton(
                         action = buttons?.playOrPause,
                         glyph = playPauseGlyph,
-                        iconSize = 26.dp,
+                        baseIconSize = 26.dp,
                     )
                     ColorOSMediaButton(
                         action = next,
                         glyph = if (nextIsStandard) nextGlyph else null,
-                        iconSize = 22.dp,
+                        baseIconSize = 22.dp,
                     )
                 },
             )
@@ -325,20 +353,22 @@ internal fun ColorOSMediaCard(
  * the playing card, with a placeholder tile, the cast icon and dimmed controls, like ColorOS.
  */
 @Composable
-internal fun ColorOSIdleMediaCard(modifier: Modifier = Modifier) {
+internal fun ColorOSIdleMediaCard(modifier: Modifier = Modifier, extraHeight: Dp = 0.dp) {
     val onSurface = MaterialTheme.colorScheme.onSurface
     ColorOSMediaLayout(
         modifier = modifier,
+        extraHeight = extraHeight,
         description = stringResource(R.string.qs_coloros_no_media),
         onClick = null,
         thumbnail = { ColorOSMediaNoteTile() },
         output = {
-            Box(Modifier.size(ColorOSMediaButtonSize), contentAlignment = Alignment.Center) {
+            val scale = colorOSMediaScale(extraHeight)
+            Box(Modifier.size(ColorOSMediaButtonSize * scale), contentAlignment = Alignment.Center) {
                 Icon(
                     painter = painterResource(R.drawable.ic_coloros_media_output),
                     contentDescription = null,
                     tint = onSurface,
-                    modifier = Modifier.size(ColorOSMediaOutputIconSize),
+                    modifier = Modifier.size(ColorOSMediaOutputIconSize * scale),
                 )
             }
         },
@@ -348,17 +378,17 @@ internal fun ColorOSIdleMediaCard(modifier: Modifier = Modifier) {
             ColorOSMediaButton(
                 action = null,
                 glyph = painterResource(R.drawable.ic_coloros_media_previous),
-                iconSize = 22.dp,
+                baseIconSize = 22.dp,
             )
             ColorOSMediaButton(
                 action = null,
                 glyph = painterResource(R.drawable.ic_coloros_media_play),
-                iconSize = 26.dp,
+                baseIconSize = 26.dp,
             )
             ColorOSMediaButton(
                 action = null,
                 glyph = painterResource(R.drawable.ic_coloros_media_next),
-                iconSize = 22.dp,
+                baseIconSize = 22.dp,
             )
         },
     )
@@ -372,6 +402,7 @@ internal fun ColorOSIdleMediaCard(modifier: Modifier = Modifier) {
 @Composable
 private fun ColorOSMediaLayout(
     modifier: Modifier,
+    extraHeight: Dp = 0.dp,
     showThumbnail: Boolean = true,
     appIcon: ImageBitmap? = null,
     description: String,
@@ -383,43 +414,60 @@ private fun ColorOSMediaLayout(
     controls: @Composable () -> Unit,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
-    Box(modifier) {
+    val scale = colorOSMediaScale(extraHeight)
+    val dimensions = ColorOSMediaLayoutDimensions(extraHeight)
+    BoxWithConstraints(modifier) {
+        // A taller card places its content by its height, which differs with the orientation.
+        val tall = extraHeight > 0.dp
+        val top = if (tall) maxHeight * 0.10f else dimensions.top
+        val artSize = if (tall) maxHeight * 0.30f else dimensions.artSize
+        val bottom =
+            if (tall) {
+                maxOf(maxHeight * 0.17f - ColorOSMediaButtonSize * scale / 2, 0.dp)
+            } else {
+                dimensions.bottom
+            }
+        val textGap = if (tall) maxHeight * 0.02f else 0.dp
         Column(
             modifier =
                 Modifier.fillMaxSize()
                     .clickable(enabled = onClick != null) { onClick?.invoke() }
                     .semantics { contentDescription = description }
-                    // Side insets are applied per item: the controls sit closer to the edges
-                    // than the text, and the row ends 3dp above the bottom like ColorOS.
-                    .padding(top = 14.dp, bottom = 3.dp)
+                    // Side insets are applied per item; the extended ColorOS QS card also
+                    // raises the controls to give the bottom edge more breathing room.
+                    .padding(top = top, bottom = bottom)
         ) {
-            val textInset = Modifier.padding(start = 16.dp, end = 12.dp)
-            if (showThumbnail) {
-                Box(
-                    Modifier.padding(start = 16.dp)
-                        .size(ColorOSMediaArtSize)
-                        .clip(ColorOSMediaArtShape)
-                ) {
-                    thumbnail()
+            val textInset = Modifier.padding(start = dimensions.start, end = dimensions.end)
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                if (showThumbnail) {
+                    Box(
+                        Modifier.padding(start = dimensions.start)
+                            .size(minOf(artSize, maxHeight))
+                            .clip(dimensions.artShape)
+                    ) {
+                        thumbnail()
+                    }
+                } else if (appIcon != null) {
+                    Icon(
+                        bitmap = appIcon,
+                        contentDescription = null,
+                        tint = onSurface,
+                        modifier =
+                            Modifier.padding(start = dimensions.start)
+                                .size(minOf(ColorOSMediaAppIconSize * scale, maxHeight)),
+                    )
                 }
-            } else if (appIcon != null) {
-                Icon(
-                    bitmap = appIcon,
-                    contentDescription = null,
-                    tint = onSurface,
-                    modifier = Modifier.padding(start = 16.dp).size(ColorOSMediaAppIconSize),
-                )
             }
-            Spacer(Modifier.weight(1f))
             if (title != null) {
                 Text(
                     text = title,
                     modifier = textInset,
                     color = onSurface,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleSmall.scaled(scale),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(Modifier.height(textGap))
             }
             Text(
                 text = subtitle,
@@ -428,22 +476,33 @@ private fun ColorOSMediaLayout(
                     if (title != null) onSurface.copy(alpha = 0.75f)
                     else onSurface.copy(alpha = 0.5f),
                 style =
-                    if (title != null) MaterialTheme.typography.bodySmall
-                    else MaterialTheme.typography.titleSmall.scaled(ColorOSIdleTextScale),
+                    if (title != null) MaterialTheme.typography.bodySmall.scaled(scale)
+                    else MaterialTheme.typography.titleSmall.scaled(ColorOSIdleTextScale * scale),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
-                // 44dp targets with 5dp inset: the prev/next icons are centred 27dp from the edges.
-                modifier = Modifier.fillMaxWidth().padding(start = 5.dp, end = 5.dp, top = 2.dp),
+                // Keep 44dp targets while adding side insets in the extended card.
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .padding(
+                            start = dimensions.controlsInset,
+                            end = dimensions.controlsInset,
+                            top = 1.dp,
+                        ),
             ) {
-                controls()
+                CompositionLocalProvider(LocalColorOSMediaScale provides scale) { controls() }
             }
         }
-        // The output button is centred 26dp below the top and 27dp from the right edge.
-        Box(Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 5.dp)) { output() }
+        // The output button follows the extended card's top and end insets too.
+        Box(
+            Modifier.align(Alignment.TopEnd)
+                .padding(top = dimensions.outputTop, end = dimensions.controlsInset)
+        ) {
+            output()
+        }
     }
 }
 
@@ -476,14 +535,16 @@ private fun ColorOSMediaNoteTile() {
  * leaves an empty slot, so the other buttons keep their place.
  */
 @Composable
-private fun ColorOSMediaButton(action: MediaAction?, glyph: Painter?, iconSize: Dp) {
+private fun ColorOSMediaButton(action: MediaAction?, glyph: Painter?, baseIconSize: Dp) {
+    val scale = LocalColorOSMediaScale.current
+    val iconSize = baseIconSize * scale
     val enabled = action?.action != null
     val tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else ColorOSMediaDimAlpha)
     val actionIcon = rememberDrawableBitmap(if (glyph == null) action?.icon else null, iconSize)
     Box(
         contentAlignment = Alignment.Center,
         modifier =
-            Modifier.size(ColorOSMediaButtonSize)
+            Modifier.size(ColorOSMediaButtonSize * scale)
                 .clip(CircleShape)
                 .clickable(enabled = enabled) { action?.action?.run() }
                 .semantics { contentDescription = action?.contentDescription?.toString().orEmpty() },

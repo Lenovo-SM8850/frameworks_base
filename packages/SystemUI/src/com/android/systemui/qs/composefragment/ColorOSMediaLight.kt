@@ -54,7 +54,7 @@ private data class ColorOSMediaArt(val color: Int, val signature: Int)
 internal fun Modifier.colorOSMediaLight(
     artwork: ImageBitmap?,
     corner: Dp,
-    artworkCenter: Offset,
+    artworkCenter: (Float) -> Offset,
 ): Modifier {
     val light = remember { runCatching { ColorOSCardLight() }.getOrNull() } ?: return this
     val night = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -92,9 +92,10 @@ internal fun Modifier.colorOSMediaLight(
     LaunchedEffect(art.signature, ready) {
         if (!ready) return@LaunchedEffect
         // The ripple is placed from the center of the card.
+        val center = artworkCenter(light.bounds.height().toFloat())
         light.playRipple(
-            artworkCenter.x - light.bounds.width() / 2f,
-            artworkCenter.y - light.bounds.height() / 2f,
+            center.x - light.bounds.width() / 2f,
+            center.y - light.bounds.height() / 2f,
         )
     }
 
