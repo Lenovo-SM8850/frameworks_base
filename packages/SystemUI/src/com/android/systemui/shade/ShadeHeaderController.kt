@@ -97,6 +97,8 @@ import java.io.PrintWriter
 import javax.inject.Inject
 import javax.inject.Named
 import kotlinx.coroutines.flow.MutableStateFlow
+import io.github.miner7222.systemui.qs.carrierTextGapPx
+import io.github.miner7222.systemui.qs.hasVisibleCarrierText
 
 /**
  * Controller for QS header.
@@ -303,6 +305,9 @@ constructor(
     /** Whether the ColorOS QS panel style is on, which gives the expanded header one row. */
     private var colorOSStyle = false
     private var qsClockStyle = 0
+    private val carrierSpacingListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+        updateCarrierTextGap()
+    }
 
     private val demoModeReceiver =
         object : DemoMode {
@@ -522,6 +527,8 @@ constructor(
         statusBarIconController.addIconGroup(iconManager)
         systemIconsHoverContainer.addOnLayoutChangeListener(statusBoundsListener)
         mShadeCarrierGroup.addOnLayoutChangeListener(statusBoundsListener)
+        mShadeCarrierGroup.addOnLayoutChangeListener(carrierSpacingListener)
+        date.addOnLayoutChangeListener(carrierSpacingListener)
         QsHeaderImageTint.addStatusListener(headerImageTintListener)
         nextAlarmController.addCallback(nextAlarmCallback)
         systemIconsHoverContainer.setOnHoverListener(
@@ -545,6 +552,8 @@ constructor(
         statusBarIconController.removeIconGroup(iconManager)
         systemIconsHoverContainer.removeOnLayoutChangeListener(statusBoundsListener)
         mShadeCarrierGroup.removeOnLayoutChangeListener(statusBoundsListener)
+        mShadeCarrierGroup.removeOnLayoutChangeListener(carrierSpacingListener)
+        date.removeOnLayoutChangeListener(carrierSpacingListener)
         QsHeaderImageTint.removeStatusListener(headerImageTintListener)
         nextAlarmController.removeCallback(nextAlarmCallback)
         systemIconsHoverContainer.setOnHoverListener(null)
@@ -660,6 +669,25 @@ constructor(
                 } else {
                     Gravity.END or Gravity.CENTER_VERTICAL
                 }
+            updateCarrierTextGap()
+        }
+    }
+
+    private fun updateCarrierTextGap() {
+        val gap =
+            carrierTextGapPx(
+                colorOSStyle = colorOSStyle,
+                largeScreenActive = largeScreenActive,
+                dateVisible = date.visibility == View.VISIBLE,
+                carrierVisible = hasVisibleCarrierText(mShadeCarrierGroup),
+                dateStartMarginPx =
+                    header.getConstraintSet(LARGE_SCREEN_HEADER_CONSTRAINT)
+                        .getConstraint(R.id.date)
+                        ?.layout
+                        ?.startMargin ?: 0,
+            )
+        if (mShadeCarrierGroup.paddingStart != gap) {
+            mShadeCarrierGroup.setPaddingRelative(gap, 0, 0, 0)
         }
     }
 
@@ -768,6 +796,7 @@ constructor(
     }
 
     private fun updatePosition() {
+        updateCarrierTextGap()
         if (!largeScreenActive && visible) {
             logInstantEvent("updatePosition: $qsExpandedFraction")
             header.progress = qsExpandedFraction
