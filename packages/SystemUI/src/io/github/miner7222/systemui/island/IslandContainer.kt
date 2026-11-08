@@ -17,8 +17,6 @@
 
 package io.github.miner7222.systemui.island
 
-import com.android.systemui.statusbar.quickactions.ui.compose.*
-
 import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
@@ -109,6 +107,7 @@ import kotlinx.coroutines.withContext
 import com.android.systemui.statusbar.quickactions.ui.compose.CosIslandShell
 import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandAnchor
 import com.android.systemui.statusbar.quickactions.ui.compose.ProvideDynamicIslandPillTurns
+import com.android.systemui.statusbar.quickactions.ui.compose.isCallChip
 import com.android.systemui.statusbar.quickactions.ui.compose.rotatedLayout
 
 /** Phone-only centered dynamic island that pages through active popup chips. */
@@ -199,27 +198,13 @@ fun IslandContainer(
     val selectedChip = chips.getOrNull(selectedIndex)
     val shownChip = chips.firstOrNull { it.isPopupShown }
 
-    val stackChips = remember(chips) { islandCardStack(chips) }
-    // Chosen when the popup opens and kept until it closes, so dismissing cards never swaps the
-    // stack for the single card while it is open.
-    var stacked by remember { mutableStateOf(false) }
-
     LaunchedEffect(shownChip) {
         if (shownChip != null) {
-            if (popupAnchorChip == null) {
-                stacked =
-                    cos &&
-                        stackChips.size >= ISLAND_STACK_MIN_CARDS &&
-                        stackChips.any { it.chipId == shownChip.chipId }
-            }
             selectedChipId = shownChip.chipId
             popupAnchorChip = shownChip
             popupVisible = true
         } else if (popupAnchorChip != null) {
             popupVisible = false
-            delay(if (cos) CosCardCloseMillis + 20L else 220L)
-            popupAnchorChip = null
-            stacked = false
         }
     }
 
@@ -268,6 +253,7 @@ fun IslandContainer(
     }
 
     // Popups without rich content cannot be stacked or paged through.
+    val stackChips = chips.filter { it.popupContent != PopupContentModel.None }
     // The status bar view is shorter than the island, so its height has to be required.
     val islandHeight =
         maxOf(
@@ -472,16 +458,34 @@ fun IslandContainer(
             }
         }
 
-        popupAnchorChip?.takeIf { cos || selectedChip != null }?.let { anchoredChip ->
-            StatusBarPopup(
-                viewModel = anchoredChip,
-                isVisible = popupVisible,
-                chipBoundsInScreen = anchorBounds,
-                anchorCenterX = cameraCenterX,
-                sideEdge = sideEdge,
-                cos = cos,
-                stackedChips = if (stacked) stackChips else null,
-            )
+        popupAnchorChip?.let { anchoredChip ->
+            val pages =
+                if (stackChips.any { it.chipId == anchoredChip.chipId }) {
+                    stackChips
+                } else {
+                    listOf(anchoredChip)
+                }
+            CompositionLocalProvider(LocalDynamicIslandWidth provides collapsedWidth) {
+                StatusBarPopup(
+                    viewModel = anchoredChip,
+                    isVisible = popupVisible,
+                    chipBoundsInScreen = anchorBounds,
+                    sideEdge = sideEdge,
+                    cos = cos,
+                    chips = pages,
+                    appHandleBounds = appHandleBounds,
+                    onPageSelected = ::selectChip,
+                    onMorphActiveChanged = { active ->
+                        popupOwnsIsland = active
+                        if (active) popupHidesContent = true
+                    },
+                    onHidden = {
+                        // The popup's handoff fade has finished; the return reveal is now visible.
+                        popupHidesContent = false
+                        if (shownChip == null) popupAnchorChip = null
+                    },
+                )
+            }
         }
     }
 }
