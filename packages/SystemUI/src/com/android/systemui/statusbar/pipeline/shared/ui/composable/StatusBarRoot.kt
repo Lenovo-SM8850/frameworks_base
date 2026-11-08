@@ -196,6 +196,10 @@ constructor(
     fun create(root: ViewGroup, andThen: (ViewGroup) -> Unit): ComposeView {
         val composeView = ComposeView(root.context)
         composeView.apply {
+            clipChildren = false
+            clipToPadding = false
+            clipToOutline = false
+            allowChildrenOutsideBounds(root, root.rootView as? ViewGroup ?: root)
             setContent {
                 PlatformTheme {
                     StatusBarRoot(
@@ -693,11 +697,9 @@ fun StatusBarRoot(
                                         else Gravity.CENTER
                                 },
                         )
-                        allowChildrenOutsideBounds(
-                            if (startAnchored) startSideHost else centeredArea,
-                            phoneStatusBarView,
-                        )
                     }
+                    // The island is taller than the bar and hangs below it.
+                    allowChildrenOutsideBounds(host, phoneStatusBarView)
                     islandAutoOffsetYPx =
                         dynamicIslandCameraCenterOffsetYPx(
                             host,
@@ -772,6 +774,10 @@ fun StatusBarRoot(
                 phoneStatusBarView.addOnAttachStateChangeListener(
                     object : View.OnAttachStateChangeListener {
                         override fun onViewAttachedToWindow(v: View) {
+                            allowChildrenOutsideBounds(
+                                composeView,
+                                phoneStatusBarView.rootView as? ViewGroup ?: phoneStatusBarView,
+                            )
                             listOf(
                                     DynamicIslandFeatureSettings.OFFSET_X_DP10,
                                     DynamicIslandFeatureSettings.OFFSET_Y_DP10,
@@ -1539,6 +1545,7 @@ private fun allowChildrenOutsideBounds(from: ViewGroup, until: ViewGroup) {
     while (view != null) {
         view.clipChildren = false
         view.clipToPadding = false
+        view.clipToOutline = false
         if (view === until) break
         view = view.parent as? ViewGroup
     }

@@ -130,6 +130,8 @@ internal val DynamicIslandOutlineWidth = 1.dp
 /** Collapsed height at a height scale of one, with or without a camera to cover. */
 internal val DynamicIslandBaseHeight = 35.dp
 
+/** Vertical centre of the island without a camera, where it sits on a camera that has one. */
+internal val DynamicIslandDefaultCenterY = 24.5.dp
 
 private fun cutoutMinimumHeight(crossAxisSize: Dp): Dp =
     crossAxisSize + (DynamicIslandCutoutFillMargin + DynamicIslandOutlineWidth) * 2
@@ -336,27 +338,70 @@ internal fun rememberDynamicIslandSizeScale(): Pair<Float, Float> {
     return widthScale to heightScale
 }
 
+internal fun LayoutCoordinates.islandBoundsInScreen(view: android.view.View): Rect {
+    val location = IntArray(2)
+    view.getLocationOnScreen(location)
+    return findRootCoordinates().localBoundingBoxOf(this, clipBounds = false)
+        .translate(Offset(location[0].toFloat(), location[1].toFloat()))
+}
+
+internal fun LayoutCoordinates.islandBoundsInWindow(): Rect {
+    val root = findRootCoordinates()
+    return root.localBoundingBoxOf(this, clipBounds = false).translate(root.positionInWindow())
+}
+
+@Composable
+internal fun rememberDynamicIslandWidth(cutoutSpec: DynamicIslandCutoutSpec): Dp {
+    val style = MaterialTheme.typography.labelLarge
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val context = LocalContext.current
+    val full = context.getString(R.string.dynamic_island_charging_full)
+    val flashlight = context.getString(R.string.dynamic_island_flashlight_short)
+    val sideBudget = remember(style, measurer, density, full, flashlight) {
+        fun textWidth(text: String): Dp =
+            (measurer.measure(
+                text = text,
+                style = style,
+                density = density,
+                softWrap = false,
+                maxLines = 1,
+            ).multiParagraph.maxIntrinsicWidth / density.density).dp
+        val startText = listOf("+99:59", "999.99W", flashlight).maxOf { textWidth(it) }
+        val endText = listOf("+99:59", "99:59", "100%", full).maxOf { textWidth(it) }
+        maxOf(16.dp + 6.dp + startText, endText)
+    }
+    return remember(sideBudget, cutoutSpec.cutoutWidth) {
+        val clearance = DynamicIslandEmbeddedGapSidePadding * 2
+        val width = (sideBudget + 10.dp) * 2 + cutoutSpec.cutoutWidth + clearance
+        // A fixed 184dp ceiling clips the utility labels at larger font scales.
+        (ceil(width.value / 4f) * 4f).dp.coerceAtLeast(120.dp)
+    }
+}
+
 @Composable
 internal fun PageDots(count: Int, index: Int, color: Color, onClick: () -> Unit) {
     val visible = minOf(count, MaxPageDots)
     val first = (index - visible / 2).coerceIn(0, count - visible)
-    Row(
+    Column(
         modifier =
-            Modifier.clickable(onClick = onClick)
+            Modifier.clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f))
+                .clickable(onClick = onClick)
                 .padding(horizontal = PageDotsTapPadding, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(PageDotSpacing),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(PageDotSpacing),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         repeat(visible) { slot ->
             val isCurrent = first + slot == index
-            val width by
+            val height by
                 animateDpAsState(
-                    targetValue = if (isCurrent) PageDotActiveWidth else PageDotSize,
-                    label = "pageDotWidth",
+                    targetValue = if (isCurrent) PageDotActiveHeight else PageDotSize,
+                    label = "pageDotHeight",
                 )
             Box(
                 modifier =
-                    Modifier.size(width = width, height = PageDotSize)
+                    Modifier.size(width = PageDotSize, height = height)
                         .background(
                             color = color.copy(alpha = if (isCurrent) 0.9f else 0.45f),
                             shape = CircleShape,
@@ -368,7 +413,7 @@ internal fun PageDots(count: Int, index: Int, color: Color, onClick: () -> Unit)
 
 private const val MaxPageDots = 5
 private val PageDotSize = 4.dp
-private val PageDotActiveWidth = 10.dp
+private val PageDotActiveHeight = 10.dp
 private val PageDotSpacing = 3.dp
 private val PageDotsTapPadding = 4.dp
 
