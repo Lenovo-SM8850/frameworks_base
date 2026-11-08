@@ -43,6 +43,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -77,6 +78,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -100,11 +102,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -216,6 +220,7 @@ fun ClassicTileContent(
     rim: Brush? = null,
     glass: Boolean = false,
     chevron: Boolean = false,
+    onChevronClick: (() -> Unit)? = null,
     pressSource: InteractionSource? = null,
     lottieSpec: String? = null,
     active: Boolean = false,
@@ -381,7 +386,11 @@ fun ClassicTileContent(
                         .thenIf(colorOSLabels) {
                             Modifier.wrapContentHeight(Alignment.Top, unbounded = true)
                         }
-                        .padding(top = 4.dp)
+                        .padding(
+                            top =
+                                if (colorOSLabels) CommonTileDefaults.ColorOSLabelTopPadding
+                                else 4.dp
+                        )
                         .fillMaxWidth(),
                 )
                 if (!colorOSLabels && !TextUtils.isEmpty(secondaryLabel)) {
@@ -399,21 +408,7 @@ fun ClassicTileContent(
                 }
             }
             if (chevron) {
-                // The chevron sits right after the widest label line, and the two are centred
-                // under the tile as one.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f, fill = false).width(IntrinsicSize.Max)) { labels() }
-                    Image(
-                        painter = painterResource(R.drawable.ic_coloros_tile_chevron),
-                        contentDescription = null,
-                        colorFilter = ColorFilter.tint(animatedSecondaryLabelColor),
-                        modifier = Modifier.padding(start = 1.dp).size(10.dp),
-                    )
-                }
+                ColorOSTileLabelRow(animatedLabelColor.copy(alpha = 0.6f), onChevronClick, labels)
             } else {
                 labels()
             }
@@ -1054,10 +1049,16 @@ object CommonTileDefaults {
 
     /**
      * Line height of a ColorOS round tile label. Two lines of it fit in [ClassicLabelHeight] less
-     * the 4dp above the label, and the label is measured without a height limit besides, so a
-     * bigger font only makes the second line reach into the gap under the tile.
+     * the [ColorOSLabelTopPadding] above the label, and the label is measured without a height
+     * limit besides, so a bigger font only makes the second line reach into the gap under the tile.
      */
-    val ColorOSLabelLineHeight = 13.sp
+    val ColorOSLabelLineHeight = 12.sp
+
+    /**
+     * Space between a ColorOS round tile and its label. The glyphs of a line sit low in its line
+     * height, so a small gap above keeps a second line clear of the tile under it.
+     */
+    val ColorOSLabelTopPadding = 2.dp
 
     val TileHeight: Dp
         @Composable
@@ -1186,3 +1187,74 @@ private fun animateToggleFloat(target: Float, eased: Boolean, label: String): St
     } else {
         animateFloatAsState(target, label = label)
     }
+
+// The chevrons of a tile label, relative to the size of the label's font.
+private const val ChevronHeightEm = 0.73f
+private const val ChevronAspect = 11f / 16f
+private const val ChevronGapEm = 0.3f
+
+/**
+ * A ColorOS round tile label with its chevrons. A label on one line is centred together with them,
+ * into the gap beside the tile if it must. A wrapped label stays just left of the centre and the
+ * chevrons sit at the edge of the tile, halfway down its lines. The chevrons alone are too small a
+ * target, so the whole row opens them.
+ */
+@Composable
+internal fun ColorOSTileLabelRow(
+    chevronTint: Color,
+    onChevronClick: (() -> Unit)?,
+    labels: @Composable () -> Unit,
+) {
+    val chevronClick by rememberUpdatedState(onChevronClick)
+    val fontSize = MaterialTheme.typography.labelMedium.fontSize
+    val density = LocalDensity.current
+    val chevronHeight = with(density) { (fontSize.toPx() * ChevronHeightEm).toDp() }
+    Layout(
+        content = {
+            Column(Modifier.width(IntrinsicSize.Max)) { labels() }
+            Image(
+                painter = painterResource(R.drawable.ic_coloros_tile_chevron),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(chevronTint),
+                modifier = Modifier.size(chevronHeight * ChevronAspect, chevronHeight),
+            )
+        },
+        modifier =
+            Modifier.fillMaxWidth().thenIf(onChevronClick != null) {
+                Modifier.pointerInput(Unit) {
+                    detectTapGestures {
+                        chevronClick?.invoke()
+                    }
+                }
+            },
+    ) { measurables, constraints ->
+        val chevronPlaceable = measurables[1].measure(Constraints())
+        val chevronWidth = chevronPlaceable.width
+        val gap = (fontSize.toPx() * ChevronGapEm).toInt()
+        val width = constraints.maxWidth
+        val wrapped = measurables[0].maxIntrinsicWidth(Constraints.Infinity) > width
+        val labelPlaceable =
+            measurables[0].measure(
+                constraints.copy(
+                    minWidth = 0,
+                    // A wrapped label keeps clear of the chevrons at the edge.
+                    maxWidth = if (wrapped) width - chevronWidth else width,
+                    minHeight = 0,
+                    maxHeight = Constraints.Infinity,
+                )
+            )
+        val height =
+            maxOf(labelPlaceable.height, chevronPlaceable.height)
+                .coerceIn(constraints.minHeight, constraints.maxHeight)
+        val labelTop = CommonTileDefaults.ColorOSLabelTopPadding.roundToPx()
+        layout(width, height) {
+            val x =
+                if (wrapped) -gap / 2 else (width - labelPlaceable.width - gap - chevronWidth) / 2
+            labelPlaceable.placeRelative(x, 0)
+            chevronPlaceable.placeRelative(
+                if (wrapped) width - chevronWidth else x + labelPlaceable.width + gap,
+                labelTop + (labelPlaceable.height - labelTop - chevronPlaceable.height) / 2,
+            )
+        }
+    }
+}
