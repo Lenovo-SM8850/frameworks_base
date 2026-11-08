@@ -285,7 +285,6 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     audioVolumeInteractor: AudioVolumeInteractor,
     showMedia: Boolean,
     media: @Composable (Modifier) -> Unit,
-    mediaHost: @Composable (Modifier) -> Unit = {},
     listening: () -> Boolean,
     modifier: Modifier = Modifier,
     availableHeight: Dp = Dp.Unspecified,
@@ -388,7 +387,6 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                                 .glassSurface(glass, ColorOSMediaShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        mediaHost(Modifier.matchParentSize())
                         if (showMedia) {
                             media(Modifier.fillMaxSize())
                         } else {

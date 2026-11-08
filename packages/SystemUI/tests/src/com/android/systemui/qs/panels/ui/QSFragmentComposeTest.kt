@@ -16,6 +16,9 @@
 
 package com.android.systemui.qs.panels.ui
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.mutableStateOf
+import com.android.systemui.qs.composefragment.ColorOSQqsMediaFrame
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -44,6 +47,28 @@ import org.junit.runner.RunWith
 class QSFragmentComposeTest : SysuiTestCase() {
 
     @get:Rule val composeTestRule = createComposeRule()
+
+    @Test
+    fun colorOSQqsMediaFrame_reservesFullHeightBeforeAndAfterMediaLoads() {
+        val contentHeight = mutableStateOf(0.dp)
+        composeTestRule.setContent {
+            Column(Modifier.fillMaxWidth()) {
+                ColorOSQqsMediaFrame(184.dp) {
+                    Box(Modifier.fillMaxWidth().height(contentHeight.value).testTag(MEDIA))
+                }
+                Box(Modifier.fillMaxWidth().height(100.dp).testTag("notifications"))
+            }
+        }
+        composeTestRule.waitForIdle()
+        val initialTop = composeTestRule.onNodeWithTag("notifications").getBoundsInRoot().top
+        assertThat(initialTop).isEqualTo(184.dp)
+        composeTestRule.runOnIdle { contentHeight.value = 184.dp }
+        composeTestRule.waitForIdle()
+        assertThat(composeTestRule.onNodeWithTag("notifications").getBoundsInRoot().top)
+            .isEqualTo(initialTop)
+        assertThat(composeTestRule.onNodeWithTag(MEDIA).getBoundsInRoot().height)
+            .isEqualTo(184.dp)
+    }
 
     @Test
     fun portraitLayout_qqs() {
