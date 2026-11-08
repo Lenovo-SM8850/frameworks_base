@@ -340,7 +340,11 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
             }
         SideEffect { onFitChanged(fit.fits) }
         val tileSize = fit.tileSize
+        // Half of the panel holds the media card, the other half the sliders and the ringer.
         val columnSize = fullColumnSize
+        val halfWidth = columnSize * 2 + ColorOSGap
+        val sliderSlot = columnSize
+        val rowCard = pillTile
         CompositionLocalProvider(
             LocalColorOSTileSize provides tileSize,
             LocalColorOSGridRows provides fit.rows,
@@ -372,21 +376,13 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                 }
 
                 // Row 2: media + tall brightness + tall volume, on the same four columns as the round
-            // tiles below: the media card covers columns 1-2 and each slider one of columns 3-4.
-            val moduleHeight = tileSize * 2 + ColorOSGap
-            val sliderWidth = minOf(columnSize, moduleHeight / ColorOSSliderAspect)
-            ColorOSModuleGlass(2, reveal) {
-                Row(
-                    horizontalArrangement = spacedBy(ColorOSGap),
-                    modifier =
-                        Modifier.colorOSModuleReveal(2, reveal)
-                            .fillMaxWidth()
-                            .height(moduleHeight),
-                ) {
+                // tiles below: the media card covers columns 1-2 and each slider one of columns 3-4.
+                val moduleHeight = tileSize * 2 + ColorOSGap
+                val sliderWidth = minOf(sliderSlot, moduleHeight / ColorOSSliderAspect)
+                val mediaCard: @Composable (Modifier) -> Unit = { cardModifier ->
                     Box(
                         modifier =
-                            Modifier.width(columnSize * 2 + ColorOSGap)
-                                .fillMaxHeight()
+                            cardModifier
                                 // Playing and idle share the same glass slot, like the other
                                 // ColorOS cards, the media card only lays out its content on it.
                                 .glassSurface(glass, ColorOSMediaShape),
@@ -399,14 +395,16 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                             ColorOSIdleMediaCard(Modifier.fillMaxSize())
                         }
                     }
-                    Box(Modifier.width(columnSize).fillMaxHeight(), Alignment.Center) {
+                }
+                val sliders: @Composable () -> Unit = {
+                    Box(Modifier.width(sliderSlot).fillMaxHeight(), Alignment.Center) {
                         ColorOSBrightnessSlider(
                             viewModel = brightnessViewModel,
                             glass = glass,
                             modifier = Modifier.width(sliderWidth).fillMaxHeight(),
                         )
                     }
-                    Box(Modifier.width(columnSize).fillMaxHeight(), Alignment.Center) {
+                    Box(Modifier.width(sliderSlot).fillMaxHeight(), Alignment.Center) {
                         ColorOSVolumeSlider(
                             audioVolumeInteractor = audioVolumeInteractor,
                             glass = glass,
@@ -414,18 +412,30 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                         )
                     }
                 }
-            }
-
-            // Row 3: My Devices + ringer switch, as ColorOS 17 has them. The mobile data tile is
-                // one of the round tiles below.
-                ColorOSModuleGlass(3, reveal) {
+                val ringer: @Composable (Modifier) -> Unit = { ringerModifier ->
+                    ColorOSRingerSwitch(
+                        audioVolumeInteractor = audioVolumeInteractor,
+                        glass = glass,
+                        height = tileSize,
+                        modifier = ringerModifier,
+                    )
+                }
+                ColorOSModuleGlass(2, reveal) {
                     Row(
                         horizontalArrangement = spacedBy(ColorOSGap),
-                        modifier = Modifier.colorOSModuleReveal(3, reveal),
+                        modifier = Modifier.colorOSModuleReveal(2, reveal).fillMaxWidth().height(moduleHeight),
                     ) {
-                        if (pillTile != null) {
+                        mediaCard(Modifier.width(halfWidth).fillMaxHeight())
+                        sliders()
+                    }
+                }
+                // The third row: the pinned pill (or My Devices) on the left and the ringer
+                // switch on the right. The mobile data tile is one of the round tiles below.
+                ColorOSModuleGlass(3, reveal) {
+                    Row(horizontalArrangement = spacedBy(ColorOSGap), modifier = Modifier.colorOSModuleReveal(3, reveal)) {
+                        if (rowCard != null) {
                             with(infiniteGridLayout) {
-                                ColorOSWideTile(pillTile, listening, Modifier.weight(1f))
+                                ColorOSWideTile(rowCard, listening, Modifier.weight(1f))
                             }
                         } else {
                             ColorOSMyDevices(
@@ -435,12 +445,7 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        ColorOSRingerSwitch(
-                            audioVolumeInteractor = audioVolumeInteractor,
-                            glass = glass,
-                            height = tileSize,
-                            modifier = Modifier.weight(1f),
-                        )
+                        ringer(Modifier.weight(1f))
                     }
                 }
 
