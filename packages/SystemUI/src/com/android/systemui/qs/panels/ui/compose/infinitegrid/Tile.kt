@@ -712,7 +712,6 @@ fun ContentScope.Tile(
                                     if (networkAsLabel) uiState.secondaryLabel else uiState.label,
                                 secondaryLabel =
                                     if (networkAsLabel) connectedLabel else uiState.secondaryLabel,
-                                labelMaxLines = if (networkAsLabel) 2 else 1,
                                 iconProvider = iconProvider,
                                 sideDrawable = uiState.sideDrawable,
                                 colors = colors,
