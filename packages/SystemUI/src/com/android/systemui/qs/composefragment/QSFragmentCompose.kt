@@ -141,9 +141,13 @@ import com.android.systemui.lifecycle.repeatWhenAttached
 import com.android.systemui.lifecycle.setSnapshotBinding
 import com.android.systemui.log.table.TableLogBuffer
 import com.android.systemui.media.controls.domain.pipeline.MediaDataManager
+import com.android.systemui.media.controls.shared.model.MediaData
+import com.android.systemui.media.controls.ui.controller.MediaCarouselController
 import com.android.systemui.media.controls.ui.view.MediaHost
 import com.android.systemui.media.controls.ui.view.MediaHostState
 import com.android.systemui.media.dialog.MediaOutputDialogManager
+import com.android.systemui.media.remedia.data.repository.MediaPipelineRepository
+import com.android.systemui.media.remedia.data.repository.MediaRepository
 import com.android.systemui.media.remedia.shared.flag.MediaControlsInComposeFlag
 import com.android.systemui.media.remedia.ui.compose.LegacyMediaSource
 import com.android.systemui.media.remedia.ui.compose.LocalLegacyMediaSource
@@ -240,6 +244,9 @@ constructor(
     private val infiniteGridLayout: InfiniteGridLayout,
     private val audioVolumeInteractor: AudioVolumeInteractor,
     private val mediaDataManager: MediaDataManager,
+    private val mediaCarouselController: dagger.Lazy<MediaCarouselController>,
+    private val mediaRepository: dagger.Lazy<MediaRepository>,
+    private val mediaPipelineRepository: dagger.Lazy<MediaPipelineRepository>,
     private val activityStarter: ActivityStarter,
     private val mediaOutputDialogManager: MediaOutputDialogManager,
     private val shadeAnimationInteractor: ShadeAnimationInteractor,
@@ -849,6 +856,22 @@ constructor(
     }
 
     @Composable
+    private fun currentColorOSMedia(): MediaData? {
+        if (MediaControlsInComposeFlag.isEnabled) {
+            val entries by
+                mediaPipelineRepository.get().currentUserEntries.collectAsStateWithLifecycle()
+            val repository = mediaRepository.get()
+            val sessions = repository.currentMedia.filterNot { it.needsImmediateRemoval }
+            val selected =
+                sessions.getOrNull(repository.currentCarouselIndex) ?: sessions.firstOrNull()
+            return selected?.let { entries[it.instanceId] }
+        }
+        val selected by
+            mediaCarouselController.get().selectedMediaData.collectAsStateWithLifecycle()
+        return selected
+    }
+
+    @Composable
     private fun ContentScope.QuickQuickSettingsElement(modifier: Modifier = Modifier) {
         val qqsPadding = viewModel.qqsHeaderHeight
         val bottomPadding = viewModel.qqsBottomPadding
@@ -1076,6 +1099,7 @@ constructor(
                                 .sysuiResTag(ResIdTags.qsScroll)
                     ) {
                         val containerViewModel = viewModel.containerViewModel
+                        val colorOSMedia = currentColorOSMedia()
                         // The room of the ColorOS header is part of the panel, which draws the
                         // buttons in it.
                         Spacer(
@@ -1171,9 +1195,9 @@ constructor(
                                         audioVolumeInteractor = audioVolumeInteractor,
                                         showMedia =
                                             viewModel.qsMediaVisible &&
-                                                colorOSMediaSessions.current != null,
+                                                colorOSMedia != null,
                                         media = { mediaModifier ->
-                                            colorOSMediaSessions.current?.let { data ->
+                                            colorOSMedia?.let { data ->
                                                 val colorOSArtFill by
                                                     qsPanelStyleRepository.colorOSMediaArtFill
                                                         .collectAsStateWithLifecycle()
