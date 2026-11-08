@@ -38,6 +38,11 @@ constructor(private val repository: ScreenRecordingServiceRepository) {
     val status: StateFlow<ScreenRecordingStatus> = repository.status
     val screenRecordings: Flow<ScreenRecording> = repository.screenRecordings
 
+    /** Starts the recording after the default delay. */
+    fun startRecordingDelayed(parameters: ScreenRecordingParameters) {
+        startRecordingDelayed(parameters, defaultRecordingRelay)
+    }
+
     /** Starts the recording after the [delay]. */
     fun startRecordingDelayed(
         parameters: ScreenRecordingParameters,

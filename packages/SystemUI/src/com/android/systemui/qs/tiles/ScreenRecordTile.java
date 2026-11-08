@@ -53,10 +53,12 @@ import com.android.systemui.res.R;
 import com.android.systemui.screencapture.common.shared.model.ScreenCaptureUiParameters;
 import com.android.systemui.screencapture.common.shared.model.ScreenCaptureUiSource;
 import com.android.systemui.screencapture.domain.interactor.ScreenCaptureUiInteractor;
+import com.android.systemui.screencapture.record.data.repository.ScreenCaptureRecordParametersRepository;
 import com.android.systemui.screencapture.record.domain.interactor.ScreenCaptureRecordFeaturesInteractor;
 import com.android.systemui.screenrecord.ScreenRecordUxController;
 import com.android.systemui.screenrecord.data.model.ScreenRecordModel;
 import com.android.systemui.screenrecord.domain.interactor.ScreenRecordingServiceInteractor;
+import com.android.systemui.screenrecord.shared.model.ScreenRecordingParameters;
 import com.android.systemui.screenrecord.shared.model.ScreenRecordingStatus;
 import com.android.systemui.settings.UserContextProvider;
 import com.android.systemui.statusbar.phone.KeyguardDismissUtil;
@@ -135,6 +137,27 @@ public class ScreenRecordTile extends QSTileImpl<QSTile.BooleanState>
         state.label = mContext.getString(R.string.quick_settings_screen_record_label);
         state.handlesLongClick = false;
         return state;
+    }
+
+    /** Starts recording with the last used options, skipping the options UI. */
+    @Override
+    protected void handleSecondaryClick(@Nullable Expandable expandable) {
+        if (mScreenCaptureRecordFeaturesInteractor.getShouldShowNewRecordingToolbar()
+                && mScreenRecordingServiceInteractor.getStatus().getValue()
+                        instanceof ScreenRecordingStatus.Stopped) {
+            final ScreenRecordingParameters parameters =
+                    ScreenCaptureRecordParametersRepository.lastParameters(
+                            mUserContextProvider.getUserContext(), mContext.getDisplayId());
+            mUiHandler.post(() -> mActivityStarter.executeRunnableDismissingKeyguard(
+                    () -> mScreenRecordingServiceInteractor.startRecordingDelayed(parameters),
+                    /* cancelAction= */ null,
+                    /* dismissShade= */ true,
+                    /* afterKeyguardGone= */ true,
+                    /* deferred= */ false
+            ));
+        } else {
+            handleClick(expandable);
+        }
     }
 
     @Override

@@ -497,11 +497,13 @@ fun ContentScope.Tile(
                         (nothingStyle ||
                             colorOSStyle ||
                             currentBounceableInfo.canBounceContainer)
+                // A ColorOS tile records at once, its chevron opens the recording options.
+                val colorOSRecord = colorOSStyle && tile.spec.spec == "screenrecord"
                 val click: (() -> Unit)? =
                     onClick@{
                             if (!isClickable) return@onClick
 
-                            if (iconOnly && isDualTarget) {
+                            if (iconOnly && (isDualTarget || colorOSRecord)) {
                                 tile.toggleClick()
                             } else {
                                 val hasDetails =
@@ -598,6 +600,12 @@ fun ContentScope.Tile(
                                         chevron =
                                             colorOSStyle &&
                                                 tile.spec.spec in COLOROS_DROPDOWN_TILES,
+                                        onChevronClick =
+                                            if (colorOSRecord) {
+                                                { tile.mainClick(expandable) }
+                                            } else {
+                                                longClick
+                                            }.takeIf { isClickable },
                                         pressSource = interactionSource.takeIf { colorOSStyle },
                                         lottieSpec = tile.spec.spec.takeIf { colorOSStyle },
                                         active = uiState.visualState == STATE_ACTIVE,
