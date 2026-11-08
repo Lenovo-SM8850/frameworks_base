@@ -234,6 +234,7 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
     /** The Liquid Glass settings that change the shade colors, see ShadeColors. */
     private static final String[] LIQUID_GLASS_SETTINGS = {
             "liquid_glass", "liquid_glass_style", "liquid_glass_dual_tone"};
+    private static final int COLOROS_LIGHT_PANEL_TINT = 0x59F0F2F7;
 
     private ScrimState mState = ScrimState.UNINITIALIZED;
 
@@ -1799,12 +1800,14 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
     }
 
     private int getShadePanelColor() {
-        if (isColorOSBackdrop() && isNightMode()) {
-            // The ColorOS QS panel draws the glass behind the shade itself, a blur region of
-            // the panel material, and the color of the scrim on top of it would only dim it.
-            // The light panel keeps its color: the glass does not lift a dark wallpaper enough
-            // for the dark text of the light theme to be read on it.
-            return Color.TRANSPARENT;
+        if (isColorOSBackdrop()) {
+            // The ColorOS QS panel draws the glass behind the shade itself, a blur region of the
+            // panel material. The dark panel has no color of its own. The light one has a pale
+            // tint, here so that it covers the whole window like the glass.
+            boolean night = (mContext.getResources().getConfiguration().uiMode
+                    & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                    == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+            return night ? Color.TRANSPARENT : COLOROS_LIGHT_PANEL_TINT;
         }
         return ShadeColors.shadePanel(mContext, isBlurCurrentlySupported(), true);
     }
@@ -1815,14 +1818,14 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
      */
     private boolean isColorOSBackdrop() {
         return Flags.notificationShadeBlur() && isBlurCurrentlySupported()
-                && Settings.System.getIntForUser(mContext.getContentResolver(),
-                        Settings.System.QS_PANEL_STYLE, 0, UserHandle.USER_CURRENT)
-                        == QS_PANEL_STYLE_COLOROS;
+                && isColorOSPanelStyle();
     }
 
-    private boolean isNightMode() {
-        return (mContext.getResources().getConfiguration().uiMode
-                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    /** Whether the ColorOS QS panel style is selected, with or without its glass. */
+    private boolean isColorOSPanelStyle() {
+        return Settings.System.getIntForUser(mContext.getContentResolver(),
+                Settings.System.QS_PANEL_STYLE, 0, UserHandle.USER_CURRENT)
+                == QS_PANEL_STYLE_COLOROS;
     }
 
     private void onThemeChanged() {
