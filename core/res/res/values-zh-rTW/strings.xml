@@ -2718,4 +2718,5 @@
     <string name="do_not_disturb_sync_notification_channel_name" msgid="8652220979613037381">"零打擾同步"</string>
     <string name="do_not_disturb_sync_notification_title" msgid="6732475150089465528">"零打擾"</string>
     <string name="do_not_disturb_sync_notification_content" msgid="2755604717509797896">"已從鄰近裝置同步處理"</string>
+    <string name="vcn_management_service">VCN 管理服務</string>
 </resources>

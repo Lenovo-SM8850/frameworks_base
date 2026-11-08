@@ -2718,4 +2718,5 @@
     <string name="do_not_disturb_sync_notification_channel_name" msgid="8652220979613037381">"同步“勿扰设置”"</string>
     <string name="do_not_disturb_sync_notification_title" msgid="6732475150089465528">"勿扰"</string>
     <string name="do_not_disturb_sync_notification_content" msgid="2755604717509797896">"已同步附近设备的勿扰设置"</string>
+    <string name="vcn_management_service">VCN 管理服务</string>
 </resources>

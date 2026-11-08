@@ -416,6 +416,7 @@
     <string name="show_hw_layers_updates" msgid="5268370750002509767">"顯示硬體層更新"</string>
     <string name="show_hw_layers_updates_summary" msgid="5850955890493054618">"在硬體層更新時閃爍綠色"</string>
     <string name="debug_hw_overdraw" msgid="8944851091008756796">"針對 GPU 過度繪製進行偵錯"</string>
+    <string name="debug_hw_renderer">設定 GPU 算繪器</string>
     <string name="disable_overlays" msgid="4206590799671557143">"停用硬體重疊圖層"</string>
     <string name="disable_overlays_summary" msgid="1954852414363338166">"一律使用 GPU 進行畫面合成"</string>
     <string name="simulate_color_space" msgid="1206503300335835151">"模擬色彩空間"</string>
