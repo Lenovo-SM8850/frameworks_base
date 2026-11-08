@@ -45,6 +45,7 @@ import com.android.systemui.media.controls.shared.model.MediaAction
         /** Ends the session, or pauses it when the session can't be stopped. */
         val stop: (() -> Unit)? = null,
         val isAppVisible: Boolean = false,
+        val customActions: List<MediaAction> = emptyList(),
         val sessionToken: MediaSession.Token? = null,
         val isPaused: Boolean = !isPlaying,
 )

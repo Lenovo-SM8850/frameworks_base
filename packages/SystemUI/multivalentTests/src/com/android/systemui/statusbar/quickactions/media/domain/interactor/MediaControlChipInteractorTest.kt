@@ -176,12 +176,19 @@ class MediaControlChipInteractorTest(flags: FlagsParameterization) : SysuiTestCa
                     contentDescription = "Initial Action",
                     background = mockDrawable,
                 )
-            val mediaButton = MediaButton(playOrPause = initialAction)
+            val favorite = initialAction.copy(contentDescription = "Favorite")
+            val shuffle = initialAction.copy(contentDescription = "Shuffle")
+            val mediaButton = MediaButton(
+                playOrPause = initialAction,
+                custom0 = favorite,
+                custom1 = shuffle,
+            )
             val userMedia = MediaData(active = true, semanticActions = mediaButton)
             updateMedia(userMedia)
 
             assertThat(model).isNotNull()
             assertThat(model?.playOrPause).isEqualTo(initialAction)
+            assertThat(model?.customActions).containsExactly(favorite, shuffle).inOrder()
 
             val newAction =
                 MediaAction(
@@ -195,6 +202,7 @@ class MediaControlChipInteractorTest(flags: FlagsParameterization) : SysuiTestCa
             updateMedia(updatedUserMedia)
 
             assertThat(model?.playOrPause).isEqualTo(newAction)
+            assertThat(model?.customActions).isEmpty()
         }
 
     @Test
