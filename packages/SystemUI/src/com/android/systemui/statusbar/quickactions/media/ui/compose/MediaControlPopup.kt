@@ -254,6 +254,8 @@ fun MediaControlPopup(
             if (model.durationMs > 0L) {
                 MediaProgressSection(
                     positionMs = model.positionMs,
+                    positionUpdatedAtMs = model.positionUpdatedAtMs,
+                    playbackSpeed = model.playbackSpeed,
                     durationMs = model.durationMs,
                     isPlaying = model.isPlaying,
                     canBeScrubbed = model.canBeScrubbed,
@@ -321,6 +323,8 @@ private fun MediaArtwork(model: MediaControlChipModel, artworkIcon: UiIcon?) {
 @Composable
 private fun MediaProgressSection(
     positionMs: Long,
+    positionUpdatedAtMs: Long,
+    playbackSpeed: Float,
     durationMs: Long,
     isPlaying: Boolean,
     canBeScrubbed: Boolean,
@@ -332,24 +336,37 @@ private fun MediaProgressSection(
     var displayedPositionMs by remember { mutableStateOf(positionMs.coerceIn(0L, durationMs)) }
     val currentSeekAction by rememberUpdatedState(onSeekTo)
 
-    LaunchedEffect(positionMs, durationMs, isPlaying, isScrubbing) {
+    LaunchedEffect(
+        positionMs,
+        positionUpdatedAtMs,
+        playbackSpeed,
+        durationMs,
+        isPlaying,
+        isScrubbing,
+    ) {
         if (isScrubbing) {
             return@LaunchedEffect
         }
 
-        displayedPositionMs = positionMs.coerceIn(0L, durationMs)
+        fun currentPosition() =
+            LyricTiming.position(
+                positionMs,
+                positionUpdatedAtMs,
+                SystemClock.elapsedRealtime(),
+                playbackSpeed,
+                isPlaying,
+                durationMs,
+            )
+        displayedPositionMs = currentPosition()
 
-        if (!isPlaying || durationMs <= 0L) {
+        if (!isPlaying || durationMs <= 0L || playbackSpeed == 0f || positionUpdatedAtMs <= 0L) {
             return@LaunchedEffect
         }
 
-        val startWallClockMs = System.currentTimeMillis()
-        val startPositionMs = displayedPositionMs
         while (!isScrubbing) {
             delay(250L)
-            val elapsedMs = System.currentTimeMillis() - startWallClockMs
-            displayedPositionMs = (startPositionMs + elapsedMs).coerceAtMost(durationMs)
-            if (displayedPositionMs >= durationMs) {
+            displayedPositionMs = currentPosition()
+            if (displayedPositionMs >= durationMs || displayedPositionMs <= 0L) {
                 break
             }
         }
@@ -357,19 +374,33 @@ private fun MediaProgressSection(
 
     val accentArgb = accent.toArgb()
     val trackAlphaArgb = accent.copy(alpha = 0.20f).toArgb()
+    val timeStyle =
+        MaterialTheme.typography.labelMedium.copy(
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            fontFeatureSettings = "tnum",
+        )
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = formatElapsedTime(displayedPositionMs),
-            style = MaterialTheme.typography.labelMedium,
-            color = LocalContentColor.current.copy(alpha = 0.60f),
-        )
+        // The elapsed time reserves the width of the duration so the seek bar keeps its length.
+        Box(contentAlignment = Alignment.CenterEnd) {
+            Text(
+                text = formatElapsedTime(durationMs),
+                style = timeStyle,
+                modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+            )
+            Text(
+                text = formatElapsedTime(displayedPositionMs),
+                style = timeStyle,
+                color = LocalContentColor.current.copy(alpha = 0.60f),
+            )
+        }
 
-        Box(modifier = Modifier.weight(1f).height(28.dp)) {
+        Box(modifier = Modifier.weight(1f).height(24.dp)) {
             var boxWidthPx by remember { mutableStateOf(0) }
 
             fun applyFraction(fraction: Float) {
@@ -407,7 +438,7 @@ private fun MediaProgressSection(
 
             if (useWaveform) {
                 AndroidView(
-                    modifier = Modifier.fillMaxWidth().height(28.dp).then(gestureModifier),
+                    modifier = Modifier.fillMaxWidth().height(24.dp).then(gestureModifier),
                     factory = { context ->
                         WaveformSeekBar(context).apply {
                             max = 10_000
@@ -435,20 +466,24 @@ private fun MediaProgressSection(
                 )
             } else {
                 AndroidView(
-                    modifier = Modifier.fillMaxWidth().height(28.dp).then(gestureModifier),
+                    modifier = Modifier.fillMaxWidth().height(24.dp).then(gestureModifier),
                     factory = { context ->
                         SeekBar(context).apply {
                             max = durationMs.toClampedInt()
                             splitTrack = false
+                            minHeight = (3f * context.resources.displayMetrics.density).toInt()
+                            maxHeight = minHeight
                             setPadding(0, 0, 0, 0)
                             isEnabled = false
                             thumb = createSeekBarThumb(context, accentArgb)
                             val layer = progressDrawable?.mutate() as? LayerDrawable
                             if (layer != null) {
-                                layer.findDrawableByLayerId(android.R.id.background)
+                                layer
+                                    .findDrawableByLayerId(android.R.id.background)
                                     ?.mutate()
                                     ?.setTint(trackAlphaArgb)
-                                layer.findDrawableByLayerId(android.R.id.secondaryProgress)
+                                layer
+                                    .findDrawableByLayerId(android.R.id.secondaryProgress)
                                     ?.mutate()
                                     ?.setTint(
                                         com.android.internal.graphics.ColorUtils.setAlphaComponent(
@@ -476,12 +511,7 @@ private fun MediaProgressSection(
                                                     R.dimen.qs_media_seekbar_progress_phase
                                                 )
                                                 .toFloat()
-                                        strokeWidth =
-                                            context.resources
-                                                .getDimensionPixelSize(
-                                                    R.dimen.qs_media_seekbar_progress_stroke_width
-                                                )
-                                                .toFloat()
+                                        strokeWidth = 3f * context.resources.displayMetrics.density
                                         setTint(accentArgb)
                                         drawRemainingLine = false
                                         transitionEnabled = true
@@ -503,13 +533,17 @@ private fun MediaProgressSection(
                         (seekBar.thumb as? GradientDrawable)?.setColor(accentArgb)
 
                         val layer = seekBar.progressDrawable as? LayerDrawable
-                        layer?.findDrawableByLayerId(android.R.id.background)?.setTint(trackAlphaArgb)
-                        layer?.findDrawableByLayerId(android.R.id.secondaryProgress)?.setTint(
-                            com.android.internal.graphics.ColorUtils.setAlphaComponent(
-                                accentArgb,
-                                60,
+                        layer
+                            ?.findDrawableByLayerId(android.R.id.background)
+                            ?.setTint(trackAlphaArgb)
+                        layer
+                            ?.findDrawableByLayerId(android.R.id.secondaryProgress)
+                            ?.setTint(
+                                com.android.internal.graphics.ColorUtils.setAlphaComponent(
+                                    accentArgb,
+                                    60,
+                                )
                             )
-                        )
                         val squiggle =
                             layer?.findDrawableByLayerId(android.R.id.progress) as? SquigglyProgress
                         squiggle?.apply {
@@ -524,7 +558,7 @@ private fun MediaProgressSection(
 
         Text(
             text = formatElapsedTime(durationMs),
-            style = MaterialTheme.typography.labelMedium,
+            style = timeStyle,
             color = LocalContentColor.current.copy(alpha = 0.60f),
         )
     }
