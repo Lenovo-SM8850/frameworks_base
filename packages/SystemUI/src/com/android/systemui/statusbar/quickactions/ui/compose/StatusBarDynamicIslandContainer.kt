@@ -115,6 +115,14 @@ fun StatusBarDynamicIslandContainer(
     var popupVisible by remember { mutableStateOf(false) }
     var popupOwnsIsland by remember { mutableStateOf(false) }
     var popupHidesContent by remember { mutableStateOf(false) }
+    // Switching the island style swaps the whole shell. Close the open popup first: the old
+    // style's card would otherwise stay up beside the new one, showing the same chip twice.
+    LaunchedEffect(cos) {
+        chips.firstOrNull { it.isPopupShown }?.hidePopup()
+        popupOwnsIsland = false
+        popupHidesContent = false
+    }
+
     var knownChipIds by remember { mutableStateOf<List<QuickActionChipId>>(emptyList()) }
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     // Where the island was placed before it is shifted onto the camera; NaN until first placed.

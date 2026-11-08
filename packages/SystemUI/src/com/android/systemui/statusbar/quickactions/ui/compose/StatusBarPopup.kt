@@ -212,6 +212,20 @@ fun StatusBarPopup(
     val sideMarginPx = with(density) { 4.dp.roundToPx() }
     val edgePaddingPx = with(density) { PopupEdgePadding.roundToPx() }
     val view = LocalView.current
+    // A status bar re-inflated around a style change detaches its island views without destroying
+    // the composition; the popup window would survive it.
+    DisposableEffect(view) {
+        val listener =
+            object : android.view.View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: android.view.View) {}
+
+                override fun onViewDetachedFromWindow(v: android.view.View) {
+                    currentChip.hidePopup()
+                }
+            }
+        view.addOnAttachStateChangeListener(listener)
+        onDispose { view.removeOnAttachStateChangeListener(listener) }
+    }
     val cameraBottomPx =
         (view.rootWindowInsets?.displayCutout ?: view.display?.cutout)?.let { cutout ->
             cutout.boundingRectTop.takeUnless { it.isEmpty }?.bottom
