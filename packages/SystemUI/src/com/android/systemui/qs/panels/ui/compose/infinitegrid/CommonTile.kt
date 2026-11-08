@@ -149,6 +149,7 @@ import com.android.systemui.qs.panels.ui.viewmodel.AccessibilityUiState
 import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
 import kotlin.math.abs
+import kotlin.math.ceil
 import platform.test.motion.compose.values.MotionTestValueKey
 import platform.test.motion.compose.values.motionTestValues
 
@@ -1061,6 +1062,12 @@ object CommonTileDefaults {
      */
     val ColorOSLabelTopPadding = 2.dp
 
+    /** Room for the Classic title, state line and top padding, including font scaling. */
+    val ClassicStateLabelHeight: Dp
+        @Composable
+        @ReadOnlyComposable
+        get() = classicStateLabelHeight()
+
     val TileHeight: Dp
         @Composable
         @ReadOnlyComposable
@@ -1205,6 +1212,18 @@ internal val TileLabelLineBreak =
 /** Label style for wrapping tiles: a phrase line break keeps a Hangul syllable with its word. */
 internal fun wrappingTileLabelStyle(style: TextStyle): TextStyle =
     style.copy(lineBreak = TileLabelLineBreak)
+
+/** Room for the Classic title, state line and top padding, including font scaling. */
+@Composable
+@ReadOnlyComposable
+internal fun classicStateLabelHeight(): Dp {
+    val typography = MaterialTheme.typography
+    return with(LocalDensity.current) {
+        4.dp +
+            ceil(typography.labelMedium.lineHeight.toPx()).toDp() +
+            ceil(typography.labelSmall.lineHeight.toPx()).toDp()
+    }
+}
 
 /**
  * A ColorOS round tile label with its chevrons. A label on one line is centred together with them,

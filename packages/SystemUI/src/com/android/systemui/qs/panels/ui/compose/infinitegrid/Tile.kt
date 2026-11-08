@@ -317,7 +317,9 @@ fun ContentScope.Tile(
         val tileHeight = if (!classicStyle || labelHide) {
             CommonTileDefaults.TileHeight
         } else {
-            CommonTileDefaults.TileHeight + CommonTileDefaults.ClassicLabelHeight
+            CommonTileDefaults.TileHeight +
+                if (colorOSStyle) CommonTileDefaults.ClassicLabelHeight
+                else CommonTileDefaults.ClassicStateLabelHeight
         }
 
         val userShapeMode = rememberTileShapeMode()
