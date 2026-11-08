@@ -21,8 +21,11 @@ import static android.view.WindowInsets.Type.systemBars;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Insets;
+import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.view.DisplayCutout;
+import android.view.MotionEvent;
+import android.view.ViewGroup;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.FrameLayout;
@@ -31,6 +34,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.android.systemui.compose.ComposeInitializer;
+import com.android.wm.shell.shared.handles.DynamicIslandTouchRegion;
 import com.android.systemui.statusbar.data.repository.StatusBarConfigurationController;
 
 /**
@@ -45,6 +49,70 @@ public class StatusBarWindowView extends FrameLayout {
     private int mLeftInset = 0;
     private int mRightInset = 0;
     private int mTopInset = 0;
+    private ViewGroup mIslandTouchTarget;
+    private View mIslandGestureTarget;
+    private final Rect mIslandTouchBounds = new Rect();
+
+    public void setIslandTouchTarget(ViewGroup target) {
+        mIslandTouchTarget = target;
+    }
+
+    public void clearIslandTouchTarget(ViewGroup target) {
+        if (mIslandTouchTarget == target) {
+            mIslandTouchTarget = null;
+            mIslandGestureTarget = null;
+        }
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        int[] origin = new int[2];
+        getLocationOnScreen(origin);
+        if (action == MotionEvent.ACTION_DOWN) {
+            mIslandGestureTarget = null;
+            if (mIslandTouchTarget != null && mIslandTouchTarget.isShown()
+                    && DynamicIslandTouchRegion.getBounds(
+                            getContext().getDisplayId(), mIslandTouchBounds)
+                    && mIslandTouchBounds.contains(
+                            (int) event.getX() + origin[0], (int) event.getY() + origin[1])
+                    && (int) event.getY() + origin[1] >= getIslandHostBottom()) {
+                // Dispatch to the Compose owner, bypassing bar-height ancestor hit rectangles.
+                // Only a point below the bar needs it; the normal dispatch delivers the others.
+                mIslandGestureTarget = mIslandTouchTarget.getChildAt(0);
+            }
+        }
+        View target = mIslandGestureTarget;
+        if (target == null) return super.dispatchTouchEvent(event);
+        int[] targetOrigin = new int[2];
+        target.getLocationOnScreen(targetOrigin);
+        MotionEvent local = MotionEvent.obtain(event);
+        local.offsetLocation(origin[0] - targetOrigin[0], origin[1] - targetOrigin[1]);
+        boolean handled = false;
+        try {
+            handled = target.dispatchTouchEvent(local);
+        } finally {
+            local.recycle();
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
+                    || (action == MotionEvent.ACTION_DOWN && !handled)) {
+                mIslandGestureTarget = null;
+            }
+        }
+        // A gesture the island does not take goes the normal way, to the status bar.
+        if (action == MotionEvent.ACTION_DOWN && !handled) {
+            return super.dispatchTouchEvent(event);
+        }
+        return true;
+    }
+
+    /** The screen y of the bottom of the view that hosts the island, or MAX_VALUE without one. */
+    private int getIslandHostBottom() {
+        if (!(mIslandTouchTarget.getParent() instanceof View)) return Integer.MAX_VALUE;
+        View host = (View) mIslandTouchTarget.getParent();
+        int[] hostOrigin = new int[2];
+        host.getLocationOnScreen(hostOrigin);
+        return hostOrigin[1] + host.getHeight();
+    }
 
     @Nullable private StatusBarConfigurationController mConfigurationController;
 

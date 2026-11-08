@@ -16,6 +16,7 @@
 
 package com.android.systemui.statusbar.quickactions.ui.compose
 
+import android.content.Context
 import android.view.DisplayCutout
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -88,6 +89,7 @@ import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.Scr
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.shared.model.chipText
+import kotlin.math.ceil
 import kotlinx.coroutines.coroutineScope
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -878,6 +880,32 @@ private fun startAnchoredGapFor(cutout: android.graphics.Rect, density: Float): 
     val edgePx = dynamicIslandStartEdgePx(cutout, density)
     val gapPx = cutout.right + DynamicIslandHoleSidePadding.value * density - edgePx
     return (gapPx / density).dp
+}
+
+/** Extra status bar window space; side cameras keep their upstream dedicated window. */
+fun dynamicIslandWindowOverflowPx(context: Context, statusBarHeight: Int): Int {
+    val overflow =
+        context.resources.getDimensionPixelSize(R.dimen.status_bar_window_island_overflow)
+    val density = context.resources.displayMetrics.density
+    val hole =
+        resolveDynamicIslandTopCutout(context)
+            ?: return maxOf(
+                overflow,
+                ceil(
+                    (DynamicIslandDefaultCenterY.value +
+                        DynamicIslandBaseHeight.value * DynamicIslandFeatureSettings.SCALE_MAX / 2f) *
+                        density
+                ).toInt() - statusBarHeight,
+            )
+    val minimumHeight = cutoutMinimumHeight((hole.height() / density).dp).value * density
+    val maximumHeight =
+        maxOf(
+            minimumHeight,
+            DynamicIslandBaseHeight.value * DynamicIslandFeatureSettings.SCALE_MAX * density,
+        )
+    val padding = DynamicIslandHoleSidePadding.value * density
+    val bottom = ceil(hole.exactCenterY() + maximumHeight / 2f + padding).toInt()
+    return maxOf(overflow, bottom - statusBarHeight)
 }
 
 private data class DynamicIslandCutoutSnapshot(

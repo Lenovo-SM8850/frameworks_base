@@ -538,6 +538,17 @@ fun StatusBarRoot(
                             }
                         }
                     }
+                composeView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    private var host: com.android.systemui.statusbar.window.StatusBarWindowView? = null
+                    override fun onViewAttachedToWindow(view: View) {
+                        host = view.rootView as? com.android.systemui.statusbar.window.StatusBarWindowView
+                        host?.setIslandTouchTarget(composeView)
+                    }
+                    override fun onViewDetachedFromWindow(view: View) {
+                        host?.clearIslandTouchTarget(composeView)
+                        host = null
+                    }
+                })
                 centeredArea.addView(composeView)
 
                 // Same island, in its own window, for a camera on the left or right edge.
