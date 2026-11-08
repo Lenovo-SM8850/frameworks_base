@@ -10,6 +10,9 @@ import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActi
 /** Closes the popup that hosts the composable. */
 val LocalHidePopup = compositionLocalOf<() -> Unit> { {} }
 
+/** Whether popup text may start scrolling after the container settles. */
+val LocalPopupMarqueeEnabled = compositionLocalOf { true }
+
 /** Runs an accepted launch only after its popup has finished collapsing. */
 val LocalLaunchAfterPopupHidden = compositionLocalOf<(() -> Unit) -> Unit> { { it() } }
 

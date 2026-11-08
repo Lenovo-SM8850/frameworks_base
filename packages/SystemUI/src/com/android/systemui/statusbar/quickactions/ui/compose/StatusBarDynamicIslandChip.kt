@@ -694,7 +694,7 @@ private fun pageDotsWidth(count: Int): Dp {
  * chips, the dots follow the current one.
  */
 @Composable
-private fun PageDots(count: Int, index: Int, color: Color, onClick: () -> Unit) {
+internal fun PageDots(count: Int, index: Int, color: Color, onClick: () -> Unit) {
     val visible = minOf(count, MaxPageDots)
     val first = (index - visible / 2).coerceIn(0, count - visible)
     Row(

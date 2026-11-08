@@ -53,8 +53,15 @@ import com.android.systemui.qs.shared.style.LiquidGlassBlue
 import com.android.systemui.qs.shared.style.liquidGlassEnabled
 import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 
-/** True when the island draws its ColorOS style glass cards. */
-@Composable fun islandGlassCards(): Boolean = rememberDynamicIslandColorOSStyle()
+/**
+ * True when the island draws its ColorOS style glass cards: the setting is on and the popup is not
+ * a container with its own surface, as it is beside a side camera and in the tail of a stack.
+ */
+@Composable
+fun islandGlassCards(): Boolean {
+    val container = LocalPopupContainer.current
+    return rememberDynamicIslandColorOSStyle() && !container
+}
 
 private val GlassCardShape = RoundedCornerShape(28.dp)
 private val GlassTint = Color.White.copy(alpha = 0.10f)
