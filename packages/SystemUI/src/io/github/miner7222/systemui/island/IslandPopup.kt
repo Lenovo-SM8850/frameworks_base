@@ -914,6 +914,21 @@ fun IslandPopup(
                             if (cos) cardAlpha.value * (1f - veil.value)
                             else visibleContentAlpha() * (1f - dismissProgress)
                         },
+                        LocalIslandCardBlurState provides
+                            IslandCardBlurState(
+                                shift =
+                                    if (cos) {
+                                        Offset(
+                                            cardShiftX.value + swipeX,
+                                            cardTranslationY.value,
+                                        )
+                                    } else {
+                                        Offset.Zero
+                                    },
+                                alpha =
+                                    (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f) *
+                                        (1f - dismissProgress) * reveal.value,
+                            ),
                     ) {
                         PopupPages(
                             viewModel = displayedChip,

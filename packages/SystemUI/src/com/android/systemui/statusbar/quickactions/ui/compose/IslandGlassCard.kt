@@ -52,6 +52,11 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSTileRim
 import com.android.systemui.qs.shared.style.LiquidGlassBlue
 import com.android.systemui.qs.shared.style.liquidGlassEnabled
 import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
+import io.github.miner7222.systemui.island.LocalIslandCardBlurState
+import kotlin.math.roundToInt
 
 /**
  * True when the island draws its ColorOS style glass cards: the setting is on and the popup is not
@@ -91,9 +96,14 @@ fun IslandGlassCard(
     val liquid = liquidGlassEnabled()
     val primaryFill =
         primaryActionColor.takeOrElse { if (liquid) LiquidGlassBlue else GlassPrimaryFill }
+    val blurState = LocalIslandCardBlurState.current
     val cardModifier =
         modifier
             .widthIn(min = 300.dp, max = 400.dp)
+            // The blur is composited outside the card layer, so move it by layout and fade it
+            // with the card; it must not stay behind a card that is being dragged or closed.
+            .offset { IntOffset(blurState.shift.x.roundToInt(), blurState.shift.y.roundToInt()) }
+            .graphicsLayer { alpha = blurState.alpha }
             .pressScale(enabled = onClick != null, pressedScale = 0.97f) { onClick?.invoke() }
     if (liquid) {
         // Liquid glass: PopupSurface draws the blur, tint and rim, and keeps the content off the
