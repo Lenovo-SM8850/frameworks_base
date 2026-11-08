@@ -40,6 +40,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -74,6 +75,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,11 +99,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -116,6 +120,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
@@ -141,8 +146,12 @@ import com.android.systemui.qs.panels.ui.viewmodel.AccessibilityUiState
 import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
 import kotlin.math.abs
+import kotlin.math.ceil
 import platform.test.motion.compose.values.MotionTestValueKey
 import platform.test.motion.compose.values.motionTestValues
+import io.github.miner7222.systemui.qs.ColorOSTileLabelRow
+import io.github.miner7222.systemui.qs.classicStateLabelHeight
+import io.github.miner7222.systemui.qs.wrappingTileLabelStyle
 
 private const val TEST_TAG_TILE_ICON = "qs_tile_icon"
 private const val TEST_TAG_TOGGLE = "qs_tile_toggle_target"
@@ -213,6 +222,7 @@ fun ClassicTileContent(
     rim: Brush? = null,
     glass: Boolean = false,
     chevron: Boolean = false,
+    onChevronClick: (() -> Unit)? = null,
     pressSource: InteractionSource? = null,
     lottieSpec: String? = null,
     active: Boolean = false,
@@ -378,7 +388,11 @@ fun ClassicTileContent(
                         .thenIf(colorOSLabels) {
                             Modifier.wrapContentHeight(Alignment.Top, unbounded = true)
                         }
-                        .padding(top = 4.dp)
+                        .padding(
+                            top =
+                                if (colorOSLabels) CommonTileDefaults.ColorOSLabelTopPadding
+                                else 4.dp
+                        )
                         .fillMaxWidth(),
                 )
                 if (!colorOSLabels && !TextUtils.isEmpty(secondaryLabel)) {
@@ -396,21 +410,7 @@ fun ClassicTileContent(
                 }
             }
             if (chevron) {
-                // The chevron sits right after the widest label line, and the two are centred
-                // under the tile as one.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f, fill = false).width(IntrinsicSize.Max)) { labels() }
-                    Image(
-                        painter = painterResource(R.drawable.ic_coloros_tile_chevron),
-                        contentDescription = null,
-                        colorFilter = ColorFilter.tint(animatedSecondaryLabelColor),
-                        modifier = Modifier.padding(start = 1.dp).size(10.dp),
-                    )
-                }
+                ColorOSTileLabelRow(animatedSecondaryLabelColor, onChevronClick, labels)
             } else {
                 labels()
             }
@@ -845,7 +845,7 @@ private fun TileLabel(
     BasicText(
         text = text,
         color = color,
-        style = style,
+        style = if (wraps) wrappingTileLabelStyle(style) else style,
         maxLines = maxLines,
         overflow = if (wraps) TextOverflow.Ellipsis else TextOverflow.Clip,
         onTextLayout = { textSize = it.size.width },
@@ -1019,10 +1019,22 @@ object CommonTileDefaults {
 
     /**
      * Line height of a ColorOS round tile label. Two lines of it fit in [ClassicLabelHeight] less
-     * the 4dp above the label, and the label is measured without a height limit besides, so a
-     * bigger font only makes the second line reach into the gap under the tile.
+     * the [ColorOSLabelTopPadding] above the label, and the label is measured without a height
+     * limit besides, so a bigger font only makes the second line reach into the gap under the tile.
      */
-    val ColorOSLabelLineHeight = 13.sp
+    val ColorOSLabelLineHeight = 12.sp
+
+    /**
+     * Space between a ColorOS round tile and its label. The glyphs of a line sit low in its line
+     * height, so a small gap above keeps a second line clear of the tile under it.
+     */
+    val ColorOSLabelTopPadding = 2.dp
+
+    /** Room for the Classic title, state line and top padding, including font scaling. */
+    val ClassicStateLabelHeight: Dp
+        @Composable
+        @ReadOnlyComposable
+        get() = classicStateLabelHeight()
 
     val TileHeight: Dp
         @Composable

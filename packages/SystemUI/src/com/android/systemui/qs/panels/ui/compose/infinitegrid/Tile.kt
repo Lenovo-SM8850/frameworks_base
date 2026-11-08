@@ -299,7 +299,9 @@ fun ContentScope.Tile(
         val tileHeight = if (!classicStyle || labelHide) {
             CommonTileDefaults.TileHeight
         } else {
-            CommonTileDefaults.TileHeight + CommonTileDefaults.ClassicLabelHeight
+            CommonTileDefaults.TileHeight +
+                if (colorOSStyle) CommonTileDefaults.ClassicLabelHeight
+                else CommonTileDefaults.ClassicStateLabelHeight
         }
 
         val userShapeMode = rememberTileShapeMode()
@@ -692,7 +694,6 @@ fun ContentScope.Tile(
                                     if (networkAsLabel) uiState.secondaryLabel else uiState.label,
                                 secondaryLabel =
                                     if (networkAsLabel) connectedLabel else uiState.secondaryLabel,
-                                labelMaxLines = if (networkAsLabel) 2 else 1,
                                 iconProvider = iconProvider,
                                 sideDrawable = uiState.sideDrawable,
                                 colors = colors,

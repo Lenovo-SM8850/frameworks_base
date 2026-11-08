@@ -244,6 +244,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import io.github.miner7222.systemui.qs.TileLabelLineBreak
 
 object TileType
 
@@ -1961,7 +1962,11 @@ private fun AvailableTileGridCell(
                     color = colors.label,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelMedium.copy(hyphens = Hyphens.Auto),
+                    style =
+                        MaterialTheme.typography.labelMedium.copy(
+                            hyphens = Hyphens.Auto,
+                            lineBreak = TileLabelLineBreak,
+                        ),
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
@@ -2004,7 +2009,11 @@ private fun BoxScope.AppIconText(
         color = color,
         overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center,
-        style = MaterialTheme.typography.labelMedium.copy(hyphens = Hyphens.Auto),
+        style =
+            MaterialTheme.typography.labelMedium.copy(
+                hyphens = Hyphens.Auto,
+                lineBreak = TileLabelLineBreak,
+            ),
         inlineContent = inlineContent,
         modifier = modifier.align(Alignment.TopCenter),
     )
