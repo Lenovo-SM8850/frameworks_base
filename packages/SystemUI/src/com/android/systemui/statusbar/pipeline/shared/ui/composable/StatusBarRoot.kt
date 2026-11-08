@@ -43,7 +43,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -150,7 +149,6 @@ import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandAncho
 import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandEdge
 import com.android.systemui.statusbar.quickactions.ui.compose.StatusBarDynamicIslandContainer
 import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandStartEdgePx
-import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandAvoidsAppHandles
 import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandCameraCenterOffsetYPx
 import com.android.systemui.statusbar.quickactions.ui.compose.resolveDynamicIslandAnchor
 import com.android.wm.shell.shared.handles.DynamicIslandTouchRegion
@@ -486,51 +484,24 @@ fun StatusBarRoot(
 
                         setContent {
                             if (islandEdgeState.value == DynamicIslandEdge.TOP) {
-                                val island =
-                                    @Composable {
-                                        StatusBarDynamicIslandContainer(
-                                            chips = statusBarViewModel.popupChips.filterIsInstance<QuickActionChipModel.PopupChip>(),
-                                            onMediaControlPopupVisibilityChanged = {},
-                                            onIslandActiveChanged = { active ->
-                                                this@apply.visibility =
-                                                    if (active) View.VISIBLE else View.GONE
-                                            },
-                                            onIslandExpandedChanged = { expanded ->
-                                                islandExpanded = expanded
-                                                publishIslandBounds()
-                                                islandExpandedHandler(expanded)
-                                            },
-                                            onIslandBoundsChanged = { bounds ->
-                                                lastIslandBoundsReported = bounds
-                                                publishIslandBounds()
-                                            },
-                                            appHandleBounds = appHandlesViewModel.appHandleBounds,
-                                        )
-                                    }
-                                // A tablet island may step beside an app handle. Span the status
-                                // bar so it stays inside this view and keeps receiving taps; empty
-                                // space passes touches through to the status bar below.
-                                val spanStatusBar = dynamicIslandAvoidsAppHandles()
-                                SideEffect {
-                                    val width =
-                                        if (spanStatusBar) {
-                                            ViewGroup.LayoutParams.MATCH_PARENT
-                                        } else {
-                                            ViewGroup.LayoutParams.WRAP_CONTENT
-                                        }
-                                    val params = this@apply.layoutParams
-                                    if (params != null && params.width != width) {
-                                        params.width = width
-                                        this@apply.layoutParams = params
-                                    }
-                                }
-                                if (spanStatusBar) {
-                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                        island()
-                                    }
-                                } else {
-                                    island()
-                                }
+                                StatusBarDynamicIslandContainer(
+                                    chips = statusBarViewModel.popupChips.filterIsInstance<QuickActionChipModel.PopupChip>(),
+                                    onMediaControlPopupVisibilityChanged = {},
+                                    onIslandActiveChanged = { active ->
+                                        this@apply.visibility =
+                                            if (active) View.VISIBLE else View.GONE
+                                    },
+                                    onIslandExpandedChanged = { expanded ->
+                                        islandExpanded = expanded
+                                        publishIslandBounds()
+                                        islandExpandedHandler(expanded)
+                                    },
+                                    onIslandBoundsChanged = { bounds ->
+                                        lastIslandBoundsReported = bounds
+                                        publishIslandBounds()
+                                    },
+                                    appHandleBounds = appHandlesViewModel.appHandleBounds,
+                                )
                             } else {
                                 SideEffect {
                                     this@apply.visibility = View.GONE
@@ -540,6 +511,17 @@ fun StatusBarRoot(
                             }
                         }
                     }
+                composeView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    private var host: com.android.systemui.statusbar.window.StatusBarWindowView? = null
+                    override fun onViewAttachedToWindow(view: View) {
+                        host = view.rootView as? com.android.systemui.statusbar.window.StatusBarWindowView
+                        host?.setIslandTouchTarget(composeView)
+                    }
+                    override fun onViewDetachedFromWindow(view: View) {
+                        host?.clearIslandTouchTarget(composeView)
+                        host = null
+                    }
+                })
                 centeredArea.addView(composeView)
                 // Padding set during this layout pass would not resize the lyric text.
                 lyricContainer?.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->

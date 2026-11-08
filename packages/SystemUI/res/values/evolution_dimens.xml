@@ -59,4 +59,6 @@
 
     <!-- Height of the Nothing style brightness slider -->
     <dimen name="qs_nothing_brightness_slider_height">52dp</dimen>
+    <!-- Status bar window space below the status bar for the Dynamic Island to wrap the cutout -->
+    <dimen name="status_bar_window_island_overflow">8dp</dimen>
 </resources>

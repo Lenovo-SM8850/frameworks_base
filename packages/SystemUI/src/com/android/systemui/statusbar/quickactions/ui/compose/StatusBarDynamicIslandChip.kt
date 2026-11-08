@@ -17,30 +17,31 @@
 
 package com.android.systemui.statusbar.quickactions.ui.compose
 
+import android.content.Context
 import android.view.DisplayCutout
+import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,36 +62,42 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import com.android.compose.ui.graphics.painter.rememberDrawablePainter
 import com.android.systemui.common.shared.model.Icon as IconModel
 import com.android.systemui.common.ui.compose.Icon
+import com.android.systemui.common.ui.compose.load
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
 import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.ScreenRecordPopupModel
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.shared.model.chipText
-import kotlinx.coroutines.coroutineScope
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 import io.github.miner7222.systemui.island.IslandChip
 
 // Only icon/text layers animate. Surface measurement remains the popup's stable morph anchor.
@@ -171,6 +178,32 @@ private fun startAnchoredGapFor(cutout: android.graphics.Rect, density: Float): 
     val edgePx = dynamicIslandStartEdgePx(cutout, density)
     val gapPx = cutout.right + DynamicIslandHoleSidePadding.value * density - edgePx
     return (gapPx / density).dp
+}
+
+/** Extra status bar window space; side cameras keep their upstream dedicated window. */
+fun dynamicIslandWindowOverflowPx(context: Context, statusBarHeight: Int): Int {
+    val overflow =
+        context.resources.getDimensionPixelSize(R.dimen.status_bar_window_island_overflow)
+    val density = context.resources.displayMetrics.density
+    val hole =
+        resolveDynamicIslandTopCutout(context)
+            ?: return maxOf(
+                overflow,
+                ceil(
+                    (DynamicIslandDefaultCenterY.value +
+                        DynamicIslandBaseHeight.value * DynamicIslandFeatureSettings.SCALE_MAX / 2f) *
+                        density
+                ).toInt() - statusBarHeight,
+            )
+    val minimumHeight = cutoutMinimumHeight((hole.height() / density).dp).value * density
+    val maximumHeight =
+        maxOf(
+            minimumHeight,
+            DynamicIslandBaseHeight.value * DynamicIslandFeatureSettings.SCALE_MAX * density,
+        )
+    val padding = DynamicIslandHoleSidePadding.value * density
+    val bottom = ceil(hole.exactCenterY() + maximumHeight / 2f + padding).toInt()
+    return maxOf(overflow, bottom - statusBarHeight)
 }
 
 private data class DynamicIslandCutoutSnapshot(
