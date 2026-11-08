@@ -28,8 +28,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -96,6 +98,19 @@ class ColorOSMediaSessions : MediaDataManager.Listener {
         entries.remove(key)
     }
 }
+
+@Composable
+internal fun rememberColorOSMediaArtwork(icon: android.graphics.drawable.Icon?): State<ImageBitmap?> =
+    key(icon) {
+        val context = LocalContext.current
+        produceState<ImageBitmap?>(initialValue = null) {
+            value = icon?.let {
+                withContext(Dispatchers.IO) {
+                    runCatching { it.loadDrawable(context)?.toBitmap()?.asImageBitmap() }.getOrNull()
+                }
+            }
+        }
+    }
 
 /** Height of the card the sizes below are drawn for, the two tile rows of a phone. */
 private val ColorOSMediaBaseHeight = 145.dp
@@ -165,16 +180,7 @@ internal fun ColorOSMediaCard(
     extraHeight: Dp = 0.dp,
 ) {
     val context = LocalContext.current
-    val artwork by
-        produceState<ImageBitmap?>(initialValue = null, data.artwork) {
-            value =
-                data.artwork?.let { icon ->
-                    withContext(Dispatchers.IO) {
-                        runCatching { icon.loadDrawable(context)?.toBitmap()?.asImageBitmap() }
-                            .getOrNull()
-                    }
-                }
-        }
+    val artwork by rememberColorOSMediaArtwork(data.artwork)
     val buttons = data.semanticActions
     val playing = data.isPlaying == true
     val outputEnabled = data.device?.enabled != false && !data.resumption
