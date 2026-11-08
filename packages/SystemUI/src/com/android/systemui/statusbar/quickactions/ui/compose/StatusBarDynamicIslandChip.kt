@@ -828,7 +828,21 @@ data class DynamicIslandCutoutSpec(
     val cutoutCenterX: Float? = null,
     /** Width of the camera hole, which the ColorOS island grows out of. */
     val holeSize: Dp = 20.dp,
+    val minimumHeight: Dp = 0.dp,
+    val minimumWidth: Dp = 0.dp,
+    val cutoutWidth: Dp = 0.dp,
 )
+internal val DynamicIslandCutoutFillMargin = 1.5.dp
+internal val DynamicIslandOutlineWidth = 1.dp
+/** Collapsed height at a height scale of one, with or without a camera to cover. */
+internal val DynamicIslandBaseHeight = 35.dp
+
+
+private fun cutoutMinimumHeight(crossAxisSize: Dp): Dp =
+    crossAxisSize + (DynamicIslandCutoutFillMargin + DynamicIslandOutlineWidth) * 2
+
+private fun cutoutMinimumWidth(mainAxisSize: Dp, minimumHeight: Dp): Dp =
+    mainAxisSize + minimumHeight + (DynamicIslandCutoutFillMargin + DynamicIslandOutlineWidth) * 2
 
 private val DynamicIslandHoleSidePadding = 4.dp
 private val DynamicIslandScreenEdgeMargin = 4.dp
@@ -924,8 +938,11 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
             DynamicIslandCutoutSpec(
                 embeddedGapWidth = DynamicIslandEmbeddedGapFallbackWidth,
                 horizontalOffset = 0.dp,
+                minimumHeight = snapshot.heightCutout?.let { cutoutMinimumHeight(it.height().toDp()) }
+                    ?: 0.dp,
             )
         } else {
+            val minimumHeight = cutoutMinimumHeight(topCutout.height().toDp())
             val anchor =
                 resolveDynamicIslandAnchor(topCutout.exactCenterX(), rootWidthPx, snapshot.isRtl)
             val fraction = topCutout.exactCenterX() / rootWidthPx
@@ -949,6 +966,9 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
                 anchor = anchor,
                 cutoutCenterX = if (centreOnCamera) topCutout.exactCenterX() else null,
                 holeSize = topCutout.width().toDp(),
+                minimumHeight = minimumHeight,
+                minimumWidth = cutoutMinimumWidth(topCutout.width().toDp(), minimumHeight),
+                cutoutWidth = topCutout.width().toDp(),
             )
         }
     }
@@ -962,9 +982,13 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
 fun rememberDynamicIslandSideCutoutSpec(edge: DynamicIslandCutoutEdge): DynamicIslandCutoutSpec {
     val density = LocalDensity.current.density
     return remember(edge, density) {
+        val minimumHeight = cutoutMinimumHeight((edge.hole.width() / density).dp)
         DynamicIslandCutoutSpec(
             embeddedGapWidth = embeddedGapFor(edge.hole.height(), density),
             horizontalOffset = 0.dp,
+            minimumHeight = minimumHeight,
+            minimumWidth = cutoutMinimumWidth((edge.hole.height() / density).dp, minimumHeight),
+            cutoutWidth = (edge.hole.height() / density).dp,
         )
     }
 }
