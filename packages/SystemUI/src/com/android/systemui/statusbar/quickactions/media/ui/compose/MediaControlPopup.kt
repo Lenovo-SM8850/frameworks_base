@@ -17,20 +17,27 @@
 package com.android.systemui.statusbar.quickactions.media.ui.compose
 
 import android.content.Context
+import android.database.ContentObserver
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
 import android.text.format.DateUtils
 import android.widget.SeekBar
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -46,6 +53,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,21 +64,34 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.android.settingslib.widget.AdaptiveIcon
 import com.android.systemui.common.shared.model.ContentDescription
 import com.android.systemui.common.shared.model.Icon as UiIcon
 import com.android.systemui.common.ui.compose.Icon as UiIconView
@@ -86,50 +107,25 @@ import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.media.ui.viewmodel.MediaControlPopupViewModel
 import com.android.systemui.statusbar.quickactions.ui.compose.MediaArtFlip
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberAlbumArtAccent
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
+import io.github.miner7222.systemui.lyrics.LyricTiming
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
-import android.provider.Settings
-import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.sp
-import com.android.settingslib.widget.AdaptiveIcon
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
-import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
-import io.github.miner7222.systemui.lyrics.LyricTiming
 
-private val PopupShape = RoundedCornerShape(34.dp)
-private val ArtworkShape = RoundedCornerShape(24.dp)
+private val PopupShape = RoundedCornerShape(32.dp)
+private val ArtworkShape = RoundedCornerShape(16.dp)
 
 /** Displays a popup containing the Media controls in QuickActionsOverlay. */
 @Composable
-fun MediaControlPopup(
-    viewModel: MediaControlPopupViewModel,
-    modifier: Modifier = Modifier,
-) {
+fun MediaControlPopup(viewModel: MediaControlPopupViewModel, modifier: Modifier = Modifier) {
     val viewModelFactory = viewModel.mediaViewModelFactory
     val mediaHost = viewModel.mediaHost
     if (MediaControlsInComposeFlag.isEnabled) {
@@ -179,11 +175,6 @@ fun MediaControlPopup(
     useWaveform: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    // The ColorOS island style has its own card; the lyrics card below it is unaffected.
-    if (islandGlassCards()) {
-        CosMediaCard(model = model, modifier = modifier)
-        return
-    }
     val artworkDrawable =
         remember(model.artworkIcon) { (model.artworkIcon as? UiIcon.Loaded)?.drawable }
     val accent =
@@ -191,64 +182,82 @@ fun MediaControlPopup(
     val onAccent =
         if (artworkDrawable == null) MaterialTheme.colorScheme.onPrimary
         else if (accent.luminance() > 0.5f) Color.Black else Color.White
-    PopupSurface(
-        shape = PopupShape,
-        modifier = modifier.widthIn(min = 320.dp, max = 400.dp),
-    ) {
+    val openApp = rememberPopupLaunchAction(model.openApp)
+    val launchAfterHide = LocalLaunchAfterPopupHidden.current
+    val openOutput: (() -> Unit)? =
+        model.openOutputSwitcher?.let { open -> { open(launchAfterHide) } }
+    val motionEnabled = rememberMarqueeMotionEnabled()
+    val marqueeEnabled = LocalPopupMarqueeEnabled.current && motionEnabled
+    val isLargeScreen = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val sharesLyricsSurface = LocalPopupContainer.current &&
+        (!model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank())
+    val customActions = model.customActions.filter { it.action != null && it.icon != null }.take(2)
+    PopupSurface(shape = PopupShape, modifier = modifier.widthIn(min = 320.dp, max = 400.dp)) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .padding(start = 16.dp, top = 14.dp, end = 16.dp,
+                        bottom = if (sharesLyricsSurface) 0.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isLargeScreen) 12.dp else 8.dp),
         ) {
             Row(
-                modifier =
-                    Modifier.fillMaxWidth().clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        enabled = model.openApp != null,
-                    ) {
-                        model.openApp?.invoke()
-                    },
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MediaArtFlip(
-                    track = model.songName?.toString() to model.packageName,
-                    artwork = model.artworkIcon,
-                ) { artworkIcon ->
-                    MediaArtwork(model = model, artworkIcon = artworkIcon)
+                Box(
+                    modifier = Modifier.clickable(enabled = openApp != null) { openApp?.invoke() }
+                ) {
+                    MediaArtFlip(
+                        track = model.songName?.toString() to model.packageName,
+                        artwork = model.artworkIcon,
+                    ) { artworkIcon ->
+                        MediaArtwork(model = model, artworkIcon = artworkIcon)
+                    }
                 }
                 Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier =
+                        Modifier.weight(1f).clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            enabled = openApp != null,
+                        ) {
+                            openApp?.invoke()
+                        },
+                    verticalArrangement = Arrangement.spacedBy(if (isLargeScreen) 6.dp else 2.dp),
                 ) {
-                    model.appName?.takeIf { it.isNotBlank() }?.let { appName ->
-                        Text(
-                            text = appName.uppercase(),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = accent.copy(alpha = 0.82f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
+                    MediaMarqueeText(
+                        enabled = marqueeEnabled,
                         text = model.songName?.toString().orEmpty(),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        style =
+                            MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 16.sp,
+                                lineHeight = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
                         color = LocalContentColor.current,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
-                    model.artistName?.takeIf { it.isNotBlank() }?.let { artist ->
-                        Text(
-                            text = artist.toString(),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = LocalContentColor.current.copy(alpha = 0.8f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    model.artistName
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { artist ->
+                            MediaMarqueeText(
+                                enabled = marqueeEnabled,
+                                text = artist.toString(),
+                                style =
+                                    MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp,
+                                        fontWeight = FontWeight.Normal,
+                                    ),
+                                color = LocalContentColor.current.copy(alpha = 0.8f),
+                            )
+                        }
                 }
+                MediaOutputChip(
+                    model = model,
+                    onClick = openOutput,
+                    modifier = Modifier.widthIn(max = 120.dp).align(Alignment.Top),
+                )
             }
 
             if (model.durationMs > 0L) {
@@ -267,30 +276,156 @@ fun MediaControlPopup(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MediaActionButton(
-                    action = model.previousAction,
-                    iconOverrideId = R.drawable.ic_skip_previous_filled,
-                    containerColor = LocalContentColor.current.copy(alpha = 0.11f),
-                    iconTint = LocalContentColor.current,
-                )
-                MediaActionButton(
-                    action = model.playOrPause,
-                    containerColor = accent,
-                    iconTint = onAccent,
-                    buttonSize = 72.dp,
-                    iconSize = 28.dp,
-                    emphasized = true,
-                )
-                MediaActionButton(
-                    action = model.nextAction,
-                    iconOverrideId = R.drawable.ic_skip_next_filled,
-                    containerColor = LocalContentColor.current.copy(alpha = 0.11f),
-                    iconTint = LocalContentColor.current,
-                )
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    customActions.getOrNull(0)?.let { action ->
+                        MediaActionButton(
+                            action = action,
+                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            iconTint = LocalContentColor.current,
+                        )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MediaActionButton(
+                        action = model.previousAction,
+                        iconOverrideId = R.drawable.ic_skip_previous_filled,
+                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        iconTint = LocalContentColor.current,
+                    )
+                    MediaActionButton(
+                        action = model.playOrPause,
+                        containerColor = accent,
+                        iconTint = onAccent,
+                        buttonSize = 56.dp,
+                        iconSize = 28.dp,
+                        emphasized = true,
+                    )
+                    MediaActionButton(
+                        action = model.nextAction,
+                        iconOverrideId = R.drawable.ic_skip_next_filled,
+                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        iconTint = LocalContentColor.current,
+                    )
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    customActions.getOrNull(1)?.let { action ->
+                        MediaActionButton(
+                            action = action,
+                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            iconTint = LocalContentColor.current,
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun rememberMarqueeMotionEnabled(): Boolean {
+    val context = LocalContext.current
+    fun readEnabled() =
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) > 0f
+    var enabled by remember(context) { mutableStateOf(readEnabled()) }
+    DisposableEffect(context) {
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    enabled = readEnabled()
+                }
+            }
+        context.contentResolver.registerContentObserver(
+            Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+            false,
+            observer,
+        )
+        enabled = readEnabled()
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+    return enabled
+}
+
+@Composable
+private fun MediaMarqueeText(text: String, style: TextStyle, color: Color, enabled: Boolean) {
+    val measurer = rememberTextMeasurer()
+    val textWidth =
+        remember(text, style, measurer) {
+            measurer.measure(text, style, softWrap = false, maxLines = 1).size.width
+        }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val scrolls = enabled && textWidth > constraints.maxWidth
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier =
+                Modifier.fillMaxWidth()
+                    .clipToBounds()
+                    .then(
+                        if (scrolls)
+                            Modifier.basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 1500,
+                                repeatDelayMillis = 2000,
+                            )
+                        else Modifier
+                    ),
+        )
+    }
+}
+
+@Composable
+private fun MediaOutputChip(
+    model: MediaControlChipModel,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val name =
+        model.outputDevice?.name?.toString() ?: stringResource(R.string.media_seamless_other_device)
+    // The media card shows the same drawable; painting it here must not change its bounds.
+    val outputIcon = model.outputDevice?.icon
+    val icon =
+        remember(outputIcon) {
+            outputIcon?.let { drawable ->
+                val source = if (drawable is AdaptiveIcon) drawable.getDrawable(1) else drawable
+                UiIcon.Loaded(source.constantState?.newDrawable()?.mutate() ?: source, null)
+            }
+        } ?: UiIcon.Resource(R.drawable.ic_media_home_devices, null)
+    val foreground = LocalContentColor.current
+    Box(modifier = modifier.widthIn(max = 180.dp)) {
+        Row(
+            modifier =
+                Modifier.height(36.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(foreground.copy(alpha = 0.1f))
+                    .alpha(if (onClick != null) 1f else 0.38f)
+                    .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
+                    .semantics(mergeDescendants = true) { contentDescription = name }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UiIconView(icon = icon, modifier = Modifier.size(18.dp), tint = foreground)
+            Text(
+                text = name,
+                style = MaterialTheme.typography.labelMedium,
+                color = foreground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
+            )
         }
     }
 }
@@ -305,16 +440,18 @@ private fun MediaArtwork(model: MediaControlChipModel, artworkIcon: UiIcon?) {
                 resId = com.android.internal.R.drawable.ic_audio_media,
                 contentDescription = contentDescription,
             )
+    // Without artwork the app icon stands in; keep it icon-sized inside the artwork frame.
+    val isArtwork = model.artworkIcon != null && model.artworkIcon !== model.appIcon
     Box(
         modifier =
-            Modifier.size(76.dp)
+            Modifier.size(64.dp)
                 .clip(ArtworkShape)
-                .background(Color.White.copy(alpha = 0.08f)),
+                .background(LocalContentColor.current.copy(alpha = 0.08f)),
         contentAlignment = Alignment.Center,
     ) {
         UiIconView(
             icon = artwork,
-            modifier = Modifier.size(76.dp),
+            modifier = Modifier.size(if (isArtwork) 64.dp else 36.dp),
             tint = Color.Unspecified,
         )
     }
@@ -569,8 +706,8 @@ private fun MediaActionButton(
     action: MediaAction?,
     containerColor: Color,
     iconTint: Color,
-    buttonSize: Dp = 54.dp,
-    iconSize: Dp = 22.dp,
+    buttonSize: Dp = 48.dp,
+    iconSize: Dp = 24.dp,
     emphasized: Boolean = false,
     iconOverrideId: Int? = null,
 ) {
@@ -581,6 +718,9 @@ private fun MediaActionButton(
     }
 
     var toggleCount by remember { mutableIntStateOf(0) }
+    // The media card shows the same drawable; tinting it here must not change its colors.
+    val actionIcon =
+        remember(act.icon) { act.icon?.let { it.constantState?.newDrawable()?.mutate() ?: it } }
     val haptics = LocalHapticFeedback.current
     val contentDescription =
         act.contentDescription?.toString()?.let { ContentDescription.Loaded(it) }
@@ -597,11 +737,12 @@ private fun MediaActionButton(
                 },
         contentAlignment = Alignment.Center,
     ) {
-        val actualIcon = if (iconOverrideId != null) {
-            UiIcon.Resource(iconOverrideId, contentDescription)
-        } else {
-            act.icon?.let { UiIcon.Loaded(it, contentDescription) }
-        }
+        val actualIcon =
+            if (iconOverrideId != null) {
+                UiIcon.Resource(iconOverrideId, contentDescription)
+            } else {
+                actionIcon?.let { UiIcon.Loaded(it, contentDescription) }
+            }
         if (actualIcon != null) {
             UiIconView(
                 icon = actualIcon,
@@ -674,109 +815,5 @@ private fun Modifier.squishAnimation(toggleCount: Int): Modifier {
     return this.graphicsLayer {
         this.scaleX = scaleX.value
         this.scaleY = scaleY.value
-    }
-}
-
-@Composable
-private fun MediaOutputChip(
-    model: MediaControlChipModel,
-    onClick: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-) {
-    val name =
-        model.outputDevice?.name?.toString() ?: stringResource(R.string.media_seamless_other_device)
-    // The media card shows the same drawable; painting it here must not change its bounds.
-    val outputIcon = model.outputDevice?.icon
-    val icon =
-        remember(outputIcon) {
-            outputIcon?.let { drawable ->
-                val source = if (drawable is AdaptiveIcon) drawable.getDrawable(1) else drawable
-                UiIcon.Loaded(source.constantState?.newDrawable()?.mutate() ?: source, null)
-            }
-        } ?: UiIcon.Resource(R.drawable.ic_media_home_devices, null)
-    val foreground = LocalContentColor.current
-    Box(modifier = modifier.widthIn(max = 180.dp)) {
-        Row(
-            modifier =
-                Modifier.height(36.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(foreground.copy(alpha = 0.1f))
-                    .alpha(if (onClick != null) 1f else 0.38f)
-                    .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
-                    .semantics(mergeDescendants = true) { contentDescription = name }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            UiIconView(icon = icon, modifier = Modifier.size(18.dp), tint = foreground)
-            Text(
-                text = name,
-                style = MaterialTheme.typography.labelMedium,
-                color = foreground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
-            )
-        }
-    }
-}
-
-@Composable
-private fun rememberMarqueeMotionEnabled(): Boolean {
-    val context = LocalContext.current
-    fun readEnabled() =
-        Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f,
-        ) > 0f
-    var enabled by remember(context) { mutableStateOf(readEnabled()) }
-    DisposableEffect(context) {
-        val observer =
-            object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) {
-                    enabled = readEnabled()
-                }
-            }
-        context.contentResolver.registerContentObserver(
-            Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
-            false,
-            observer,
-        )
-        enabled = readEnabled()
-        onDispose { context.contentResolver.unregisterContentObserver(observer) }
-    }
-    return enabled
-}
-
-@Composable
-private fun MediaMarqueeText(text: String, style: TextStyle, color: Color, enabled: Boolean) {
-    val measurer = rememberTextMeasurer()
-    val textWidth =
-        remember(text, style, measurer) {
-            measurer.measure(text, style, softWrap = false, maxLines = 1).size.width
-        }
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val scrolls = enabled && textWidth > constraints.maxWidth
-        Text(
-            text = text,
-            style = style,
-            color = color,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-            modifier =
-                Modifier.fillMaxWidth()
-                    .clipToBounds()
-                    .then(
-                        if (scrolls)
-                            Modifier.basicMarquee(
-                                iterations = Int.MAX_VALUE,
-                                initialDelayMillis = 1500,
-                                repeatDelayMillis = 2000,
-                            )
-                        else Modifier
-                    ),
-        )
     }
 }
