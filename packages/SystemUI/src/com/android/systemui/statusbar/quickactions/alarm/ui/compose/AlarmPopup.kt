@@ -57,6 +57,8 @@ import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import com.android.systemui.statusbar.quickactions.ui.compose.pressScale
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -66,6 +68,8 @@ fun AlarmPopup(
     model: AlarmPopupModel,
     modifier: Modifier = Modifier,
 ) {
+    val onOpen = rememberPopupLaunchAction(model.onOpen)
+    val actions = rememberPopupActions(model.actions)
     val accent = IslandAccents.Alarm
     val breathe = rememberInfiniteTransition(label = "alarm_breathe")
     val breatheScale by
@@ -99,9 +103,9 @@ fun AlarmPopup(
                 )
             },
             modifier = modifier,
-            onClick = model.onOpen,
+            onClick = onOpen,
             primaryAction =
-                model.actions.getOrNull(0)?.let { it.copy(vector = it.vector ?: Icons.Rounded.Snooze) },
+                actions.getOrNull(0)?.let { it.copy(vector = it.vector ?: Icons.Rounded.Snooze) },
         )
         return
     }
@@ -110,8 +114,8 @@ fun AlarmPopup(
         modifier =
             modifier
                 .widthIn(min = 300.dp, max = 360.dp)
-                .pressScale(enabled = model.onOpen != null, pressedScale = 0.97f) {
-                    model.onOpen?.invoke()
+                .pressScale(enabled = onOpen != null, pressedScale = 0.97f) {
+                    onOpen?.invoke()
                 },
     ) {
         Column(
@@ -162,8 +166,8 @@ fun AlarmPopup(
             PopupActionChips(
                 actions =
                     buildList {
-                        model.actions.forEach(::add)
-                        model.onOpen?.let {
+                        actions.forEach(::add)
+                        onOpen?.let {
                             add(
                                 PopupActionModel(
                                     label = stringResource(R.string.dynamic_island_open_clock_action),

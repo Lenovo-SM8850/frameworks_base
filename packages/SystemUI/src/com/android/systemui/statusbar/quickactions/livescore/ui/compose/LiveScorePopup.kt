@@ -40,6 +40,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.IslandAccents
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.pressScale
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -49,14 +50,15 @@ fun LiveScorePopup(
     model: LiveScoreChipModel,
     modifier: Modifier = Modifier,
 ) {
+    val onOpen = rememberPopupLaunchAction(model.onOpen)
     val accent = IslandAccents.Score
     PopupSurface(
         shape = PopupShape,
         modifier =
             modifier
                 .widthIn(min = 320.dp, max = 400.dp)
-                .pressScale(enabled = model.onOpen != null, pressedScale = 0.97f) {
-                    model.onOpen?.invoke()
+                .pressScale(enabled = onOpen != null, pressedScale = 0.97f) {
+                    onOpen?.invoke()
                 },
     ) {
         Row(

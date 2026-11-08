@@ -50,21 +50,26 @@ import com.android.systemui.statusbar.chips.ui.viewmodel.ChipTransitionHelper.Co
 import com.android.systemui.statusbar.chips.ui.viewmodel.ChipTransitionHelper.Companion.shouldChipBeHidden
 import com.android.systemui.statusbar.chips.ui.viewmodel.OngoingActivityChipViewModel.Companion.createNotificationToggleClickBehavior
 import com.android.systemui.statusbar.chips.ui.viewmodel.OngoingActivityChipViewModel.Companion.isShowingHeadsUpFromChipTap
+import com.android.systemui.statusbar.notification.collection.notifcollection.CommonNotifCollection
 import com.android.systemui.statusbar.notification.domain.interactor.HeadsUpNotificationInteractor
 import com.android.systemui.statusbar.notification.domain.model.TopPinnedState
 import com.android.systemui.statusbar.notification.promoted.shared.model.PromotedNotificationContentModel
 import com.android.systemui.statusbar.notification.shared.Metric
 import com.android.systemui.statusbar.notification.shared.NotificationChipFromCompactContent
+import com.android.systemui.statusbar.quickactions.popups.shared.ClockNotificationKind
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.parseClockNotification
 import com.android.systemui.util.kotlin.pairwise
 import com.android.systemui.util.time.SystemClock
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 
 /** A view model for status bar chips for promoted ongoing notifications. */
@@ -79,6 +84,8 @@ constructor(
     private val systemClock: SystemClock,
     private val activityStarter: ActivityStarter,
     @StatusBarChipsLog private val logBuffer: LogBuffer,
+    private val notifCollection: CommonNotifCollection,
+    @Main private val mainDispatcher: CoroutineDispatcher,
 ) {
     private val logger = Logger(logBuffer, "NotifChipVM".pad())
 
@@ -136,11 +143,42 @@ constructor(
      * each status bar chip needs.
      */
     private val notificationChipsWithPrunedContent: Flow<List<PrunedNotificationChipModel>> =
-        combine(notifChipsInteractor.allNotificationChips, islandShowsLiveUpdates) {
-                chips,
-                islandShows ->
-                if (islandShows) chips.filterNot { it.isShownByIsland() } else chips
+        combine(
+                notifChipsInteractor.allNotificationChips,
+                islandShowsLiveUpdates,
+                DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                    context,
+                    Settings.System.STATUS_BAR_SHOW_DYNAMIC_ISLAND,
+                    defaultValue = false,
+                ),
+                DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                    context,
+                    DynamicIslandFeatureSettings.STOPWATCH,
+                ),
+                DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                    context,
+                    DynamicIslandFeatureSettings.ALARMS,
+                ),
+            ) { allChips, islandShows, islandEnabled, stopwatchEnabled, alarmsEnabled ->
+                val chips = if (islandShows) allChips.filterNot { it.isShownByIsland() } else allChips
+                // The island owns these clock chips independently of the dynamic bar setting.
+                if (!islandEnabled || (!stopwatchEnabled && !alarmsEnabled)) {
+                    chips
+                } else {
+                    chips.filterNot { chip ->
+                        val clockKind =
+                            notifCollection.getEntry(chip.key)?.parseClockNotification(context)?.kind
+                        when (clockKind) {
+                            ClockNotificationKind.TIMER,
+                            ClockNotificationKind.STOPWATCH -> stopwatchEnabled
+                            ClockNotificationKind.ALARM -> alarmsEnabled
+                            null -> false
+                        }
+                    }
+                }
             }
+            // Clock classification can inflate RemoteViews; keep it on the main thread.
+            .flowOn(mainDispatcher)
             .pairwise(initialValue = emptyList())
             .map { (oldChips, currentChips) ->
                 if (StatusBarChipsReturnAnimations.isEnabled) {
