@@ -70,14 +70,12 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
@@ -86,8 +84,12 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.android.settingslib.widget.AdaptiveIcon
 import com.android.systemui.common.shared.model.ContentDescription
@@ -104,26 +106,26 @@ import com.android.systemui.media.remedia.ui.viewmodel.MediaCarouselVisibility
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.media.ui.viewmodel.MediaControlPopupViewModel
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
 import com.android.systemui.statusbar.quickactions.ui.compose.MediaArtFlip
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberAlbumArtAccent
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
-private val PopupShape = RoundedCornerShape(34.dp)
-private val ArtworkShape = RoundedCornerShape(24.dp)
+private val PopupShape = RoundedCornerShape(32.dp)
+private val ArtworkShape = RoundedCornerShape(16.dp)
 
 /** Displays a popup containing the Media controls in QuickActionsOverlay. */
 @Composable
-fun MediaControlPopup(
-    viewModel: MediaControlPopupViewModel,
-    modifier: Modifier = Modifier,
-) {
+fun MediaControlPopup(viewModel: MediaControlPopupViewModel, modifier: Modifier = Modifier) {
     val viewModelFactory = viewModel.mediaViewModelFactory
     val mediaHost = viewModel.mediaHost
     if (MediaControlsInComposeFlag.isEnabled) {
@@ -185,66 +187,76 @@ fun MediaControlPopup(
     val onAccent =
         if (artworkDrawable == null) MaterialTheme.colorScheme.onPrimary
         else if (accent.luminance() > 0.5f) Color.Black else Color.White
+    val openApp = rememberPopupLaunchAction(model.openApp)
     val launchAfterHide = LocalLaunchAfterPopupHidden.current
     val openOutput: (() -> Unit)? =
         model.openOutputSwitcher?.let { open -> { open(launchAfterHide) } }
-    PopupSurface(
-        shape = PopupShape,
-        modifier = modifier.widthIn(min = 320.dp, max = 400.dp),
-    ) {
+    val motionEnabled = rememberMarqueeMotionEnabled()
+    val marqueeEnabled = LocalPopupMarqueeEnabled.current && motionEnabled
+    val isLargeScreen = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val sharesLyricsSurface = LocalPopupContainer.current &&
+        (!model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank())
+    val customActions = model.customActions.filter { it.action != null && it.icon != null }.take(2)
+    PopupSurface(shape = PopupShape, modifier = modifier.widthIn(min = 320.dp, max = 400.dp)) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .padding(start = 16.dp, top = 14.dp, end = 16.dp,
+                        bottom = if (sharesLyricsSurface) 0.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isLargeScreen) 12.dp else 8.dp),
         ) {
             Row(
-                modifier =
-                    Modifier.fillMaxWidth().clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        enabled = model.openApp != null,
-                    ) {
-                        model.openApp?.invoke()
-                    },
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MediaArtFlip(
-                    track = model.songName?.toString() to model.packageName,
-                    artwork = model.artworkIcon,
-                ) { artworkIcon ->
-                    MediaArtwork(model = model, artworkIcon = artworkIcon)
+                Box(
+                    modifier = Modifier.clickable(enabled = openApp != null) { openApp?.invoke() }
+                ) {
+                    MediaArtFlip(
+                        track = model.songName?.toString() to model.packageName,
+                        artwork = model.artworkIcon,
+                    ) { artworkIcon ->
+                        MediaArtwork(model = model, artworkIcon = artworkIcon)
+                    }
                 }
                 Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier =
+                        Modifier.weight(1f).clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            enabled = openApp != null,
+                        ) {
+                            openApp?.invoke()
+                        },
+                    verticalArrangement = Arrangement.spacedBy(if (isLargeScreen) 6.dp else 2.dp),
                 ) {
-                    model.appName?.takeIf { it.isNotBlank() }?.let { appName ->
-                        Text(
-                            text = appName.uppercase(),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = accent.copy(alpha = 0.82f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
+                    MediaMarqueeText(
+                        enabled = marqueeEnabled,
                         text = model.songName?.toString().orEmpty(),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        style =
+                            MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 16.sp,
+                                lineHeight = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
                         color = LocalContentColor.current,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
-                    model.artistName?.takeIf { it.isNotBlank() }?.let { artist ->
-                        Text(
-                            text = artist.toString(),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = LocalContentColor.current.copy(alpha = 0.8f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    model.artistName
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { artist ->
+                            MediaMarqueeText(
+                                enabled = marqueeEnabled,
+                                text = artist.toString(),
+                                style =
+                                    MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp,
+                                        fontWeight = FontWeight.Normal,
+                                    ),
+                                color = LocalContentColor.current.copy(alpha = 0.8f),
+                            )
+                        }
                 }
                 MediaOutputChip(
                     model = model,
@@ -269,29 +281,51 @@ fun MediaControlPopup(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MediaActionButton(
-                    action = model.previousAction,
-                    iconOverrideId = R.drawable.ic_skip_previous_filled,
-                    containerColor = LocalContentColor.current.copy(alpha = 0.11f),
-                    iconTint = LocalContentColor.current,
-                )
-                MediaActionButton(
-                    action = model.playOrPause,
-                    containerColor = accent,
-                    iconTint = onAccent,
-                    buttonSize = 72.dp,
-                    iconSize = 28.dp,
-                    emphasized = true,
-                )
-                MediaActionButton(
-                    action = model.nextAction,
-                    iconOverrideId = R.drawable.ic_skip_next_filled,
-                    containerColor = LocalContentColor.current.copy(alpha = 0.11f),
-                    iconTint = LocalContentColor.current,
-                )
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    customActions.getOrNull(0)?.let { action ->
+                        MediaActionButton(
+                            action = action,
+                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            iconTint = LocalContentColor.current,
+                        )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MediaActionButton(
+                        action = model.previousAction,
+                        iconOverrideId = R.drawable.ic_skip_previous_filled,
+                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        iconTint = LocalContentColor.current,
+                    )
+                    MediaActionButton(
+                        action = model.playOrPause,
+                        containerColor = accent,
+                        iconTint = onAccent,
+                        buttonSize = 56.dp,
+                        iconSize = 28.dp,
+                        emphasized = true,
+                    )
+                    MediaActionButton(
+                        action = model.nextAction,
+                        iconOverrideId = R.drawable.ic_skip_next_filled,
+                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        iconTint = LocalContentColor.current,
+                    )
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    customActions.getOrNull(1)?.let { action ->
+                        MediaActionButton(
+                            action = action,
+                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            iconTint = LocalContentColor.current,
+                        )
+                    }
+                }
             }
         }
     }
@@ -411,16 +445,18 @@ private fun MediaArtwork(model: MediaControlChipModel, artworkIcon: UiIcon?) {
                 resId = com.android.internal.R.drawable.ic_audio_media,
                 contentDescription = contentDescription,
             )
+    // Without artwork the app icon stands in; keep it icon-sized inside the artwork frame.
+    val isArtwork = model.artworkIcon != null && model.artworkIcon !== model.appIcon
     Box(
         modifier =
-            Modifier.size(76.dp)
+            Modifier.size(64.dp)
                 .clip(ArtworkShape)
-                .background(Color.White.copy(alpha = 0.08f)),
+                .background(LocalContentColor.current.copy(alpha = 0.08f)),
         contentAlignment = Alignment.Center,
     ) {
         UiIconView(
             icon = artwork,
-            modifier = Modifier.size(76.dp),
+            modifier = Modifier.size(if (isArtwork) 64.dp else 36.dp),
             tint = Color.Unspecified,
         )
     }
@@ -497,19 +533,33 @@ private fun MediaProgressSection(
 
     val accentArgb = accent.toArgb()
     val trackAlphaArgb = accent.copy(alpha = 0.20f).toArgb()
+    val timeStyle =
+        MaterialTheme.typography.labelMedium.copy(
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            fontFeatureSettings = "tnum",
+        )
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = formatElapsedTime(displayedPositionMs),
-            style = MaterialTheme.typography.labelMedium,
-            color = LocalContentColor.current.copy(alpha = 0.60f),
-        )
+        // The elapsed time reserves the width of the duration so the seek bar keeps its length.
+        Box(contentAlignment = Alignment.CenterEnd) {
+            Text(
+                text = formatElapsedTime(durationMs),
+                style = timeStyle,
+                modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+            )
+            Text(
+                text = formatElapsedTime(displayedPositionMs),
+                style = timeStyle,
+                color = LocalContentColor.current.copy(alpha = 0.60f),
+            )
+        }
 
-        Box(modifier = Modifier.weight(1f).height(28.dp)) {
+        Box(modifier = Modifier.weight(1f).height(24.dp)) {
             var boxWidthPx by remember { mutableStateOf(0) }
 
             fun applyFraction(fraction: Float) {
@@ -547,7 +597,7 @@ private fun MediaProgressSection(
 
             if (useWaveform) {
                 AndroidView(
-                    modifier = Modifier.fillMaxWidth().height(28.dp).then(gestureModifier),
+                    modifier = Modifier.fillMaxWidth().height(24.dp).then(gestureModifier),
                     factory = { context ->
                         WaveformSeekBar(context).apply {
                             max = 10_000
@@ -575,20 +625,24 @@ private fun MediaProgressSection(
                 )
             } else {
                 AndroidView(
-                    modifier = Modifier.fillMaxWidth().height(28.dp).then(gestureModifier),
+                    modifier = Modifier.fillMaxWidth().height(24.dp).then(gestureModifier),
                     factory = { context ->
                         SeekBar(context).apply {
                             max = durationMs.toClampedInt()
                             splitTrack = false
+                            minHeight = (3f * context.resources.displayMetrics.density).toInt()
+                            maxHeight = minHeight
                             setPadding(0, 0, 0, 0)
                             isEnabled = false
                             thumb = createSeekBarThumb(context, accentArgb)
                             val layer = progressDrawable?.mutate() as? LayerDrawable
                             if (layer != null) {
-                                layer.findDrawableByLayerId(android.R.id.background)
+                                layer
+                                    .findDrawableByLayerId(android.R.id.background)
                                     ?.mutate()
                                     ?.setTint(trackAlphaArgb)
-                                layer.findDrawableByLayerId(android.R.id.secondaryProgress)
+                                layer
+                                    .findDrawableByLayerId(android.R.id.secondaryProgress)
                                     ?.mutate()
                                     ?.setTint(
                                         com.android.internal.graphics.ColorUtils.setAlphaComponent(
@@ -616,12 +670,7 @@ private fun MediaProgressSection(
                                                     R.dimen.qs_media_seekbar_progress_phase
                                                 )
                                                 .toFloat()
-                                        strokeWidth =
-                                            context.resources
-                                                .getDimensionPixelSize(
-                                                    R.dimen.qs_media_seekbar_progress_stroke_width
-                                                )
-                                                .toFloat()
+                                        strokeWidth = 3f * context.resources.displayMetrics.density
                                         setTint(accentArgb)
                                         drawRemainingLine = false
                                         transitionEnabled = true
@@ -643,13 +692,17 @@ private fun MediaProgressSection(
                         (seekBar.thumb as? GradientDrawable)?.setColor(accentArgb)
 
                         val layer = seekBar.progressDrawable as? LayerDrawable
-                        layer?.findDrawableByLayerId(android.R.id.background)?.setTint(trackAlphaArgb)
-                        layer?.findDrawableByLayerId(android.R.id.secondaryProgress)?.setTint(
-                            com.android.internal.graphics.ColorUtils.setAlphaComponent(
-                                accentArgb,
-                                60,
+                        layer
+                            ?.findDrawableByLayerId(android.R.id.background)
+                            ?.setTint(trackAlphaArgb)
+                        layer
+                            ?.findDrawableByLayerId(android.R.id.secondaryProgress)
+                            ?.setTint(
+                                com.android.internal.graphics.ColorUtils.setAlphaComponent(
+                                    accentArgb,
+                                    60,
+                                )
                             )
-                        )
                         val squiggle =
                             layer?.findDrawableByLayerId(android.R.id.progress) as? SquigglyProgress
                         squiggle?.apply {
@@ -664,7 +717,7 @@ private fun MediaProgressSection(
 
         Text(
             text = formatElapsedTime(durationMs),
-            style = MaterialTheme.typography.labelMedium,
+            style = timeStyle,
             color = LocalContentColor.current.copy(alpha = 0.60f),
         )
     }
@@ -675,8 +728,8 @@ private fun MediaActionButton(
     action: MediaAction?,
     containerColor: Color,
     iconTint: Color,
-    buttonSize: Dp = 54.dp,
-    iconSize: Dp = 22.dp,
+    buttonSize: Dp = 48.dp,
+    iconSize: Dp = 24.dp,
     emphasized: Boolean = false,
     iconOverrideId: Int? = null,
 ) {
@@ -687,6 +740,9 @@ private fun MediaActionButton(
     }
 
     var toggleCount by remember { mutableIntStateOf(0) }
+    // The media card shows the same drawable; tinting it here must not change its colors.
+    val actionIcon =
+        remember(act.icon) { act.icon?.let { it.constantState?.newDrawable()?.mutate() ?: it } }
     val haptics = LocalHapticFeedback.current
     val contentDescription =
         act.contentDescription?.toString()?.let { ContentDescription.Loaded(it) }
@@ -703,11 +759,12 @@ private fun MediaActionButton(
                 },
         contentAlignment = Alignment.Center,
     ) {
-        val actualIcon = if (iconOverrideId != null) {
-            UiIcon.Resource(iconOverrideId, contentDescription)
-        } else {
-            act.icon?.let { UiIcon.Loaded(it, contentDescription) }
-        }
+        val actualIcon =
+            if (iconOverrideId != null) {
+                UiIcon.Resource(iconOverrideId, contentDescription)
+            } else {
+                actionIcon?.let { UiIcon.Loaded(it, contentDescription) }
+            }
         if (actualIcon != null) {
             UiIconView(
                 icon = actualIcon,
