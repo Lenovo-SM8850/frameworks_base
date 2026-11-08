@@ -317,6 +317,12 @@ private fun MediaDataModel.toMediaControlState(
                 playOrPause = playOrPauseAction,
                 nextAction = nextAction,
                 previousAction = previousAction,
+                customActions =
+                    playbackStateActions?.let { buttons ->
+                        listOfNotNull(buttons.custom0, buttons.custom1)
+                    } ?: notifActions.filterNot {
+                        it == previousAction || it == playOrPauseAction || it == nextAction
+                    }.take(2),
                 openApp =
                     clickIntent.toAction(
                         activityStarter = activityStarter,
@@ -392,6 +398,12 @@ private fun MediaData.toMediaControlState(
                 playOrPause = playOrPauseAction,
                 nextAction = nextAction,
                 previousAction = previousAction,
+                customActions =
+                    semanticActions?.let { buttons ->
+                        listOfNotNull(buttons.custom0, buttons.custom1)
+                    } ?: notifActions.filterNot {
+                        it == previousAction || it == playOrPauseAction || it == nextAction
+                    }.take(2),
                 openApp = openApp,
                 seekTo = token.toSeekAction(context),
                 stop = token.toStopAction(context),

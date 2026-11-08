@@ -48,6 +48,7 @@ import io.github.miner7222.systemui.lyrics.LyricState
         val lyricState: LyricState = LyricState(),
         val playbackSpeed: Float = 1f,
         val isAppVisible: Boolean = false,
+        val customActions: List<MediaAction> = emptyList(),
         val sessionToken: MediaSession.Token? = null,
         val isPaused: Boolean = !isPlaying,
 )
