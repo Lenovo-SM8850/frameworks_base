@@ -271,15 +271,30 @@ constructor(
                 val isShown =
                     (chip.chipId == currentActiveQuickActionId) ||
                         (chip.chipId == currentShownPopupChipId)
+                val hidePopup = {
+                    if (currentShownPopupChipId == chip.chipId) {
+                        currentShownPopupChipId = null
+                    }
+                    quickActionsInteractor.close()
+                }
                 chip.copy(
                     isPopupShown = isShown,
                     showPopup = { currentShownPopupChipId = chip.chipId },
-                    hidePopup = {
-                        if (currentShownPopupChipId == chip.chipId) {
-                            currentShownPopupChipId = null
-                        }
-                        quickActionsInteractor.close()
-                    },
+                    hidePopup = hidePopup,
+                    onDismissed =
+                        chip.onDismissed?.let { dismiss ->
+                            {
+                                val nextChip = if (isShown) {
+                                    nextPopupChipAfterDismiss(
+                                        shownQuickActionChips.filterIsInstance<QuickActionChipModel.PopupChip>(),
+                                        chip.chipId,
+                                    )
+                                } else null
+                                if (nextChip != null) currentShownPopupChipId = nextChip.chipId
+                                dismiss()
+                                if (nextChip == null) hidePopup()
+                            }
+                        },
                     hide = {
                         if (chip.chipId.isHideable()) {
                             hiddenChips[chip.chipId] = chip.hideKey()
