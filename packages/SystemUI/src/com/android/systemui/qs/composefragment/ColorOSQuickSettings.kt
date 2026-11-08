@@ -209,7 +209,7 @@ internal data class ColorOSFit(val tileSize: Dp, val rows: Int, val fits: Boolea
  * Settings scroller. The tiles keep the width of a column, [columnSize], when that fits. On a
  * short screen they shrink to the height that does fit, but not below [ColorOSMinTileSize], and
  * the grid first drops from [ColorOSGridRows] to [ColorOSMinGridRows] rows per page. If even that
- * does not fit (landscape, tiny screens), the panel keeps its full size and the Quick Settings
+ * does not fit (landscape, tiny screens), the panel keeps its smallest size and the Quick Settings
  * scroller takes over, which [ColorOSFit.fits] reports.
  *
  * The panel is stacked from, in tiles: the pills (1), the media card and sliders (2), the pills
@@ -238,7 +238,9 @@ internal fun colorOSFit(
             return ColorOSFit(minOf(columnSize, tileSize), rows, fits = true)
         }
     }
-    return ColorOSFit(columnSize, ColorOSGridRows, fits = false)
+    // Do not grow back to full-width tiles when the minimum layout just misses the viewport:
+    // the cards above the grid would consume its space again, pushing all round tiles offscreen.
+    return ColorOSFit(minOf(columnSize, ColorOSMinTileSize), ColorOSMinGridRows, fits = false)
 }
 
 /**
@@ -293,6 +295,7 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     headerHeight: Dp = 0.dp,
     header: @Composable () -> Unit = {},
     onOpenDevices: () -> Unit = {},
+    maximumTileSize: Dp = Dp.Infinity,
 ) {
     val chosen by rememberColorOSPinned()
     val pinned =
@@ -321,22 +324,23 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
         }
     val glass = colorOSGlass(blurred = glassBlur != null)
 
-    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         // ColorOS is built on four equal columns with a 17dp gap. The round tiles, the pills, the
-        // media card and the sliders all take their size from the column width, so the circles
-        // fill their column whatever the screen width is. When the screen is too short for that,
-        // the tiles shrink and the grid loses a row, see colorOSFit.
-        val columnSize = (maxWidth - ColorOSGap * 3) / 4
+        // media card and sliders share the columns. The tile diameter is capped separately so
+        // extra room does not stretch it. Short screens still shrink it, see colorOSFit.
+        val fullColumnSize = (maxWidth - ColorOSGap * 3) / 4
+        val tileColumnSize = minOf(fullColumnSize, maximumTileSize)
         // Without the labels the round tile rows are shorter and further apart.
         val labelsHidden = rememberQSTileLabelHide()
         val labelHeight = if (labelsHidden) 0.dp else CommonTileDefaults.ClassicLabelHeight
         val iconRowGap = colorOSIconRowGap(labelsHidden)
         val fit =
-            remember(columnSize, availableHeight, labelHeight, iconRowGap) {
-                colorOSFit(columnSize, availableHeight, labelHeight, iconRowGap)
+            remember(tileColumnSize, availableHeight, labelHeight, iconRowGap) {
+                colorOSFit(tileColumnSize, availableHeight, labelHeight, iconRowGap)
             }
         SideEffect { onFitChanged(fit.fits) }
         val tileSize = fit.tileSize
+        val columnSize = fullColumnSize
         CompositionLocalProvider(
             LocalColorOSTileSize provides tileSize,
             LocalColorOSGridRows provides fit.rows,

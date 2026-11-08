@@ -177,6 +177,7 @@ import com.android.systemui.qs.panels.ui.compose.QsCirclesMediaRow
 import com.android.systemui.qs.panels.ui.compose.QuickQuickSettings
 import com.android.systemui.qs.panels.ui.compose.TileGrid
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSBackdrop
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalQsBrightness
@@ -1208,6 +1209,9 @@ constructor(
                                         // margin already gives ~16dp, so add the rest.
                                         modifier = Modifier.padding(horizontal = 23.dp),
                                         availableHeight = colorOSAvailableHeight,
+                                        maximumTileSize =
+                                            if (colorOSHeader) Dp.Infinity
+                                            else CommonTileDefaults.ColorOSTileHeight,
                                         onFitChanged = { colorOSContentFits = it },
                                         headerHeight = if (colorOSHeader) qsExtraPadding else 0.dp,
                                         header = {
