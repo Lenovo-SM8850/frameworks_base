@@ -469,8 +469,10 @@ fun LargeTileContent(
             else Modifier
         Box(
             modifier =
-                Modifier.size(CommonTileDefaults.ToggleTargetSize).thenIf(isDualTarget) {
-                    Modifier.borderOnFocus(color = focusBorderColor, iconShape.topEnd)
+                Modifier.size(CommonTileDefaults.ToggleTargetSize).thenIf(isDualTarget || colorOSStyle) {
+                    Modifier.thenIf(isDualTarget) {
+                            Modifier.borderOnFocus(color = focusBorderColor, iconShape.topEnd)
+                        }
                         .clip(iconShape)
                         .then(glassBlurModifier)
                         .drawBehind {
@@ -500,13 +502,15 @@ fun LargeTileContent(
                         }
                         // apply the squish effect after the bg is drawn
                         .verticalSquish(squishiness)
-                        .combinedClickable(
-                            onClick = toggleClick!!,
-                            onLongClick = onLongClick,
-                            onLongClickLabel = longPressLabel,
-                            hapticFeedbackEnabled = false, // Haptics handled separately
-                        )
-                        .thenIf(accessibilityUiState != null) {
+                        .thenIf(isDualTarget) {
+                            Modifier.combinedClickable(
+                                onClick = requireNotNull(toggleClick),
+                                onLongClick = onLongClick,
+                                onLongClickLabel = longPressLabel,
+                                hapticFeedbackEnabled = false, // Haptics handled separately
+                            )
+                        }
+                        .thenIf(isDualTarget && accessibilityUiState != null) {
                             Modifier.semantics {
                                     accessibilityUiState as AccessibilityUiState
                                     contentDescription = accessibilityUiState.contentDescription

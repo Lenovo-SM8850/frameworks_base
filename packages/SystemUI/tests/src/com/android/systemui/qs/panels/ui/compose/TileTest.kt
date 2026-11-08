@@ -17,7 +17,15 @@
 package com.android.systemui.qs.panels.ui.compose
 
 import android.service.quicksettings.Tile.STATE_UNAVAILABLE
+import android.service.quicksettings.Tile.STATE_ACTIVE
+import android.service.quicksettings.Tile.STATE_INACTIVE
+import android.graphics.drawable.ColorDrawable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -25,6 +33,12 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SmallTest
 import com.android.compose.animation.scene.SceneTransitionLayout
@@ -37,6 +51,12 @@ import com.android.systemui.haptics.msdl.tileHapticsViewModelFactory
 import com.android.systemui.plugins.qs.QSTile
 import com.android.systemui.qs.FakeQSTile
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.Tile
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LargeTileContent
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.TileDefaults
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.TileColors
+import com.android.systemui.qs.panels.ui.viewmodel.toUiState
+import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.qs.panels.ui.viewmodel.BounceableTileViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.TileViewModel
 import com.android.systemui.qs.pipeline.shared.TileSpec
@@ -52,6 +72,57 @@ class TileTest : SysuiTestCase() {
     @get:Rule val composeRule = createComposeRule()
     private val kosmos = testKosmos()
     private val tileHapticsViewModelFactory = kosmos.tileHapticsViewModelFactory
+
+    @Test
+    fun colorOSWideSingleTarget_loadedAndResourceIconsShareBackgroundAndTint() {
+        val states = listOf(STATE_UNAVAILABLE, STATE_INACTIVE, STATE_ACTIVE)
+        val expected = mutableMapOf<Int, TileColors>()
+        composeRule.setContent {
+            PlatformTheme {
+                CompositionLocalProvider(LocalColorOSQsStyle provides true) {
+                    Column {
+                        states.forEach { state ->
+                            val uiState = QSTile.State().apply { this.state = state }
+                                .toUiState(context.resources)
+                            val colors = TileDefaults.colorOSColorsForState(uiState, false, "custom(test)")
+                            expected[state] = colors
+                            listOf(false, true).forEach { loaded ->
+                                LargeTileContent(
+                                    label = "Quick Share",
+                                    secondaryLabel = null,
+                                    iconProvider = {
+                                        if (loaded) Icon.Loaded(ColorDrawable(android.graphics.Color.WHITE), null)
+                                        else Icon.Resource(android.R.drawable.ic_menu_share, null)
+                                    },
+                                    sideDrawable = null,
+                                    colors = colors,
+                                    squishiness = { 1f },
+                                    iconShape = RoundedCornerShape(50),
+                                    active = state == STATE_ACTIVE,
+                                    modifier = Modifier.width(220.dp).height(44.dp)
+                                        .testTag("wide-$state-$loaded"),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        states.forEach { state ->
+            val loaded = composeRule.onNodeWithTag("wide-$state-true").captureToImage()
+            val resource = composeRule.onNodeWithTag("wide-$state-false").captureToImage()
+            val scale = loaded.height / 44f
+            val x = (4f * scale).toInt()
+            val y = loaded.height / 2
+            val loadedPixels = loaded.toPixelMap()
+            assertThat(loadedPixels[x, y]).isEqualTo(resource.toPixelMap()[x, y])
+            assertThat(loadedPixels[x, y]).isNotEqualTo(loadedPixels[loaded.width - 1, y])
+            if (state != STATE_UNAVAILABLE) {
+                assertThat(loadedPixels[(22f * scale).toInt(), y]).isEqualTo(expected.getValue(state).icon)
+            }
+        }
+    }
 
     @Composable
     private fun TestTile(tile: TileViewModel, iconOnly: Boolean) {
