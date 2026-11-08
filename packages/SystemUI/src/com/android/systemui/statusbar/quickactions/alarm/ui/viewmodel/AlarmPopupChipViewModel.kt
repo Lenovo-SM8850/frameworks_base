@@ -20,7 +20,9 @@ import androidx.compose.runtime.getValue
 import android.app.AlarmManager
 import android.app.Notification
 import android.content.Context
+import android.content.pm.UserInfo
 import android.text.format.DateFormat
+import android.util.SparseArray
 import com.android.systemui.ActivityIntentHelper
 import com.android.systemui.common.shared.model.ContentDescription
 import com.android.systemui.common.shared.model.Icon
@@ -35,9 +37,9 @@ import com.android.systemui.statusbar.notification.collection.notifcollection.No
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.policy.NextAlarmController
 import com.android.systemui.statusbar.quickactions.alarm.shared.model.AlarmPopupModel
-import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
+import com.android.systemui.statusbar.quickactions.popups.shared.ClockNotificationKind
+import com.android.systemui.statusbar.quickactions.popups.shared.parseClockNotification
 import com.android.systemui.statusbar.quickactions.popups.shared.toActivityLaunchAction
-import com.android.systemui.statusbar.quickactions.popups.shared.toSendAction
 import com.android.systemui.statusbar.quickactions.popups.ui.viewmodel.StatusBarPopupChipViewModel
 import com.android.systemui.statusbar.quickactions.shared.model.ChipContent
 import com.android.systemui.statusbar.quickactions.shared.model.ChipIcon
@@ -48,6 +50,8 @@ import com.android.systemui.statusbar.quickactions.ui.compose.ChipColors
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.PopupItemDismissal
+import com.android.systemui.statusbar.quickactions.popups.shared.toSendPopupAction
 import java.util.Locale
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
@@ -67,6 +71,8 @@ constructor(
     private val keyguardStateController: KeyguardStateController,
 ) : StatusBarPopupChipViewModel, HydratedActivatable() {
 
+    private val dismissal = PopupItemDismissal()
+
     override val chip: QuickActionChipModel by
         callbackFlow<AlarmPopupState> {
                 var nextAlarm: AlarmManager.AlarmClockInfo? = null
@@ -75,7 +81,10 @@ constructor(
                         AlarmPopupState(
                             nextAlarm = nextAlarm,
                             activeNotification =
-                                notifCollection.allNotifs.firstOrNull { it.isAlarmCandidate() },
+                                notifCollection.allNotifs.firstOrNull {
+                                    lockscreenUserManager.isCurrentProfile(it.sbn.userId) &&
+                                        it.isAlarmCandidate(context)
+                                },
                         )
                     )
                 }
@@ -97,15 +106,26 @@ constructor(
                         override fun onRankingApplied() = emitState()
                     }
 
+                val userChangedListener =
+                    object : NotificationLockscreenUserManager.UserChangedListener {
+                        override fun onUserChanged(userId: Int) = emitState()
+
+                        override fun onCurrentProfilesChanged(currentProfiles: SparseArray<UserInfo>) =
+                            emitState()
+                    }
+
+                lockscreenUserManager.addUserChangedListener(userChangedListener)
                 nextAlarmController.addCallback(callback)
                 notifCollection.addCollectionListener(notificationListener)
                 emitState()
                 awaitClose {
                     nextAlarmController.removeCallback(callback)
                     notifCollection.removeCollectionListener(notificationListener)
+                    lockscreenUserManager.removeUserChangedListener(userChangedListener)
                 }
             }
             .map(::toPopupChipModel)
+            .let(dismissal::filterDismissed)
             .combine(
                 DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
                     context,
@@ -167,17 +187,14 @@ constructor(
                 dayText = dayText,
                 onOpen = onOpen,
                 actions =
-                    buildList {
-                        activeNotification?.snoozeAction()?.toSendAction()?.let {
-                            add(
-                                PopupActionModel(
-                                    context.getString(R.string.dynamic_island_action_snooze),
-                                    it,
-                                    emphasized = true,
-                                )
+                    listOfNotNull(
+                        activeNotification
+                            ?.snoozeAction()
+                            .toSendPopupAction(
+                                context.getString(R.string.dynamic_island_action_snooze),
+                                emphasized = true,
                             )
-                        }
-                    },
+                    ),
             )
         val contentDescription =
             alarm?.let {
@@ -206,6 +223,7 @@ constructor(
             colors = ChipColors.DynamicIsland,
             contentDescription = contentDescription,
             popupContent = PopupContentModel.Alarm(model),
+            dismissKey = alarm?.triggerTime to activeNotification?.sbn?.key,
         )
     }
 
@@ -232,21 +250,25 @@ private data class AlarmPopupState(
     val activeNotification: NotificationEntry?,
 )
 
-private fun NotificationEntry.isAlarmCandidate(): Boolean {
+private fun NotificationEntry.isAlarmCandidate(context: Context): Boolean {
     val notification = sbn.notification
     // Clock timers are not alarms; they show as their own Live Update card.
     val isTimer =
         notification.category != Notification.CATEGORY_ALARM &&
             (notification.channelId.orEmpty().contains("timer", ignoreCase = true) ||
                 notification.flags and Notification.FLAG_PROMOTED_ONGOING != 0)
-    return notification.contentIntent != null && !isTimer &&
-        (
-            notification.category == Notification.CATEGORY_ALARM ||
-                sbn.packageName.contains("clock", ignoreCase = true) ||
-                notification.actions.orEmpty().any { action ->
-                    action.title?.toString()?.contains("snooze", ignoreCase = true) == true
-                }
-        )
+    if (isTimer) return false
+    if (
+        notification.flags and Notification.FLAG_GROUP_SUMMARY != 0 ||
+        notification.contentIntent == null
+    ) {
+        return false
+    }
+    // Clock notifications that are actually timers or stopwatches belong to their own chips.
+    parseClockNotification(context)?.let {
+        return it.kind == ClockNotificationKind.ALARM
+    }
+    return notification.category == Notification.CATEGORY_ALARM
 }
 
 private fun NotificationEntry.notificationTitle(): String? {
