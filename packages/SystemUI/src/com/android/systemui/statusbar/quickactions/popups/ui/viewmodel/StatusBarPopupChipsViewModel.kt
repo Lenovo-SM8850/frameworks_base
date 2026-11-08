@@ -597,3 +597,16 @@ constructor(
         const val CALL_PEEK_MS = 5_000L
     }
 }
+
+internal fun nextPopupChipAfterDismiss(
+    chips: List<QuickActionChipModel.PopupChip>,
+    dismissedId: QuickActionChipId,
+): QuickActionChipModel.PopupChip? {
+    val index = chips.indexOfFirst { it.chipId == dismissedId }
+    if (index < 0) return null
+    return (1 until chips.size).firstNotNullOfOrNull { offset ->
+        chips[(index + offset).mod(chips.size)].takeIf {
+            it.chipId != dismissedId && it.popupContent != PopupContentModel.None
+        }
+    }
+}
