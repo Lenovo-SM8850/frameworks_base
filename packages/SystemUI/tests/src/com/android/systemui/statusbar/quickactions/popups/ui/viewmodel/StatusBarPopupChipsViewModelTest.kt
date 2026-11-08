@@ -30,6 +30,8 @@ import com.android.systemui.lifecycle.activateIn
 import com.android.systemui.media.controls.shared.model.MediaData
 import com.android.systemui.media.remedia.data.repository.mediaPipelineRepository
 import com.android.systemui.statusbar.quickactions.popups.StatusBarPopupChips
+import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
+import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipId
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.testKosmos
@@ -91,6 +93,39 @@ class StatusBarPopupChipsViewModelTest : SysuiTestCase() {
                     .isTrue()
             }
         }
+
+    @Test
+    fun dismissedPopup_selectsNextRichCardAndWraps() {
+        val first = popupChip("first")
+        val next = popupChip("next")
+        val last = popupChip("last")
+        val chips = listOf(first, next, last)
+        assertThat(nextPopupChipAfterDismiss(chips, first.chipId)).isEqualTo(next)
+        assertThat(nextPopupChipAfterDismiss(chips, last.chipId)).isEqualTo(first)
+    }
+
+    @Test
+    fun dismissedPopup_skipsEmptyContentAndClosesOnlyLastRichCard() {
+        val first = popupChip("first")
+        val empty = popupChip("empty").copy(popupContent = PopupContentModel.None)
+        val next = popupChip("next")
+        assertThat(nextPopupChipAfterDismiss(listOf(first, empty, next), first.chipId))
+            .isEqualTo(next)
+        assertThat(nextPopupChipAfterDismiss(listOf(first, empty), first.chipId)).isNull()
+        assertThat(nextPopupChipAfterDismiss(listOf(first), first.chipId)).isNull()
+        assertThat(nextPopupChipAfterDismiss(emptyList(), first.chipId)).isNull()
+    }
+
+    private fun popupChip(id: String) = QuickActionChipModel.PopupChip(
+        chipId = QuickActionChipId.SystemEvent(id),
+        icons = emptyList(),
+        popupContent = PopupContentModel.SystemEvent(
+            kind = SystemEventKind.entries.first(),
+            title = id,
+            text = "",
+            actions = emptyList(),
+        ),
+    )
 
     // TODO(b/444459963) Add a test for the share screen privacy indicator.
 }

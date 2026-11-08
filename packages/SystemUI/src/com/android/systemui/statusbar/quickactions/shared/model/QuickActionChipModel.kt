@@ -195,6 +195,8 @@ sealed class QuickActionChipModel {
         val contentDescription: ContentDescription? = null,
         val popupViewModelFactory: StatusBarPopupViewModel.Factory? = null,
         val popupContent: PopupContentModel = PopupContentModel.None,
+        /** Removes the shown item from the island after a swipe, or null if it can't be swiped. */
+        val onDismissed: (() -> Unit)? = null,
     ) : QuickActionChipModel() {
         override val logName = "Shown(id=$chipId, toggled=$isPopupShown)"
     }

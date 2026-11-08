@@ -27,4 +27,6 @@ data class PopupActionModel(
     /** Glyph for the round glass buttons: [vector] when we know the action, else an app icon. */
     val icon: Icon? = null,
     val vector: ImageVector? = null,
+    /** Whether [onClick] opens an app, in which case the popup closes along with it. */
+    val launchesApp: Boolean = false,
 )
