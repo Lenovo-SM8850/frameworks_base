@@ -16,22 +16,32 @@
 
 package com.android.systemui.statusbar.quickactions.ui.compose
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -43,26 +53,40 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import com.android.compose.animation.Easings
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.observeDynamicIslandColorOSStyle
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.readDynamicIslandColorOSStyle
 import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipId
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Phone-only centered dynamic island that pages through active popup chips. */
 @Composable
@@ -76,6 +100,7 @@ fun StatusBarDynamicIslandContainer(
     modifier: Modifier = Modifier,
     sideEdge: DynamicIslandCutoutEdge? = null,
 ) {
+    val view = LocalView.current
     val cutoutSpec =
         if (sideEdge != null) {
             rememberDynamicIslandSideCutoutSpec(sideEdge)
@@ -84,14 +109,51 @@ fun StatusBarDynamicIslandContainer(
         }
     // The ColorOS island is drawn on a top camera only; a side-docked pill keeps our own look.
     val cos = sideEdge == null && rememberDynamicIslandColorOSStyle()
+    val collapsedWidth = rememberDynamicIslandWidth(cutoutSpec)
     var selectedChipId by remember { mutableStateOf<QuickActionChipId?>(null) }
     var popupAnchorChip by remember { mutableStateOf<QuickActionChipModel.PopupChip?>(null) }
     var popupVisible by remember { mutableStateOf(false) }
+    var popupOwnsIsland by remember { mutableStateOf(false) }
+    var popupHidesContent by remember { mutableStateOf(false) }
     var knownChipIds by remember { mutableStateOf<List<QuickActionChipId>>(emptyList()) }
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     // Where the island was placed before it is shifted onto the camera; NaN until first placed.
     var naturalCenterX by remember { mutableFloatStateOf(Float.NaN) }
     val cameraCenterX = if (sideEdge == null) cutoutSpec.cutoutCenterX else null
+    var retainedChip by remember { mutableStateOf<QuickActionChipModel.PopupChip?>(null) }
+    val presence = remember { IslandPresenceMotion() }
+    val popupContentAlpha = remember { Animatable(1f) }
+    val spatialMotionEnabled = rememberIslandSpatialMotionEnabled()
+    // The pill returns at full opacity; only its contents reveal after the popup morph.
+    // Keep this separate from presence so returning from a popup never reruns the circle sequence.
+    LaunchedEffect(popupHidesContent, spatialMotionEnabled) {
+        if (popupHidesContent) {
+            popupContentAlpha.snapTo(0f)
+        } else {
+            val durationScale = currentCoroutineContext()[MotionDurationScale]?.scaleFactor ?: 1f
+            if (!spatialMotionEnabled || durationScale == 0f) {
+                withContext(IslandFadeDurationScale) {
+                    popupContentAlpha.animateTo(1f, tween(IslandReducedMotionFadeMillis))
+                }
+            } else {
+                popupContentAlpha.animateTo(
+                    1f,
+                    tween(IslandContentFadeMillis, easing = Easings.EmphasizedDecelerate),
+                )
+            }
+        }
+    }
+    val contentProgress = remember {
+        { presence.contentAlpha.value * popupContentAlpha.value }
+    }
+    val layoutDirection = LocalLayoutDirection.current
+    val presenceOrigin = remember(cutoutSpec.anchor, layoutDirection) {
+        if (cutoutSpec.anchor == DynamicIslandAnchor.START) {
+            TransformOrigin(if (layoutDirection == LayoutDirection.Ltr) 0f else 1f, 0.5f)
+        } else {
+            TransformOrigin.Center
+        }
+    }
 
     LaunchedEffect(chips) {
         val currentChipIds = chips.map { it.chipId }
@@ -144,27 +206,51 @@ fun StatusBarDynamicIslandContainer(
         )
     }
 
-    val hasChip = selectedChip != null
-    LaunchedEffect(hasChip) { onIslandActiveChanged(hasChip) }
+    val hasChip = selectedChip != null || popupAnchorChip != null
+    val renderedChip = selectedChip ?: retainedChip
+    LaunchedEffect(selectedChip, chips.size) {
+        if (selectedChip != null) {
+            retainedChip = selectedChip
+        }
+    }
+    // Only an empty/non-empty transition runs the circle sequence. Paging and popup size
+    // changes keep their existing animations, and interrupted exits retarget the same springs.
+    LaunchedEffect(hasChip, spatialMotionEnabled) {
+        presence.animatePresence(hasChip, spatialMotionEnabled)
+        if (!hasChip) retainedChip = null
+    }
+    val isIslandActive = hasChip || retainedChip != null
+    LaunchedEffect(isIslandActive) { onIslandActiveChanged(isIslandActive) }
 
-    val isExpanded = shownChip != null
+    val isExpanded = shownChip != null || popupOwnsIsland
     LaunchedEffect(isExpanded) { onIslandExpandedChanged(isExpanded) }
 
-    LaunchedEffect(selectedChip) {
-        if (selectedChip == null) {
+    LaunchedEffect(renderedChip) {
+        if (renderedChip == null) {
             onIslandBoundsChanged(android.graphics.Rect())
+        }
+    }
+
+    fun selectChip(newChip: QuickActionChipModel.PopupChip) {
+        selectedChipId = newChip.chipId
+        if (popupVisible) {
+            popupAnchorChip = newChip
+            newChip.showPopup()
         }
     }
 
     fun selectRelative(direction: Int) {
         if (chips.size <= 1) return
-        val newIndex = (selectedIndex + direction).mod(chips.size)
-        val newChip = chips[newIndex]
-        selectedChipId = newChip.chipId
-        if (popupVisible) {
-            newChip.showPopup()
-        }
+        selectChip(chips[(selectedIndex + direction).mod(chips.size)])
     }
+
+    // Popups without rich content cannot be stacked or paged through.
+    // The status bar view is shorter than the island, so its height has to be required.
+    val islandHeight =
+        maxOf(
+            DynamicIslandBaseHeight * rememberDynamicIslandSizeScale().second,
+            cutoutSpec.minimumHeight,
+        )
 
     Box(
         modifier =
@@ -180,7 +266,7 @@ fun StatusBarDynamicIslandContainer(
                 )
                 .then(
                     if (cameraCenterX != null) {
-                        Modifier.onPlaced { naturalCenterX = it.boundsInWindow().center.x }
+                        Modifier.onPlaced { naturalCenterX = it.islandBoundsInWindow().center.x }
                             .graphicsLayer {
                                 val natural = naturalCenterX
                                 translationX =
@@ -191,14 +277,14 @@ fun StatusBarDynamicIslandContainer(
                     }
                 )
                 .onGloballyPositioned { coordinates ->
-                    if (selectedChip != null) {
-                        val b = coordinates.boundsInWindow()
+                    if (renderedChip != null) {
+                        val b = coordinates.islandBoundsInWindow()
                         onIslandBoundsChanged(
                             android.graphics.Rect(
-                                b.left.toInt(),
-                                b.top.toInt(),
-                                b.right.toInt(),
-                                b.bottom.toInt(),
+                                kotlin.math.floor(b.left).toInt(),
+                                kotlin.math.floor(b.top).toInt(),
+                                kotlin.math.ceil(b.right).toInt(),
+                                kotlin.math.ceil(b.bottom).toInt(),
                             )
                         )
                     } else {
@@ -207,7 +293,8 @@ fun StatusBarDynamicIslandContainer(
                 }
                 // Docked to a side camera: turn the whole pill with its edge. The reported bounds
                 // above are of the turned pill.
-                .rotatedLayout(sideEdge?.quarterTurns ?: 0),
+                .rotatedLayout(sideEdge?.quarterTurns ?: 0)
+                .requiredHeightIn(min = islandHeight),
         contentAlignment = Alignment.Center,
     ) {
         if (cos) {
@@ -267,78 +354,98 @@ fun StatusBarDynamicIslandContainer(
                     )
                 }
             }
-        } else if (selectedChip != null) AnimatedContent(
-            targetState = selectedChip.chipId,
-            transitionSpec = {
-                if (targetState == initialState) {
-                    fadeIn(animationSpec = tween(150)) togetherWith
-                        fadeOut(animationSpec = tween(150))
-                } else {
-                    val slideDirection =
-                        if (
-                            chips.indexOfFirst { it.chipId == targetState } >
-                                chips.indexOfFirst { it.chipId == initialState }
-                        ) {
-                            1
-                        } else {
-                            -1
-                        }
-                    (slideInHorizontally(
-                        animationSpec = tween(220),
-                        initialOffsetX = { fullWidth -> slideDirection * fullWidth / 2 },
-                    ) + fadeIn(animationSpec = tween(180))) togetherWith
-                        (slideOutHorizontally(
-                            animationSpec = tween(200),
-                            targetOffsetX = { fullWidth -> -slideDirection * fullWidth / 3 },
-                        ) + fadeOut(animationSpec = tween(140)))
-                }
-            },
-            label = "dynamic_island_chip",
-        ) { chipId ->
-            val chip = chips.firstOrNull { it.chipId == chipId } ?: return@AnimatedContent
-            // The gesture handlers below keep running across recompositions, so they read the
-            // latest chip and pager state instead of what they were created with. Otherwise a
-            // chip that updates (the battery level, say) is hidden through a stale model, and a
-            // swipe pages through a list that has since changed.
-            val currentChip by rememberUpdatedState(chip)
-            val currentSelectRelative by rememberUpdatedState { direction: Int -> selectRelative(direction) }
-            var horizontalDragPx by remember(chipId, chips.size) { mutableFloatStateOf(0f) }
-            val thresholdPx = with(LocalDensity.current) { 36.dp.toPx() }
-
-            ProvideDynamicIslandPillTurns(sideEdge?.quarterTurns ?: 0) {
-                StatusBarDynamicIslandChip(
-                    viewModel = chip,
-                    pageCount = chips.size,
-                    pageIndex = chips.indexOfFirst { it.chipId == chipId }.coerceAtLeast(0),
-                    onNextPage = { selectRelative(1) },
-                    cutoutSpec = cutoutSpec,
-                    onChipBoundsChanged = { bounds -> anchorBounds = bounds },
-                    modifier =
-                        Modifier.swipeUpToHide(chip.chipId, thresholdPx) { currentChip.hide() }
-                            .pointerInput(chips.size, chip.chipId) {
-                            detectHorizontalDragGestures(
-                                onDragEnd = {
-                                    when {
-                                        chips.size <= 1 && abs(horizontalDragPx) >= thresholdPx ->
-                                            currentChip.hide()
-                                        horizontalDragPx <= -thresholdPx -> currentSelectRelative(1)
-                                        horizontalDragPx >= thresholdPx -> currentSelectRelative(-1)
-                                    }
-                                    horizontalDragPx = 0f
-                                },
-                                onDragCancel = { horizontalDragPx = 0f },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    horizontalDragPx += dragAmount
-                                    if (chips.size > 1 && abs(horizontalDragPx) > 8f) {
-                                        change.consume()
-                                    }
-                                },
+        } else if (renderedChip != null) Box(
+            modifier =
+                Modifier.onGloballyPositioned { coordinates ->
+                        // Content slides never move the surface used as the popup source.
+                        anchorBounds = coordinates.islandBoundsInScreen(view)
+                    }
+                    .graphicsLayer {
+                        alpha = if (popupOwnsIsland) 0f else presence.surfaceAlpha.value
+                        scaleX = presence.circleScale.value
+                        scaleY = presence.circleScale.value
+                        transformOrigin = presenceOrigin
+                        // Clip the surface and every child layer to the same circle/pill outline.
+                        // Keep measurement unchanged so the popup always receives the full pill bounds.
+                        shape = IslandPresenceShape(presence.widthFraction.value, cutoutSpec.anchor)
+                        clip = true
+                    }
+                    .background(Color.Black)
+        ) {
+            val contentSlidePx = with(LocalDensity.current) { 6.dp.roundToPx() }
+            CompositionLocalProvider(
+                LocalDynamicIslandWidth provides collapsedWidth,
+                LocalIslandContentProgress provides contentProgress,
+                LocalIslandContentSpatialMotion provides spatialMotionEnabled,
+            ) {
+                AnimatedContent(
+                    targetState = renderedChip,
+                    contentKey = { it.chipId },
+                    transitionSpec = {
+                        val enter = fadeIn(
+                            tween(
+                                if (spatialMotionEnabled) IslandContentFadeMillis
+                                else IslandReducedMotionFadeMillis,
+                                easing = Easings.EmphasizedDecelerate,
                             )
-                        },
-                    onTap = {
-                        if (chip.isPopupShown) chip.hidePopup() else chip.showPopup()
+                        )
+                        val exit = fadeOut(
+                            tween(
+                                if (spatialMotionEnabled) IslandContentExitMillis
+                                else IslandReducedMotionFadeMillis,
+                                easing = Easings.EmphasizedAccelerate,
+                            )
+                        )
+                        if (spatialMotionEnabled) {
+                            (enter + slideInVertically(
+                                tween(IslandContentFadeMillis, easing = Easings.EmphasizedDecelerate),
+                                initialOffsetY = { contentSlidePx },
+                            )) togetherWith
+                                (exit + slideOutVertically(
+                                    tween(IslandContentExitMillis, easing = Easings.EmphasizedAccelerate),
+                                    targetOffsetY = { -contentSlidePx },
+                                ))
+                        } else {
+                            enter togetherWith exit
+                        }
                     },
-                )
+                    label = "dynamic_island_chip",
+                ) { chip ->
+                    val currentChip by rememberUpdatedState(chip)
+                    val currentSelectRelative by rememberUpdatedState { direction: Int -> selectRelative(direction) }
+                    var horizontalDragPx by remember(chip.chipId, chips.size) { mutableFloatStateOf(0f) }
+                    val thresholdPx = with(LocalDensity.current) { 36.dp.toPx() }
+                    ProvideDynamicIslandPillTurns(sideEdge?.quarterTurns ?: 0) {
+                        StatusBarDynamicIslandChip(
+                            viewModel = chip,
+                            pageCount = chips.size,
+                            modifier = Modifier.swipeUpToHide(chip.chipId, thresholdPx) { currentChip.hide() }
+                                .pointerInput(chips.size, chip.chipId) {
+                                    detectHorizontalDragGestures(
+                                        onDragEnd = {
+                                            when {
+                                                chips.size <= 1 && abs(horizontalDragPx) >= thresholdPx -> currentChip.hide()
+                                                horizontalDragPx <= -thresholdPx -> currentSelectRelative(1)
+                                                horizontalDragPx >= thresholdPx -> currentSelectRelative(-1)
+                                            }
+                                            horizontalDragPx = 0f
+                                        },
+                                        onDragCancel = { horizontalDragPx = 0f },
+                                        onHorizontalDrag = { change, delta ->
+                                            horizontalDragPx += delta
+                                            change.consume()
+                                        },
+                                    )
+                                },
+                            cutoutSpec = cutoutSpec,
+                            onTap = {
+                                if (selectedChip != null && presence.contentAlpha.value >= 1f) {
+                                    if (chip.isPopupShown) chip.hidePopup() else chip.showPopup()
+                                }
+                            },
+                        )
+                    }
+                }
             }
         }
 
@@ -355,7 +462,6 @@ fun StatusBarDynamicIslandContainer(
         }
     }
 }
-
 /** Whether the island uses the ColorOS style; follows its setting live. */
 @Composable
 internal fun rememberDynamicIslandColorOSStyle(): Boolean {
@@ -369,7 +475,131 @@ internal fun rememberDynamicIslandColorOSStyle(): Boolean {
 private const val TABLET_MIN_WIDTH_DP = 600
 private val AppHandleGap = 8.dp
 
-/** Hides the island on a swipe up; a pull down is left to the shade. */
+private class IslandPresenceShape(
+    private val widthFraction: Float,
+    private val anchor: DynamicIslandAnchor,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline {
+        val diameter = size.height
+        val width =
+            diameter + (size.width - diameter).coerceAtLeast(0f) * widthFraction.coerceAtLeast(0f)
+        val left =
+            if (anchor == DynamicIslandAnchor.START) {
+                if (layoutDirection == LayoutDirection.Ltr) 0f else size.width - width
+            } else {
+                (size.width - width) / 2f
+            }
+        return Outline.Rounded(
+            RoundRect(Rect(left, 0f, left + width, diameter), CornerRadius(diameter / 2f))
+        )
+    }
+}
+
+// M3 Expressive default spatial spring for the pill (~300-350ms to settle). The smaller
+// circle uses custom higher stiffness for a ~200ms emergence, with the same slight overshoot.
+private val IslandPillSpatialSpring = spring<Float>(dampingRatio = 0.8f, stiffness = 380f)
+private val IslandCircleSpatialSpring = spring<Float>(dampingRatio = 0.8f, stiffness = 1600f)
+private const val IslandCircleFadeMillis = 200
+private const val IslandContentFadeMillis = 230
+private const val IslandContentExitMillis = 150
+private const val IslandReducedMotionFadeMillis = 100
+private const val IslandHiddenCircleScale = 0f
+
+// A short opacity-only fallback remains a fade even when the system animator scale is zero.
+private val IslandFadeDurationScale = object : MotionDurationScale {
+    override val scaleFactor = 1f
+}
+
+private class IslandPresenceMotion {
+    val surfaceAlpha = Animatable(0f)
+    val circleScale = Animatable(IslandHiddenCircleScale)
+    val widthFraction = Animatable(0f)
+    val contentAlpha = Animatable(0f)
+
+    suspend fun animatePresence(visible: Boolean, spatialMotionEnabled: Boolean) {
+        if (!visible && surfaceAlpha.value == 0f) {
+            // A transition can be cancelled before its first visible frame.
+            widthFraction.snapTo(0f)
+            circleScale.snapTo(IslandHiddenCircleScale)
+            contentAlpha.snapTo(0f)
+            return
+        }
+        val durationScale = currentCoroutineContext()[MotionDurationScale]?.scaleFactor ?: 1f
+        if (!spatialMotionEnabled || durationScale == 0f) {
+            widthFraction.snapTo(1f)
+            circleScale.snapTo(1f)
+            contentAlpha.snapTo(1f)
+            withContext(IslandFadeDurationScale) {
+                surfaceAlpha.animateTo(
+                    if (visible) 1f else 0f,
+                    tween(IslandReducedMotionFadeMillis),
+                )
+            }
+            if (!visible) {
+                widthFraction.snapTo(0f)
+                circleScale.snapTo(IslandHiddenCircleScale)
+                contentAlpha.snapTo(0f)
+            }
+            return
+        }
+
+        if (visible) {
+            coroutineScope {
+                launch { circleScale.animateTo(1f, IslandCircleSpatialSpring) }
+                launch { surfaceAlpha.animateTo(1f, tween(IslandCircleFadeMillis)) }
+            }
+            widthFraction.animateTo(1f, IslandPillSpatialSpring)
+            contentAlpha.animateTo(
+                1f,
+                tween(IslandContentFadeMillis, easing = Easings.EmphasizedDecelerate),
+            )
+        } else {
+            contentAlpha.animateTo(
+                0f,
+                tween(IslandContentExitMillis, easing = Easings.EmphasizedAccelerate),
+            )
+            widthFraction.animateTo(0f, IslandPillSpatialSpring)
+            coroutineScope {
+                launch {
+                    circleScale.animateTo(IslandHiddenCircleScale, IslandCircleSpatialSpring)
+                }
+                launch { surfaceAlpha.animateTo(0f, tween(IslandCircleFadeMillis)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberIslandSpatialMotionEnabled(): Boolean {
+    val context = LocalContext.current
+    fun readEnabled() =
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) > 0f
+    var enabled by remember(context) { mutableStateOf(readEnabled()) }
+    DisposableEffect(context) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                enabled = readEnabled()
+            }
+        }
+        context.contentResolver.registerContentObserver(
+            Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+            false,
+            observer,
+        )
+        enabled = readEnabled()
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+    return enabled
+}
+
 private fun Modifier.swipeUpToHide(key: Any, slopPx: Float, onHide: () -> Unit): Modifier =
     pointerInput(key) {
         awaitEachGesture {

@@ -26,6 +26,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +78,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
@@ -789,6 +793,10 @@ private fun CameraSplitRow(
     }
 }
 
+// Only icon/text layers animate. Surface measurement remains the popup's stable morph anchor.
+internal val LocalIslandContentProgress = staticCompositionLocalOf<() -> Float> { { 1f } }
+internal val LocalIslandContentSpatialMotion = staticCompositionLocalOf { true }
+internal val LocalDynamicIslandWidth = staticCompositionLocalOf { 120.dp }
 private val CameraSplitSpacing = 8.dp
 private val CompactUtilityStartTextWidth = 36.dp
 private const val AlarmCountdownTickMs = 30_000L
@@ -1096,6 +1104,47 @@ internal fun rememberDynamicIslandSizeScale(): Pair<Float, Float> {
             )
         }.collectAsState(initial = 1f)
     return widthScale to heightScale
+}
+
+internal fun LayoutCoordinates.islandBoundsInScreen(view: android.view.View): Rect {
+    val location = IntArray(2)
+    view.getLocationOnScreen(location)
+    return findRootCoordinates().localBoundingBoxOf(this, clipBounds = false)
+        .translate(Offset(location[0].toFloat(), location[1].toFloat()))
+}
+
+internal fun LayoutCoordinates.islandBoundsInWindow(): Rect {
+    val root = findRootCoordinates()
+    return root.localBoundingBoxOf(this, clipBounds = false).translate(root.positionInWindow())
+}
+
+@Composable
+internal fun rememberDynamicIslandWidth(cutoutSpec: DynamicIslandCutoutSpec): Dp {
+    val style = MaterialTheme.typography.labelLarge
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val context = LocalContext.current
+    val full = context.getString(R.string.dynamic_island_charging_full)
+    val flashlight = context.getString(R.string.dynamic_island_flashlight_short)
+    val sideBudget = remember(style, measurer, density, full, flashlight) {
+        fun textWidth(text: String): Dp =
+            (measurer.measure(
+                text = text,
+                style = style,
+                density = density,
+                softWrap = false,
+                maxLines = 1,
+            ).multiParagraph.maxIntrinsicWidth / density.density).dp
+        val startText = listOf("+99:59", "999.99W", flashlight).maxOf { textWidth(it) }
+        val endText = listOf("+99:59", "99:59", "100%", full).maxOf { textWidth(it) }
+        maxOf(16.dp + 6.dp + startText, endText)
+    }
+    return remember(sideBudget, cutoutSpec.cutoutWidth) {
+        val clearance = DynamicIslandEmbeddedGapSidePadding * 2
+        val width = (sideBudget + 10.dp) * 2 + cutoutSpec.cutoutWidth + clearance
+        // No upper limit: a fixed ceiling would clip the utility labels at larger font scales.
+        (ceil(width.value / 4f) * 4f).dp.coerceAtLeast(120.dp)
+    }
 }
 
 private data class DynamicIslandCollapseState(val scale: Float, val contentAlpha: Float)
