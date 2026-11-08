@@ -17,47 +17,36 @@
 package com.android.systemui.statusbar.quickactions.ui.compose
 
 import android.graphics.drawable.Drawable
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.core.graphics.drawable.toBitmap
 import androidx.palette.graphics.Palette
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
 fun rememberAlbumArtAccent(artworkDrawable: Drawable?, fallback: Color): Color {
-    var extracted by remember { mutableStateOf<Color?>(null) }
-
-    LaunchedEffect(artworkDrawable) {
-        extracted = null
-        if (artworkDrawable == null) return@LaunchedEffect
-        val rgb =
-            withContext(Dispatchers.Default) {
+    val extracted =
+        remember(artworkDrawable) {
+            artworkDrawable?.let { artwork ->
                 runCatching {
-                    val bitmap = artworkDrawable.toBitmap(width = 64, height = 64)
+                    val bitmap = artwork.toBitmap(width = 64, height = 64)
                     val palette = Palette.from(bitmap).generate()
                     palette.vibrantSwatch?.rgb
                         ?: palette.lightVibrantSwatch?.rgb
                         ?: palette.darkVibrantSwatch?.rgb
                 }
-                    .getOrNull()
+                    .getOrNull()?.let { Color(it) }
             }
-        extracted = rgb?.let { Color(it) }
-    }
-
-    return animateColorAsState(
-            targetValue = extracted ?: fallback,
-            animationSpec = tween(durationMillis = 450),
-            label = "album_art_accent",
-        )
-        .value
+        }
+    return extracted ?: fallback
 }
 
 /**
