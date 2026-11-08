@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,31 +35,31 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import kotlinx.coroutines.delay
 
-private val PopupShape = RoundedCornerShape(34.dp)
+private val PopupShape = RoundedCornerShape(32.dp)
 
 typealias LyricLine = io.github.miner7222.systemui.lyrics.LyricLine
 
 @Composable
-fun LyricsCard(
-    model: MediaControlChipModel,
-    modifier: Modifier = Modifier,
-) {
+fun LyricsCard(model: MediaControlChipModel, modifier: Modifier = Modifier) {
     val plainLyrics = model.lyrics
     val lyricLines = model.lyricState.lines
     val activeIndex = model.lyricState.activeIndex
+    val lineHeight = with(LocalDensity.current) { 20.sp.toDp() } + 4.dp
+    val lyricsHeight = lineHeight * 3 + 8.dp
 
     PopupSurface(
         shape = PopupShape,
-        modifier = modifier.widthIn(min = 320.dp, max = 400.dp).height(200.dp),
+        modifier = modifier.widthIn(min = 320.dp, max = 400.dp).height(lyricsHeight),
     ) {
         if (lyricLines.isNotEmpty()) {
             val lazyListState = rememberLazyListState()
@@ -73,41 +72,42 @@ fun LyricsCard(
 
             LazyColumn(
                 state = lazyListState,
-                contentPadding = PaddingValues(vertical = 80.dp),
+                contentPadding = PaddingValues(vertical = lineHeight + 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             ) {
                 itemsIndexed(lyricLines) { index, line ->
                     val isActive = index == activeIndex
-                    val alpha by animateFloatAsState(if (isActive) 1f else 0.4f, label = "lyric_alpha")
+                    val alpha by
+                        animateFloatAsState(if (isActive) 1f else 0.4f, label = "lyric_alpha")
                     val scale = if (isActive) 1.1f else 0.9f
                     val fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
 
                     Text(
                         text = line.text,
                         color = LocalContentColor.current,
-                        fontSize = (16.sp * scale),
+                        fontSize = (14.sp * scale),
+                        lineHeight = 20.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         fontWeight = fontWeight,
                         textAlign = TextAlign.Center,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp)
-                                .alpha(alpha),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).alpha(alpha),
                     )
                 }
             }
         } else if (!plainLyrics.isNullOrBlank()) {
             LazyColumn(
-                contentPadding = PaddingValues(vertical = 16.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             ) {
                 item {
                     Text(
                         text = plainLyrics,
                         color = LocalContentColor.current.copy(alpha = 0.8f),
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )

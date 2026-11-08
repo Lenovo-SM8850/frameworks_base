@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -1258,18 +1259,31 @@ private fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
             if (hasLyrics) {
                 // One surface holds both cards in a container, so the cards touch and the card keeps
                 // an inset below. Without one they are separate surfaces with a gap between.
+                // The ColorOS cards have a surface each; give the lyrics the surface of the media
+                // card there too, like the morph container does, so they read as one card.
                 val sharedSurface = LocalPopupContainer.current
-                Column(
-                    modifier =
-                        if (sharedSurface) mediaClickModifier.padding(bottom = 12.dp)
-                        else mediaClickModifier,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement =
-                        if (sharedSurface) Arrangement.Top else Arrangement.spacedBy(8.dp),
-                ) {
-                    MediaControlPopup(model = model, useWaveform = useWaveform)
-                    CompositionLocalProvider(LocalPopupCameraClearance provides 0.dp) {
-                        LyricsCard(model = model)
+                val mediaWithLyrics: @Composable () -> Unit = {
+                    Column(
+                        modifier = mediaClickModifier.padding(bottom = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Top,
+                    ) {
+                        MediaControlPopup(model = model, useWaveform = useWaveform)
+                        CompositionLocalProvider(LocalPopupCameraClearance provides 0.dp) {
+                            LyricsCard(model = model)
+                        }
+                    }
+                }
+                if (sharedSurface) {
+                    mediaWithLyrics()
+                } else {
+                    PopupSurface(
+                        shape = RoundedCornerShape(32.dp),
+                        modifier = Modifier.widthIn(min = 320.dp, max = 400.dp),
+                    ) {
+                        CompositionLocalProvider(LocalPopupContainer provides true) {
+                            mediaWithLyrics()
+                        }
                     }
                 }
             } else {
