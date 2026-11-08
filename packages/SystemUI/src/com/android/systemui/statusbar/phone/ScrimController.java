@@ -1799,11 +1799,10 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
     }
 
     private int getShadePanelColor() {
-        if (isColorOSBackdrop() && isNightMode()) {
-            // The ColorOS QS panel draws the glass behind the shade itself, a blur region of
-            // the panel material, and the color of the scrim on top of it would only dim it.
-            // The light panel keeps its color: the glass does not lift a dark wallpaper enough
-            // for the dark text of the light theme to be read on it.
+        if (isColorOSBackdrop()) {
+            // The ColorOS QS panel draws the glass behind the shade itself, a blur region of the
+            // panel material, and the color of the scrim on top of it would only dim it. Both
+            // themes rely on that glass, so the panel has no color of its own.
             return Color.TRANSPARENT;
         }
         return ShadeColors.shadePanel(mContext, isBlurCurrentlySupported(), true);
@@ -1818,11 +1817,6 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
                 && Settings.System.getIntForUser(mContext.getContentResolver(),
                         Settings.System.QS_PANEL_STYLE, 0, UserHandle.USER_CURRENT)
                         == QS_PANEL_STYLE_COLOROS;
-    }
-
-    private boolean isNightMode() {
-        return (mContext.getResources().getConfiguration().uiMode
-                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
     }
 
     private void onThemeChanged() {
