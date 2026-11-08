@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -68,9 +69,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.android.settingslib.widget.AdaptiveIcon
 import com.android.systemui.common.shared.model.ContentDescription
 import com.android.systemui.common.shared.model.Icon as UiIcon
 import com.android.systemui.common.ui.compose.Icon as UiIconView
@@ -85,6 +92,7 @@ import com.android.systemui.media.remedia.ui.viewmodel.MediaCarouselVisibility
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.media.ui.viewmodel.MediaControlPopupViewModel
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
 import com.android.systemui.statusbar.quickactions.ui.compose.MediaArtFlip
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
@@ -165,6 +173,9 @@ fun MediaControlPopup(
     val onAccent =
         if (artworkDrawable == null) MaterialTheme.colorScheme.onPrimary
         else if (accent.luminance() > 0.5f) Color.Black else Color.White
+    val launchAfterHide = LocalLaunchAfterPopupHidden.current
+    val openOutput: (() -> Unit)? =
+        model.openOutputSwitcher?.let { open -> { open(launchAfterHide) } }
     PopupSurface(
         shape = PopupShape,
         modifier = modifier.widthIn(min = 320.dp, max = 400.dp),
@@ -223,6 +234,11 @@ fun MediaControlPopup(
                         )
                     }
                 }
+                MediaOutputChip(
+                    model = model,
+                    onClick = openOutput,
+                    modifier = Modifier.widthIn(max = 120.dp).align(Alignment.Top),
+                )
             }
 
             if (model.durationMs > 0L) {
@@ -263,6 +279,50 @@ fun MediaControlPopup(
                     iconTint = LocalContentColor.current,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MediaOutputChip(
+    model: MediaControlChipModel,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val name =
+        model.outputDevice?.name?.toString() ?: stringResource(R.string.media_seamless_other_device)
+    // The media card shows the same drawable; painting it here must not change its bounds.
+    val outputIcon = model.outputDevice?.icon
+    val icon =
+        remember(outputIcon) {
+            outputIcon?.let { drawable ->
+                val source = if (drawable is AdaptiveIcon) drawable.getDrawable(1) else drawable
+                UiIcon.Loaded(source.constantState?.newDrawable()?.mutate() ?: source, null)
+            }
+        } ?: UiIcon.Resource(R.drawable.ic_media_home_devices, null)
+    val foreground = LocalContentColor.current
+    Box(modifier = modifier.widthIn(max = 180.dp)) {
+        Row(
+            modifier =
+                Modifier.height(36.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(foreground.copy(alpha = 0.1f))
+                    .alpha(if (onClick != null) 1f else 0.38f)
+                    .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
+                    .semantics(mergeDescendants = true) { contentDescription = name }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UiIconView(icon = icon, modifier = Modifier.size(18.dp), tint = foreground)
+            Text(
+                text = name,
+                style = MaterialTheme.typography.labelMedium,
+                color = foreground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
+            )
         }
     }
 }

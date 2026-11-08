@@ -19,7 +19,10 @@ package com.android.systemui.statusbar.quickactions.media.shared.model
 import android.media.session.MediaSession
 import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.media.controls.shared.model.MediaAction
+import com.android.systemui.media.controls.shared.model.MediaDeviceData
 
+/** Checks an output tap, then schedules the accepted launch after the popup closes. */
+typealias MediaOutputSwitcherAction = (launchAfterHide: (() -> Unit) -> Unit) -> Unit
 
 /** Model used to display and control media from the status bar island. */
     data class MediaControlChipModel(
@@ -38,6 +41,8 @@ import com.android.systemui.media.controls.shared.model.MediaAction
         val canBeScrubbed: Boolean,
         val isPlaying: Boolean,
         val packageName: String? = null,
+        val outputDevice: MediaDeviceData? = null,
+        val openOutputSwitcher: MediaOutputSwitcherAction? = null,
         val lyrics: String? = null,
         val syncedLyrics: String? = null,
         /** When [positionMs] was read, on the elapsedRealtime clock, or 0 if it is not known. */

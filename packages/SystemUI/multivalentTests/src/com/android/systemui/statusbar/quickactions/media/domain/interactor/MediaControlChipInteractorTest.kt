@@ -24,6 +24,7 @@ import androidx.test.filters.SmallTest
 import com.android.systemui.SysuiTestCase
 import com.android.systemui.activity.data.repository.activityManagerRepository
 import com.android.systemui.activityIntentHelper
+import com.android.systemui.classifier.falsingManager
 import com.android.systemui.flags.parameterizeSceneContainerFlag
 import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.kosmos.backgroundScope
@@ -36,6 +37,7 @@ import com.android.systemui.media.controls.domain.pipeline.MediaDataManager
 import com.android.systemui.media.controls.shared.model.MediaAction
 import com.android.systemui.media.controls.shared.model.MediaButton
 import com.android.systemui.media.controls.shared.model.MediaData
+import com.android.systemui.media.mediaOutputDialogManager
 import com.android.systemui.media.remedia.data.repository.mediaPauseActionButton
 import com.android.systemui.media.remedia.data.repository.mediaPlayActionButton
 import com.android.systemui.media.remedia.data.repository.mediaRepository
@@ -68,6 +70,8 @@ class MediaControlChipInteractorTest(flags: FlagsParameterization) : SysuiTestCa
                 context = applicationContext,
                 backgroundScope = backgroundScope,
                 mediaRepository = mediaRepository,
+                mediaOutputDialogManager = mediaOutputDialogManager,
+                falsingManager = falsingManager,
                 activityStarter = activityStarter,
                 activityIntentHelper = activityIntentHelper,
                 lockscreenUserManager = notificationLockscreenUserManager,
