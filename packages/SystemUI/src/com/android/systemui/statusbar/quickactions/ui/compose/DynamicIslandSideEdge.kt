@@ -16,7 +16,12 @@
 
 package com.android.systemui.statusbar.quickactions.ui.compose
 
+import android.content.Context
 import android.graphics.Rect
+import android.view.Display
+import android.view.DisplayCutout
+import android.view.DisplayInfo
+import android.view.Surface
 import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
@@ -29,7 +34,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import kotlin.math.roundToInt
+import com.android.internal.R as InternalR
 
 /** Display edge that holds the camera cutout the Dynamic Island is docked to. */
 enum class DynamicIslandEdge {
@@ -69,23 +76,75 @@ data class DynamicIslandCutoutEdge(val edge: DynamicIslandEdge, val hole: Rect) 
 }
 
 /**
- * Finds the edge holding the camera cutout in the current rotation. A top cutout is resolved
- * exactly as before. Only when there is none, the left and right cutouts of the display are
+ * Finds the edge holding the camera cutout in the current rotation. A top cutout uses the status
+ * bar insets. Only when there is none, the left and right cutouts of the display are
  * considered; the status bar window is too short to receive those in its own insets, so the
  * display-level cutout is used.
  */
-fun resolveDynamicIslandCutoutEdge(view: View): DynamicIslandCutoutEdge? {
-    val displayCutout = view.display?.cutout
-    val top = (view.rootWindowInsets?.displayCutout ?: displayCutout)?.dynamicIslandHoleRect()
+fun resolveDynamicIslandCutoutEdge(view: View): DynamicIslandCutoutEdge? =
+    resolveDynamicIslandCutoutEdge(view.context, view.rootWindowInsets?.displayCutout, view.display)
+
+private fun resolveDynamicIslandCutoutEdge(
+    context: Context,
+    windowCutout: DisplayCutout?,
+    display: Display?,
+): DynamicIslandCutoutEdge? {
+    var displayCutout = display?.cutout
+    if (
+        displayCutout == null && display != null &&
+            context.resources.getBoolean(InternalR.bool.config_hideDisplayCutoutInLandscape)
+    ) {
+        val info = DisplayInfo()
+        if (
+            display.getDisplayInfo(info) && info.type == Display.TYPE_INTERNAL &&
+                (info.rotation == Surface.ROTATION_90 || info.rotation == Surface.ROTATION_270)
+        ) {
+            displayCutout = DisplayCutout.fromResourcesForDisplay(context.resources, info)
+        }
+    }
+    val top =
+        (windowCutout ?: displayCutout)?.boundingRectTop
+            ?.takeUnless { it.isEmpty }
     if (top != null) return DynamicIslandCutoutEdge(DynamicIslandEdge.TOP, top)
     val cutout = displayCutout ?: return null
     cutout.getBoundingRectLeft().takeUnless { it.isEmpty }?.let {
-        return DynamicIslandCutoutEdge(DynamicIslandEdge.LEFT, cutout.dynamicIslandHoleWithin(it))
+        return DynamicIslandCutoutEdge(DynamicIslandEdge.LEFT, Rect(it))
     }
     cutout.getBoundingRectRight().takeUnless { it.isEmpty }?.let {
-        return DynamicIslandCutoutEdge(DynamicIslandEdge.RIGHT, cutout.dynamicIslandHoleWithin(it))
+        return DynamicIslandCutoutEdge(DynamicIslandEdge.RIGHT, Rect(it))
     }
     return null
+}
+
+/** Camera geometry for the status-bar island, retaining its portrait inset on a side camera. */
+fun resolveDynamicIslandTopCutout(view: View): Rect? =
+    resolveDynamicIslandTopCutout(view.context, view.rootWindowInsets?.displayCutout, view.display)
+
+fun resolveDynamicIslandTopCutout(context: Context): Rect? =
+    resolveDynamicIslandTopCutout(context, null, runCatching { context.display }.getOrNull())
+
+private fun resolveDynamicIslandTopCutout(
+    context: Context,
+    windowCutout: DisplayCutout?,
+    display: Display?,
+): Rect? {
+    val edge = resolveDynamicIslandCutoutEdge(context, windowCutout, display) ?: return null
+    if (edge.edge == DynamicIslandEdge.TOP) return Rect(edge.hole)
+    val keepOnTop =
+        with(DynamicIslandFeatureSettings) {
+            context.contentResolver.readDynamicIslandFeatureEnabled(LANDSCAPE_TOP, defaultValue = true)
+        }
+    if (!keepOnTop) return null
+    val info = DisplayInfo()
+    if (display?.getDisplayInfo(info) != true) return null
+    return edge.topCutout(info.logicalWidth)
+}
+
+internal fun DynamicIslandCutoutEdge.topCutout(displayWidth: Int): Rect {
+    if (edge == DynamicIslandEdge.TOP) return Rect(hole)
+    val left = (displayWidth - hole.height()) / 2
+    val top = if (edge == DynamicIslandEdge.LEFT) hole.left else displayWidth - hole.right
+    return Rect(left, top, left + hole.height(), top + hole.width())
 }
 
 /**

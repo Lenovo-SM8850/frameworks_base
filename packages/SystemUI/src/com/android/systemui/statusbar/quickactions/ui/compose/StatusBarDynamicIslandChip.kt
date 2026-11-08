@@ -17,8 +17,11 @@
 package com.android.systemui.statusbar.quickactions.ui.compose
 
 import android.view.DisplayCutout
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,6 +35,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -69,10 +73,12 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
@@ -82,12 +88,14 @@ import com.android.systemui.common.shared.model.Icon as IconModel
 import com.android.systemui.common.ui.compose.Icon
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
 import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.ScreenRecordPopupModel
 import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.shared.model.chipText
 import kotlinx.coroutines.coroutineScope
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
@@ -865,13 +873,15 @@ private fun startAnchoredGapFor(cutout: android.graphics.Rect, density: Float): 
 
 private data class DynamicIslandCutoutSnapshot(
     val topCutout: android.graphics.Rect?,
+    val heightCutout: android.graphics.Rect?,
     val windowWidthPx: Int,
     val isRtl: Boolean,
 )
 
 private fun readDynamicIslandCutoutSnapshot(view: View): DynamicIslandCutoutSnapshot {
-    val displayCutout = view.rootWindowInsets?.displayCutout ?: view.display?.cutout
-    val topCutout = displayCutout?.dynamicIslandHoleRect()
+    val topCutout =
+        resolveDynamicIslandCutoutEdge(view)?.takeIf { it.edge == DynamicIslandEdge.TOP }?.hole
+    val heightCutout = resolveDynamicIslandTopCutout(view)
     val windowWidthPx =
         when {
             view.rootView.width > 0 -> view.rootView.width
@@ -880,6 +890,7 @@ private fun readDynamicIslandCutoutSnapshot(view: View): DynamicIslandCutoutSnap
         }
     return DynamicIslandCutoutSnapshot(
         topCutout = topCutout,
+        heightCutout = heightCutout,
         windowWidthPx = windowWidthPx,
         isRtl = view.layoutDirection == View.LAYOUT_DIRECTION_RTL,
     )
