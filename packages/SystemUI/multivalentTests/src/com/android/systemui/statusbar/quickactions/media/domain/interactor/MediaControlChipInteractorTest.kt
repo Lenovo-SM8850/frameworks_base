@@ -16,25 +16,40 @@
 
 package com.android.systemui.statusbar.quickactions.media.domain.interactor
 
+import android.content.applicationContext
 import android.graphics.drawable.Drawable
 import android.platform.test.flag.junit.FlagsParameterization
 import android.provider.Settings
 import androidx.test.filters.SmallTest
 import com.android.systemui.SysuiTestCase
+import com.android.systemui.activity.data.repository.activityManagerRepository
+import com.android.systemui.activityIntentHelper
+import com.android.systemui.classifier.falsingManager
 import com.android.systemui.flags.parameterizeSceneContainerFlag
 import com.android.systemui.kosmos.Kosmos
+import com.android.systemui.kosmos.backgroundScope
 import com.android.systemui.kosmos.collectLastValue
+import com.android.systemui.kosmos.runCurrent
 import com.android.systemui.kosmos.runTest
 import com.android.systemui.kosmos.useUnconfinedTestDispatcher
+import com.android.systemui.log.logcatLogBuffer
 import com.android.systemui.media.controls.domain.pipeline.MediaDataManager
 import com.android.systemui.media.controls.shared.model.MediaAction
 import com.android.systemui.media.controls.shared.model.MediaButton
 import com.android.systemui.media.controls.shared.model.MediaData
+import com.android.systemui.media.mediaOutputDialogManager
+import com.android.systemui.media.remedia.data.repository.mediaPauseActionButton
+import com.android.systemui.media.remedia.data.repository.mediaPlayActionButton
 import com.android.systemui.media.remedia.data.repository.mediaRepository
 import com.android.systemui.media.remedia.shared.flag.MediaControlsInComposeFlag
+import com.android.systemui.media.remedia.shared.model.MediaSessionState
+import com.android.systemui.plugins.activityStarter
+import com.android.systemui.statusbar.notificationLockscreenUserManager
+import com.android.systemui.statusbar.policy.keyguardStateController
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import com.android.systemui.testKosmos
 import com.google.common.truth.Truth.assertThat
+import io.github.miner7222.systemui.lyrics.lyricSyncRepository
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -50,7 +65,23 @@ import platform.test.runner.parameterized.Parameters
 class MediaControlChipInteractorTest(flags: FlagsParameterization) : SysuiTestCase() {
     private val kosmos = testKosmos().useUnconfinedTestDispatcher()
     private val mediaRepository = kosmos.mediaRepository
-    private val Kosmos.underTest by Kosmos.Fixture { kosmos.mediaControlChipInteractor }
+    private val Kosmos.underTest by
+        Kosmos.Fixture {
+            MediaControlChipInteractor(
+                context = applicationContext,
+                backgroundScope = backgroundScope,
+                mediaRepository = mediaRepository,
+                mediaOutputDialogManager = mediaOutputDialogManager,
+                falsingManager = falsingManager,
+                activityStarter = activityStarter,
+                activityIntentHelper = activityIntentHelper,
+                lockscreenUserManager = notificationLockscreenUserManager,
+                keyguardStateController = keyguardStateController,
+                lyricSyncRepository = lyricSyncRepository,
+                activityManagerRepository = activityManagerRepository,
+                logBuffer = logcatLogBuffer("MediaControlChipTest"),
+            )
+        }
     @Captor lateinit var listener: ArgumentCaptor<MediaDataManager.Listener>
 
     companion object {
@@ -212,9 +243,81 @@ class MediaControlChipInteractorTest(flags: FlagsParameterization) : SysuiTestCa
             assertThat(model?.packageName).isEqualTo("com.google.android.apps.youtube.music")
         }
 
+    @Test
+    fun mediaControlChipModel_visibleApp_retainsModelAndTracksPlayback() =
+        kosmos.runTest {
+            kosmos.activityManagerRepository.startingIsAppVisibleValue = true
+            val model by collectLastValue(underTest.mediaControlChipModel)
+            val userMedia =
+                MediaData(
+                    active = true,
+                    appUid = 1012345,
+                    song = "Playing",
+                    isPlaying = true,
+                    semanticActions = MediaButton(playOrPause = mediaPauseActionButton),
+                )
+            updateMedia(userMedia)
+            if (MediaControlsInComposeFlag.isEnabled) {
+                mediaRepository.currentMedia[0] =
+                    mediaRepository.currentMedia[0].copy(state = MediaSessionState.Playing)
+                runCurrent()
+            }
+
+            assertThat(model).isNotNull()
+            assertThat(model?.isAppVisible).isTrue()
+
+            assertThat(model?.isPlaying).isTrue()
+            kosmos.activityManagerRepository.startingIsAppVisibleValue = false
+            updateMedia(
+                userMedia.copy(
+                    song = "Paused",
+                    isPlaying = false,
+                    semanticActions = MediaButton(playOrPause = mediaPlayActionButton),
+                )
+            )
+            assertThat(model?.songName).isEqualTo("Paused")
+            assertThat(model?.isPlaying).isFalse()
+            assertThat(model?.isAppVisible).isTrue()
+
+            kosmos.activityManagerRepository.setIsAppVisible(userMedia.appUid, false)
+            assertThat(model?.isAppVisible).isFalse()
+            assertThat(model?.songName).isEqualTo("Paused")
+        }
+
+    @Test
+    fun mediaControlChipModel_uidChanges_ignoresPreviousUid() =
+        kosmos.runTest {
+            val model by collectLastValue(underTest.mediaControlChipModel)
+            val userMedia = MediaData(active = true, appUid = 1012345, song = "Song")
+            updateMedia(userMedia)
+            kosmos.activityManagerRepository.setIsAppVisible(userMedia.appUid, true)
+            assertThat(model?.isAppVisible).isTrue()
+
+            val otherUserMedia = userMedia.copy(appUid = 1112345)
+            updateMedia(otherUserMedia)
+            assertThat(model?.isAppVisible).isFalse()
+
+            kosmos.activityManagerRepository.setIsAppVisible(userMedia.appUid, false)
+            kosmos.activityManagerRepository.setIsAppVisible(userMedia.appUid, true)
+            assertThat(model?.isAppVisible).isFalse()
+            kosmos.activityManagerRepository.setIsAppVisible(otherUserMedia.appUid, true)
+            assertThat(model?.isAppVisible).isTrue()
+        }
+
+    @Test
+    fun mediaControlChipModel_invalidUid_notVisible() =
+        kosmos.runTest {
+            kosmos.activityManagerRepository.startingIsAppVisibleValue = true
+            val model by collectLastValue(underTest.mediaControlChipModel)
+            updateMedia(MediaData(active = true, appUid = -1))
+            assertThat(model).isNotNull()
+            assertThat(model?.isAppVisible).isFalse()
+        }
+
     private fun updateMedia(mediaData: MediaData) {
         if (MediaControlsInComposeFlag.isEnabled) {
             mediaRepository.addCurrentUserMediaEntry(mediaData)
+            kosmos.runCurrent()
         } else {
             kosmos.underTest.updateMediaControlChipModelLegacy(mediaData)
         }

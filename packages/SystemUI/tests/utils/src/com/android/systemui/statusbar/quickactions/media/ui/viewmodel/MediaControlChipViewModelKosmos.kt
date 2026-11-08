@@ -16,7 +16,6 @@
 
 package com.android.systemui.statusbar.quickactions.media.ui.viewmodel
 
-import android.content.applicationContext
 import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.media.controls.ui.view.qsMediaHost
 import com.android.systemui.media.remedia.ui.viewmodel.factory.mediaViewModelFactory
@@ -43,8 +42,6 @@ val Kosmos.mediaControlChipViewModelFactory by
 private val Kosmos.mediaControlChipViewModel: MediaControlChipViewModel by
     Kosmos.Fixture {
         MediaControlChipViewModel(
-            applicationContext = applicationContext,
             mediaControlChipInteractor = mediaControlChipInteractor,
-            popupViewModelFactory = mediaControlPopupViewModelFactory,
         )
     }

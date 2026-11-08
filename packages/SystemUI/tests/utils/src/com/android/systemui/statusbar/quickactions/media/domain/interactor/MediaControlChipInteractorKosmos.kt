@@ -17,10 +17,12 @@
 package com.android.systemui.statusbar.quickactions.media.domain.interactor
 
 import android.content.applicationContext
+import com.android.systemui.activity.data.repository.activityManagerRepository
 import com.android.systemui.activityIntentHelper
 import com.android.systemui.classifier.falsingManager
 import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.kosmos.backgroundScope
+import com.android.systemui.log.logcatLogBuffer
 import com.android.systemui.media.mediaOutputDialogManager
 import com.android.systemui.media.remedia.data.repository.mediaRepository
 import com.android.systemui.plugins.activityStarter
@@ -41,5 +43,7 @@ val Kosmos.mediaControlChipInteractor: MediaControlChipInteractor by
             activityIntentHelper = activityIntentHelper,
             lockscreenUserManager = notificationLockscreenUserManager,
             keyguardStateController = keyguardStateController,
+            activityManagerRepository = activityManagerRepository,
+            logBuffer = logcatLogBuffer("MediaControlChipInteractorKosmos"),
         )
     }

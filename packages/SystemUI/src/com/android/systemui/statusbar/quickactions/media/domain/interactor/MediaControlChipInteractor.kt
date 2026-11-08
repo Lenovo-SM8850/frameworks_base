@@ -16,6 +16,8 @@
 
 package com.android.systemui.statusbar.quickactions.media.domain.interactor
 
+import android.app.ActivityOptions
+import android.app.BroadcastOptions
 import android.app.PendingIntent
 import android.content.Context
 import android.database.ContentObserver
@@ -30,29 +32,36 @@ import android.os.UserHandle
 import android.provider.Settings
 import androidx.compose.runtime.snapshotFlow
 import com.android.systemui.ActivityIntentHelper
+import com.android.systemui.activity.data.repository.ActivityManagerRepository
 import com.android.systemui.common.shared.model.ContentDescription
 import com.android.systemui.common.shared.model.Icon as UiIcon
 import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.dagger.qualifiers.Application
 import com.android.systemui.dagger.qualifiers.Background
+import com.android.systemui.log.LogBuffer
+import com.android.systemui.log.core.Logger
 import com.android.systemui.media.NotificationMediaManager
 import com.android.systemui.media.controls.domain.pipeline.getNotificationActions
 import com.android.systemui.media.controls.shared.model.MediaAction
 import com.android.systemui.media.controls.shared.model.MediaButton
 import com.android.systemui.media.controls.shared.model.MediaData
+import com.android.systemui.media.controls.shared.model.MediaDeviceData
+import com.android.systemui.media.dialog.MediaOutputDialogManager
 import com.android.systemui.media.remedia.data.model.MediaDataModel
 import com.android.systemui.media.remedia.data.repository.MediaRepositoryImpl
 import com.android.systemui.media.remedia.shared.flag.MediaControlsInComposeFlag
 import com.android.systemui.media.remedia.shared.model.MediaSessionState
 import com.android.systemui.plugins.ActivityStarter
+import com.android.systemui.plugins.FalsingManager
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.NotificationLockscreenUserManager
+import com.android.systemui.statusbar.chips.StatusBarChipsLog
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.quickactions.media.shared.model.MediaControlChipModel
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import io.github.miner7222.systemui.lyrics.LyricState
-import io.github.miner7222.systemui.lyrics.LyricTiming
 import io.github.miner7222.systemui.lyrics.LyricSyncRepository
+import io.github.miner7222.systemui.lyrics.LyricTiming
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
@@ -66,6 +75,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -83,12 +93,17 @@ constructor(
     @Application private val context: Context,
     @Background private val backgroundScope: CoroutineScope,
     private val mediaRepository: MediaRepositoryImpl,
+    private val mediaOutputDialogManager: MediaOutputDialogManager,
+    private val falsingManager: FalsingManager,
     private val activityStarter: ActivityStarter,
     private val activityIntentHelper: ActivityIntentHelper,
     private val lockscreenUserManager: NotificationLockscreenUserManager,
     private val keyguardStateController: KeyguardStateController,
     private val lyricSyncRepository: LyricSyncRepository,
+    private val activityManagerRepository: ActivityManagerRepository,
+    @StatusBarChipsLog private val logBuffer: LogBuffer,
 ) {
+    private val logger = Logger(logBuffer, "MediaControlChipInteractor")
     private val isEnabled = MutableStateFlow(false)
     private val isDynamicIslandEnabled = MutableStateFlow(false)
     private var isInitialized = false
@@ -143,28 +158,46 @@ constructor(
             .flatMapLatest { state -> state.token.playbackInfoFlow(context) }
             .distinctUntilChanged()
 
+    private val isMediaAppVisible: Flow<Boolean> =
+        mediaControlState
+            .map { it.appUid }
+            .distinctUntilChanged()
+            .flatMapLatest { uid ->
+                if (uid >= 0) {
+                    activityManagerRepository.createIsAppVisibleFlow(
+                        creationUid = uid,
+                        logger = logger,
+                        identifyingLogTag = "MediaControlChipInteractor",
+                    )
+                } else {
+                    flowOf(false)
+                }
+            }
+
     private val baseMediaControlChipModel: Flow<MediaControlChipModel?> =
         combine(
-            mediaControlState,
-            livePlaybackInfo,
-            isEnabled,
-            isDynamicIslandEnabled,
-            DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
-                context,
-                DynamicIslandFeatureSettings.MEDIA_CONTROLS,
-            ),
-        ) {
-            mediaControlState,
-            playbackInfo,
-            isEnabled,
-            isDynamicIslandEnabled,
-            mediaControlsEnabled ->
+            combine(
+                mediaControlState,
+                livePlaybackInfo,
+                isEnabled,
+                isDynamicIslandEnabled,
+                DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                    context,
+                    DynamicIslandFeatureSettings.MEDIA_CONTROLS,
+                ),
+            ) { state, playbackInfo, isEnabled, isDynamicIslandEnabled, mediaControlsEnabled ->
                 if (isEnabled && isDynamicIslandEnabled && mediaControlsEnabled) {
-                    mediaControlState.model?.withPlaybackInfo(playbackInfo)
+                    state.model?.withPlaybackInfo(playbackInfo)
                 } else {
                     null
                 }
+            },
+            isMediaAppVisible,
+        ) { model, isAppVisible ->
+            // Retain the session while hidden so visibility never resets swipe dismissal.
+            model?.copy(isAppVisible = isAppVisible)
         }
+
 
     val mediaUseWaveform: StateFlow<Boolean> =
         DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
@@ -275,6 +308,7 @@ private fun MediaDataModel.toMediaControlState(
         model =
             MediaControlChipModel(
                 packageName = packageName,
+                sessionToken = token,
                 appIcon = appIcon,
                 artworkIcon = background ?: appIcon,
                 appName = appName,
@@ -291,12 +325,15 @@ private fun MediaDataModel.toMediaControlState(
                         keyguardStateController = keyguardStateController,
                     ),
                 seekTo = token.toSeekAction(context),
+                stop = token.toStopAction(context),
                 durationMs = durationMs,
                 positionMs = positionMs,
                 canBeScrubbed = canBeScrubbed,
                 isPlaying = state is MediaSessionState.Playing || state is MediaSessionState.Buffering,
+                isPaused = state is MediaSessionState.Paused,
             ),
         token = token,
+        appUid = appUid,
     )
 }
 
@@ -346,6 +383,7 @@ private fun MediaData.toMediaControlState(
         model =
             MediaControlChipModel(
                 packageName = packageName,
+                sessionToken = token,
                 appIcon = appIcon,
                 artworkIcon = artworkIcon,
                 appName = app,
@@ -356,12 +394,15 @@ private fun MediaData.toMediaControlState(
                 previousAction = previousAction,
                 openApp = openApp,
                 seekTo = token.toSeekAction(context),
+                stop = token.toStopAction(context),
                 durationMs = 0L,
                 positionMs = 0L,
                 canBeScrubbed = false,
                 isPlaying = playOrPauseAction.isPauseAction(),
+                isPaused = token == null && this.isPlaying == false,
             ),
         token = token,
+        appUid = appUid,
     )
 }
 
@@ -436,6 +477,24 @@ private fun MediaSession.Token?.toSeekAction(context: Context): ((Long) -> Unit)
                 MediaController(context, token)
                     .transportControls
                     .seekTo(targetPositionMs.coerceAtLeast(0L))
+            }
+        }
+    }
+}
+
+private fun MediaSession.Token?.toStopAction(context: Context): (() -> Unit)? {
+    return this?.let { token ->
+        {
+            runCatching {
+                val controller = MediaController(context, token)
+                val supportsStop =
+                    controller.playbackState?.supportsPlaybackAction(PlaybackState.ACTION_STOP) ==
+                        true
+                if (supportsStop) {
+                    controller.transportControls.stop()
+                } else {
+                    controller.transportControls.pause()
+                }
             }
         }
     }
@@ -539,6 +598,7 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
         canSeek =
             (playbackState?.actions?.and(PlaybackState.ACTION_SEEK_TO) != 0L || durationMs > 0L) && durationMs > 0L,
         isPlaying = isPlaying,
+        isPaused = playbackState?.state == PlaybackState.STATE_PAUSED,
         playOrPause = playOrPauseAction,
         nextAction = nextAction,
         previousAction = previousAction,
@@ -609,6 +669,7 @@ private data class PlaybackInfo(
     val playbackSpeed: Float,
     val canSeek: Boolean,
     val isPlaying: Boolean,
+    val isPaused: Boolean,
     val playOrPause: MediaAction?,
     val nextAction: MediaAction?,
     val previousAction: MediaAction?,
@@ -617,6 +678,7 @@ private data class PlaybackInfo(
 private data class MediaControlState(
     val model: MediaControlChipModel?,
     val token: MediaSession.Token?,
+    val appUid: Int = -1,
 ) {
     companion object {
         val Hidden = MediaControlState(model = null, token = null)
@@ -637,5 +699,6 @@ private fun MediaControlChipModel.withPlaybackInfo(playbackInfo: PlaybackInfo?):
         playbackSpeed = playbackInfo.playbackSpeed,
         canBeScrubbed = canBeScrubbed || playbackInfo.canSeek,
         isPlaying = playbackInfo.isPlaying,
+        isPaused = playbackInfo.isPaused,
     )
 }

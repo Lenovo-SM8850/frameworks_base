@@ -16,6 +16,7 @@
 
 package com.android.systemui.statusbar.quickactions.media.ui.viewmodel
 
+import android.media.session.MediaSession
 import androidx.compose.runtime.getValue
 import com.android.systemui.common.shared.model.ContentDescription
 import com.android.systemui.common.shared.model.Icon
@@ -32,6 +33,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.ChipColors
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import java.util.Locale
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 
@@ -45,12 +47,35 @@ constructor(
     mediaControlChipInteractor: MediaControlChipInteractor,
 ) : StatusBarPopupChipViewModel, HydratedActivatable() {
 
+    private data class DismissedSession(
+        val packageName: String?,
+        val token: MediaSession.Token?,
+        val pausedSinceDismiss: Boolean,
+    )
+
+    private val dismissedSession = MutableStateFlow<DismissedSession?>(null)
+
     override val chip: QuickActionChipModel by
         combine(
             mediaControlChipInteractor.mediaControlChipModel,
             mediaControlChipInteractor.mediaUseWaveform,
-        ) { model, useWaveform ->
-            toPopupChipModel(model, useWaveform)
+            dismissedSession,
+        ) { model, useWaveform, dismissed ->
+            if (dismissed != null && model != null) {
+                when {
+                    model.packageName != dismissed.packageName || model.sessionToken != dismissed.token ->
+                        dismissedSession.value = null
+                    model.isPlaying && dismissed.pausedSinceDismiss ->
+                        dismissedSession.value = null
+                    model.isPaused && !dismissed.pausedSinceDismiss ->
+                        dismissedSession.value = dismissed.copy(pausedSinceDismiss = true)
+                }
+            }
+            if (dismissedSession.value != null) {
+                QuickActionChipModel.Hidden(QuickActionChipId.MediaControl)
+            } else {
+                toPopupChipModel(model, useWaveform)
+            }
         }
             .hydratedStateOf(
                 traceName = "chip",
@@ -61,7 +86,7 @@ constructor(
             model: MediaControlChipModel?,
             useWaveform: Boolean = false,
         ): QuickActionChipModel {
-        if (model == null || model.songName.isNullOrEmpty()) {
+        if (model == null || model.isAppVisible || model.songName.isNullOrEmpty()) {
             return QuickActionChipModel.Hidden(QuickActionChipId.MediaControl)
         }
 
@@ -83,6 +108,10 @@ constructor(
             colors = ChipColors.DynamicIsland,
             contentDescription = contentDescription,
             popupContent = PopupContentModel.Media(model, useWaveform),
+            onDismissed = {
+                dismissedSession.value =
+                    DismissedSession(model.packageName, model.sessionToken, model.isPaused)
+            },
         )
     }
 
