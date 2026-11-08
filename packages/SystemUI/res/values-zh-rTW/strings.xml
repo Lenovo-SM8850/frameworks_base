@@ -159,6 +159,33 @@
     <string name="screenrecord_stop_dialog_message" msgid="6262768207331626817">"目前正在錄製整個螢幕的畫面"</string>
     <string name="screenrecord_stop_dialog_message_specific_app" msgid="5995770227684523244">"目前正在錄製「<xliff:g id="APP_NAME">%1$s</xliff:g>」的畫面"</string>
     <string name="screenrecord_stop_dialog_button" msgid="2883812564938194350">"停止錄製"</string>
+    <string name="dynamic_island_screen_record_short">錄影</string>
+    <string name="dynamic_island_screen_record_active">正在錄影</string>
+    <string name="dynamic_island_screen_record_countdown">%1$s秒後開始</string>
+    <string name="dynamic_island_alarm_title">下一個鬧鐘</string>
+    <string name="dynamic_island_flashlight_enabled">已開啟</string>
+    <string name="dynamic_island_flashlight_short">開</string>
+    <string name="dynamic_island_open_action">開啟</string>
+    <string name="dynamic_island_open_clock_action">開啟時鐘</string>
+    <string name="dynamic_island_stopwatch_title">碼錶</string>
+    <string name="dynamic_island_alarm_active_title">鬧鐘</string>
+    <string name="dynamic_island_action_snooze">稍後提醒</string>
+    <string name="dynamic_island_action_lap">計圈</string>
+    <string name="dynamic_island_action_stop">停止</string>
+    <string name="dynamic_island_action_resume">繼續</string>
+    <string name="dynamic_island_charging_title">充電中</string>
+    <string name="dynamic_island_charging_wireless_title">無線充電</string>
+    <string name="dynamic_island_charging_battery_saver">省電模式</string>
+    <string name="dynamic_island_charging_battery_settings">電池設定</string>
+    <string name="dynamic_island_charging_max_current">最大電流</string>
+    <string name="dynamic_island_charging_max_power">最大功率</string>
+    <string name="dynamic_island_charging_max_voltage">最大電壓</string>
+    <string name="dynamic_island_charging_temperature">溫度</string>
+    <string name="dynamic_island_charging_full">已充飽</string>
+    <string name="dynamic_island_alarm_in_minutes"><xliff:g id="minutes" example="42">%1$d</xliff:g>分鐘後</string>
+    <string name="dynamic_island_alarm_in_hours"><xliff:g id="hours" example="7">%1$d</xliff:g>小時後</string>
+    <string name="dynamic_island_alarm_in_hours_minutes"><xliff:g id="hours" example="7">%1$d</xliff:g>小時<xliff:g id="minutes" example="5">%2$d</xliff:g>分鐘後</string>
+    <string name="dynamic_island_alarm_in_days"><xliff:g id="days" example="2">%1$d</xliff:g>天後</string>
     <string name="screen_record_entire_screen" msgid="66944996337928170">"整個畫面"</string>
     <string name="screen_record_single_app" msgid="7355880948574569290">"單一應用程式"</string>
     <string name="screen_record_single_app_hint" msgid="8404332826093639170">"要錄製畫面的應用程式"</string>
@@ -470,6 +497,7 @@
     <string name="quick_settings_rotation_unlocked_label" msgid="2359922767950346112">"自動旋轉"</string>
     <string name="accessibility_quick_settings_rotation" msgid="4800050198392260738">"自動旋轉螢幕"</string>
     <string name="quick_settings_location_label" msgid="2621868789013389163">"定位"</string>
+    <string name="quick_settings_screensaver_label">螢幕保護程式</string>
     <string name="quick_settings_camera_label" msgid="5612076679385269339">"相機存取權"</string>
     <string name="quick_settings_mic_label" msgid="8392773746295266375">"麥克風存取權"</string>
     <string name="quick_settings_camera_mic_available" msgid="1453719768420394314">"可以使用"</string>
@@ -939,6 +967,7 @@
     <string name="status_bar_airplane" msgid="4848702508684541009">"飛航模式"</string>
     <string name="status_bar_supervision" msgid="6735015942701134125">"家長監護"</string>
     <string name="status_bar_pin_supervision" msgid="4376576498566645782">"部分裝置控制選項的 PIN 碼保護措施"</string>
+    <string name="zen_alarm_warning_indef">除非你在這之前將其關閉，否則你不會聽到下一個 <xliff:g id="when" example="at 7:00 AM">%1$s</xliff:g> 的鬧鐘</string>
     <string name="zen_alarm_warning" msgid="7844303238486849503">"你不會聽到下一個<xliff:g id="WHEN">%1$s</xliff:g> 的鬧鐘"</string>
     <string name="alarm_template" msgid="2234991538018805736">"於<xliff:g id="WHEN">%1$s</xliff:g>"</string>
     <string name="alarm_template_far" msgid="3561752195856839456">"於<xliff:g id="WHEN">%1$s</xliff:g>"</string>
@@ -1108,7 +1137,7 @@
     <string name="system_multitasking_rhs" msgid="8779289852395243004">"使用分割畫面，並在右側顯示應用程式"</string>
     <string name="system_multitasking_lhs" msgid="7348595296208696452">"使用分割畫面，並在左側顯示應用程式"</string>
     <string name="system_multitasking_full_screen" msgid="4221409316059910349">"使用全螢幕模式"</string>
-    <string name="system_multitasking_desktop_view" msgid="8871367687089347180">"使用電腦視窗化模式"</string>
+    <string name="system_multitasking_desktop_view">使用電腦分割視窗</string>
     <string name="system_multitasking_splitscreen_focus_rhs" msgid="3838578650313318508">"使用分割畫面時，切換到右邊或上方的應用程式"</string>
     <string name="system_multitasking_splitscreen_focus_lhs" msgid="3164261844398662518">"使用分割畫面時，切換到左邊或上方的應用程式"</string>
     <string name="system_multitasking_replace" msgid="7410071959803642125">"使用分割畫面期間：更換應用程式"</string>
@@ -1893,4 +1922,27 @@
     <string name="ace_attribution_settings_button_accessibility_description" msgid="8426163772933746374">"「設定」按鈕"</string>
     <string name="ace_attribution_thumbs_up_button_accessibility_description" msgid="3561722934830934360">"「喜歡」意見回饋按鈕"</string>
     <string name="ace_attribution_thumbs_down_button_accessibility_description" msgid="5471283747650437662">"「不喜歡」意見回饋按鈕"</string>
+
+    <string name="accessibility_adaptive_brightness">自動調整亮度</string>
+    <string name="camera">相機</string>
+    <string name="calculator">計算機</string>
+    <string name="gallery">相簿</string>
+    <string name="no_default_app_found">找不到預設的 %1$s 應用程式</string>
+    <string name="weather_data_unavailable">無法取得資料</string>
+    <string name="omnijaws_weather">OmniJaws</string>
+    <string name="quick_settings_data_label">行動數據</string>
+    <string name="quick_settings_ringer_label">響鈴模式</string>
+    <string name="torch_active">手電筒已開啟</string>
+    <string name="google_wallet">Google 錢包</string>
+    <!-- Values for strings that the Material library defines without this language. -->
+
+
+
+
+
+    <string name="quick_settings_desktop_mode_label">電腦模式</string>
+    <string name="notification_open_split_screen">在分割畫面中開啟</string>
+    <string name="notification_open_floating">在浮動視窗中開啟</string>
+    <string name="game_gesture_lock_swipe_again">再次滑動</string>
+    <string name="game_gesture_lock_turn_off">關閉</string>
 </resources>

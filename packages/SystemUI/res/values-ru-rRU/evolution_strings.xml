@@ -72,7 +72,11 @@
     <string name="quick_settings_autobrightness_label">Авто яркость</string>
     <!-- Label for notification action to delete a screen recording file [CHAR LIMIT=35] -->
     <string name="screenrecord_delete_label">Удалить</string>
+    <string name="screenrecord_keep_screen_awake_label">Не выключать экран</string>
     <!-- A toast message shown after successfully deleting a screen recording [CHAR LIMIT=NONE] -->
+    <string name="screenrecord_camera_hint">Перетащите камеру для селфи, чтобы переместить её</string>
+    <string name="screenrecord_camera_preview">Предпросмотр камеры для селфи. Перетащите, чтобы переместить.</string>
+    <string name="screenrecord_camera_unavailable">Камера для селфи недоступна. Запись экрана продолжится.</string>
     <string name="screenrecord_delete_description">Запись экрана удалена</string>
     <!-- VPN tethering QS tile -->
     <string name="vpn_tethering_label">VPN для модема</string>
@@ -115,18 +119,18 @@
     <string name="force_stop_dlg_title">Остановить принудительно?</string>
     <string name="force_stop_dlg_text">Если вы принудительно остановите приложение, он может неправильно работать.</string>
     <!-- On The Go -->
-    <string name="onthego_notif_ticker">Режим \"На ходу\" включён</string>
-    <string name="onthego_notif_title">Режим \"На ходу\" активен</string>
+    <string name="onthego_notif_ticker">Режим «На ходу» включён</string>
+    <string name="onthego_notif_title">Режим «На ходу» активен</string>
     <string name="onthego_notif_stop">Стоп</string>
     <string name="onthego_notif_options">Параметры</string>
     <string name="onthego_notif_error">Невозможно запустить режим «На ходу»</string>
-    <string name="onthego_notif_restart">Перезапустить режим \"На ходу\"</string>
+    <string name="onthego_notif_restart">Перезапустить режим «На ходу»</string>
     <string name="onthego_notif_camera_changed">Режим камеры изменен</string>
     <string name="onthego_transparency">Прозрачность</string>
     <string name="onthego_front_camera">Использовать переднюю камеру</string>
     <string name="onthego_service_toggle">Автоматический перезапуск службы</string>
     <string name="onthego_channel_name">Основной</string>
-    <string name="global_action_onthego">Режим \"На ходу\"</string>
+    <string name="global_action_onthego">Режим «На ходу»</string>
     <!-- Privacy Indicator -->
     <string name="mic_camera_privacy_indicator_title">Индикатор использования камеры и микрофона</string>
     <string name="location_privacy_indicator_title">Индикатор конфиденциальности местоположения</string>

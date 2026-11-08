@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Copyright (C) 2019-2024 The Evolution X Project
+     SPDX-License-Identifier: Apache-2.0
+-->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="status_bar_hd_calling">Вызовы HD (VoLTE/VoNR)</string>
+    <string name="status_bar_vowifi">Вызовы по Wi-Fi (VoWiFi)</string>
+    <string name="data_disabled_icon_title">Значок «Данные отключены»</string>
+    <string name="show_fourg_icon_title">Значок 4G</string>
+    <string name="wifi_standard_icon_title">Стандарт Wi-Fi</string>
+    <string name="projection_privacy_indicator_title">Индикатор конфиденциальности захвата экрана</string>
+    <plurals name="quick_settings_internet_hotspot_summary_num_devices">
+        <item quantity="one">%d устройство подключено</item>
+        <item quantity="few">%d устройства подключено</item>
+        <item quantity="many">%d устройств подключено</item>
+        <item quantity="other">%d устройства подключено</item>
+    </plurals>
+    <string name="quick_settings_sound_ring">Со звуком</string>
+    <string name="quick_settings_sound_vibrate">Вибрация</string>
+    <string name="quick_settings_sound_mute">Без звука</string>
+    <string name="quick_settings_locale_more_locales_toast">Сначала настройте несколько языков</string>
+    <string name="quick_settings_compass_S">Ю</string>
+    <string name="screenshot_long_press">Удерживайте, чтобы выделить область для скриншота</string>
+    <string name="quick_settings_autobrightness_label">Автояркость</string>
+    <string name="vpn_tethering_changed_off">VPN для модема отключён.</string>
+    <string name="vpn_tethering_changed_on">VPN для модема включён.</string>
+    <string name="keyguard_indication_dash_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • Dash Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_dash_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка Dash</string>
+    <string name="keyguard_indication_warp_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • Warp Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_warp_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка Warp</string>
+    <string name="keyguard_indication_vooc_charging_time"><xliff:g id="percentage">%2$s</xliff:g> • VOOC Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_vooc_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка VOOC</string>
+    <string name="keyguard_indication_turbo_power_time"><xliff:g id="percentage">%2$s</xliff:g> • Turbo Charging (до полной зарядки: <xliff:g id="charging_time_left" example="4 hours and 2 minutes">%1$s</xliff:g>)</string>
+    <string name="keyguard_plugged_in_turbo_charging"><xliff:g id="percentage">%s</xliff:g> • Зарядка Turbo</string>
+    <string name="global_action_restart_systemui">SystemUI</string>
+    <string name="usb_mode_photo_transfer">Передача фото и видео</string>
+    <string name="usb_mode_webcam">Веб-камера USB</string>
+    <string name="onthego_notif_error">Невозможно запустить режим «На ходу»</string>
+    <string name="onthego_notif_camera_changed">Режим камеры изменён</string>
+    <string name="onthego_dialog_title">Режим «На ходу»</string>
+    <string name="onthego_opacity_title">Непрозрачность камеры</string>
+    <string name="onthego_restart_title">Перезапуск при смене камеры</string>
+    <string name="onthego_restart_summary">Кратко перезапускать предпросмотр при смене камеры</string>
+    <string name="onthego_front_camera_title">Фронтальная камера</string>
+    <string name="onthego_front_camera_summary">Использовать фронтальную камеру вместо задней</string>
+    <string name="ax_dynamic_bar_media_output">Вывод мультимедиа</string>
+    <string name="ax_dynamic_bar_silent">Без звука</string>
+    <string name="ax_dynamic_bar_vibrate">Вибрация</string>
+    <string name="ax_dynamic_bar_ring">Со звуком</string>
+    <string name="ax_dynamic_bar_saver">Экономия</string>
+    <string name="ax_dynamic_bar_image_copied">Изображение скопировано</string>
+    <string name="ax_dynamic_bar_reset">Сбросить</string>
+    <string name="ax_dynamic_bar_kill_app">Завершить приложение</string>
+    <string name="ax_dynamic_bar_casting_to">Трансляция на</string>
+    <string name="ax_dynamic_bar_camera_mic">Камера и микрофон</string>
+    <string name="ax_dynamic_bar_camera_mic_short">Камера и микр.</string>
+    <string name="ax_dynamic_bar_hotspot_devices">Устройств: <xliff:g id="count" example="3">%d</xliff:g></string>
+    <string name="ax_dynamic_bar_until_full">до полной зарядки</string>
+    <string name="ax_dynamic_bar_battery_saver">Режим энергосбережения</string>
+    <string name="ax_dynamic_bar_devices_connected">Подключено устройств: <xliff:g id="count" example="3">%d</xliff:g></string>
+    <string name="ax_dynamic_bar_vpn_connected">VPN подключён</string>
+    <string name="ax_dynamic_bar_apps_count">Приложений: <xliff:g id="count" example="2">%d</xliff:g></string>
+    <string name="ax_dynamic_bar_mins_ago"><xliff:g id="count" example="5">%d</xliff:g> мин. назад</string>
+    <string name="ax_dynamic_bar_hours_ago"><xliff:g id="count" example="2">%d</xliff:g> ч. назад</string>
+    <string name="ax_dynamic_bar_days_ago"><xliff:g id="count" example="3">%d</xliff:g> д. назад</string>
+    <string name="ax_dynamic_bar_weeks_ago"><xliff:g id="count" example="1">%d</xliff:g> нед. назад</string>
+    <string name="ax_dynamic_bar_cast_short">Трансляция</string>
+    <string name="ax_dynamic_bar_trust">Trust</string>
+    <string name="quick_settings_screenshot_label">Скриншот</string>
+    <string name="reevaluating_system_theme">Обновление системной темы… Подождите несколько секунд</string>
+    <string name="clock_ide_weather_data_unavailable">null</string>
+    <string name="usage_data_weekly">использовано за неделю</string>
+    <string name="screenshot_save_to_storage_label">Сохранить в хранилище</string>
+    <string name="ax_dynamic_bar_left_earbud">Левый наушник</string>
+    <string name="ax_dynamic_bar_right_earbud">Правый наушник</string>
+    <string name="ax_dynamic_bar_earbuds_case">Кейс</string>
+    <string name="screenshot_lens_label">Объектив</string>
+    <string name="quick_settings_blur_label">Размытие</string>
+    <string name="force_stop_dlg_text">Принудительное закрытие приложения может отразиться на его функциональности.</string>
+    <string name="app_volume_panel_title">Громкость приложений</string>
+    <string name="app_volume_panel_subtitle_idle">Настройте громкость для каждого приложения, которое воспроизводит звук</string>
+    <plurals name="app_volume_panel_subtitle_active">
+        <item quantity="one"><xliff:g id="count" example="1">%d</xliff:g> приложение воспроизводит звук</item>
+        <item quantity="few"><xliff:g id="count" example="3">%d</xliff:g> приложения воспроизводят звук</item>
+        <item quantity="many"><xliff:g id="count" example="3">%d</xliff:g> приложений воспроизводят звук</item>
+        <item quantity="other"><xliff:g id="count" example="3">%d</xliff:g> приложения воспроизводят звук</item>
+    </plurals>
+    <string name="app_volume_panel_empty">Сейчас нет приложений, воспроизводящих звук</string>
+    <string name="app_volume_panel_percent"><xliff:g id="percent" example="50">%d</xliff:g>%%</string>
+    <string name="qs_coloros_no_media">Не воспроизводится</string>
+    <string name="qs_coloros_edit_title">Изменить</string>
+    <string name="qs_coloros_edit_hint">Нажмите и удерживайте, чтобы изменить порядок</string>
+    <string name="qs_coloros_edit_pinned">Закреплено</string>
+    <string name="qs_coloros_edit_pinned_pick">Нажмите на параметр, чтобы закрепить его здесь</string>
+    <string name="qs_coloros_edit_pinned_default">По умолчанию</string>
+    <string name="qs_coloros_edit_added">Добавленные параметры</string>
+    <string name="qs_coloros_edit_more">Другие параметры</string>
+    <string name="qs_coloros_edit_remove_hint">Перетащите сюда, чтобы удалить</string>
+    <string name="qs_coloros_edit_empty_added">Нет активных параметров. Чтобы добавить, нажмите на параметры ниже или перетащите их.</string>
+    <string name="qs_coloros_edit_empty_more">Все параметры добавлены</string>
+    <string name="qs_coloros_my_devices">Мои устройства</string>
+    <string name="qs_coloros_my_devices_hint">Нажмите, чтобы добавить</string>
+    <string name="qs_nothing_ringer_silent">Без звука</string>
+    <string name="qs_nothing_ringer_vibrate">Вибрация</string>
+    <string name="qs_nothing_ringer_normal">Со звуком</string>
+    <string name="qs_nothing_slider_brightness">Яркость</string>
+    <string name="qs_nothing_slider_volume">Громкость</string>
+    <string name="qs_nothing_slider_add_brightness">Добавить ползунок яркости</string>
+    <string name="qs_nothing_slider_add_volume">Добавить ползунок громкости</string>
+    <string name="charging_style_normal">Зарядка</string>
+    <string name="charging_style_fast">Быстрая зарядка</string>
+    <string name="charging_style_super">Сверхбыстрая зарядка</string>
+    <string name="qs_media_tile_label">Мультимедиа</string>
+    <string name="qs_media_tile_play_pause_label">Воспроизвести медиа</string>
+    <string name="qs_media_tile_idle">Не воспроизводится</string>
+    <string name="qs_volume_tile_label">Громкость</string>
+    <string name="qs_volume_tile_mute_label">Отключить звук медиа</string>
+    <string name="qs_volume_tile_muted">Звук отключён</string>
+    <string name="qs_brightness_tile_label">Яркость</string>
+    <string name="qs_brightness_tile_auto_label">Автояркость</string>
+    <string name="qs_brightness_tile_auto">Авто</string>
+    <string name="qs_brightness_tile_manual">Вручную</string>
+    <string name="qs_sound_tile_label">Режим звука</string>
+    <string name="qs_sound_tile_ring">Со звуком</string>
+    <string name="qs_sound_tile_vibrate">Вибрация</string>
+    <string name="qs_sound_tile_silent">Без звука</string>
+    <string name="qs_custom_volume_ring">Звонок</string>
+    <string name="qs_custom_volume_alarm">Будильник</string>
+    <string name="qs_custom_volume_call">Вызов</string>
+    <string name="qs_custom_title">Настройка</string>
+    <string name="qs_custom_title_open">Настройка</string>
+    <string name="qs_custom_open">Открыть</string>
+    <string name="qs_custom_done">Готово</string>
+    <string name="qs_custom_tab_theme">Тема</string>
+    <string name="qs_custom_tab_layout">Раскладка</string>
+    <string name="qs_custom_tab_tiles">Параметры</string>
+    <string name="qs_custom_tab_add">Добавить</string>
+    <string name="qs_custom_all_added">Все параметры уже на панели</string>
+    <string name="qs_custom_my_theme_name">Моя тема %1$d</string>
+    <string name="qs_custom_my_themes">Мои темы (удерживайте для удаления)</string>
+    <string name="qs_custom_save">Сохранить как мою тему</string>
+    <string name="qs_custom_copy_code">Копировать код</string>
+    <string name="qs_custom_paste_code">Вставить код</string>
+    <string name="qs_custom_code_copied">Код темы скопирован</string>
+    <string name="qs_custom_code_applied">Тема применена</string>
+    <string name="qs_custom_code_bad">Нет кода темы для вставки</string>
+    <string name="qs_custom_resize">Изменить размер</string>
+    <string name="qs_custom_add_tile">Добавить параметр</string>
+    <string name="qs_custom_remove">Удалить</string>
+    <string name="qs_custom_drop_remove">Перетащите сюда, чтобы удалить</string>
+    <string name="qs_custom_look">Вид</string>
+    <string name="qs_custom_same_as_panel">Как на панели</string>
+    <string name="qs_custom_tile_width">Ширина</string>
+    <string name="qs_custom_tile_height">Высота</string>
+    <string name="qs_custom_auto">Авто</string>
+    <string name="qs_custom_tile_color">Цвет во включённом состоянии</string>
+    <string name="qs_custom_tile_icon">Значок</string>
+    <string name="qs_custom_default">По умолчанию</string>
+    <string name="qs_custom_show">Показать</string>
+    <string name="qs_custom_hide">Скрыть</string>
+    <string name="qs_custom_color_blue">Синий</string>
+    <string name="qs_custom_color_teal">Бирюзовый</string>
+    <string name="qs_custom_color_green">Зелёный</string>
+    <string name="qs_custom_color_violet">Фиолетовый</string>
+    <string name="qs_custom_color_rose">Розовый</string>
+    <string name="qs_custom_color_amber">Янтарный</string>
+    <string name="qs_custom_color_white">Белый</string>
+    <string name="qs_custom_start_from">Начать с</string>
+    <string name="qs_custom_reset">Сбросить эту тему</string>
+    <string name="qs_custom_columns">Столбцы</string>
+    <string name="qs_custom_rows">Строк на странице</string>
+    <string name="qs_custom_scroll">Прокрутка вместо страниц</string>
+    <string name="qs_custom_tile_height_dp">Высота параметра</string>
+    <string name="qs_custom_spacing">Отступы</string>
+    <string name="qs_custom_sizes">Размеры параметров</string>
+    <string name="qs_custom_mixed">Смешанные</string>
+    <string name="qs_custom_all_long">Все длинные</string>
+    <string name="qs_custom_all_icons">Все значки</string>
+    <string name="qs_custom_corners">Углы</string>
+    <string name="qs_custom_pill">Капсула</string>
+    <string name="qs_custom_label">Подпись</string>
+    <string name="qs_custom_label_inside">Внутри</string>
+    <string name="qs_custom_label_under">Снизу</string>
+    <string name="qs_custom_none">Нет</string>
+    <string name="qs_custom_theme">Тема</string>
+    <string name="qs_custom_backing">Подложка значка</string>
+    <string name="qs_custom_circle">Круг</string>
+    <string name="qs_custom_rounded">Скруглённая</string>
+    <string name="qs_custom_blob">Капля</string>
+    <string name="qs_custom_second_line">Вторая строка</string>
+    <string name="qs_custom_icon_size">Размер значка</string>
+    <string name="qs_custom_font">Текст</string>
+    <string name="qs_custom_font_sans">Без засечек</string>
+    <string name="qs_custom_font_mono">Моноширинный</string>
+    <string name="qs_custom_font_caps">Заглавные</string>
+    <string name="qs_custom_media_art">Обложка</string>
+    <string name="qs_custom_media_blocks">Блоки</string>
+    <string name="qs_custom_media_buttons">Кнопки</string>
+    <string name="qs_custom_media_cover">Во весь фон</string>
+    <string name="qs_custom_media_full">Полный</string>
+    <string name="qs_custom_media_glow">Свечение</string>
+    <string name="qs_custom_media_line">Линия</string>
+    <string name="qs_custom_media_look">Вид</string>
+    <string name="qs_custom_media_place">Расположение</string>
+    <string name="qs_custom_media_place_above">Над параметрами</string>
+    <string name="qs_custom_media_place_below">Под параметрами</string>
+    <string name="qs_custom_media_place_grid">Вместе с параметрами</string>
+    <string name="qs_custom_media_play">Только воспроизведение</string>
+    <string name="qs_custom_media_progress">Прогресс</string>
+    <string name="qs_custom_media_small">Маленький</string>
+    <string name="qs_custom_media_square">Квадрат</string>
+    <string name="qs_custom_media_tall">Высокий</string>
+    <string name="qs_custom_media_trio">Назад, воспроизведение, вперёд</string>
+    <string name="qs_custom_media_wave">Волна</string>
+    <string name="qs_custom_media_wide">Широкий</string>
+    <string name="qs_custom_off">Выкл</string>
+    <string name="qs_custom_size">Размер</string>
+    <string name="qs_custom_volume_half">Половина</string>
+    <string name="qs_custom_volume_mute">Без звука</string>
+    <string name="qs_custom_volume_on">Вкл</string>
+    <string name="qs_custom_volume_panel">Панель громкости</string>
+    <string name="qs_custom_volume_show_all">Название и проценты</string>
+    <string name="qs_custom_volume_show_icon">Только значок</string>
+    <string name="qs_custom_volume_show_percent">Проценты</string>
+    <string name="qs_custom_volume_sound">Звук</string>
+    <string name="qs_custom_volume_stack">Стопка</string>
+    <string name="qs_custom_volume_tap">Нажатие на значок</string>
+    <string name="qs_custom_volume_ticks">Тактильные щелчки при перетаскивании</string>
+    <string name="qs_custom_slider_follow">Как в теме</string>
+    <string name="qs_custom_slider_solid">Сплошной</string>
+    <string name="qs_custom_slider_knob">Ручка</string>
+    <string name="qs_custom_slider_liquid">Жидкость</string>
+    <string name="qs_custom_accent">Акцентный цвет</string>
+    <string name="qs_custom_depth">Глубина</string>
+    <string name="qs_custom_depth_flat">Плоский</string>
+    <string name="qs_custom_depth_raised">Приподнятый</string>
+    <string name="qs_custom_fill_clear">Прозрачный</string>
+    <string name="qs_custom_fill_dark">Тёмный</string>
+    <string name="qs_custom_fill_gradient">Градиент</string>
+    <string name="qs_custom_fill_icon">Только значок</string>
+    <string name="qs_custom_fill_outline">Контур</string>
+    <string name="qs_custom_fill_solid">Сплошной</string>
+    <string name="qs_custom_fill_surface">Поверхность</string>
+    <string name="qs_custom_fill_tint">Оттенок</string>
+    <string name="qs_custom_glow">Свечение во включённом состоянии</string>
+    <string name="qs_custom_mix_media">Медиаплеер</string>
+    <string name="qs_custom_mix_paint">Цвета параметров</string>
+    <string name="qs_custom_mix_shape">Форма параметров</string>
+    <string name="qs_custom_mix_slider">Ползунок</string>
+    <string name="qs_custom_off_fill">Выключенные параметры</string>
+    <string name="qs_custom_on_fill">Включённые параметры</string>
+    <string name="qs_custom_tab_color">Цвет</string>
+    <string name="qs_custom_tab_mix">Сочетание</string>
+    <string name="qs_custom_tab_sliders">Ползунки</string>
+    <string name="qs_custom_sliders_layout">Раскладка</string>
+    <string name="qs_custom_sliders_pair">A · Пара рядом</string>
+    <string name="qs_custom_sliders_split">B · Разделённый ряд</string>
+    <string name="qs_custom_sliders_rails">C · Направляющие</string>
+    <string name="qs_custom_sliders_corner">D · Угол</string>
+    <string name="qs_custom_sliders_percent">Проценты</string>
+    <string name="qs_custom_sliders_always">Всегда</string>
+    <string name="qs_custom_sliders_dragging">При перетаскивании</string>
+    <string name="qs_custom_sliders_sound">Переключатель режима звука</string>
+    <string name="qs_custom_sliders_bar">Полоса яркости</string>
+    <string name="qs_custom_slider_place">Расположение</string>
+    <string name="qs_custom_slider_top">Сверху</string>
+    <string name="qs_custom_slider_under">Под параметрами</string>
+    <string name="qs_custom_slider_by_player">Рядом с плеером</string>
+    <string name="qs_custom_mix_footer">Кнопки внизу</string>
+    <string name="global_actions_slide_to_power_off">Проведите, чтобы выключить</string>
+    <string name="global_actions_slide_to_restart">Проведите, чтобы перезапустить</string>
+    <string name="global_actions_add_actions">Добавить действия</string>
+    <string name="global_actions_arrange_tiles">Расположение параметров</string>
+</resources>
