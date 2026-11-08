@@ -169,6 +169,9 @@ class DynamicIslandSideEdgeHost(
                 layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                 setFitInsetsTypes(0)
+                // Input counts a window as occluding across its whole frame, whatever its
+                // touchable region. Untrusted, this one would drop every touch to the app below.
+                setTrustedOverlay()
             }
 
     private class HostLifecycleOwner :
