@@ -686,3 +686,63 @@ private fun MediaOutputChip(
         }
     }
 }
+
+@Composable
+private fun rememberMarqueeMotionEnabled(): Boolean {
+    val context = LocalContext.current
+    fun readEnabled() =
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) > 0f
+    var enabled by remember(context) { mutableStateOf(readEnabled()) }
+    DisposableEffect(context) {
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    enabled = readEnabled()
+                }
+            }
+        context.contentResolver.registerContentObserver(
+            Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+            false,
+            observer,
+        )
+        enabled = readEnabled()
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+    return enabled
+}
+
+@Composable
+private fun MediaMarqueeText(text: String, style: TextStyle, color: Color, enabled: Boolean) {
+    val measurer = rememberTextMeasurer()
+    val textWidth =
+        remember(text, style, measurer) {
+            measurer.measure(text, style, softWrap = false, maxLines = 1).size.width
+        }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val scrolls = enabled && textWidth > constraints.maxWidth
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier =
+                Modifier.fillMaxWidth()
+                    .clipToBounds()
+                    .then(
+                        if (scrolls)
+                            Modifier.basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 1500,
+                                repeatDelayMillis = 2000,
+                            )
+                        else Modifier
+                    ),
+        )
+    }
+}
