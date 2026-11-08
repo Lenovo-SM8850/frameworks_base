@@ -161,6 +161,7 @@ import com.android.systemui.qs.composefragment.ui.toEditMode
 import com.android.systemui.qs.composefragment.viewmodel.QSFragmentComposeViewModel
 import com.android.systemui.qs.footer.ui.compose.FooterActions
 import com.android.systemui.qs.panels.data.repository.QsPanelStyleRepository
+import com.android.systemui.qs.footer.ui.compose.rememberSystemSettingEnabled
 import com.android.systemui.qs.panels.shared.model.QSFragmentComposeClippingTableLog
 import com.android.systemui.qs.panels.shared.model.LocalQsGlass
 import com.android.systemui.qs.panels.shared.model.LocalQsMediaStyle
@@ -191,6 +192,7 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.NothingSliderKind
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingLayout
 import com.android.systemui.qs.panels.ui.compose.QsStyleSliderFrame
 import com.android.systemui.qs.panels.ui.compose.qsSliderStyle
+import com.android.systemui.qs.panels.ui.compose.toolbar.EditModeButton
 import com.android.systemui.qs.shared.ui.QuickSettings.Elements
 import com.android.systemui.qs.ui.composable.QuickSettingsShade
 import com.android.systemui.qs.ui.composable.QuickSettingsShade.systemGestureExclusionInShade
@@ -1337,14 +1339,36 @@ constructor(
                         }
                     }
                 }
-                // The ColorOS panel has no footer, its buttons are in the header.
-                if (!LocalColorOSQsStyle.current) {
+                // Keep the footer when the replacement header is absent.
+                if (!colorOSHeader) {
                     QuickSettingsTheme {
                         Element(
                             Elements.FooterActions,
                             Modifier.sysuiResTag(ResIdTags.qsFooterActions),
                         ) {
-                            FooterActions(viewModel = viewModel.footerActionsViewModel)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (LocalColorOSQsStyle.current) {
+                                    val showEdit by rememberSystemSettingEnabled(
+                                        android.provider.Settings.System.QS_FOOTER_SHOW_EDIT
+                                    )
+                                    val editButton = rememberViewModel("FooterEdit") {
+                                        viewModel.editModeButtonViewModelFactory.create()
+                                    }
+                                    if (showEdit) {
+                                        EditModeButton(
+                                            viewModel = editButton,
+                                            modifier = Modifier.padding(
+                                                start = dimensionResource(R.dimen.qs_content_horizontal_padding)
+                                            ),
+                                            isVisible = viewModel.isQsVisibleAndAnyShadeExpanded,
+                                        )
+                                    }
+                                }
+                                FooterActions(
+                                    viewModel = viewModel.footerActionsViewModel,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
                 }
