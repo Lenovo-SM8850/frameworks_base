@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -80,6 +81,7 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSIconRowGap
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.SmallTileContent
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSTileRim
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.TileLabelLineBreak
 import com.android.systemui.qs.panels.ui.viewmodel.EditModeViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.EditTileViewModel
 import com.android.systemui.qs.pipeline.shared.TileSpec
@@ -774,6 +776,7 @@ private fun EditorTile(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
+            style = LocalTextStyle.current.copy(lineBreak = TileLabelLineBreak),
             modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
         )
     }

@@ -123,6 +123,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
@@ -875,7 +876,7 @@ private fun TileLabel(
     BasicText(
         text = text,
         color = color,
-        style = style,
+        style = if (wraps) wrappingTileLabelStyle(style) else style,
         maxLines = maxLines,
         overflow = if (wraps) TextOverflow.Ellipsis else TextOverflow.Clip,
         onTextLayout = { textSize = it.size.width },
@@ -1192,6 +1193,18 @@ private fun animateToggleFloat(target: Float, eased: Boolean, label: String): St
 private const val ChevronHeightEm = 0.73f
 private const val ChevronAspect = 11f / 16f
 private const val ChevronGapEm = 0.3f
+
+/** Wraps a tile label between words, in the languages that could otherwise break inside one. */
+internal val TileLabelLineBreak =
+    LineBreak(
+        strategy = LineBreak.Strategy.Simple,
+        strictness = LineBreak.Strictness.Default,
+        wordBreak = LineBreak.WordBreak.Phrase,
+    )
+
+/** Label style for wrapping tiles: a phrase line break keeps a Hangul syllable with its word. */
+internal fun wrappingTileLabelStyle(style: TextStyle): TextStyle =
+    style.copy(lineBreak = TileLabelLineBreak)
 
 /**
  * A ColorOS round tile label with its chevrons. A label on one line is centred together with them,
