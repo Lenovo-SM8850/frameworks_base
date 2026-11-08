@@ -149,13 +149,13 @@ import com.android.systemui.statusbar.quickactions.ui.DynamicIslandSideEdgeHost
 import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandAnchor
 import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandEdge
 import com.android.systemui.statusbar.quickactions.ui.compose.StatusBarDynamicIslandContainer
-import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandHoleRect
 import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandStartEdgePx
 import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandAvoidsAppHandles
 import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandCameraCenterOffsetYPx
 import com.android.systemui.statusbar.quickactions.ui.compose.resolveDynamicIslandAnchor
 import com.android.wm.shell.shared.handles.DynamicIslandTouchRegion
 import com.android.systemui.statusbar.quickactions.ui.compose.resolveDynamicIslandCutoutEdge
+import com.android.systemui.statusbar.quickactions.ui.compose.resolveDynamicIslandTopCutout
 import com.android.systemui.statusbar.pipeline.shared.ui.view.SystemStatusIconsLayoutHelper
 import com.android.systemui.statusbar.pipeline.shared.ui.viewmodel.HomeStatusBarViewModel
 import com.android.systemui.statusbar.pipeline.shared.ui.viewmodel.HomeStatusBarViewModel.HomeStatusBarViewModelFactory
@@ -663,7 +663,7 @@ fun StatusBarRoot(
                     val displayCutout =
                         phoneStatusBarView.rootWindowInsets?.displayCutout
                             ?: phoneStatusBarView.display?.cutout
-                    val cutout = displayCutout?.dynamicIslandHoleRect()
+                    val cutout = resolveDynamicIslandTopCutout(phoneStatusBarView)
                     val anchor =
                         resolveDynamicIslandAnchor(
                             cutout?.exactCenterX(),
