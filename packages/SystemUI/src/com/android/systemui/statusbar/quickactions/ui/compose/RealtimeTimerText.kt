@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.android.systemui.statusbar.quickactions.popups.shared.formatClockDuration
 import kotlinx.coroutines.delay
 
 @Composable
@@ -39,6 +40,22 @@ fun rememberElapsedDurationText(baseElapsedRealtimeMs: Long): String {
 
     val elapsedSeconds = ((now - baseElapsedRealtimeMs).coerceAtLeast(0L) / 1000L)
     return formatElapsedDuration(elapsedSeconds)
+}
+
+@Composable
+fun rememberRemainingDurationText(endElapsedRealtimeMs: Long): String {
+    var now by remember(endElapsedRealtimeMs) {
+        mutableLongStateOf(android.os.SystemClock.elapsedRealtime())
+    }
+
+    LaunchedEffect(endElapsedRealtimeMs) {
+        while (true) {
+            now = android.os.SystemClock.elapsedRealtime()
+            delay(1000L)
+        }
+    }
+
+    return formatClockDuration(endElapsedRealtimeMs - now)
 }
 
 private fun formatElapsedDuration(totalSeconds: Long): String {

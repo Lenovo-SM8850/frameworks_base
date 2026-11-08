@@ -1065,6 +1065,7 @@ fun DisplayCutout.dynamicIslandHoleWithin(
 private fun PopupContentModel.isUtilityStatusContent(): Boolean {
     return this is PopupContentModel.ScreenRecord ||
         this is PopupContentModel.Stopwatch ||
+        this is PopupContentModel.Timer ||
         this is PopupContentModel.Alarm ||
         this is PopupContentModel.Charging ||
         this is PopupContentModel.Flashlight

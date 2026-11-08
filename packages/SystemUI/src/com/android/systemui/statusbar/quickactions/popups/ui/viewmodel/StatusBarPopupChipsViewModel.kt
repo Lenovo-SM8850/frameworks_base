@@ -58,6 +58,7 @@ import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipM
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionPanelModel
 import com.android.systemui.statusbar.quickactions.sharescreen.ui.viewmodel.ShareScreenPrivacyIndicatorViewModel
 import com.android.systemui.statusbar.quickactions.stopwatch.ui.viewmodel.StopwatchPopupChipViewModel
+import com.android.systemui.statusbar.quickactions.timer.ui.viewmodel.TimerPopupChipViewModel
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -96,6 +97,7 @@ constructor(
     liveScoreChipFactory: LiveScorePopupChipViewModel.Factory,
     flashlightChipFactory: FlashlightPopupChipViewModel.Factory,
     stopwatchChipFactory: StopwatchPopupChipViewModel.Factory,
+    timerChipFactory: TimerPopupChipViewModel.Factory,
     alarmChipFactory: AlarmPopupChipViewModel.Factory,
     chargingChipFactory: ChargingPopupChipViewModel.Factory,
     systemEventChipsFactory: SystemEventPopupChipsViewModel.Factory,
@@ -114,6 +116,7 @@ constructor(
     private val liveScoreChip by lazy { liveScoreChipFactory.create() }
     private val flashlightChip by lazy { flashlightChipFactory.create() }
     private val stopwatchChip by lazy { stopwatchChipFactory.create() }
+    private val timerChip by lazy { timerChipFactory.create() }
     private val alarmChip by lazy { alarmChipFactory.create() }
     private val chargingChip by lazy { chargingChipFactory.create() }
     private val systemEventChips by lazy { systemEventChipsFactory.create() }
@@ -221,6 +224,7 @@ constructor(
             liveScore = liveScoreChip.chip,
             flashlight = flashlightChip.chip,
             stopwatch = stopwatchChip.chip,
+            timer = timerChip.chip,
             alarm = alarmChip.chip,
             charging = chargingChip.chip,
         )
@@ -243,6 +247,7 @@ constructor(
                     bundle.liveScore,
                     bundle.flashlight,
                     bundle.stopwatch,
+                    bundle.timer,
                     bundle.alarm,
                     bundle.media,
                     bundle.charging,
@@ -481,6 +486,7 @@ constructor(
             launch { liveScoreChip.activate() }
             launch { flashlightChip.activate() }
             launch { stopwatchChip.activate() }
+            launch { timerChip.activate() }
             launch { alarmChip.activate() }
             launch { chargingChip.activate() }
             launch { systemEventChips.activate() }
@@ -569,6 +575,8 @@ constructor(
             QuickActionChipModel.Hidden(chipId = QuickActionChipId.Flashlight),
         val stopwatch: QuickActionChipModel =
             QuickActionChipModel.Hidden(chipId = QuickActionChipId.Stopwatch),
+        val timer: QuickActionChipModel =
+            QuickActionChipModel.Hidden(chipId = QuickActionChipId.Timer),
         val alarm: QuickActionChipModel =
             QuickActionChipModel.Hidden(chipId = QuickActionChipId.Alarm),
         val charging: QuickActionChipModel =
@@ -587,6 +595,7 @@ constructor(
                     liveScore,
                     flashlight,
                     stopwatch,
+                    timer,
                     alarm,
                     charging,
                 )

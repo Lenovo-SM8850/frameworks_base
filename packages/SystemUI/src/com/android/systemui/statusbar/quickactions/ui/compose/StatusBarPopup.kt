@@ -119,6 +119,7 @@ import com.android.systemui.statusbar.quickactions.shared.model.PopupContentMode
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.stopwatch.ui.compose.StopwatchPopup
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.POPUP_COLOR_MODE_BLUR
+import com.android.systemui.statusbar.quickactions.timer.ui.compose.TimerPopup
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sign
@@ -1279,6 +1280,7 @@ private fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
                 hapticsViewModelFactory = popupContent.hapticsViewModelFactory,
             )
         is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
+        is PopupContentModel.Timer -> TimerPopup(model = popupContent.model)
         is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
         is PopupContentModel.Charging -> ChargingPopup(model = popupContent.model)
         is PopupContentModel.SystemEvent -> SystemEventPopup(model = popupContent)
@@ -1348,6 +1350,7 @@ internal fun IslandPopupContent(
             )
         is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
         is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
+        is PopupContentModel.Timer -> TimerPopup(model = popupContent.model)
         is PopupContentModel.Charging -> ChargingPopup(model = popupContent.model)
         is PopupContentModel.SystemEvent -> SystemEventPopup(model = popupContent)
         PopupContentModel.None -> Unit
