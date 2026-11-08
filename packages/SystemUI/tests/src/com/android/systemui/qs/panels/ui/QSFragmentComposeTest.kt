@@ -16,6 +16,10 @@
 
 package com.android.systemui.qs.panels.ui
 
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.StateListDrawable
+import com.android.systemui.qs.composefragment.snapshotColorOSMediaDrawable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.mutableStateOf
 import com.android.systemui.qs.composefragment.ColorOSQqsMediaFrame
@@ -68,6 +72,52 @@ class QSFragmentComposeTest : SysuiTestCase() {
             .isEqualTo(initialTop)
         assertThat(composeTestRule.onNodeWithTag(MEDIA).getBoundsInRoot().height)
             .isEqualTo(184.dp)
+    }
+
+    @Test
+    fun customActionSnapshot_startsEnabledWithoutChangingSharedDrawable() {
+        val source = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_enabled), ColorDrawable(Color.WHITE))
+            addState(intArrayOf(), ColorDrawable(0x44333333))
+            state = intArrayOf()
+        }
+        val bitmap = snapshotColorOSMediaDrawable(source, context.resources, 24, true)!!
+        assertThat(bitmap.getPixel(12, 12)).isEqualTo(Color.WHITE)
+        assertThat(source.state).isEmpty()
+        val original = snapshotColorOSMediaDrawable(source, context.resources, 24, false)!!
+        assertThat(Color.alpha(original.getPixel(12, 12))).isEqualTo(0x44)
+    }
+
+    @Test
+    fun customActionSnapshot_finishesEntryFadeBeforeFirstDraw() {
+        val source = StateListDrawable().apply {
+            setEnterFadeDuration(200)
+            addState(intArrayOf(android.R.attr.state_enabled), ColorDrawable(Color.WHITE))
+            addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+            state = intArrayOf()
+        }
+        val bitmap = snapshotColorOSMediaDrawable(source, context.resources, 24, true)!!
+        assertThat(bitmap.getPixel(12, 12)).isEqualTo(Color.WHITE)
+        assertThat(source.state).isEmpty()
+    }
+
+    @Test
+    fun customActionSnapshot_keepsCheckedGlyphWithoutPressedState() {
+        val source = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(Color.TRANSPARENT))
+            addState(intArrayOf(android.R.attr.state_checked), ColorDrawable(Color.WHITE))
+            addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+            state = intArrayOf(android.R.attr.state_checked, android.R.attr.state_pressed)
+            alpha = 0
+            level = 3
+        }
+        val bitmap = snapshotColorOSMediaDrawable(source, context.resources, 24, true)!!
+        assertThat(bitmap.getPixel(12, 12)).isEqualTo(Color.WHITE)
+        assertThat(source.alpha).isEqualTo(0)
+        assertThat(source.level).isEqualTo(3)
+        assertThat(source.state).asList().containsExactly(
+            android.R.attr.state_checked, android.R.attr.state_pressed,
+        )
     }
 
     @Test

@@ -60,6 +60,7 @@ import com.android.systemui.media.controls.shared.MediaControlDrawables
 import com.android.systemui.media.controls.shared.model.MediaAction
 import com.android.systemui.media.controls.shared.model.MediaData
 import com.android.systemui.res.R
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -540,7 +541,7 @@ private fun ColorOSMediaButton(action: MediaAction?, glyph: Painter?, baseIconSi
     val iconSize = baseIconSize * scale
     val enabled = action?.action != null
     val tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else ColorOSMediaDimAlpha)
-    val actionIcon = rememberDrawableBitmap(if (glyph == null) action?.icon else null, iconSize)
+    val actionIcon = rememberDrawableBitmap(if (glyph == null) action?.icon else null, iconSize, actionIcon = true)
     Box(
         contentAlignment = Alignment.Center,
         modifier =
@@ -583,15 +584,57 @@ private fun ColorOSMediaButton(action: MediaAction?, glyph: Painter?, baseIconSi
  * non-animated frame and leaves the original untouched.
  */
 @Composable
-private fun rememberDrawableBitmap(icon: Drawable?, size: Dp): ImageBitmap? {
+private fun rememberDrawableBitmap(
+    icon: Drawable?,
+    size: Dp,
+    actionIcon: Boolean = false,
+): ImageBitmap? {
     val resources = LocalContext.current.resources
     val sizePx = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
-    return remember(icon, sizePx) {
-        icon?.let { source ->
-            // Fall back to the source if it has no constant state; toBitmap() restores its bounds
-            // and only reads from it.
-            val copy = source.constantState?.newDrawable(resources)?.mutate() ?: source
-            runCatching { copy.toBitmap(sizePx, sizePx).asImageBitmap() }.getOrNull()
-        }
+    return remember(icon, sizePx, actionIcon) {
+        snapshotColorOSMediaDrawable(icon, resources, sizePx, actionIcon)?.asImageBitmap()
     }
+}
+
+internal fun snapshotColorOSMediaDrawable(
+    source: Drawable?,
+    resources: android.content.res.Resources,
+    sizePx: Int,
+    actionIcon: Boolean,
+): android.graphics.Bitmap? = source?.let {
+    val copy = it.constantState?.newDrawable(resources)?.mutate() ?: it
+    if (actionIcon && copy !== source) {
+        copy.state = source.state.filterNot {
+            it == -android.R.attr.state_enabled || it == android.R.attr.state_pressed ||
+                it == android.R.attr.state_focused || it == android.R.attr.state_hovered
+        }.plus(android.R.attr.state_enabled).distinct().toIntArray()
+        copy.level = source.level
+        copy.alpha = 255
+        copy.clearColorFilter()
+        copy.setTint(android.graphics.Color.WHITE)
+        copy.jumpToCurrentState()
+    }
+    runCatching {
+        val w = copy.intrinsicWidth
+        val h = copy.intrinsicHeight
+        if (w <= 0 || h <= 0 || w == h) {
+            copy.toBitmap(sizePx, sizePx)
+        } else {
+            // An app's icon need not be square: fit it in the square instead of stretching it.
+            val fit = sizePx / maxOf(w, h).toFloat()
+            val dw = (w * fit).roundToInt().coerceAtLeast(1)
+            val dh = (h * fit).roundToInt().coerceAtLeast(1)
+            val bitmap =
+                android.graphics.Bitmap.createBitmap(
+                    sizePx,
+                    sizePx,
+                    android.graphics.Bitmap.Config.ARGB_8888,
+                )
+            val left = (sizePx - dw) / 2
+            val top = (sizePx - dh) / 2
+            copy.setBounds(left, top, left + dw, top + dh)
+            copy.draw(android.graphics.Canvas(bitmap))
+            bitmap
+        }
+    }.getOrNull()
 }
