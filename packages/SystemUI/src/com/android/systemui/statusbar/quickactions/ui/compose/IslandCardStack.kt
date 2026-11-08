@@ -83,6 +83,7 @@ import com.android.systemui.statusbar.quickactions.media.ui.compose.MediaControl
 import com.android.systemui.statusbar.quickactions.charging.ui.compose.ChargingPopup
 import com.android.systemui.statusbar.quickactions.screenrecord.ui.compose.ScreenRecordPopup
 import com.android.systemui.statusbar.quickactions.stopwatch.ui.compose.StopwatchPopup
+import com.android.systemui.statusbar.quickactions.timer.ui.compose.TimerPopup
 
 /** The island opens every live activity as a stack once at least this many are running. */
 internal const val ISLAND_STACK_MIN_CARDS = 2
@@ -368,6 +369,7 @@ internal fun IslandPopupContent(
             )
         is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
         is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
+        is PopupContentModel.Timer -> TimerPopup(model = popupContent.model)
         is PopupContentModel.Charging -> ChargingPopup(model = popupContent.model)
         is PopupContentModel.SystemEvent -> SystemEventPopup(model = popupContent)
         PopupContentModel.None -> Unit

@@ -52,6 +52,8 @@ import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import com.android.systemui.statusbar.quickactions.ui.compose.pressScale
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberElapsedDurationText
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -61,6 +63,8 @@ fun StopwatchPopup(
     model: StopwatchPopupModel,
     modifier: Modifier = Modifier,
 ) {
+    val onOpen = rememberPopupLaunchAction(model.onOpen)
+    val actions = rememberPopupActions(model.actions)
     val accent = IslandAccents.Stopwatch
     val rotation = remember { Animatable(0f) }
     LaunchedEffect(model.isRunning) {
@@ -87,9 +91,9 @@ fun StopwatchPopup(
                 }
             },
             modifier = modifier,
-            onClick = model.onOpen,
-            primaryAction = model.actions.getOrNull(0),
-            secondaryAction = model.actions.getOrNull(1),
+            onClick = onOpen,
+            primaryAction = actions.getOrNull(0),
+            secondaryAction = actions.getOrNull(1),
         )
         return
     }
@@ -98,8 +102,8 @@ fun StopwatchPopup(
         modifier =
             modifier
                 .widthIn(min = 300.dp, max = 360.dp)
-                .pressScale(enabled = model.onOpen != null, pressedScale = 0.97f) {
-                    model.onOpen?.invoke()
+                .pressScale(enabled = onOpen != null, pressedScale = 0.97f) {
+                    onOpen?.invoke()
                 },
     ) {
         Column(
@@ -150,7 +154,7 @@ fun StopwatchPopup(
                 color = accent,
             )
 
-            PopupActionChips(actions = model.actions, accent = accent)
+            PopupActionChips(actions = actions, accent = accent)
         }
     }
 }

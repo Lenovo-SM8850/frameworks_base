@@ -126,6 +126,7 @@ import com.android.systemui.statusbar.quickactions.shared.model.PopupContentMode
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipId
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.stopwatch.ui.compose.StopwatchPopup
+import com.android.systemui.statusbar.quickactions.timer.ui.compose.TimerPopup
 import com.android.systemui.statusbar.quickactions.ui.compose.CosCardCloseMillis
 import com.android.systemui.statusbar.quickactions.ui.compose.CosCardCorner
 import com.android.systemui.statusbar.quickactions.ui.compose.CosCardEase
@@ -1300,6 +1301,7 @@ private fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
                 hapticsViewModelFactory = popupContent.hapticsViewModelFactory,
             )
         is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
+        is PopupContentModel.Timer -> TimerPopup(model = popupContent.model)
         is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
         is PopupContentModel.Charging -> ChargingPopup(model = popupContent.model)
         is PopupContentModel.SystemEvent -> SystemEventPopup(model = popupContent)

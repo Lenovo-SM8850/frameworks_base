@@ -34,6 +34,7 @@ import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEve
 import com.android.systemui.statusbar.quickactions.popups.ui.viewmodel.StatusBarPopupViewModel
 import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.ScreenRecordPopupModel
 import com.android.systemui.statusbar.quickactions.stopwatch.shared.model.StopwatchPopupModel
+import com.android.systemui.statusbar.quickactions.timer.shared.model.TimerPopupModel
 import com.android.systemui.statusbar.quickactions.ui.compose.ChipColors
 import com.android.systemui.util.time.SystemClock
 
@@ -51,6 +52,8 @@ sealed class QuickActionChipId(val value: String) {
     data object Flashlight : QuickActionChipId("Flashlight")
 
     data object Stopwatch : QuickActionChipId("Stopwatch")
+
+    data object Timer : QuickActionChipId("Timer")
 
     data object Alarm : QuickActionChipId("Alarm")
 
@@ -109,6 +112,8 @@ sealed interface PopupContentModel {
     ) : PopupContentModel
 
     data class Stopwatch(val model: StopwatchPopupModel) : PopupContentModel
+
+    data class Timer(val model: TimerPopupModel) : PopupContentModel
 
     data class Alarm(val model: AlarmPopupModel) : PopupContentModel
 

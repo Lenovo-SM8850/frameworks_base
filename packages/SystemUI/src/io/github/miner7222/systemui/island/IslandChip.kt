@@ -19,7 +19,6 @@ package io.github.miner7222.systemui.island
 import android.view.DisplayCutout
 import android.view.HapticFeedbackConstants
 import android.view.View
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -28,14 +27,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,7 +41,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.keyframes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,7 +74,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
@@ -90,7 +85,6 @@ import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
 import com.android.systemui.statusbar.quickactions.screenrecord.shared.model.ScreenRecordPopupModel
-import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.shared.model.chipText
@@ -100,7 +94,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 import com.android.systemui.statusbar.quickactions.ui.compose.*
 
@@ -628,10 +621,67 @@ private fun UtilityStatusIslandChip(
     }
 }
 
-/**
- * The time left until the alarm as short text such as `in 7h 5m`, kept current once a minute. Null
- * when there is no upcoming alarm to count down to, e.g. while one is ringing.
- */
+@Composable
+private fun collapsedIslandText(viewModel: QuickActionChipModel.PopupChip): String =
+    when (val content = viewModel.popupContent) {
+        is PopupContentModel.ScreenRecord ->
+            compactIslandDurationText(
+                when (val model = content.model) {
+                    is ScreenRecordPopupModel.Starting ->
+                        "0:${model.secondsUntilStarted.toString().padStart(2, '0')}"
+                    is ScreenRecordPopupModel.Recording ->
+                        rememberElapsedDurationText(model.startElapsedRealtimeMs)
+                }
+            )
+        is PopupContentModel.Stopwatch ->
+            compactIslandDurationText(
+                content.model.elapsedTimeText
+                    ?: rememberElapsedDurationText(content.model.baseElapsedRealtimeMs)
+            )
+        is PopupContentModel.Timer ->
+            compactIslandDurationText(
+                content.model.remainingTimeText
+                    ?: rememberRemainingDurationText(content.model.endElapsedRealtimeMs)
+            )
+        is PopupContentModel.Alarm ->
+            viewModel.chipText.orEmpty()
+        is PopupContentModel.SystemEvent -> {
+            val startMs = content.callStartTimeMs.takeIf { content.kind == SystemEventKind.Call }
+            if (startMs != null) {
+                val base = remember(startMs) {
+                    android.os.SystemClock.elapsedRealtime() -
+                        (System.currentTimeMillis() - startMs).coerceAtLeast(0L)
+                }
+                compactIslandDurationText(rememberElapsedDurationText(base))
+            } else {
+                viewModel.chipText.orEmpty()
+            }
+        }
+        else -> viewModel.chipText.orEmpty()
+    }
+
+private val CompactIslandDurationPattern = Regex("""([\p{Nd}]+):([\p{Nd}]{2})(?::([\p{Nd}]{2}))?""")
+
+private fun compactIslandDurationText(text: String): String {
+    val match = CompactIslandDurationPattern.find(text) ?: return text.take(5)
+    val fields = match.groupValues.drop(1).map { field ->
+        field.fold(0L) { value, digit ->
+            (value * 10L + digit.digitToInt()).coerceAtMost(10_000L)
+        }
+    }
+    val hasHours = match.groupValues[3].isNotEmpty()
+    val totalMinutes = if (hasHours) fields[0] * 60L + fields[1] else fields[0]
+    val hours = totalMinutes / 60L
+    val sign = if (text.trimStart().startsWith("+")) "+" else ""
+    if (hours >= 100L) return "${sign}99:59"
+    val first = if (hours > 0L) hours else totalMinutes
+    val second =
+        if (hours > 0L) totalMinutes % 60L
+        else if (hasHours) fields[2] else fields[1]
+    return "$sign${first.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}"
+}
+
+/** Compact countdown for the collapsed island; popup clock formats remain separate. */
 @Composable
 private fun rememberAlarmCountdownText(triggerTimeMs: Long): String? {
     val context = LocalContext.current
@@ -777,6 +827,7 @@ private val CompactUtilityCameraSplitMaxWidth = 232.dp
 private fun PopupContentModel.isUtilityStatusContent(): Boolean {
     return this is PopupContentModel.ScreenRecord ||
         this is PopupContentModel.Stopwatch ||
+        this is PopupContentModel.Timer ||
         this is PopupContentModel.Alarm ||
         this is PopupContentModel.Charging ||
         this is PopupContentModel.Flashlight
