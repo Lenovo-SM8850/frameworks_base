@@ -17,20 +17,26 @@
 package com.android.systemui.statusbar.quickactions.media.ui.compose
 
 import android.content.Context
+import android.database.ContentObserver
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import android.text.format.DateUtils
 import android.widget.SeekBar
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -46,6 +52,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
@@ -65,7 +73,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.dimensionResource
@@ -74,6 +84,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -280,6 +291,66 @@ fun MediaControlPopup(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun rememberMarqueeMotionEnabled(): Boolean {
+    val context = LocalContext.current
+    fun readEnabled() =
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) > 0f
+    var enabled by remember(context) { mutableStateOf(readEnabled()) }
+    DisposableEffect(context) {
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    enabled = readEnabled()
+                }
+            }
+        context.contentResolver.registerContentObserver(
+            Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+            false,
+            observer,
+        )
+        enabled = readEnabled()
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+    return enabled
+}
+
+@Composable
+private fun MediaMarqueeText(text: String, style: TextStyle, color: Color, enabled: Boolean) {
+    val measurer = rememberTextMeasurer()
+    val textWidth =
+        remember(text, style, measurer) {
+            measurer.measure(text, style, softWrap = false, maxLines = 1).size.width
+        }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val scrolls = enabled && textWidth > constraints.maxWidth
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier =
+                Modifier.fillMaxWidth()
+                    .clipToBounds()
+                    .then(
+                        if (scrolls)
+                            Modifier.basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 1500,
+                                repeatDelayMillis = 2000,
+                            )
+                        else Modifier
+                    ),
+        )
     }
 }
 
