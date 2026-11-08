@@ -91,7 +91,9 @@ import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -154,6 +156,11 @@ constructor(
 
     /** A key for the last player card that is completely visible */
     private var lastFullyVisiblePlayerKey: String? = null
+
+    private val _selectedMediaData = MutableStateFlow<MediaData?>(null)
+
+    /** Data bound to the visible carousel player, including paused and resumption entries. */
+    val selectedMediaData = _selectedMediaData.asStateFlow()
 
     /**
      * The desired location where we'll be at the end of the transformation. Usually this matches
@@ -610,6 +617,7 @@ constructor(
             MediaPlayerData.getFirstActiveMediaData()
         )
         MediaPlayerData.updateVisibleMediaPlayers()
+        updateSelectedMediaData()
         if (isRtl && mediaContent.childCount > 0) {
             // In RTL, Scroll to the first player as it is the rightmost player in media carousel.
             mediaCarouselScrollHandler.scrollToPlayer(destIndex = 0)
@@ -672,6 +680,7 @@ constructor(
         } else {
             needsReordering = true
         }
+        updateSelectedMediaData()
     }
 
     private fun setupNewPlayer(key: String, data: MediaData, mediaViewHolder: MediaViewHolder) {
@@ -689,7 +698,7 @@ constructor(
         newPlayer.setListening(mediaCarouselScrollHandler.visibleToUser && currentlyExpanded)
         MediaPlayerData.addMediaPlayer(key, data, newPlayer, systemClock, debugLogger)
         updateViewControllerToState(newPlayer.mediaViewController, noAnimation = true)
-        if (data.active) {
+        if (data.active || mediaContent.childCount == 0) {
             reorderAllPlayers()
         } else {
             needsReordering = true
@@ -751,6 +760,7 @@ constructor(
     }
 
     private fun updatePageIndicator() {
+        updateSelectedMediaData()
         val numPages = mediaContent.getChildCount()
         pageIndicator.setNumPages(numPages)
         if (numPages == 1) {
@@ -1086,8 +1096,20 @@ constructor(
         onCardVisibilityChanged()
     }
 
+    private fun updateSelectedMediaData() {
+        val player =
+            mediaContent.getChildAt(mediaCarouselScrollHandler.visibleMediaIndex)
+                ?: mediaContent.getChildAt(0)
+        _selectedMediaData.value =
+            if (player == null) null
+            else MediaPlayerData.playerKeys().firstOrNull {
+                MediaPlayerData.getMediaPlayer(it.key)?.mediaViewHolder?.player === player
+            }?.data
+    }
+
     /** Triggered whenever carousel's scroll position changes, revealing a new card. */
     fun onVisibleCardChanged() {
+        updateSelectedMediaData()
         if (!enableSuggestedDeviceUi()) {
             return
         }

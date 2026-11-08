@@ -422,7 +422,7 @@ constructor(
                 },
         )
 
-    private val qqsMediaExpansion: Float
+    internal val qqsMediaExpansion: Float
         get() =
             if (qqsMediaInRow && collapsedLandscapeMedia) {
                 MediaHostState.COLLAPSED

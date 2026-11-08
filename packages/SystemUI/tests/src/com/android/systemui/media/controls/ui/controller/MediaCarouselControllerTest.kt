@@ -50,6 +50,7 @@ import com.android.systemui.media.controls.shared.model.MediaData
 import com.android.systemui.media.controls.ui.controller.MediaHierarchyManager.Companion.LOCATION_QS
 import com.android.systemui.media.controls.ui.view.MediaHostState
 import com.android.systemui.media.controls.ui.view.MediaScrollView
+import com.android.systemui.media.controls.ui.view.MediaViewHolder
 import com.android.systemui.media.controls.util.MediaUiEventLogger
 import com.android.systemui.media.remedia.shared.flag.MediaControlsInComposeFlag
 import com.android.systemui.plugins.ActivityStarter
@@ -79,16 +80,17 @@ import org.junit.runner.RunWith
 import org.mockito.ArgumentCaptor
 import org.mockito.Captor
 import org.mockito.Mock
+import org.mockito.Mockito.`when` as whenever
 import org.mockito.Mockito.anyLong
 import org.mockito.Mockito.atLeast
 import org.mockito.Mockito.clearInvocations
+import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.floatThat
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
-import org.mockito.Mockito.`when` as whenever
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.capture
@@ -932,6 +934,41 @@ class MediaCarouselControllerTest : SysuiTestCase() {
         globalSettings.putFloat(Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
         settingsObserverCaptor.value!!.onChange(false)
         verify(panel).updateAnimatorDurationScale()
+    }
+
+    @Test
+    fun selectedMedia_metadataUpdateWithoutReordering_refreshesSelection() {
+        verify(mediaDataManager).addListener(capture(listener))
+        whenever(mediaReorderController.isReorderingAllowed()).thenReturn(false)
+        doAnswer { invocation ->
+            whenever(panel.mediaViewHolder).thenReturn(invocation.getArgument<MediaViewHolder>(0))
+            null
+        }.`when`(panel).attachPlayer(any())
+        listener.value.onMediaDataLoaded(PAUSED_LOCAL, null, DATA)
+        runAllReady()
+        val updated = DATA.copy(song = "Updated title")
+        listener.value.onMediaDataLoaded(PAUSED_LOCAL, PAUSED_LOCAL, updated)
+        runAllReady()
+        assertThat(mediaCarouselController.selectedMediaData.value).isEqualTo(updated)
+    }
+
+    @Test
+    fun initialPausedPlayer_populatesSelectedMediaWithoutReorderingOrExpansion() {
+        verify(mediaDataManager).addListener(capture(listener))
+        Settings.Secure.putInt(context.contentResolver, Settings.Secure.MEDIA_CONTROLS_RESUME, 1)
+        whenever(mediaReorderController.isReorderingAllowed()).thenReturn(false)
+        doAnswer { invocation ->
+            whenever(panel.mediaViewHolder).thenReturn(invocation.getArgument<MediaViewHolder>(0))
+            null
+        }.`when`(panel).attachPlayer(any())
+        val paused = DATA.copy(active = false, isPlaying = false, resumption = true)
+
+        listener.value.onMediaDataLoaded(PAUSED_LOCAL, null, paused)
+        runAllReady()
+
+        assertThat(mediaCarouselController.selectedMediaData.value).isEqualTo(paused)
+        assertThat(panel.mediaViewHolder?.player?.parent).isNotNull()
+
     }
 
     @Test
