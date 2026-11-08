@@ -73,6 +73,16 @@ import kotlin.math.abs
 import kotlin.math.sign
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.CompositionLocalProvider
+import com.android.systemui.statusbar.quickactions.alarm.ui.compose.AlarmPopup
+import com.android.systemui.statusbar.quickactions.flashlight.ui.compose.FlashlightPopup
+import com.android.systemui.statusbar.quickactions.livescore.ui.compose.LiveScorePopup
+import com.android.systemui.statusbar.quickactions.media.ui.compose.LyricsCard
+import com.android.systemui.statusbar.quickactions.media.ui.compose.MediaControlPopup
+import com.android.systemui.statusbar.quickactions.charging.ui.compose.ChargingPopup
+import com.android.systemui.statusbar.quickactions.screenrecord.ui.compose.ScreenRecordPopup
+import com.android.systemui.statusbar.quickactions.stopwatch.ui.compose.StopwatchPopup
 
 /** The island opens every live activity as a stack once at least this many are running. */
 internal const val ISLAND_STACK_MIN_CARDS = 2
@@ -318,3 +328,48 @@ private const val StackStaggerBaseMs = 90L
 private const val StackStaggerMs = 45L
 private const val StackCardInMs = 380
 private const val StackCardOutMs = 260
+
+/** Renders the per-feature card for [viewModel]; the single popup and the card stack show these. */
+@Composable
+internal fun IslandPopupContent(
+    viewModel: QuickActionChipModel.PopupChip,
+    fillWidth: Boolean = false,
+) {
+    val cardModifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier
+    when (val popupContent = viewModel.popupContent) {
+        is PopupContentModel.Media -> {
+            val model = popupContent.model
+            val useWaveform = popupContent.useWaveform
+            val hasLyrics = !model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank()
+            if (hasLyrics) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MediaControlPopup(
+                        model = model,
+                        useWaveform = useWaveform,
+                        modifier = cardModifier,
+                    )
+                    CompositionLocalProvider(LocalPopupCameraClearance provides 0.dp) {
+                        LyricsCard(model = model, modifier = cardModifier)
+                    }
+                }
+            } else {
+                MediaControlPopup(model = model, useWaveform = useWaveform)
+            }
+        }
+        is PopupContentModel.ScreenRecord -> ScreenRecordPopup(model = popupContent.model)
+        is PopupContentModel.LiveScore -> LiveScorePopup(model = popupContent.model)
+        is PopupContentModel.Flashlight ->
+            FlashlightPopup(
+                model = popupContent.model,
+                hapticsViewModelFactory = popupContent.hapticsViewModelFactory,
+            )
+        is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
+        is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
+        is PopupContentModel.Charging -> ChargingPopup(model = popupContent.model)
+        is PopupContentModel.SystemEvent -> SystemEventPopup(model = popupContent)
+        PopupContentModel.None -> Unit
+    }
+}
