@@ -837,6 +837,8 @@ internal val DynamicIslandOutlineWidth = 1.dp
 /** Collapsed height at a height scale of one, with or without a camera to cover. */
 internal val DynamicIslandBaseHeight = 35.dp
 
+/** Vertical centre of the island without a camera, where it sits on a camera that has one. */
+internal val DynamicIslandDefaultCenterY = 24.5.dp
 
 private fun cutoutMinimumHeight(crossAxisSize: Dp): Dp =
     crossAxisSize + (DynamicIslandCutoutFillMargin + DynamicIslandOutlineWidth) * 2
