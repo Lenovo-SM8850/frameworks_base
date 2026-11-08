@@ -481,8 +481,10 @@ fun LargeTileContent(
             modifier =
                 Modifier.size(toggleSize).thenIf(alwaysBacked && !isDualTarget) {
                     Modifier.clip(iconClip).drawBehind { drawRect(animatedBackgroundColor) }
-                }.thenIf(isDualTarget) {
-                    Modifier.borderOnFocus(color = focusBorderColor, iconShape.topEnd)
+                }.thenIf(isDualTarget || colorOSStyle) {
+                    Modifier.thenIf(isDualTarget) {
+                            Modifier.borderOnFocus(color = focusBorderColor, iconShape.topEnd)
+                        }
                         .clip(iconClip)
                         .then(glassBlurModifier)
                         .drawBehind {
@@ -512,15 +514,18 @@ fun LargeTileContent(
                         }
                         // apply the squish effect after the bg is drawn
                         .verticalSquish(squishiness)
-                        .combinedClickable(
-                            interactionSource = toggleInteractionSource,
-                            indication = if (toggleInteractionSource != null) indication else null,
-                            onClick = toggleClick!!,
-                            onLongClick = onLongClick,
-                            onLongClickLabel = longPressLabel,
-                            hapticFeedbackEnabled = false, // Haptics handled separately
-                        )
-                        .thenIf(accessibilityUiState != null) {
+                        .thenIf(isDualTarget) {
+                            Modifier.combinedClickable(
+                                interactionSource = toggleInteractionSource,
+                                indication =
+                                    if (toggleInteractionSource != null) indication else null,
+                                onClick = requireNotNull(toggleClick),
+                                onLongClick = onLongClick,
+                                onLongClickLabel = longPressLabel,
+                                hapticFeedbackEnabled = false, // Haptics handled separately
+                            )
+                        }
+                        .thenIf(isDualTarget && accessibilityUiState != null) {
                             Modifier.semantics {
                                     accessibilityUiState as AccessibilityUiState
                                     contentDescription = accessibilityUiState.contentDescription
