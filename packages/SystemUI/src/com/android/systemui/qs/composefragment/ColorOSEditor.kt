@@ -302,12 +302,7 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                 repeat(COLOROS_PINNED_SLOTS) { slot ->
                     val spec = if (slot < COLOROS_PILL_SLOT) pinned.cards[slot] else pinned.pill
                     val label =
-                        spec?.let { bySpec[TileSpec.create(it)]?.label?.text?.toString() }
-                            ?: if (slot == COLOROS_PILL_SLOT) {
-                                stringResource(R.string.qs_coloros_my_devices)
-                            } else {
-                                ""
-                            }
+                        spec?.let { bySpec[TileSpec.create(it)]?.label?.text?.toString() }.orEmpty()
                     PinnedSlotChip(
                         label = label,
                         selected = selectedPin == slot,
