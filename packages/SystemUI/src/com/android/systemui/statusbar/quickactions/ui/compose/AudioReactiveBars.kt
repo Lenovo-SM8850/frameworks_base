@@ -21,12 +21,11 @@ import android.media.audiofx.Visualizer
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -42,7 +41,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -56,23 +54,16 @@ import androidx.palette.graphics.Palette
 import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val BAR_COUNT = 4
 
-private val PausedRestLevels = floatArrayOf(0.20f, 0.35f, 0.35f, 0.20f)
+private const val MinimumBarLevel = 0.08f
+private val PausedRestLevels = FloatArray(BAR_COUNT) { MinimumBarLevel }
 
 private val BeatSpring = spring<Float>(
     dampingRatio = 0.50f,
     stiffness = 280f,
-)
-
-private val SettleSpring = spring<Float>(
-    dampingRatio = 0.72f,
-    stiffness = 140f,
 )
 
 private data class BarWaveConfig(
@@ -80,13 +71,6 @@ private data class BarWaveConfig(
     val maxLevel: Float,
     val durationMs: Int,
     val phaseOffsetMs: Int,
-)
-
-private val IdleConfigs = arrayOf(
-    BarWaveConfig(minLevel = 0.14f, maxLevel = 0.26f, durationMs = 2600, phaseOffsetMs = 300),
-    BarWaveConfig(minLevel = 0.22f, maxLevel = 0.42f, durationMs = 2200, phaseOffsetMs = 0),
-    BarWaveConfig(minLevel = 0.22f, maxLevel = 0.42f, durationMs = 2200, phaseOffsetMs = 150),
-    BarWaveConfig(minLevel = 0.14f, maxLevel = 0.26f, durationMs = 2600, phaseOffsetMs = 450),
 )
 
 private val PlayingConfigs = arrayOf(
@@ -143,13 +127,11 @@ fun AudioReactiveBars(
         mutableStateListOf(*PausedRestLevels.toTypedArray())
     }
 
-    val animatedLevels: List<Animatable<Float, AnimationVector1D>> = remember {
-        List(BAR_COUNT) { i -> Animatable(PausedRestLevels[i]) }
-    }
-
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     DisposableEffect(isPlaying) {
+        // Ignore captures already queued when this playback session is disposed.
+        var captureActive = isPlaying
         if (!isPlaying) {
             PausedRestLevels.forEachIndexed { i, v -> rawLevels[i] = v }
             onDispose {}
@@ -184,6 +166,7 @@ fun AudioReactiveBars(
                             )
 
                         mainHandler.post {
+                            if (!captureActive) return@post
                             for (i in mirrored.indices) {
                                 rawLevels[i] =
                                     (rawLevels[i] * 0.55f + mirrored[i] * 0.45f)
@@ -217,32 +200,30 @@ fun AudioReactiveBars(
             }
 
             onDispose {
+                captureActive = false
                 runCatching { visualizer?.enabled = false }
                 runCatching { visualizer?.release() }
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        snapshotFlow { rawLevels.toList() to isPlaying }
-            .distinctUntilChanged()
-            .collect { (targets, playing) ->
-                val spec = if (playing) BeatSpring else SettleSpring
-                coroutineScope {
-                    targets.forEachIndexed { index, target ->
-                        launch {
-                            animatedLevels[index].animateTo(target, animationSpec = spec)
-                        }
-                    }
-                }
-            }
-    }
-
-    // Only the wave set for the current mode runs. Both used to be composed and read on every
-    // draw, so the set the current mode never showed kept animating and invalidating the chip.
-    val idleFloats = rememberWaveLevels(active = !isPlaying, configs = IdleConfigs, label = "idle")
     val playingFloats =
         rememberWaveLevels(active = isPlaying, configs = PlayingConfigs, label = "playing")
+
+    val hasActiveHardwareCapture =
+        isPlaying && (android.os.SystemClock.elapsedRealtime() - lastAudioCaptureMs < 1200L)
+    val displayedLevels = List(BAR_COUNT) { index ->
+        animateFloatAsState(
+            targetValue =
+                when {
+                    !isPlaying -> MinimumBarLevel
+                    hasActiveHardwareCapture -> rawLevels[index]
+                    else -> playingFloats?.get(index)?.value ?: MinimumBarLevel
+                },
+            animationSpec = if (isPlaying) BeatSpring else tween(180),
+            label = "visualizer_bar_$index",
+        )
+    }
 
     val totalWidth = barWidth * BAR_COUNT + spacing * (BAR_COUNT - 1)
 
@@ -258,19 +239,7 @@ fun AudioReactiveBars(
         val radius = CornerRadius(barPx / 2f, barPx / 2f)
 
         for (index in 0 until BAR_COUNT) {
-            val springLevel = animatedLevels[index].value
-            val idleLevel = idleFloats?.get(index)?.value ?: PausedRestLevels[index]
-            val playingLevel = playingFloats?.get(index)?.value ?: PausedRestLevels[index]
-
-            val hasActiveHardwareCapture =
-                isPlaying && (android.os.SystemClock.elapsedRealtime() - lastAudioCaptureMs < 1200L)
-
-            val level =
-                when {
-                    !isPlaying -> idleLevel
-                    hasActiveHardwareCapture -> springLevel
-                    else -> playingLevel
-                }.coerceIn(0.08f, 1f)
+            val level = displayedLevels[index].value.coerceIn(MinimumBarLevel, 1f)
 
             val barH = maxH * level
             val left = index * (barPx + spacingPx)
