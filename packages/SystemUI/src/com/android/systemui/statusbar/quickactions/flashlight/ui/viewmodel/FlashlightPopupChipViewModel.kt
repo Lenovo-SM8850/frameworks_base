@@ -34,6 +34,7 @@ import com.android.systemui.statusbar.quickactions.shared.model.ChipIcon
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipId
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
+import com.android.systemui.statusbar.quickactions.popups.shared.PopupItemDismissal
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.ui.compose.ChipColors
 import dagger.assisted.AssistedFactory
@@ -52,6 +53,8 @@ constructor(
     private val flashlightInteractor: FlashlightInteractor,
     private val hapticsViewModelFactory: SliderHapticsViewModel.Factory,
 ) : StatusBarPopupChipViewModel, HydratedActivatable() {
+
+    private val dismissal = PopupItemDismissal()
 
     private var callbackScope: ProducerScope<FlashlightState>? = null
 
@@ -87,6 +90,7 @@ constructor(
             .combine(flashlightInteractor.state) { state, flashlightModel ->
                 toPopupChipModel(state, flashlightModel)
             }
+            .let(dismissal::filterDismissed)
             .combine(
                 DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
                     context,
@@ -150,6 +154,7 @@ constructor(
                     model = model,
                     hapticsViewModelFactory = hapticsViewModelFactory,
                 ),
+            dismissKey = QuickActionChipId.Flashlight,
         )
     }
 
