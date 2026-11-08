@@ -158,11 +158,13 @@ import com.android.systemui.qs.composefragment.ui.quickQuickSettingsToQuickSetti
 import com.android.systemui.qs.composefragment.ui.toEditMode
 import com.android.systemui.qs.composefragment.viewmodel.QSFragmentComposeViewModel
 import com.android.systemui.qs.footer.ui.compose.FooterActions
+import com.android.systemui.qs.footer.ui.compose.rememberSystemSettingEnabled
 import com.android.systemui.qs.panels.shared.model.QSFragmentComposeClippingTableLog
 import com.android.systemui.qs.panels.ui.compose.EditMode
 import com.android.systemui.qs.panels.ui.compose.QuickQuickSettings
 import com.android.systemui.qs.panels.ui.compose.TileGrid
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSBackdrop
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingQsOsColors
@@ -174,6 +176,7 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSColorOSM
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSColorOSStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSNothingOsColors
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSNothingStyle
+import com.android.systemui.qs.panels.ui.compose.toolbar.EditModeButton
 import com.android.systemui.qs.shared.ui.QuickSettings.Elements
 import com.android.systemui.qs.ui.composable.QuickSettingsShade
 import com.android.systemui.qs.ui.composable.QuickSettingsShade.systemGestureExclusionInShade
@@ -1158,6 +1161,9 @@ constructor(
                                         // margin already gives ~16dp, so add the rest.
                                         modifier = Modifier.padding(horizontal = 23.dp),
                                         availableHeight = colorOSAvailableHeight,
+                                        maximumTileSize =
+                                            if (colorOSHeader) Dp.Infinity
+                                            else CommonTileDefaults.ColorOSTileHeight,
                                         onFitChanged = { colorOSContentFits = it },
                                         headerHeight = if (colorOSHeader) qsExtraPadding else 0.dp,
                                         header = {
@@ -1250,14 +1256,36 @@ constructor(
                         }
                     }
                 }
-                // The ColorOS panel has no footer, its buttons are in the header.
-                if (!LocalColorOSQsStyle.current) {
+                // Keep the footer when the replacement header is absent.
+                if (!colorOSHeader) {
                     QuickSettingsTheme {
                         Element(
                             Elements.FooterActions,
                             Modifier.sysuiResTag(ResIdTags.qsFooterActions),
                         ) {
-                            FooterActions(viewModel = viewModel.footerActionsViewModel)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (LocalColorOSQsStyle.current) {
+                                    val showEdit by rememberSystemSettingEnabled(
+                                        android.provider.Settings.System.QS_FOOTER_SHOW_EDIT
+                                    )
+                                    val editButton = rememberViewModel("FooterEdit") {
+                                        viewModel.editModeButtonViewModelFactory.create()
+                                    }
+                                    if (showEdit) {
+                                        EditModeButton(
+                                            viewModel = editButton,
+                                            modifier = Modifier.padding(
+                                                start = dimensionResource(R.dimen.qs_content_horizontal_padding)
+                                            ),
+                                            isVisible = viewModel.isQsVisibleAndAnyShadeExpanded,
+                                        )
+                                    }
+                                }
+                                FooterActions(
+                                    viewModel = viewModel.footerActionsViewModel,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
                 }
