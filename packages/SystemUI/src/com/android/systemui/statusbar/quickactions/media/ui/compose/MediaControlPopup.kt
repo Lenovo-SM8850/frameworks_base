@@ -94,6 +94,32 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.sp
+import com.android.settingslib.widget.AdaptiveIcon
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
+import io.github.miner7222.systemui.lyrics.LyricTiming
 
 private val PopupShape = RoundedCornerShape(34.dp)
 private val ArtworkShape = RoundedCornerShape(24.dp)
@@ -614,5 +640,49 @@ private fun Modifier.squishAnimation(toggleCount: Int): Modifier {
     return this.graphicsLayer {
         this.scaleX = scaleX.value
         this.scaleY = scaleY.value
+    }
+}
+
+@Composable
+private fun MediaOutputChip(
+    model: MediaControlChipModel,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val name =
+        model.outputDevice?.name?.toString() ?: stringResource(R.string.media_seamless_other_device)
+    // The media card shows the same drawable; painting it here must not change its bounds.
+    val outputIcon = model.outputDevice?.icon
+    val icon =
+        remember(outputIcon) {
+            outputIcon?.let { drawable ->
+                val source = if (drawable is AdaptiveIcon) drawable.getDrawable(1) else drawable
+                UiIcon.Loaded(source.constantState?.newDrawable()?.mutate() ?: source, null)
+            }
+        } ?: UiIcon.Resource(R.drawable.ic_media_home_devices, null)
+    val foreground = LocalContentColor.current
+    Box(modifier = modifier.widthIn(max = 180.dp)) {
+        Row(
+            modifier =
+                Modifier.height(36.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(foreground.copy(alpha = 0.1f))
+                    .alpha(if (onClick != null) 1f else 0.38f)
+                    .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
+                    .semantics(mergeDescendants = true) { contentDescription = name }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UiIconView(icon = icon, modifier = Modifier.size(18.dp), tint = foreground)
+            Text(
+                text = name,
+                style = MaterialTheme.typography.labelMedium,
+                color = foreground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
+            )
+        }
     }
 }
