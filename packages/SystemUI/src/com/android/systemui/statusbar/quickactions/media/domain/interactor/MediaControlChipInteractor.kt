@@ -838,6 +838,10 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
             metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                 ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
         resolvedAtMs = SystemClock.elapsedRealtime(),
+        playbackSpeed =
+            if (playbackState != null && NotificationMediaManager.isPlayingState(playbackState.state))
+                playbackState.playbackSpeed
+            else 0f,
         durationMs = durationMs,
         positionMs = playbackState?.computeActualPosition(durationMs) ?: 0L,
         canSeek =
@@ -922,6 +926,8 @@ private data class PlaybackInfo(
     val canSeek: Boolean,
     val isPlaying: Boolean,
     val isPaused: Boolean,
+    /** Speed [positionMs] advances at, or 0 when the session is not playing. */
+    val playbackSpeed: Float = 0f,
     val playOrPause: MediaAction?,
     val nextAction: MediaAction?,
     val previousAction: MediaAction?,
@@ -950,6 +956,7 @@ private fun MediaControlChipModel.withPlaybackInfo(playbackInfo: PlaybackInfo?):
         durationMs = durationMs.takeIf { it > 0L } ?: playbackInfo.durationMs,
         positionMs = playbackInfo.positionMs,
         positionUpdatedAtMs = playbackInfo.resolvedAtMs,
+        playbackSpeed = playbackInfo.playbackSpeed,
         canBeScrubbed = canBeScrubbed || playbackInfo.canSeek,
         isPlaying = playbackInfo.isPlaying,
         isPaused = playbackInfo.isPaused,

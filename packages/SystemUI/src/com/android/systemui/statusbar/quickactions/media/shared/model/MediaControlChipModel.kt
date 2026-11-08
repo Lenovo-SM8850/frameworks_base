@@ -47,6 +47,7 @@ typealias MediaOutputSwitcherAction = (launchAfterHide: (() -> Unit) -> Unit) ->
         val syncedLyrics: String? = null,
         /** When [positionMs] was read, on the elapsedRealtime clock, or 0 if it is not known. */
         val positionUpdatedAtMs: Long = 0L,
+        val playbackSpeed: Float = 1f,
         /** Ends the session, or pauses it when the session can't be stopped. */
         val stop: (() -> Unit)? = null,
         val isAppVisible: Boolean = false,

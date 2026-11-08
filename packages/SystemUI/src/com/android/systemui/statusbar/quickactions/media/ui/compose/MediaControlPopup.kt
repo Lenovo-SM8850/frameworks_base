@@ -22,6 +22,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.DateUtils
 import android.widget.SeekBar
@@ -255,6 +256,8 @@ fun MediaControlPopup(
             if (model.durationMs > 0L) {
                 MediaProgressSection(
                     positionMs = model.positionMs,
+                    positionUpdatedAtMs = model.positionUpdatedAtMs,
+                    playbackSpeed = model.playbackSpeed,
                     durationMs = model.durationMs,
                     isPlaying = model.isPlaying,
                     canBeScrubbed = model.canBeScrubbed,
@@ -423,9 +426,28 @@ private fun MediaArtwork(model: MediaControlChipModel, artworkIcon: UiIcon?) {
     }
 }
 
+/** Position of a session reported at [updatedMs], advanced to [nowMs] at [speed] while playing. */
+private fun mediaPositionMs(
+    positionMs: Long,
+    updatedMs: Long,
+    nowMs: Long,
+    speed: Float,
+    playing: Boolean,
+    durationMs: Long,
+): Long {
+    val elapsed = if (playing && updatedMs > 0) (nowMs - updatedMs).coerceAtLeast(0) else 0
+    val value =
+        (positionMs.coerceAtLeast(0) + elapsed * (if (speed.isFinite()) speed.toDouble() else 0.0))
+            .toLong()
+            .coerceAtLeast(0)
+    return if (durationMs > 0) value.coerceAtMost(durationMs) else value
+}
+
 @Composable
 private fun MediaProgressSection(
     positionMs: Long,
+    positionUpdatedAtMs: Long,
+    playbackSpeed: Float,
     durationMs: Long,
     isPlaying: Boolean,
     canBeScrubbed: Boolean,
@@ -437,24 +459,37 @@ private fun MediaProgressSection(
     var displayedPositionMs by remember { mutableStateOf(positionMs.coerceIn(0L, durationMs)) }
     val currentSeekAction by rememberUpdatedState(onSeekTo)
 
-    LaunchedEffect(positionMs, durationMs, isPlaying, isScrubbing) {
+    LaunchedEffect(
+        positionMs,
+        positionUpdatedAtMs,
+        playbackSpeed,
+        durationMs,
+        isPlaying,
+        isScrubbing,
+    ) {
         if (isScrubbing) {
             return@LaunchedEffect
         }
 
-        displayedPositionMs = positionMs.coerceIn(0L, durationMs)
+        fun currentPosition() =
+            mediaPositionMs(
+                positionMs,
+                positionUpdatedAtMs,
+                SystemClock.elapsedRealtime(),
+                playbackSpeed,
+                isPlaying,
+                durationMs,
+            )
+        displayedPositionMs = currentPosition()
 
-        if (!isPlaying || durationMs <= 0L) {
+        if (!isPlaying || durationMs <= 0L || playbackSpeed == 0f || positionUpdatedAtMs <= 0L) {
             return@LaunchedEffect
         }
 
-        val startWallClockMs = System.currentTimeMillis()
-        val startPositionMs = displayedPositionMs
         while (!isScrubbing) {
             delay(250L)
-            val elapsedMs = System.currentTimeMillis() - startWallClockMs
-            displayedPositionMs = (startPositionMs + elapsedMs).coerceAtMost(durationMs)
-            if (displayedPositionMs >= durationMs) {
+            displayedPositionMs = currentPosition()
+            if (displayedPositionMs >= durationMs || displayedPositionMs <= 0L) {
                 break
             }
         }
