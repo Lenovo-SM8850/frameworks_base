@@ -132,6 +132,7 @@ import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.node.Ref
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -2018,7 +2019,7 @@ private fun DeviceChip(
                     Icon(
                         icon = viewModel.icon,
                         tint = style.contentColor,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(dimensionResource(R.dimen.qs_seamless_icon_size)),
                     )
                 }
                 AnimatedVisibility(visible = viewModel.text != null) {
