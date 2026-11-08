@@ -1193,6 +1193,10 @@ constructor(
             }
         }
 
+    internal fun onQsMediaHostChanged() {
+        updateDesiredLocation(forceNoAnimation = true)
+    }
+
     private fun updateHostAttachment() =
         traceSection("MediaHierarchyManager#updateHostAttachment") {
             if (MediaControlsInComposeFlag.isEnabled) return
@@ -1331,9 +1335,12 @@ constructor(
         // When communal showing while dreaming, skipQqsOnExpansion is also true but we want to
         // return the calculated location, so it won't disappear as soon as shade is pulled down.
         if (isCommunalShowing) return location
+        if (location == LOCATION_QS && getHost(LOCATION_QQS)?.isOnlyQsMediaHost == true) {
+            return LOCATION_QQS
+        }
         if (skipQqsOnExpansion) {
-            // When doing an immediate expand or collapse, we want to keep it in QS.
-            return LOCATION_QS
+            // When doing an immediate expand or collapse, keep the only host in QQS.
+            return if (getHost(LOCATION_QQS)?.isOnlyQsMediaHost == true) LOCATION_QQS else LOCATION_QS
         }
         return location
     }

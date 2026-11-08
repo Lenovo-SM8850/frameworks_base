@@ -211,6 +211,44 @@ class MediaHierarchyManagerTest : SysuiTestCase() {
     }
 
     @Test
+    fun onlyQsMediaHost_staysInQqsAndRestoresNormalRouting() {
+        whenever(qqsHost.isOnlyQsMediaHost).thenReturn(true)
+        mediaHierarchyManager.onQsMediaHostChanged()
+        clearInvocations(mediaCarouselController)
+        mediaHierarchyManager.qsExpansion = 1f
+        verify(mediaCarouselController, times(0))
+            .onDesiredLocationChanged(
+                eq(MediaHierarchyManager.LOCATION_QS),
+                any<MediaHostState>(),
+                anyBoolean(),
+                anyLong(),
+                anyLong(),
+            )
+
+        whenever(qqsHost.isOnlyQsMediaHost).thenReturn(false)
+        mediaHierarchyManager.onQsMediaHostChanged()
+        verify(mediaCarouselController)
+            .onDesiredLocationChanged(
+                eq(MediaHierarchyManager.LOCATION_QS),
+                any<MediaHostState>(),
+                anyBoolean(),
+                anyLong(),
+                anyLong(),
+            )
+        clearInvocations(mediaCarouselController)
+        whenever(qqsHost.isOnlyQsMediaHost).thenReturn(true)
+        mediaHierarchyManager.onQsMediaHostChanged()
+        verify(mediaCarouselController)
+            .onDesiredLocationChanged(
+                eq(MediaHierarchyManager.LOCATION_QQS),
+                any<MediaHostState>(),
+                anyBoolean(),
+                anyLong(),
+                anyLong(),
+            )
+    }
+
+    @Test
     fun testBlockedWhenScreenTurningOff() {
         // Let's set it onto QS:
         mediaHierarchyManager.qsExpansion = 1.0f

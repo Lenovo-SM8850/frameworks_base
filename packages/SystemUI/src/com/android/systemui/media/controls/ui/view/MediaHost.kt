@@ -52,6 +52,13 @@ class MediaHost(
 
     private var inited: Boolean = false
 
+    internal var isOnlyQsMediaHost: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (inited) mediaHierarchyManager.onQsMediaHostChanged()
+        }
+
     /** Are we listening to media data changes? */
     private var listeningToMediaData = false
 
