@@ -30,6 +30,9 @@ private const val QQS_BRIGHTNESS_FADE_END = 0.3f
 /** End of the progress range in which the QQS tiles fade out (ColorOS style). */
 private const val QQS_TILES_FADE_END = 0.3f
 
+internal fun colorOSQqsTileAlpha(expansion: Float): Float =
+    1f - FastOutLinearInEasing.transform((expansion / QQS_TILES_FADE_END).coerceIn(0f, 1f))
+
 /**
  * @param animateTilesExpansion whether the tiles morph from QQS to QS.
  * @param fadeOutBrightnessSlider whether the QQS brightness slider just fades out instead of

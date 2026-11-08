@@ -164,6 +164,7 @@ import com.android.systemui.qs.composefragment.SceneKeys.debugName
 import com.android.systemui.qs.composefragment.SceneKeys.toIdleSceneKey
 import com.android.systemui.qs.composefragment.ui.GridAnchor
 import com.android.systemui.qs.composefragment.ui.NotificationScrimClipParams
+import com.android.systemui.qs.composefragment.ui.colorOSQqsTileAlpha
 import com.android.systemui.qs.composefragment.ui.quickQuickSettingsToQuickSettings
 import com.android.systemui.qs.composefragment.ui.toEditMode
 import com.android.systemui.qs.composefragment.viewmodel.QSFragmentComposeViewModel
@@ -188,6 +189,7 @@ import com.android.systemui.qs.panels.ui.compose.TileGrid
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSBackdrop
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalQsBrightness
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingQsOsColors
@@ -200,6 +202,7 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.NothingSliderKind
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingLayout
 import com.android.systemui.qs.panels.ui.compose.QsStyleSliderFrame
 import com.android.systemui.qs.panels.ui.compose.qsSliderStyle
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.toolbar.EditModeButton
 import com.android.systemui.qs.pipeline.shared.TileSpec
 import com.android.systemui.qs.shared.ui.QuickSettings.Elements
@@ -876,6 +879,7 @@ constructor(
         val qqsPadding = viewModel.qqsHeaderHeight
         val bottomPadding = viewModel.qqsBottomPadding
         val colorOSStyle = LocalColorOSQsStyle.current
+        val launchProgress by shadeAnimationInteractor.launchProgress.collectAsStateWithLifecycle()
         DisposableEffect(colorOSStyle) {
             viewModel.qqsMediaHost.isOnlyQsMediaHost = colorOSStyle
             onDispose { viewModel.qqsMediaHost.isOnlyQsMediaHost = false }
@@ -931,10 +935,26 @@ constructor(
                         .let { state -> { state.value } }
                 val Tiles =
                     @Composable {
-                        QuickQuickSettings(
-                            viewModel = viewModel.quickQuickSettingsViewModel,
-                            listening = isListening,
-                        )
+                        val glassBlur =
+                            if (colorOSStyle) {
+                                rememberColorOSGlassBlur {
+                                    if (isListening()) {
+                                        viewModel.viewAlpha * colorOSLaunchGlassFade(launchProgress) *
+                                            colorOSQqsTileAlpha(viewModel.expansionState.progress) *
+                                            (QuickQuickSettings.rootElementKey.currentAlpha() ?: 1f)
+                                    } else {
+                                        0f
+                                    }
+                                }
+                            } else {
+                                null
+                            }
+                        CompositionLocalProvider(LocalColorOSGlassBlur provides glassBlur) {
+                            QuickQuickSettings(
+                                viewModel = viewModel.quickQuickSettingsViewModel,
+                                listening = isListening,
+                            )
+                        }
                     }
                 val Media =
                     @Composable {
