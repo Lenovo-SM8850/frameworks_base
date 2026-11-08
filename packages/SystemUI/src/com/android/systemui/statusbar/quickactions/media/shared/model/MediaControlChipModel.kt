@@ -16,8 +16,10 @@
 
 package com.android.systemui.statusbar.quickactions.media.shared.model
 
+import android.media.session.MediaSession
 import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.media.controls.shared.model.MediaAction
+
 
 /** Model used to display and control media from the status bar island. */
     data class MediaControlChipModel(
@@ -40,5 +42,9 @@ import com.android.systemui.media.controls.shared.model.MediaAction
         val syncedLyrics: String? = null,
         /** When [positionMs] was read, on the elapsedRealtime clock, or 0 if it is not known. */
         val positionUpdatedAtMs: Long = 0L,
+        /** Ends the session, or pauses it when the session can't be stopped. */
+        val stop: (() -> Unit)? = null,
         val isAppVisible: Boolean = false,
+        val sessionToken: MediaSession.Token? = null,
+        val isPaused: Boolean = !isPlaying,
 )

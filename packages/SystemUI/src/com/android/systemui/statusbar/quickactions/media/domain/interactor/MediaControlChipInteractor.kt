@@ -453,6 +453,7 @@ private fun MediaDataModel.toMediaControlState(
         model =
             MediaControlChipModel(
                 packageName = packageName,
+                sessionToken = token,
                 appIcon = appIcon,
                 artworkIcon = background ?: appIcon,
                 appName = appName,
@@ -469,10 +470,12 @@ private fun MediaDataModel.toMediaControlState(
                         keyguardStateController = keyguardStateController,
                     ),
                 seekTo = token.toSeekAction(context),
+                stop = token.toStopAction(context),
                 durationMs = durationMs,
                 positionMs = positionMs,
                 canBeScrubbed = canBeScrubbed,
                 isPlaying = state is MediaSessionState.Playing || state is MediaSessionState.Buffering,
+                isPaused = state is MediaSessionState.Paused,
             ),
         token = token,
         appUid = appUid,
@@ -525,6 +528,7 @@ private fun MediaData.toMediaControlState(
         model =
             MediaControlChipModel(
                 packageName = packageName,
+                sessionToken = token,
                 appIcon = appIcon,
                 artworkIcon = artworkIcon,
                 appName = app,
@@ -535,10 +539,12 @@ private fun MediaData.toMediaControlState(
                 previousAction = previousAction,
                 openApp = openApp,
                 seekTo = token.toSeekAction(context),
+                stop = token.toStopAction(context),
                 durationMs = 0L,
                 positionMs = 0L,
                 canBeScrubbed = false,
                 isPlaying = playOrPauseAction.isPauseAction(),
+                isPaused = token == null && this.isPlaying == false,
             ),
         token = token,
         appUid = appUid,
@@ -616,6 +622,24 @@ private fun MediaSession.Token?.toSeekAction(context: Context): ((Long) -> Unit)
                 MediaController(context, token)
                     .transportControls
                     .seekTo(targetPositionMs.coerceAtLeast(0L))
+            }
+        }
+    }
+}
+
+private fun MediaSession.Token?.toStopAction(context: Context): (() -> Unit)? {
+    return this?.let { token ->
+        {
+            runCatching {
+                val controller = MediaController(context, token)
+                val supportsStop =
+                    controller.playbackState?.supportsPlaybackAction(PlaybackState.ACTION_STOP) ==
+                        true
+                if (supportsStop) {
+                    controller.transportControls.stop()
+                } else {
+                    controller.transportControls.pause()
+                }
             }
         }
     }
@@ -738,6 +762,7 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
         canSeek =
             (playbackState?.actions?.and(PlaybackState.ACTION_SEEK_TO) != 0L || durationMs > 0L) && durationMs > 0L,
         isPlaying = isPlaying,
+        isPaused = playbackState?.state == PlaybackState.STATE_PAUSED,
         playOrPause = playOrPauseAction,
         nextAction = nextAction,
         previousAction = previousAction,
@@ -815,6 +840,7 @@ private data class PlaybackInfo(
     val positionMs: Long,
     val canSeek: Boolean,
     val isPlaying: Boolean,
+    val isPaused: Boolean,
     val playOrPause: MediaAction?,
     val nextAction: MediaAction?,
     val previousAction: MediaAction?,
@@ -843,5 +869,6 @@ private fun MediaControlChipModel.withPlaybackInfo(playbackInfo: PlaybackInfo?):
         positionUpdatedAtMs = playbackInfo.resolvedAtMs,
         canBeScrubbed = canBeScrubbed || playbackInfo.canSeek,
         isPlaying = playbackInfo.isPlaying,
+        isPaused = playbackInfo.isPaused,
     )
 }

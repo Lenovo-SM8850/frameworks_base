@@ -16,6 +16,7 @@
 
 package com.android.systemui.statusbar.quickactions.media.ui.viewmodel
 
+import android.media.session.MediaSession
 import android.content.applicationContext
 import android.platform.test.flag.junit.FlagsParameterization
 import android.provider.Settings
@@ -158,6 +159,79 @@ class MediaControlChipViewModelTest(flags: FlagsParameterization) : SysuiTestCas
             assertThat(chip).isInstanceOf(QuickActionChipModel.PopupChip::class.java)
             val media = (chip as QuickActionChipModel.PopupChip).popupContent
             assertThat((media as PopupContentModel.Media).model.isPlaying).isFalse()
+        }
+
+    @Test
+    fun chip_dismissed_visibilityRoundTrip_staysHidden() =
+        kosmos.runTest {
+            val userMedia = MediaData(active = true, appUid = 1012345, song = "test")
+            updateMedia(userMedia)
+            runCurrent()
+            (underTest.chip as QuickActionChipModel.PopupChip).onDismissed?.invoke()
+            runCurrent()
+            assertThat(underTest.chip).isInstanceOf(QuickActionChipModel.Hidden::class.java)
+
+            kosmos.activityManagerRepository.setIsAppVisible(userMedia.appUid, true)
+            runCurrent()
+            assertThat(underTest.chip).isInstanceOf(QuickActionChipModel.Hidden::class.java)
+            kosmos.activityManagerRepository.setIsAppVisible(userMedia.appUid, false)
+            runCurrent()
+            assertThat(underTest.chip).isInstanceOf(QuickActionChipModel.Hidden::class.java)
+        }
+
+    @Test
+    fun chip_dismissed_trackChangeStaysHidden_pauseThenPlayShowsAgain() =
+        kosmos.runTest {
+            val playing = MediaData(
+                active = true,
+                packageName = "test.player",
+                song = "first",
+                isPlaying = true,
+                semanticActions = MediaButton(playOrPause = mediaPauseActionButton),
+            )
+            updateMedia(playing)
+            runCurrent()
+            (underTest.chip as QuickActionChipModel.PopupChip).onDismissed?.invoke()
+            runCurrent()
+            updateMedia(playing.copy(song = "second"))
+            runCurrent()
+            assertThat(underTest.chip).isInstanceOf(QuickActionChipModel.Hidden::class.java)
+            updateMedia(playing.copy(
+                isPlaying = false,
+                semanticActions = MediaButton(playOrPause = mediaPlayActionButton),
+            ))
+            runCurrent()
+            assertThat(underTest.chip).isInstanceOf(QuickActionChipModel.Hidden::class.java)
+            updateMedia(playing)
+            runCurrent()
+            assertThat(underTest.chip).isInstanceOf(QuickActionChipModel.PopupChip::class.java)
+        }
+
+    @Test
+    fun chip_dismissed_differentSessionInSameAppShowsAgain() =
+        kosmos.runTest {
+            val first = MediaSession(context, "first")
+            val second = MediaSession(context, "second")
+            try {
+                val playing = MediaData(
+                    active = true,
+                    packageName = "test.player",
+                    token = first.sessionToken,
+                    song = "first",
+                    isPlaying = true,
+                    semanticActions = MediaButton(playOrPause = mediaPauseActionButton),
+                )
+                updateMedia(playing)
+                runCurrent()
+                (underTest.chip as QuickActionChipModel.PopupChip).onDismissed?.invoke()
+                runCurrent()
+                updateMedia(playing.copy(token = second.sessionToken))
+                runCurrent()
+                assertThat(underTest.chip).isInstanceOf(QuickActionChipModel.PopupChip::class.java)
+            } finally {
+                first.release()
+                second.release()
+            }
         }
 
     private fun updateMedia(mediaData: MediaData) {
