@@ -923,6 +923,46 @@ class ShadeHeaderControllerTest : SysuiTestCase() {
     }
 
     @Test
+    fun carrierStartPaddingIsKeptOutsideColorOSStyle() {
+        whenever(carrierGroup.paddingStart).thenReturn(300)
+        val captor = ArgumentCaptor.forClass(View.OnLayoutChangeListener::class.java)
+        verify(carrierGroup, times(2)).addOnLayoutChangeListener(capture(captor))
+
+        carrierGroup.executeLayoutChange(0, 0, 100, 30, captor.allValues.last())
+
+        verify(carrierGroup, Mockito.never()).setPaddingRelative(0, 0, 0, 0)
+    }
+
+    @Test
+    fun colorOSCarrierGap_matchesDateMarginOnlyWithVisibleText() {
+        val carrierText = TextView(context).apply { text = "KT" }
+        whenever(carrierGroup.childCount).thenReturn(1)
+        whenever(carrierGroup.getChildAt(0)).thenReturn(carrierText)
+        val dateConstraint = ConstraintSet.Constraint().apply { layout.startMargin = 24 }
+        whenever(largeScreenConstraints.getConstraint(R.id.date)).thenReturn(dateConstraint)
+        shadeHeaderController.onTuningChanged(ShadeHeaderController.QS_PANEL_STYLE, "2")
+        shadeHeaderController.largeScreenActive = true
+        val captor = ArgumentCaptor.forClass(View.OnLayoutChangeListener::class.java)
+        verify(carrierGroup, times(2)).addOnLayoutChangeListener(capture(captor))
+        val spacingListener = captor.allValues.last()
+        Mockito.clearInvocations(carrierGroup)
+        carrierGroup.executeLayoutChange(0, 0, 100, 30, spacingListener)
+        verify(carrierGroup).setPaddingRelative(24, 0, 0, 0)
+
+        whenever(carrierGroup.paddingStart).thenReturn(24)
+        carrierText.text = ""
+        Mockito.clearInvocations(carrierGroup)
+        carrierGroup.executeLayoutChange(0, 0, 0, 30, spacingListener)
+        verify(carrierGroup).setPaddingRelative(0, 0, 0, 0)
+
+        carrierText.text = "KT"
+        whenever(date.visibility).thenReturn(View.GONE)
+        Mockito.clearInvocations(carrierGroup)
+        carrierGroup.executeLayoutChange(0, 0, 100, 30, spacingListener)
+        verify(carrierGroup).setPaddingRelative(0, 0, 0, 0)
+    }
+
+    @Test
     fun launchClock_launchesDefaultIntentWhenNoAlarmSet() {
         shadeHeaderController.launchClockActivity()
 

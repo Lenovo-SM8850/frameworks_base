@@ -303,6 +303,9 @@ constructor(
     /** Whether the ColorOS QS panel style is on, which gives the expanded header one row. */
     private var colorOSStyle = false
     private var qsClockStyle = 0
+    private val carrierSpacingListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+        updateCarrierTextGap()
+    }
 
     private val demoModeReceiver =
         object : DemoMode {
@@ -522,6 +525,8 @@ constructor(
         statusBarIconController.addIconGroup(iconManager)
         systemIconsHoverContainer.addOnLayoutChangeListener(statusBoundsListener)
         mShadeCarrierGroup.addOnLayoutChangeListener(statusBoundsListener)
+        mShadeCarrierGroup.addOnLayoutChangeListener(carrierSpacingListener)
+        date.addOnLayoutChangeListener(carrierSpacingListener)
         QsHeaderImageTint.addStatusListener(headerImageTintListener)
         nextAlarmController.addCallback(nextAlarmCallback)
         systemIconsHoverContainer.setOnHoverListener(
@@ -545,6 +550,8 @@ constructor(
         statusBarIconController.removeIconGroup(iconManager)
         systemIconsHoverContainer.removeOnLayoutChangeListener(statusBoundsListener)
         mShadeCarrierGroup.removeOnLayoutChangeListener(statusBoundsListener)
+        mShadeCarrierGroup.removeOnLayoutChangeListener(carrierSpacingListener)
+        date.removeOnLayoutChangeListener(carrierSpacingListener)
         QsHeaderImageTint.removeStatusListener(headerImageTintListener)
         nextAlarmController.removeCallback(nextAlarmCallback)
         systemIconsHoverContainer.setOnHoverListener(null)
@@ -660,6 +667,27 @@ constructor(
                 } else {
                     Gravity.END or Gravity.CENTER_VERTICAL
                 }
+            updateCarrierTextGap()
+        }
+    }
+
+    private fun updateCarrierTextGap() {
+        // The other styles keep the padding that updateCarrierGroupPadding() sets from the clock.
+        if (!colorOSStyle) return
+        val gap =
+            carrierTextGapPx(
+                colorOSStyle = colorOSStyle,
+                largeScreenActive = largeScreenActive,
+                dateVisible = date.visibility == View.VISIBLE,
+                carrierVisible = hasVisibleCarrierText(mShadeCarrierGroup),
+                dateStartMarginPx =
+                    header.getConstraintSet(LARGE_SCREEN_HEADER_CONSTRAINT)
+                        .getConstraint(R.id.date)
+                        ?.layout
+                        ?.startMargin ?: 0,
+            )
+        if (mShadeCarrierGroup.paddingStart != gap) {
+            mShadeCarrierGroup.setPaddingRelative(gap, 0, 0, 0)
         }
     }
 
@@ -768,6 +796,7 @@ constructor(
     }
 
     private fun updatePosition() {
+        updateCarrierTextGap()
         if (!largeScreenActive && visible) {
             logInstantEvent("updatePosition: $qsExpandedFraction")
             header.progress = qsExpandedFraction
@@ -876,3 +905,30 @@ constructor(
         }
     }
 }
+
+/** Whether a carrier group shows any text at all; the group itself stays laid out when empty. */
+internal fun hasVisibleCarrierText(view: View): Boolean =
+    when {
+        view.visibility != View.VISIBLE -> false
+        view is TextView -> !view.text.isNullOrBlank()
+        view is ViewGroup ->
+            (0 until view.childCount).any { hasVisibleCarrierText(view.getChildAt(it)) }
+        else -> false
+    }
+
+/**
+ * Start padding that keeps the carrier clear of the date in the one-row ColorOS header: the date
+ * start margin when both are visible on a large screen, otherwise none.
+ */
+internal fun carrierTextGapPx(
+    colorOSStyle: Boolean,
+    largeScreenActive: Boolean,
+    dateVisible: Boolean,
+    carrierVisible: Boolean,
+    dateStartMarginPx: Int,
+): Int =
+    if (colorOSStyle && largeScreenActive && dateVisible && carrierVisible) {
+        dateStartMarginPx.coerceAtLeast(0)
+    } else {
+        0
+    }
