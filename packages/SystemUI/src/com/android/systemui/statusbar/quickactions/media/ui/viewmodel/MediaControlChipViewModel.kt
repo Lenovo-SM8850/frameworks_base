@@ -61,7 +61,7 @@ constructor(
             model: MediaControlChipModel?,
             useWaveform: Boolean = false,
         ): QuickActionChipModel {
-        if (model == null || model.songName.isNullOrEmpty()) {
+        if (model == null || model.isAppVisible || model.songName.isNullOrEmpty()) {
             return QuickActionChipModel.Hidden(QuickActionChipId.MediaControl)
         }
 
