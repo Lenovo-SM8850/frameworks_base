@@ -154,6 +154,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandStart
 import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandAvoidsAppHandles
 import com.android.systemui.statusbar.quickactions.ui.compose.dynamicIslandCameraCenterOffsetYPx
 import com.android.systemui.statusbar.quickactions.ui.compose.resolveDynamicIslandAnchor
+import com.android.wm.shell.shared.handles.DynamicIslandTouchRegion
 import com.android.systemui.statusbar.quickactions.ui.compose.resolveDynamicIslandCutoutEdge
 import com.android.systemui.statusbar.pipeline.shared.ui.view.SystemStatusIconsLayoutHelper
 import com.android.systemui.statusbar.pipeline.shared.ui.viewmodel.HomeStatusBarViewModel
@@ -432,6 +433,26 @@ fun StatusBarRoot(
                         overlapDotParentRef,
                         effective,
                     )
+                    // The island takes touches in its whole column, so the app handle behind it
+                    // cannot be hit through the gap above it. While its popup is open the island
+                    // is gone and the visible handle takes touches again.
+                    val root = phoneStatusBarView.rootView
+                    val origin = IntArray(2)
+                    root.getLocationOnScreen(origin)
+                    val touchRegion =
+                        if (effective.isEmpty) {
+                            Rect()
+                        } else {
+                            Rect(effective.left, 0, effective.right, effective.bottom).apply {
+                                offset(origin[0], origin[1])
+                            }
+                        }
+                    // The island is placed after this window computed its touchable region, which
+                    // must take in the part below the status bar. Recompute it once the current
+                    // layout pass has finished.
+                    if (DynamicIslandTouchRegion.update(context.displayId, touchRegion)) {
+                        root.post { root.requestLayout() }
+                    }
                     lyricContainer?.keepClearOfIsland(effective)
                 }
 
@@ -778,6 +799,7 @@ fun StatusBarRoot(
                     ViewTreeObserver.OnGlobalLayoutListener {
                         if (!composeView.isShown) {
                             islandBoundsState.value = Rect()
+                            DynamicIslandTouchRegion.update(context.displayId, Rect())
                             collapseOverlappingStatusIcons(
                                 statusIconContainerRef,
                                 overlapDotParentRef,
@@ -796,6 +818,7 @@ fun StatusBarRoot(
                             centeredArea.viewTreeObserver.removeOnGlobalLayoutListener(
                                 islandVisibilityResetListener
                             )
+                            DynamicIslandTouchRegion.update(context.displayId, Rect())
                         }
                     }
                 )
