@@ -48,11 +48,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -70,6 +72,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.approachLayout
@@ -137,9 +140,13 @@ import com.android.systemui.lifecycle.rememberViewModel
 import com.android.systemui.lifecycle.repeatWhenAttached
 import com.android.systemui.lifecycle.setSnapshotBinding
 import com.android.systemui.log.table.TableLogBuffer
-import com.android.systemui.media.controls.domain.pipeline.MediaDataManager
+import com.android.systemui.media.controls.shared.model.MediaData
+import com.android.systemui.media.controls.ui.controller.MediaCarouselController
 import com.android.systemui.media.controls.ui.view.MediaHost
+import com.android.systemui.media.controls.ui.view.MediaHostState
 import com.android.systemui.media.dialog.MediaOutputDialogManager
+import com.android.systemui.media.remedia.data.repository.MediaPipelineRepository
+import com.android.systemui.media.remedia.data.repository.MediaRepository
 import com.android.systemui.media.remedia.shared.flag.MediaControlsInComposeFlag
 import com.android.systemui.media.remedia.ui.compose.Media
 import com.android.systemui.media.remedia.ui.compose.MediaPresentationStyle
@@ -154,6 +161,7 @@ import com.android.systemui.qs.composefragment.SceneKeys.debugName
 import com.android.systemui.qs.composefragment.SceneKeys.toIdleSceneKey
 import com.android.systemui.qs.composefragment.ui.GridAnchor
 import com.android.systemui.qs.composefragment.ui.NotificationScrimClipParams
+import com.android.systemui.qs.composefragment.ui.colorOSQqsTileAlpha
 import com.android.systemui.qs.composefragment.ui.quickQuickSettingsToQuickSettings
 import com.android.systemui.qs.composefragment.ui.toEditMode
 import com.android.systemui.qs.composefragment.viewmodel.QSFragmentComposeViewModel
@@ -166,18 +174,22 @@ import com.android.systemui.qs.panels.ui.compose.TileGrid
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSBackdrop
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingQsOsColors
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingSliderContent
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.NothingSliderKind
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingLayout
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSColorOSMediaArtFill
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSColorOSStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSNothingOsColors
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberQSNothingStyle
 import com.android.systemui.qs.panels.ui.compose.toolbar.EditModeButton
+import com.android.systemui.qs.pipeline.shared.TileSpec
 import com.android.systemui.qs.shared.ui.QuickSettings.Elements
+import com.android.systemui.qs.shared.ui.QuickSettings.Elements.toElementKey
 import com.android.systemui.qs.ui.composable.QuickSettingsShade
 import com.android.systemui.qs.ui.composable.QuickSettingsShade.systemGestureExclusionInShade
 import com.android.systemui.qs.ui.composable.QuickSettingsTheme
@@ -217,7 +229,9 @@ constructor(
     @ShadeDisplayAware private val configurationController: ConfigurationController,
     private val infiniteGridLayout: InfiniteGridLayout,
     private val audioVolumeInteractor: AudioVolumeInteractor,
-    private val mediaDataManager: MediaDataManager,
+    private val mediaCarouselController: dagger.Lazy<MediaCarouselController>,
+    private val mediaRepository: dagger.Lazy<MediaRepository>,
+    private val mediaPipelineRepository: dagger.Lazy<MediaPipelineRepository>,
     private val activityStarter: ActivityStarter,
     private val mediaOutputDialogManager: MediaOutputDialogManager,
     private val shadeAnimationInteractor: ShadeAnimationInteractor,
@@ -253,9 +267,6 @@ constructor(
      */
     private var colorOSContentFits by mutableStateOf(true)
 
-    /** Media sessions for the ColorOS-style QS media card. */
-    private val colorOSMediaSessions = ColorOSMediaSessions()
-
     /**
      * The portrait ColorOS layout shrinks to fit, so QS never scrolls and a swipe up always
      * collapses it. When it cannot fit, and in landscape where the panel is too short, it scrolls
@@ -281,12 +292,6 @@ constructor(
 
         setListenerCollections()
         lifecycleScope.launch { viewModel.activate() }
-        mediaDataManager.addListener(colorOSMediaSessions)
-    }
-
-    override fun onDestroy() {
-        mediaDataManager.removeListener(colorOSMediaSessions)
-        super.onDestroy()
     }
 
     override fun onCreateView(
@@ -795,9 +800,31 @@ constructor(
     }
 
     @Composable
+    private fun currentColorOSMedia(): MediaData? {
+        if (MediaControlsInComposeFlag.isEnabled) {
+            val entries by
+                mediaPipelineRepository.get().currentUserEntries.collectAsStateWithLifecycle()
+            val repository = mediaRepository.get()
+            val sessions = repository.currentMedia.filterNot { it.needsImmediateRemoval }
+            val selected =
+                sessions.getOrNull(repository.currentCarouselIndex) ?: sessions.firstOrNull()
+            return selected?.let { entries[it.instanceId] }
+        }
+        val selected by
+            mediaCarouselController.get().selectedMediaData.collectAsStateWithLifecycle()
+        return selected
+    }
+
+    @Composable
     private fun ContentScope.QuickQuickSettingsElement(modifier: Modifier = Modifier) {
         val qqsPadding = viewModel.qqsHeaderHeight
         val bottomPadding = viewModel.qqsBottomPadding
+        val colorOSStyle = LocalColorOSQsStyle.current
+        val launchProgress by shadeAnimationInteractor.launchProgress.collectAsStateWithLifecycle()
+        DisposableEffect(colorOSStyle) {
+            viewModel.qqsMediaHost.isOnlyQsMediaHost = colorOSStyle
+            onDispose { viewModel.qqsMediaHost.isOnlyQsMediaHost = false }
+        }
         DisposableEffect(Unit) {
             qqsVisible.value = true
 
@@ -849,34 +876,75 @@ constructor(
                         .let { state -> { state.value } }
                 val Tiles =
                     @Composable {
-                        QuickQuickSettings(
-                            viewModel = viewModel.quickQuickSettingsViewModel,
-                            listening = isListening,
-                        )
+                        val glassBlur =
+                            if (colorOSStyle) {
+                                rememberColorOSGlassBlur {
+                                    if (isListening()) {
+                                        viewModel.viewAlpha * colorOSLaunchGlassFade(launchProgress) *
+                                            colorOSQqsTileAlpha(viewModel.expansionState.progress) *
+                                            (QuickQuickSettings.rootElementKey.currentAlpha() ?: 1f)
+                                    } else {
+                                        0f
+                                    }
+                                }
+                            } else {
+                                null
+                            }
+                        CompositionLocalProvider(LocalColorOSGlassBlur provides glassBlur) {
+                            QuickQuickSettings(
+                                viewModel = viewModel.quickQuickSettingsViewModel,
+                                listening = isListening,
+                            )
+                        }
                     }
                 val Media =
                     @Composable {
                         if (viewModel.qqsMediaVisible) {
-                            MediaObject(
-                                // In order to have stable constraints passed to the AndroidView
-                                // during expansion (available height changing due to squishiness),
-                                // We always allow the media here to be as tall as it wants.
-                                // (b/383085298)
-                                modifier = Modifier.requiredHeightIn(max = Dp.Infinity),
-                                mediaHost = viewModel.qqsMediaHost,
-                                mediaPresentationStyle =
-                                    if (viewModel.qqsMediaInRow) {
-                                        MediaPresentationStyle.Compressed
-                                    } else {
-                                        MediaPresentationStyle.Default
-                                    },
-                                onSwipeToDismiss = viewModel::onMediaSwipeToDismiss,
-                                mediaViewModelFactory = viewModel.mediaViewModelFactory,
-                                behavior = viewModel.qqsMediaUiBehavior,
-                                visible = isListening,
-                                location = Media.Location.SHADE,
-                                expansion = { viewModel.expansionState.progress },
-                            )
+                            val mediaHeight =
+                                if (MediaControlsInComposeFlag.isEnabled) {
+                                    if (viewModel.qqsMediaInRow) Media.COMPRESSED_HEIGHT
+                                    else Media.DEFAULT_HEIGHT
+                                } else {
+                                    dimensionResource(
+                                        if (viewModel.qqsMediaExpansion == MediaHostState.COLLAPSED) {
+                                            R.dimen.qs_media_session_height_collapsed
+                                        } else R.dimen.qs_media_session_height_expanded
+                                    )
+                                }
+                            val media = @Composable {
+                                MediaObject(
+                                    // In order to have stable constraints passed to the AndroidView
+                                    // during expansion (available height changing due to squishiness),
+                                    // We always allow the media here to be as tall as it wants.
+                                    // (b/383085298)
+                                    modifier =
+                                        if (colorOSStyle) {
+                                            Modifier.fillMaxWidth()
+                                                .wrapContentHeight(Alignment.Top, unbounded = true)
+                                                .height(mediaHeight)
+                                        } else Modifier.requiredHeightIn(max = Dp.Infinity),
+                                    mediaHost = viewModel.qqsMediaHost,
+                                    mediaPresentationStyle =
+                                        if (viewModel.qqsMediaInRow) {
+                                            MediaPresentationStyle.Compressed
+                                        } else {
+                                            MediaPresentationStyle.Default
+                                        },
+                                    onSwipeToDismiss = viewModel::onMediaSwipeToDismiss,
+                                    mediaViewModelFactory = viewModel.mediaViewModelFactory,
+                                    behavior = viewModel.qqsMediaUiBehavior,
+                                    visible = isListening,
+                                    location = Media.Location.SHADE,
+                                    expansion = { if (colorOSStyle) 0f else viewModel.expansionState.progress },
+                                )
+                            }
+                            if (colorOSStyle) {
+                                Element(ColorOSQqsMediaElement, Modifier) {
+                                    ColorOSQqsMediaFrame(mediaHeight, media)
+                                }
+                            } else {
+                                media()
+                            }
                         }
                     }
 
@@ -992,6 +1060,7 @@ constructor(
                                 .sysuiResTag(ResIdTags.qsScroll)
                     ) {
                         val containerViewModel = viewModel.containerViewModel
+                        val colorOSMedia = currentColorOSMedia()
                         // The room of the ColorOS header is part of the panel, which draws the
                         // buttons in it.
                         Spacer(
@@ -1087,40 +1156,14 @@ constructor(
                                         audioVolumeInteractor = audioVolumeInteractor,
                                         showMedia =
                                             viewModel.qsMediaVisible &&
-                                                colorOSMediaSessions.current != null,
-                                        mediaHost = { hostModifier ->
-                                            // The stock QS media host stays in the slot, hidden
-                                            // under the ColorOS card, so the stock media
-                                            // animation from QQS lands here instead of flying
-                                            // off to the top of the screen.
-                                            if (viewModel.qsMediaVisible) {
-                                                MediaObject(
-                                                    mediaHost = viewModel.qsMediaHost,
-                                                    modifier =
-                                                        hostModifier.graphicsLayer { alpha = 0f },
-                                                    mediaViewModelFactory =
-                                                        viewModel.mediaViewModelFactory,
-                                                    mediaPresentationStyle =
-                                                        MediaPresentationStyle.Compressed,
-                                                    onSwipeToDismiss =
-                                                        viewModel::onMediaSwipeToDismiss,
-                                                    behavior = viewModel.qsMediaUiBehavior,
-                                                    visible = isListening,
-                                                    // Fully qualified: the local `Media` lambda
-                                                    // shadows the class here.
-                                                    location =
-                                                        com.android.systemui.media.remedia.ui
-                                                            .compose.Media.Location.QS,
-                                                    expansion = { 0f },
-                                                )
-                                            }
-                                        },
-                                        media = { mediaModifier ->
-                                            colorOSMediaSessions.current?.let { data ->
+                                                colorOSMedia != null,
+                                        media = { mediaModifier, extraHeight ->
+                                            colorOSMedia?.let { data ->
                                                 val colorOSArtFill = rememberQSColorOSMediaArtFill()
                                                 ColorOSMediaCard(
                                                     data = data,
                                                     artFill = colorOSArtFill,
+                                                    extraHeight = extraHeight,
                                                     onOpen = { intent ->
                                                         activityStarter
                                                             .postStartActivityDismissingKeyguard(
@@ -1756,6 +1799,11 @@ private interface CanScrollQs {
 }
 
 @Composable
+internal fun ColorOSQqsMediaFrame(height: Dp, media: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth().height(height).clipToBounds()) { media() }
+}
+
+@Composable
 private fun ContentScope.MediaObject(
     mediaHost: MediaHost,
     modifier: Modifier = Modifier,
@@ -1794,6 +1842,7 @@ private fun ContentScope.MediaObject(
                 modifier = modifier,
                 factory = {
                     mediaHost.hostView.apply {
+                        (parent as? ViewGroup)?.removeView(this)
                         layoutParams =
                             FrameLayout.LayoutParams(
                                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1993,3 +2042,5 @@ private data class QsBrightnessSettings(
     val sliderAtTop: Boolean,
     val showSlider: Int,
 )
+
+internal val ColorOSQqsMediaElement = TileSpec.create("coloros_qqs_media").toElementKey()
