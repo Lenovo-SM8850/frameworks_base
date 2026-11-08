@@ -22,6 +22,7 @@ import com.android.systemui.Prefs
 import com.android.systemui.dagger.qualifiers.Application
 import com.android.systemui.screencapture.common.ScreenCaptureScope
 import com.android.systemui.screenrecord.ScreenRecordingAudioSource
+import com.android.systemui.screenrecord.shared.model.ScreenRecordingParameters
 import com.android.systemui.settings.UserTracker
 import javax.inject.Inject
 
@@ -33,7 +34,7 @@ constructor(@Application private val context: Context, private val userTracker: 
     private val userContext: Context
         get() = context.createContextAsUser(userTracker.userHandle, 0)
 
-    private val audioSourceState = mutableStateOf(loadAudioSource())
+    private val audioSourceState = mutableStateOf(loadAudioSource(userContext))
     var audioSource: ScreenRecordingAudioSource
         get() = audioSourceState.value
         set(value) {
@@ -101,14 +102,6 @@ constructor(@Application private val context: Context, private val userTracker: 
             Prefs.putInt(userContext, PREF_KEEP_AWAKE, if (value) 1 else 0)
         }
 
-    private fun loadAudioSource(): ScreenRecordingAudioSource {
-        val useAudio = Prefs.getInt(userContext, PREF_AUDIO, 0) == 1
-        if (!useAudio) return ScreenRecordingAudioSource.NONE
-        val pos = Prefs.getInt(userContext, PREF_AUDIO_SOURCE, 0)
-        val values = ScreenRecordingAudioSource.values()
-        return if (pos >= 0 && pos < values.size) values[pos] else ScreenRecordingAudioSource.NONE
-    }
-
     private fun saveAudioSource(value: ScreenRecordingAudioSource) {
         val useAudio = value != ScreenRecordingAudioSource.NONE
         Prefs.putInt(userContext, PREF_AUDIO, if (useAudio) 1 else 0)
@@ -126,5 +119,29 @@ constructor(@Application private val context: Context, private val userTracker: 
         private const val PREF_AUDIO_SOURCE = "screenrecord_audio_source"
         private const val PREF_HEVC = "screenrecord_use_hevc"
         private const val PREF_KEEP_AWAKE = "screenrecord_keep_screen_awake"
+
+        /** The options last chosen in the recording UI, for a recording started without it. */
+        @JvmStatic
+        fun lastParameters(userContext: Context, displayId: Int) =
+            ScreenRecordingParameters(
+                captureTarget = null,
+                audioSource = loadAudioSource(userContext),
+                displayId = displayId,
+                shouldShowTaps = Prefs.getInt(userContext, PREF_TAPS, 0) == 1,
+                lowQuality = Prefs.getInt(userContext, PREF_LOW, 0) == 1,
+                longerDuration = Prefs.getInt(userContext, PREF_LONGER, 0) == 1,
+                hevc = Prefs.getInt(userContext, PREF_HEVC, 0) == 1,
+                keepScreenAwake = Prefs.getInt(userContext, PREF_KEEP_AWAKE, 0) == 1,
+                shouldShowFrontCamera = Prefs.getInt(userContext, PREF_FRONT_CAMERA, 0) == 1,
+            )
+
+        private fun loadAudioSource(userContext: Context): ScreenRecordingAudioSource {
+            val useAudio = Prefs.getInt(userContext, PREF_AUDIO, 0) == 1
+            if (!useAudio) return ScreenRecordingAudioSource.NONE
+            val pos = Prefs.getInt(userContext, PREF_AUDIO_SOURCE, 0)
+            val values = ScreenRecordingAudioSource.values()
+            return if (pos >= 0 && pos < values.size) values[pos]
+            else ScreenRecordingAudioSource.NONE
+        }
     }
 }
