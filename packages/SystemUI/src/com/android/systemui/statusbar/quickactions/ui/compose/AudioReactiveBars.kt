@@ -61,6 +61,9 @@ private const val BAR_COUNT = 4
 private const val MinimumBarLevel = 0.08f
 private val PausedRestLevels = FloatArray(BAR_COUNT) { MinimumBarLevel }
 
+/** Centred bars keep this colour whatever the artwork is. */
+private val CenteredBarColor = Color(0xFFCCCCCC)
+
 private val BeatSpring = spring<Float>(
     dampingRatio = 0.50f,
     stiffness = 280f,
@@ -90,6 +93,7 @@ fun AudioReactiveBars(
     maxBarHeight: Dp = 13.dp,
     spacing: Dp = 1.6.dp,
     startPadding: Dp = 0.dp,
+    centered: Boolean = false,
 ) {
     var rawAccentColor by remember { mutableStateOf<Color?>(null) }
     var lastAudioCaptureMs by remember { mutableStateOf(0L) }
@@ -241,8 +245,20 @@ fun AudioReactiveBars(
         for (index in 0 until BAR_COUNT) {
             val level = displayedLevels[index].value.coerceIn(MinimumBarLevel, 1f)
 
-            val barH = maxH * level
             val left = index * (barPx + spacingPx)
+            if (centered) {
+                // Plain bars that move up and down from the middle; at rest they are round dots.
+                val barH = (maxH * level).coerceAtLeast(barPx)
+                drawRoundRect(
+                    color = CenteredBarColor,
+                    topLeft = Offset(left, (maxH - barH) / 2f),
+                    size = Size(barPx, barH),
+                    cornerRadius = radius,
+                )
+                continue
+            }
+
+            val barH = maxH * level
             val top = maxH - barH
 
             val peakAlpha = (0.65f + level * 0.35f).coerceIn(0.65f, 1.00f)
