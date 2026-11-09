@@ -108,6 +108,12 @@ internal fun IslandGlassSurface(modifier: Modifier = Modifier, content: @Composa
             )
         }
     }
+    // The blur of the surface is composited outside the card layer at its full size, whatever the
+    // layer alpha is. So there is no surface until the card has grown, or it would blur the island.
+    if (blurState.alpha <= 0f) {
+        Box(modifier = modifier) { body() }
+        return
+    }
     AxBlurSurface(
         modifier = glassModifier,
         shape = GlassCardShape,

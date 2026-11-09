@@ -904,7 +904,11 @@ fun StatusBarPopup(
                                     },
                                 alpha =
                                     (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f) *
-                                        (1f - dismissProgress) * reveal.value,
+                                        (1f - dismissProgress) *
+                                        // The glass has the full size of the card and is not in
+                                        // the reveal clip, so it comes in only once the card has
+                                        // nearly grown. Earlier it would blur the island above it.
+                                        ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f),
                             ),
                     ) {
                         PopupPages(
