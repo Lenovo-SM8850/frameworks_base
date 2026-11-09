@@ -221,7 +221,9 @@ fun IslandPopup(
     val currentOnMorphActiveChanged by rememberUpdatedState(onMorphActiveChanged)
     val currentOnHidden by rememberUpdatedState(onHidden)
     val hidePopupAction = remember { { currentChip.hidePopup() } }
-    val canPage = chips.size > 1
+    // The ColorOS style shows every activity at once, one card under another, instead of paging.
+    val listMode = cos && chips.size > 1
+    val canPage = chips.size > 1 && !listMode
     val swipeSlack =
         ((LocalConfiguration.current.screenWidthDp - (PopupMaxWidth + PopupPadding * 2).value) / 2f)
             .coerceIn(0f, SwipeSlackMax.value)
@@ -439,7 +441,7 @@ fun IslandPopup(
         val displayedChip = chips.firstOrNull { it.chipId == displayedChipId } ?: viewModel
         val frontIndex = chips.indexOfFirst { it.chipId == displayedChipId }
         val revealedChip =
-            if (chips.size > 1 && frontIndex >= 0) chips[(frontIndex + 1).mod(chips.size)]
+            if (chips.size > 1 && !listMode && frontIndex >= 0) chips[(frontIndex + 1).mod(chips.size)]
             else null
         val swipeScope = rememberCoroutineScope()
         val swipeDismissible = viewModel.onDismissed != null
@@ -522,6 +524,17 @@ fun IslandPopup(
                     swipeY = 0f
                     settlingPageFraction = null
                 }
+        }
+
+        // A card of the list left the screen. If it is the chip the popup is anchored to, select
+        // another one first, so the popup never sees an empty list and runs its close animation.
+        val dismissListCard: (QuickActionChipModel.PopupChip) -> Unit = { dismissed ->
+            if (dismissed.chipId == currentChip.chipId) {
+                nextPopupChipAfterDismiss(currentChips, dismissed.chipId)?.let {
+                    currentOnPageSelected(it)
+                }
+            }
+            dismissed.onDismissed?.invoke()
         }
 
         // An external selection or removal must not leave the old page mid-drag.
@@ -750,7 +763,9 @@ fun IslandPopup(
                         Modifier
                             // Keeps taps on blank parts of the card from closing the popup.
                             .pointerInput(Unit) { detectTapGestures {} }
-                            .pointerInput(swipeDismissible, chips.size, isVisible) {
+                            .pointerInput(swipeDismissible, chips.size, isVisible, listMode) {
+                                // The list handles the swipe of each card itself.
+                                if (listMode) return@pointerInput
                                 val paging = chips.size > 1
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -866,7 +881,7 @@ fun IslandPopup(
                                     drawContent()
                                     if (veil.value > 0f) {
                                         // The stack tail below the card is transparent; the veil
-                                        // covers the card only.
+                                        // covers the card, or the whole list with its gaps.
                                         val tail = if (canPage) StackTailHeight.toPx() else 0f
                                         drawRect(
                                             Color.Black,
@@ -934,14 +949,26 @@ fun IslandPopup(
                                         ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f),
                             ),
                     ) {
-                        PopupPages(
-                            viewModel = displayedChip,
-                            chips = chips,
-                            swipeY = swipeY,
-                            settlingFraction = settlingPageFraction,
-                            settlingDirection = settlingPageDirection,
-                            onPageDistanceChanged = { pageDistancePx = it },
-                        )
+                        if (listMode) {
+                            IslandCardList(
+                                chips = chips,
+                                interactive = { isVisible && !isAnimating },
+                                fadeDistancePx = fadeDistancePx,
+                                dismissThresholdPx = dismissThresholdPx,
+                                flingVelocityPx = flingVelocityPx,
+                                flingMinDistancePx = flingMinDistancePx,
+                                onDismissed = dismissListCard,
+                            )
+                        } else {
+                            PopupPages(
+                                viewModel = displayedChip,
+                                chips = chips,
+                                swipeY = swipeY,
+                                settlingFraction = settlingPageFraction,
+                                settlingDirection = settlingPageDirection,
+                                onPageDistanceChanged = { pageDistancePx = it },
+                            )
+                        }
                     }
                 }
                 Box(
@@ -1022,7 +1049,8 @@ fun IslandPopup(
                     Constraints(
                         maxWidth = contentWidth,
                         maxHeight =
-                            (constraints.maxHeight - targetTop.roundToInt() - padding)
+                            (constraints.maxHeight - targetTop.roundToInt() - padding -
+                                    if (listMode) ListBottomMargin.roundToPx() else 0)
                                 .coerceAtLeast(0),
                     )
                 )
@@ -1145,6 +1173,9 @@ fun IslandPopup(
 }
 
 private val PopupEdgePadding = 8.dp
+
+// Room kept below a list of cards that fills the screen.
+private val ListBottomMargin = 16.dp
 
 internal fun popupPageIndicatorOffset(
     card: Rect,
@@ -1273,7 +1304,7 @@ private fun PopupPages(
 
 
 @Composable
-private fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
+internal fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
     when (val popupContent = viewModel.popupContent) {
         is PopupContentModel.Media -> {
             val model = popupContent.model
