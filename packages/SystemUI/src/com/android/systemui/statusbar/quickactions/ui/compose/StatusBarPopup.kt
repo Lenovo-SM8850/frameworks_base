@@ -20,6 +20,7 @@ import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
@@ -148,6 +149,10 @@ private val StackPeekDropNear = 9.dp
 private const val StackPeekScaleFar = 0.95f
 private const val StackPeekScaleNear = 0.975f
 private val StackShape = RoundedCornerShape(32.dp)
+
+// Dot colours over a dark and over a light backdrop.
+private val DotsOnDark = Color.White
+private val DotsOnLight = Color(0xFF1B1B1F)
 
 // How long the stack takes to open as a list, and to close again.
 private const val ListExpandMillis = 320
@@ -386,7 +391,29 @@ fun StatusBarPopup(
             ),
     ) {
         val popupView = LocalView.current
+        // The dots sit beside the cards over whatever is behind the popup, so their colour follows
+        // the brightness sampled there and not the theme. Until a sample arrives it is the theme's.
+        val backdrop = rememberIslandBackdrop(popupView, enabled = cos && hasIndicator && isVisible)
+        val themeDotsColor = MaterialTheme.colorScheme.onSurface
         val veilColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        val dotsColor by
+            animateColorAsState(
+                targetValue =
+                    when (backdrop.isDark) {
+                        true -> DotsOnDark
+                        false -> DotsOnLight
+                        null -> themeDotsColor
+                    },
+                animationSpec = tween(200),
+                label = "islandDotsColor",
+            )
+        // A thin edge of the opposite shade keeps the dots readable where the backdrop is mixed.
+        val dotsOutlineColor =
+            when (backdrop.isDark) {
+                true -> DotsOnLight.copy(alpha = 0.35f)
+                false -> DotsOnDark.copy(alpha = 0.45f)
+                null -> Color.Transparent
+            }
         var popupBoundsInScreen by remember { mutableStateOf<Rect?>(null) }
         val cardScaleX = remember { Animatable(1f) }
         val cardScaleY = remember { Animatable(1f) }
@@ -1095,6 +1122,17 @@ fun StatusBarPopup(
                         alpha = visibleContentAlpha() * handoffAlpha.value * cosStackAlpha() *
                             (if (chips.size > 2) 1f else 1f - dismissProgress)
                     }
+                        .onGloballyPositioned { coordinates ->
+                            val bounds = coordinates.boundsInScreen(popupView)
+                            backdrop.setBounds(
+                                android.graphics.Rect(
+                                    bounds.left.roundToInt(),
+                                    bounds.top.roundToInt(),
+                                    bounds.right.roundToInt(),
+                                    bounds.bottom.roundToInt(),
+                                )
+                            )
+                        }
                 ) {
                     if (hasIndicator) {
                         if (cos) {
@@ -1103,7 +1141,8 @@ fun StatusBarPopup(
                                 index =
                                     chips.indexOfFirst { it.chipId == displayedChipId }
                                         .coerceAtLeast(0),
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = dotsColor,
+                                outlineColor = dotsOutlineColor,
                                 cardOnLeft = dotsRightOfCard,
                                 onClickLabel = dotsClickLabel,
                                 onClick = toggleList,
