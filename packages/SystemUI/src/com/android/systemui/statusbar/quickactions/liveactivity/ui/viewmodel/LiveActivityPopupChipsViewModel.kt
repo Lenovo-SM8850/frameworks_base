@@ -39,10 +39,12 @@ import com.android.systemui.statusbar.notification.shared.CallType
 import com.android.systemui.statusbar.notification.shared.Metric
 import com.android.systemui.statusbar.policy.KeyguardStateController
 import com.android.systemui.statusbar.quickactions.livescore.ui.viewmodel.isLiveScoreCandidate
+import com.android.systemui.statusbar.quickactions.popups.shared.ClockNotificationKind
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 import com.android.systemui.statusbar.quickactions.popups.shared.toSendAction
 import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
+import com.android.systemui.statusbar.quickactions.popups.shared.parseClockNotification
 import com.android.systemui.statusbar.quickactions.popups.shared.toActivityLaunchAction
 import com.android.systemui.statusbar.quickactions.shared.model.ChipContent
 import com.android.systemui.statusbar.quickactions.shared.model.ChipIcon
@@ -77,6 +79,30 @@ constructor(
     private val keyguardStateController: KeyguardStateController,
 ) : HydratedActivatable() {
 
+    /**
+     * The clock notifications that have a card of their own while their feature is on. The Clock
+     * app promotes them too, so without this each of them would be shown twice.
+     */
+    private val clockKindsWithOwnCard: Flow<Set<ClockNotificationKind>> =
+        combine(
+            DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                context,
+                DynamicIslandFeatureSettings.STOPWATCH,
+            ),
+            DynamicIslandFeatureSettings.observeDynamicIslandFeatureEnabled(
+                context,
+                DynamicIslandFeatureSettings.ALARMS,
+            ),
+        ) { stopwatchAndTimer, alarms ->
+            buildSet {
+                if (stopwatchAndTimer) {
+                    add(ClockNotificationKind.STOPWATCH)
+                    add(ClockNotificationKind.TIMER)
+                }
+                if (alarms) add(ClockNotificationKind.ALARM)
+            }
+        }
+
     private val activities: Flow<List<LiveActivity>> =
         combine(
             activeNotificationsInteractor.promotedOngoingNotifications,
@@ -85,14 +111,15 @@ constructor(
                 context,
                 DynamicIslandFeatureSettings.LIVE_UPDATES,
             ),
-        ) { promotedNotifications, allNotifications, enabled ->
+            clockKindsWithOwnCard,
+        ) { promotedNotifications, allNotifications, enabled, ownCard ->
             if (!enabled) {
                 emptyList()
             } else {
                 promotedNotifications
                     .mapNotNull { notif -> allNotifications[notif.key] }
                     .distinctBy { it.key }
-                    .mapNotNull { it.toLiveActivity() }
+                    .mapNotNull { it.toLiveActivity(ownCard) }
             }
         }
 
@@ -113,7 +140,9 @@ constructor(
             }
             .hydratedStateOf(traceName = "chips", initialValue = emptyList())
 
-    private fun ActiveNotificationModel.toLiveActivity(): LiveActivity? {
+    private fun ActiveNotificationModel.toLiveActivity(
+        ownCard: Set<ClockNotificationKind>
+    ): LiveActivity? {
         val content = promotedContent?.privateVersion ?: return null
         if (
             callType != CallType.None ||
@@ -123,6 +152,11 @@ constructor(
                 isLiveScoreCandidate()
         ) {
             return null
+        }
+        // A stopwatch, timer or alarm that has its own card is not a live update as well.
+        if (ownCard.isNotEmpty()) {
+            val clockKind = notifCollection.getEntry(key)?.parseClockNotification(context)?.kind
+            if (clockKind != null && clockKind in ownCard) return null
         }
         // Metric style notifications, like the Clock app's timers, keep their time in a metric.
         val metric = content.metrics?.firstOrNull()
