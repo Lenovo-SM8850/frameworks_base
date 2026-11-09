@@ -631,7 +631,6 @@ private fun UtilityStatusIslandChip(
  */
 @Composable
 private fun rememberAlarmCountdownText(triggerTimeMs: Long): String? {
-    val context = LocalContext.current
     val now by
         produceState(System.currentTimeMillis(), triggerTimeMs) {
             while (triggerTimeMs > 0L) {
@@ -639,18 +638,15 @@ private fun rememberAlarmCountdownText(triggerTimeMs: Long): String? {
                 value = System.currentTimeMillis()
             }
         }
+    return compactIslandAlarmCountdownText(triggerTimeMs, now)
+}
+
+private fun compactIslandAlarmCountdownText(triggerTimeMs: Long, now: Long): String? {
     if (triggerTimeMs <= 0L) return null
-    val minutes = ((triggerTimeMs - now + 59_999L) / 60_000L).toInt()
-    if (minutes <= 0) return null
-    val hours = minutes / 60
-    return when {
-        minutes < 60 -> context.getString(R.string.dynamic_island_alarm_in_minutes, minutes)
-        minutes < 24 * 60 && minutes % 60 == 0 ->
-            context.getString(R.string.dynamic_island_alarm_in_hours, hours)
-        minutes < 24 * 60 ->
-            context.getString(R.string.dynamic_island_alarm_in_hours_minutes, hours, minutes % 60)
-        else -> context.getString(R.string.dynamic_island_alarm_in_days, minutes / (24 * 60))
-    }
+    val minutes = (triggerTimeMs - now + 59_999L) / 60_000L
+    if (minutes <= 0L) return null
+    val bounded = minutes.coerceAtMost(99L * 60L + 59L)
+    return "+${(bounded / 60L).toString().padStart(2, '0')}:${(bounded % 60L).toString().padStart(2, '0')}"
 }
 
 @Composable
