@@ -74,13 +74,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
@@ -365,6 +368,7 @@ fun StatusBarPopup(
             ),
     ) {
         val popupView = LocalView.current
+        val veilColor = MaterialTheme.colorScheme.surfaceContainerHigh
         var popupBoundsInScreen by remember { mutableStateOf<Rect?>(null) }
         val cardScaleX = remember { Animatable(1f) }
         val cardScaleY = remember { Animatable(1f) }
@@ -374,6 +378,10 @@ fun StatusBarPopup(
         val cardShiftX = remember { Animatable(0f) }
         val reveal = remember { Animatable(1f) }
         val veil = remember { Animatable(0f) }
+        // The card's content fades and sharpens in as the card grows, and out as it shrinks.
+        val cosContent = remember { Animatable(1f) }
+        val cosContentBlur = remember { Animatable(0f) }
+        val cosContentBlurPx = with(density) { CosCardContentBlur.toPx() }
         // The stack behind the setting-on card is not in its layer, so it follows the card's reveal
         // and fade instead of showing before the card or staying through the close.
         val cosStackAlpha = { if (cos) (reveal.value * cardAlpha.value).coerceIn(0f, 1f) else 1f }
@@ -541,21 +549,34 @@ fun StatusBarPopup(
                     swipeY = 0f
                 }
 
+                if (isVisible) {
+                    // The bounds of the card are those of its last opening until it has been laid
+                    // out again, and its first frame would be drawn away from the island. It stays
+                    // hidden until then.
+                    cardAlpha.snapTo(0f)
+                    // Its glass is not in its layer and follows the reveal, so that goes too.
+                    reveal.snapTo(0f)
+                    repeat(2) { withFrameNanos {} }
+                }
                 val chip = chipBoundsInScreen
                 val popup = popupBoundsInScreen
                 val fromX = if (chip != null && popup != null) chip.center.x - popup.center.x else 0f
-                // The card grows from the top of the island and shrinks back into it, so its top
-                // follows the island's top and never rises above the island.
-                val fromY = if (chip != null && popup != null) chip.top - popup.top else 0f
+                // The card grows from the middle of the island and shrinks back into it.
+                val fromY =
+                    if (chip != null && popup != null) chip.center.y - popup.center.y else 0f
                 if (isVisible && popup != null) {
-                    cardScaleX.snapTo(0.4f)
-                    cardScaleY.snapTo(0.4f)
+                    cardScaleX.snapTo(CosCardStartScale)
+                    cardScaleY.snapTo(CosCardStartScale)
                     cardShiftX.snapTo(fromX)
                     cardTranslationY.snapTo(fromY)
                     reveal.snapTo(0f)
                     veil.snapTo(1f)
+                    cosContent.snapTo(0f)
+                    cosContentBlur.snapTo(cosContentBlurPx)
                     cardAlpha.snapTo(1f)
                     coroutineScope {
+                        launch { cosContent.animateTo(1f, tween(300, easing = CosCardEase)) }
+                        launch { cosContentBlur.animateTo(0f, tween(300, easing = CosCardEase)) }
                         launch { cardShiftX.animateTo(0f, tween(300, easing = CosCardGrow)) }
                         launch { cardTranslationY.animateTo(0f, tween(300, easing = CosCardGrow)) }
                         launch { reveal.animateTo(1f, tween(300, easing = CosCardGrow)) }
@@ -581,9 +602,19 @@ fun StatusBarPopup(
                     } else {
                         coroutineScope {
                             launch { cardAlpha.animateTo(0f, tween(50, delayMillis = CosCardCloseMillis - 50)) }
+                            launch { cosContent.animateTo(0f, tween(150, easing = CosCardEase)) }
+                            launch {
+                                cosContentBlur.animateTo(
+                                    cosContentBlurPx,
+                                    tween(CosCardCloseMillis, easing = CosCardEase),
+                                )
+                            }
                             for (scale in listOf(cardScaleX, cardScaleY)) {
                                 launch {
-                                    scale.animateTo(0.4f, tween(CosCardCloseMillis, easing = CosCardEase))
+                                    scale.animateTo(
+                                        CosCardStartScale,
+                                        tween(CosCardCloseMillis, easing = CosCardEase),
+                                    )
                                 }
                             }
                             launch {
@@ -593,7 +624,7 @@ fun StatusBarPopup(
                                 cardTranslationY.animateTo(fromY, tween(CosCardCloseMillis, easing = CosCardMove))
                             }
                             launch { reveal.animateTo(0f, tween(CosCardCloseMillis, easing = CosCardEase)) }
-                            veil.animateTo(1f, tween(200, easing = CosCardEase))
+                            veil.animateTo(1f, tween(150, easing = CosCardEase))
                         }
                     }
                 }
@@ -842,9 +873,11 @@ fun StatusBarPopup(
                                     this.alpha = cardAlpha.value * (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f)
                                     this.translationX = cardShiftX.value + swipeX
                                     this.translationY = cardTranslationY.value
-                                    this.transformOrigin = TransformOrigin(0.5f, 0f)
+                                    this.transformOrigin = TransformOrigin.Center
                                     this.clip = reveal.value < 1f
-                                    if (this.clip) this.shape = CosRevealShape(reveal.value, cosCornerPx)
+                                    if (this.clip) {
+                                        this.shape = CosRevealShape(reveal.value, cosCornerPx)
+                                    }
                                 } else {
                                 alpha =
                                     visibleContentAlpha() *
@@ -859,10 +892,12 @@ fun StatusBarPopup(
                                     drawContent()
                                     if (veil.value > 0f) {
                                         // The stack tail below the card is transparent; the veil
-                                        // covers the card, or the whole list with its gaps.
+                                        // covers the card, or the whole list with its gaps. It has
+                                        // the colour of the glass, as that cannot be shown until the
+                                        // card has grown; black would show as a black card first.
                                         val tail = if (canPage) StackTailHeight.toPx() else 0f
                                         drawRect(
-                                            Color.Black,
+                                            lerp(CosIslandColor, veilColor, reveal.value),
                                             size = Size(size.width, (size.height - tail).coerceAtLeast(0f)),
                                             alpha = veil.value,
                                         )
@@ -889,6 +924,16 @@ fun StatusBarPopup(
                                     }
                                 clipPath(path) { this@drawWithContent.drawContent() }
 
+                                }
+                            }
+                            // The content alone, under the veil: it fades and sharpens as the card
+                            // opens and the other way as it closes.
+                            .graphicsLayer {
+                                if (cos) {
+                                    alpha = cosContent.value
+                                    val b = cosContentBlur.value
+                                    renderEffect =
+                                        if (b > 0.5f) BlurEffect(b, b, TileMode.Decal) else null
                                 }
                             }
                 ) {
@@ -924,7 +969,8 @@ fun StatusBarPopup(
                                         // The glass has the full size of the card and is not in
                                         // the reveal clip, so it comes in only once the card has
                                         // nearly grown. Earlier it would blur the island above it.
-                                        ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f),
+                                        ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f) *
+                                        (if (cos) cardAlpha.value else 1f),
                             ),
                     ) {
                         if (listMode) {
@@ -1338,19 +1384,32 @@ internal fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
         PopupContentModel.None -> Unit
     }
 }
-/** Reveals the card from a small rounded rectangle in its middle out to its full size. */
-private class CosRevealShape(private val fraction: Float, private val cornerPx: Float) : Shape {
+
+/** Scale the ColorOS card opens from and closes to, in the middle of the island. */
+private const val CosCardStartScale = 0.4f
+
+/** Blur of the card's content when it starts to open and when it has closed. */
+private val CosCardContentBlur = 12.dp
+
+/** The island capsule's colour, which the card starts in. */
+private val CosIslandColor = Color.Black
+
+/** The visible part of the ColorOS card while it grows: from a small square in its middle. */
+private class CosRevealShape(
+    private val fraction: Float,
+    private val cornerPx: Float,
+) : Shape {
     override fun createOutline(
         size: Size,
         layoutDirection: LayoutDirection,
         density: Density,
     ): Outline {
-        val start = size.width * 0.12f
-        val w = start + (size.width - start) * fraction
-        val h = start + (size.height - start) * fraction
+        val square = size.width * 0.12f
+        val startH = minOf(square, size.height)
+        val w = square + (size.width - square) * fraction
+        val h = startH + (size.height - startH) * fraction
         val left = (size.width - w) / 2f
-        // Kept to the top of the card, where the island is.
-        val top = 0f
+        val top = (size.height - h) / 2f
         val r = minOf(cornerPx, w / 2f, h / 2f)
         return Outline.Rounded(RoundRect(left, top, left + w, top + h, CornerRadius(r)))
     }
