@@ -410,7 +410,7 @@ fun ClassicTileContent(
                 }
             }
             if (chevron) {
-                ColorOSTileLabelRow(animatedSecondaryLabelColor, onChevronClick, labels)
+                ColorOSTileLabelRow(animatedLabelColor.copy(alpha = 0.6f), onChevronClick, labels)
             } else {
                 labels()
             }

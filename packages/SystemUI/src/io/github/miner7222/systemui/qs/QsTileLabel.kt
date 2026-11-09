@@ -45,6 +45,11 @@ import kotlin.math.ceil
 import com.android.compose.modifiers.thenIf
 import androidx.compose.foundation.gestures.detectTapGestures
 
+// The chevrons of a tile label, relative to the size of the label's font.
+private const val ChevronHeightEm = 0.73f
+private const val ChevronAspect = 11f / 16f
+private const val ChevronGapEm = 0.3f
+
 /** Wraps a tile label between words, in the languages that could otherwise break inside one. */
 internal val TileLabelLineBreak =
     LineBreak(
@@ -70,9 +75,10 @@ internal fun classicStateLabelHeight(): Dp {
 }
 
 /**
- * A ColorOS round tile label: centred under the tile on its own and given the whole width, with
- * the chevron hanging after its widest line, into the gap beside the tile if it must. The chevron
- * alone is too small a target, so its whole row opens it.
+ * A ColorOS round tile label with its chevrons. A label on one line is centred together with them,
+ * into the gap beside the tile if it must. A wrapped label stays just left of the centre and the
+ * chevrons sit at the edge of the tile, halfway down its lines. The chevrons alone are too small a
+ * target, so the whole row opens them.
  */
 @Composable
 internal fun ColorOSTileLabelRow(
@@ -81,6 +87,9 @@ internal fun ColorOSTileLabelRow(
     labels: @Composable () -> Unit,
 ) {
     val chevronClick by rememberUpdatedState(onChevronClick)
+    val fontSize = MaterialTheme.typography.labelMedium.fontSize
+    val density = LocalDensity.current
+    val chevronHeight = with(density) { (fontSize.toPx() * ChevronHeightEm).toDp() }
     Layout(
         content = {
             Column(Modifier.width(IntrinsicSize.Max)) { labels() }
@@ -88,7 +97,7 @@ internal fun ColorOSTileLabelRow(
                 painter = painterResource(R.drawable.ic_coloros_tile_chevron),
                 contentDescription = null,
                 colorFilter = ColorFilter.tint(chevronTint),
-                modifier = Modifier.size(10.dp),
+                modifier = Modifier.size(chevronHeight * ChevronAspect, chevronHeight),
             )
         },
         modifier =
@@ -101,13 +110,16 @@ internal fun ColorOSTileLabelRow(
             },
     ) { measurables, constraints ->
         val chevronPlaceable = measurables[1].measure(Constraints())
-        val gap = 1.dp.roundToPx()
+        val chevronWidth = chevronPlaceable.width
+        val gap = (fontSize.toPx() * ChevronGapEm).toInt()
         val width = constraints.maxWidth
+        val wrapped = measurables[0].maxIntrinsicWidth(Constraints.Infinity) > width
         val labelPlaceable =
             measurables[0].measure(
                 constraints.copy(
                     minWidth = 0,
-                    maxWidth = width,
+                    // A wrapped label keeps clear of the chevrons at the edge.
+                    maxWidth = if (wrapped) width - chevronWidth else width,
                     minHeight = 0,
                     maxHeight = Constraints.Infinity,
                 )
@@ -117,10 +129,11 @@ internal fun ColorOSTileLabelRow(
                 .coerceIn(constraints.minHeight, constraints.maxHeight)
         val labelTop = CommonTileDefaults.ColorOSLabelTopPadding.roundToPx()
         layout(width, height) {
-            val x = (width - labelPlaceable.width) / 2
+            val x =
+                if (wrapped) -gap / 2 else (width - labelPlaceable.width - gap - chevronWidth) / 2
             labelPlaceable.placeRelative(x, 0)
             chevronPlaceable.placeRelative(
-                x + labelPlaceable.width + gap,
+                if (wrapped) width - chevronWidth else x + labelPlaceable.width + gap,
                 labelTop + (labelPlaceable.height - labelTop - chevronPlaceable.height) / 2,
             )
         }
