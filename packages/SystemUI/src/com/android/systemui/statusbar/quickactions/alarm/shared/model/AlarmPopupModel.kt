@@ -27,4 +27,6 @@ data class AlarmPopupModel(
     val dayText: String,
     val onOpen: (() -> Unit)?,
     val actions: List<PopupActionModel> = emptyList(),
+    /** Ends the alarm through the alarm app's own notification action, when it has one. */
+    val dismissAction: PopupActionModel? = null,
 )

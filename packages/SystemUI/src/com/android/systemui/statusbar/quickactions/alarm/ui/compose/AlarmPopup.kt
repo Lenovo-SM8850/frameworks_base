@@ -32,7 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Snooze
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -53,6 +53,7 @@ import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActi
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandAccents
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalHidePopup
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
@@ -71,6 +72,7 @@ fun AlarmPopup(
     val onOpen = rememberPopupLaunchAction(model.onOpen)
     val actions = rememberPopupActions(model.actions)
     val accent = IslandAccents.Alarm
+    val hidePopup = LocalHidePopup.current
     val breathe = rememberInfiniteTransition(label = "alarm_breathe")
     val breatheScale by
         breathe.animateFloat(
@@ -95,7 +97,7 @@ fun AlarmPopup(
                             contentDescription = ContentDescription.Resource(R.string.status_bar_alarm),
                         ),
                     modifier =
-                        Modifier.size(32.dp).graphicsLayer {
+                        Modifier.size(40.dp).graphicsLayer {
                             scaleX = breatheScale
                             scaleY = breatheScale
                         },
@@ -104,8 +106,28 @@ fun AlarmPopup(
             },
             modifier = modifier,
             onClick = onOpen,
-            primaryAction =
-                actions.getOrNull(0)?.let { it.copy(vector = it.vector ?: Icons.Rounded.Snooze) },
+            // The snooze action has no icon, so the card draws it as a pill.
+            primaryAction = actions.getOrNull(0),
+            // The close button ends the alarm with the app's own action. Without one it only
+            // hides the card.
+            secondaryAction =
+                model.dismissAction?.let { dismiss ->
+                    val send = dismiss.onClick
+                    dismiss.copy(
+                        onClick = {
+                            send()
+                            hidePopup()
+                        },
+                        vector = Icons.Rounded.Close,
+                    )
+                }
+                    ?: actions.getOrNull(0)?.let {
+                        PopupActionModel(
+                            label = stringResource(android.R.string.cancel),
+                            onClick = hidePopup,
+                            vector = Icons.Rounded.Close,
+                        )
+                    },
         )
         return
     }
