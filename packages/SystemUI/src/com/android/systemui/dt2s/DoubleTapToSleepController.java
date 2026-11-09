@@ -2,9 +2,13 @@ package com.android.systemui.dt2s;
 
 import android.app.ActivityManager;
 import android.app.ActivityTaskManager;
+import android.app.KeyguardManager;
 import android.app.TaskInfo;
 import android.app.WindowConfiguration;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.inputmethodservice.InputMethodService;
@@ -95,6 +99,7 @@ public final class DoubleTapToSleepController implements CoreStartable, TunerSer
 
     private final Context mContext;
     private final PowerManager mPowerManager;
+    private final KeyguardManager mKeyguardManager;
     private final FalsingManager mFalsingManager;
     private final Handler mMainHandler;
     private final Executor mBackgroundExecutor;
@@ -151,6 +156,7 @@ public final class DoubleTapToSleepController implements CoreStartable, TunerSer
             JavaAdapter javaAdapter) {
         mContext = context;
         mPowerManager = powerManager;
+        mKeyguardManager = context.getSystemService(KeyguardManager.class);
         mFalsingManager = falsingManager;
         mCommandQueue = commandQueue;
         mMainHandler = mainHandler;
@@ -171,6 +177,19 @@ public final class DoubleTapToSleepController implements CoreStartable, TunerSer
         mJavaAdapter.alwaysCollectFlow(mShadeInteractor.isAnyExpanded(),
                 expanded -> updateMonitoring());
         mTunerService.addTunable(this, DOUBLE_TAP_SLEEP_GESTURE);
+
+        // The taps that wake the device from the always-on display reach this monitor too.
+        // Drop a half-finished gesture and any pending sleep whenever the screen changes state.
+        final IntentFilter screenFilter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        mContext.registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                cancelPendingSleep();
+                if (mMonitoringActive) mGestureDetector = createGestureDetector();
+                mTrackingTouch = false;
+            }
+        }, screenFilter, null, mMainHandler, Context.RECEIVER_NOT_EXPORTED);
 
         TaskStackChangeListeners.getInstance().registerTaskStackListener(
                 new TaskStackChangeListener() {
@@ -384,8 +403,10 @@ public final class DoubleTapToSleepController implements CoreStartable, TunerSer
         final int action = me.getActionMasked();
 
         if (action == MotionEvent.ACTION_DOWN) {
-            mTrackingTouch = me.getPointerCount() == 1 && isInAllowedRegion(me)
-                    && isLauncherWindowAt(me);
+            // A tap that starts on the always-on display or the keyguard belongs to waking or
+            // unlocking the device, not to the home screen.
+            mTrackingTouch = me.getPointerCount() == 1 && isHomeInteractive()
+                    && isInAllowedRegion(me) && isLauncherWindowAt(me);
             if (!mTrackingTouch) {
                 // A tap on the search bar, widget area, dock or a window over the launcher must
                 // not pair with another tap.
@@ -400,6 +421,11 @@ public final class DoubleTapToSleepController implements CoreStartable, TunerSer
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             mTrackingTouch = false;
         }
+    }
+
+    private boolean isHomeInteractive() {
+        return mPowerManager.isInteractive()
+                && (mKeyguardManager == null || !mKeyguardManager.isKeyguardLocked());
     }
 
     private void registerWindowInfosListener() {
@@ -518,6 +544,7 @@ public final class DoubleTapToSleepController implements CoreStartable, TunerSer
     private void triggerSleep() {
         // Eligibility can change during SLEEP_DELAY_MS, before a state collector runs.
         if (!canHandleGesture()) return;
+        if (!isHomeInteractive()) return;
         Log.d(TAG, "DT2S: goToSleep");
         try {
             mPowerManager.goToSleep(SystemClock.uptimeMillis());
