@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -112,7 +113,8 @@ fun ScreenRecordPopup(
                         vector = Icons.Rounded.Stop,
                     )
                 },
-            primaryActionColor = accent,
+            // The model has no pause action, so stop is the only button, at the right.
+            primaryActionColor = Color(0xFFFF5F52),
         )
         return
     }

@@ -99,11 +99,11 @@ fun FlashlightPopup(
                 null
             }
         IslandGlassCard(
-            primary = stringResource(R.string.quick_settings_flashlight_label),
-            secondary =
+            primary =
                 model.strengthPercent?.let {
                     stringResource(R.string.quick_settings_flashlight_tile_level_percentage, it)
                 } ?: stringResource(R.string.dynamic_island_flashlight_enabled),
+            secondary = stringResource(R.string.quick_settings_flashlight_label),
             glyph = {
                 StatusBarIcon(
                     icon =
@@ -114,7 +114,7 @@ fun FlashlightPopup(
                                     R.string.quick_settings_flashlight_label
                                 ),
                         ),
-                    modifier = Modifier.size(32.dp),
+                    modifier = Modifier.size(40.dp),
                     tint = accent,
                 )
             },
@@ -126,6 +126,8 @@ fun FlashlightPopup(
                     emphasized = true,
                     vector = Icons.Rounded.PowerSettingsNew,
                 ),
+            primaryActionColor = MaterialTheme.colorScheme.onSurface,
+            primaryActionTint = MaterialTheme.colorScheme.surface,
             below = strengthSlider,
         )
         return
@@ -279,9 +281,9 @@ private fun FlashlightGlassSlider(
         interactionSource = interactionSource,
         colors =
             SliderDefaults.colors(
-                thumbColor = Color.White,
+                thumbColor = LocalContentColor.current,
                 activeTrackColor = accent,
-                inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                inactiveTrackColor = LocalContentColor.current.copy(alpha = 0.16f),
             ),
     )
 }

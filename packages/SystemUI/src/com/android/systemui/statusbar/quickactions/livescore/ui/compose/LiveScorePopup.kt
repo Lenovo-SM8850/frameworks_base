@@ -34,11 +34,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.android.systemui.common.ui.compose.Icon
 import com.android.systemui.statusbar.quickactions.livescore.shared.model.LiveScoreChipModel
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandAccents
+import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
+import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import com.android.systemui.statusbar.quickactions.ui.compose.pressScale
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
@@ -52,6 +55,39 @@ fun LiveScorePopup(
 ) {
     val onOpen = rememberPopupLaunchAction(model.onOpen)
     val accent = IslandAccents.Score
+    if (islandGlassCards()) {
+        val title = model.title?.takeIf { it.isNotBlank() }
+        val subtitle = model.subtitle?.takeIf { it.isNotBlank() }
+        val subtitleLine: (@Composable () -> Unit)? =
+            if (title != null && subtitle != null) {
+                {
+                    Text(
+                        text = subtitle,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        color = LocalContentColor.current.copy(alpha = 0.55f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                null
+            }
+        IslandGlassCard(
+            primary = model.score,
+            // Without a title the subtitle labels the score, and then it has no line below.
+            secondary = title ?: subtitle,
+            glyph = {
+                model.icon?.let { icon ->
+                    Icon(icon = icon, modifier = Modifier.size(40.dp), tint = LocalContentColor.current)
+                }
+            },
+            modifier = modifier,
+            onClick = onOpen,
+            below = subtitleLine,
+        )
+        return
+    }
     PopupSurface(
         shape = PopupShape,
         modifier =
@@ -73,7 +109,8 @@ fun LiveScorePopup(
                     Icon(
                         icon = icon,
                         modifier = Modifier.size(30.dp),
-                        tint = Color.Unspecified,
+                        // The icon is the small icon of the app, plain white, so it takes the accent.
+                        tint = accent,
                     )
                 }
             }

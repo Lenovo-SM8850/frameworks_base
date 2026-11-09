@@ -85,7 +85,7 @@ fun StopwatchPopup(
                 model.icon?.let { icon ->
                     Icon(
                         icon = icon,
-                        modifier = Modifier.size(32.dp).graphicsLayer { rotationZ = rotation.value },
+                        modifier = Modifier.size(40.dp).graphicsLayer { rotationZ = rotation.value },
                         tint = accent,
                     )
                 }
@@ -133,15 +133,6 @@ fun StopwatchPopup(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    model.subtitle?.takeIf { it.isNotBlank() }?.let { subtitle ->
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = LocalContentColor.current.copy(alpha = 0.73f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
                 }
             }
 

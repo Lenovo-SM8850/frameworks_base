@@ -16,10 +16,22 @@
 
 package com.android.systemui.statusbar.quickactions.screenrecord.ui.compose
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingToolbarDefaults
@@ -33,22 +45,90 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.res.R
 import com.android.systemui.screencapture.common.ui.compose.PrimaryButton
+import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 import com.android.systemui.statusbar.quickactions.screenrecord.ui.viewmodel.LargeScreenStopRecordingPopupViewModel2
+import com.android.systemui.statusbar.quickactions.ui.compose.IslandAccents
+import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
+import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/** Displays a popup for screen recording configurations. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LargeScreenStopRecordingPopup(
     viewModel: LargeScreenStopRecordingPopupViewModel2,
     modifier: Modifier = Modifier,
 ) {
+    // The stop runs once at a time, whichever style draws the button.
+    val coroutineScope = rememberCoroutineScope()
+    var buttonJob: Job? by remember { mutableStateOf(null) }
+    val onStop: () -> Unit = {
+        if (buttonJob == null) {
+            buttonJob =
+                coroutineScope.launch {
+                    viewModel.onStopButtonTapped()
+                    buttonJob = null
+                }
+        }
+    }
+    if (islandGlassCards()) {
+        val accent = IslandAccents.Recording
+        val pulse = rememberInfiniteTransition(label = "rec_pulse")
+        val pulseScale by
+            pulse.animateFloat(
+                initialValue = 0.9f,
+                targetValue = 1.15f,
+                animationSpec =
+                    infiniteRepeatable(
+                        tween(800, easing = FastOutSlowInEasing),
+                        RepeatMode.Reverse,
+                    ),
+                label = "rec_scale",
+            )
+        val pulseAlpha by
+            pulse.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 0.95f,
+                animationSpec =
+                    infiniteRepeatable(
+                        tween(800, easing = FastOutSlowInEasing),
+                        RepeatMode.Reverse,
+                    ),
+                label = "rec_alpha",
+            )
+        IslandGlassCard(
+            primary = stringResource(R.string.dynamic_island_screen_record_active),
+            secondary = stringResource(R.string.screenrecord_ongoing_screen_only),
+            glyph = {
+                Box(
+                    modifier =
+                        Modifier.size(18.dp)
+                            .graphicsLayer {
+                                scaleX = pulseScale
+                                scaleY = pulseScale
+                                alpha = pulseAlpha
+                            }
+                            .background(accent, CircleShape)
+                )
+            },
+            modifier = modifier,
+            primaryAction =
+                PopupActionModel(
+                    label = stringResource(R.string.screenrecord_stop_label),
+                    onClick = onStop,
+                    vector = Icons.Rounded.Stop,
+                ),
+            primaryActionColor = Color(0xFFFF5F52),
+        )
+        return
+    }
     Surface(
         shape = FloatingToolbarDefaults.ContainerShape,
         color = MaterialTheme.colorScheme.surface,
@@ -59,20 +139,7 @@ fun LargeScreenStopRecordingPopup(
             modifier = Modifier.height(64.dp).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val coroutineScope = rememberCoroutineScope()
-            var buttonJob: Job? by remember { mutableStateOf(null) }
-            StopRecordingButton(
-                onClick = {
-                    if (buttonJob == null) {
-                        buttonJob =
-                            coroutineScope.launch {
-                                viewModel.onStopButtonTapped()
-                                buttonJob = null
-                            }
-                    }
-                },
-                modifier = Modifier.height(40.dp),
-            )
+            StopRecordingButton(onClick = onStop, modifier = Modifier.height(40.dp))
         }
     }
 }
