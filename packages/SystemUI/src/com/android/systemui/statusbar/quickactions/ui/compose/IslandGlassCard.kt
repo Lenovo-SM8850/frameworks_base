@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -73,6 +74,12 @@ fun islandGlassCards(): Boolean {
     val container = LocalPopupContainer.current
     return rememberDynamicIslandColorOSStyle() && !container
 }
+
+/**
+ * Set by the island popup in the ColorOS style, also for a card that sits in a container with its
+ * own surface, such as the media card above its lyrics, where [islandGlassCards] is false.
+ */
+internal val LocalIslandCosStyle = staticCompositionLocalOf { false }
 
 private val GlassCardShape = RoundedCornerShape(28.dp)
 private val GlassTintDark = Color.White.copy(alpha = 0.10f)

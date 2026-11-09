@@ -12,6 +12,12 @@ import androidx.compose.ui.geometry.Offset
 data class IslandCardBlurState(
     val shift: Offset = Offset.Zero,
     val alpha: Float = 1f,
+    /**
+     * The glass takes [alpha] as its own opacity, and the card content is left to the layer it is
+     * in, so the glass and the content fade with the same alpha. Otherwise the glass is drawn at
+     * full strength whatever [alpha] is, and only [alpha] reaching zero removes it.
+     */
+    val glassFollowsAlpha: Boolean = false,
 )
 
 internal val LocalIslandCardBlurState = compositionLocalOf { IslandCardBlurState() }

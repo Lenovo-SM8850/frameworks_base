@@ -24,10 +24,13 @@ import android.view.View
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -75,6 +78,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
@@ -412,34 +416,62 @@ internal fun rememberDynamicIslandWidth(cutoutSpec: DynamicIslandCutoutSpec): Dp
     }
 }
 
+/**
+ * The page indicator of the normal style popup: a pill of dots beside the card. The touch target is
+ * at least [PageDotsTouchSize] square and the pill sits at the edge of it that faces the card, so
+ * the popup's gap to the card is the visible one. [cardOnLeft] is true when the card is to the left
+ * of the dots. [onClickLabel] names what a tap does for accessibility services.
+ */
 @Composable
-internal fun PageDots(count: Int, index: Int, color: Color, onClick: () -> Unit) {
+internal fun PageDots(
+    count: Int,
+    index: Int,
+    color: Color,
+    onClick: () -> Unit,
+    cardOnLeft: Boolean = true,
+    onClickLabel: String? = null,
+) {
     val visible = minOf(count, MaxPageDots)
     val first = (index - visible / 2).coerceIn(0, count - visible)
-    Column(
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
         modifier =
-            Modifier.clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f))
-                .clickable(onClick = onClick)
-                .padding(horizontal = PageDotsTapPadding, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(PageDotSpacing),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            Modifier.defaultMinSize(minWidth = PageDotsTouchSize, minHeight = PageDotsTouchSize)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = onClickLabel,
+                    onClick = onClick,
+                ),
+        contentAlignment = if (cardOnLeft) Alignment.CenterStart else Alignment.CenterEnd,
     ) {
-        repeat(visible) { slot ->
-            val isCurrent = first + slot == index
-            val height by
-                animateDpAsState(
-                    targetValue = if (isCurrent) PageDotActiveHeight else PageDotSize,
-                    label = "pageDotHeight",
+        Column(
+            modifier =
+                Modifier.clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f))
+                    // The press shows on the pill, not on the whole touch target.
+                    .indication(interactionSource, LocalIndication.current)
+                    .padding(horizontal = PageDotsTapPadding, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(PageDotSpacing),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            repeat(visible) { slot ->
+                val isCurrent = first + slot == index
+                val height by
+                    animateDpAsState(
+                        targetValue = if (isCurrent) PageDotActiveHeight else PageDotSize,
+                        label = "pageDotHeight",
+                    )
+                Box(
+                    modifier =
+                        Modifier.size(width = PageDotSize, height = height)
+                            .background(
+                                color = color.copy(alpha = if (isCurrent) 0.9f else 0.45f),
+                                shape = CircleShape,
+                            )
                 )
-            Box(
-                modifier =
-                    Modifier.size(width = PageDotSize, height = height)
-                        .background(
-                            color = color.copy(alpha = if (isCurrent) 0.9f else 0.45f),
-                            shape = CircleShape,
-                        )
-            )
+            }
         }
     }
 }
@@ -449,6 +481,7 @@ private val PageDotSize = 4.dp
 private val PageDotActiveHeight = 10.dp
 private val PageDotSpacing = 3.dp
 private val PageDotsTapPadding = 4.dp
+private val PageDotsTouchSize = 48.dp
 
 /** Single centered status bar capsule styled like a compact dynamic island. */
 @OptIn(ExperimentalFoundationApi::class)

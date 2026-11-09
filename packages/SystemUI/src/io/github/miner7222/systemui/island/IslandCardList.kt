@@ -60,15 +60,20 @@ private val SwipeClipSlack = 96.dp
 private const val DismissGraceMillis = 1000L
 
 /**
- * The ColorOS style popup for several island activities: every card is shown at once, one under
- * another at the popup width, in the order of [chips]. A horizontal swipe dismisses one card and
- * the cards below close up; when the list is taller than the room it has, it scrolls vertically.
- * [onDismissed] runs once a card has left the screen and must remove its chip. [onCardUsed] runs when
- * a control of a card takes a touch.
+ * The popup for several island activities when its stack is opened: every card is shown at once,
+ * one under another at the width of the front card, in the order of [chips], which starts with
+ * the front card. [expansion] runs from 0, the stack, to 1, the list: the front card stays where
+ * it is and the others slide down from under it, or back under it. A horizontal swipe dismisses
+ * one card and the cards below close up; when the list is taller than the room it has, it scrolls
+ * vertically. [onFrontHeight] gets the height of the front card whenever the list is measured.
+ * [onDismissed] runs once a card has left the screen and must remove its chip. [onCardUsed] runs
+ * when a control of a card takes a touch.
  */
 @Composable
 internal fun IslandCardList(
     chips: List<QuickActionChipModel.PopupChip>,
+    expansion: () -> Float,
+    onFrontHeight: (Int) -> Unit,
     interactive: () -> Boolean,
     fadeDistancePx: Float,
     dismissThresholdPx: Float,
@@ -92,6 +97,8 @@ internal fun IslandCardList(
         old - new
     }
 
+    val revealBelowFront: () -> Float = { (expansion() * 2f).coerceIn(0f, 1f) }
+
     Layout(
         modifier =
             Modifier.scrollable(scrollState, Orientation.Vertical, enabled = overflowing)
@@ -101,10 +108,12 @@ internal fun IslandCardList(
                     shape = clipShape
                 },
         content = {
-            chips.forEach { chip ->
+            chips.forEachIndexed { index, chip ->
                 key(chip.chipId) {
                     IslandListCard(
                         chip = chip,
+                        // The cards under the front one come in as they slide out.
+                        reveal = if (index == 0) AlwaysRevealed else revealBelowFront,
                         interactive = interactive,
                         baseBlur = baseBlur,
                         gapPx = gapPx,
@@ -119,14 +128,17 @@ internal fun IslandCardList(
             }
         },
     ) { measurables, constraints ->
-        val width = constraints.maxWidth
+        if (measurables.isEmpty()) return@Layout layout(0, 0) {}
+        // The front card has the width it has as part of the stack; the others take it.
+        val front = measurables[0].measure(Constraints(maxWidth = constraints.maxWidth))
+        val width = front.width
         val cards =
-            measurables.map {
-                it.measure(
-                    Constraints(minWidth = width, maxWidth = width, minHeight = 0)
-                )
-            }
+            listOf(front) +
+                measurables.drop(1).map {
+                    it.measure(Constraints(minWidth = width, maxWidth = width, minHeight = 0))
+                }
         // Each card reports the gap below it, so the closing card takes its gap with it.
+        onFrontHeight((front.height - gapPx).coerceAtLeast(1))
         val total = (cards.sumOf { it.height } - gapPx).coerceAtLeast(0)
         val height = if (constraints.hasBoundedHeight) minOf(total, constraints.maxHeight) else total
         maxScroll[0] = (total - height).coerceAtLeast(0).toFloat()
@@ -134,10 +146,15 @@ internal fun IslandCardList(
         if (overflowing != over) overflowing = over
         val offset = scrollPx.coerceIn(0f, maxScroll[0]).roundToInt()
         layout(width, height) {
-            var y = -offset
-            cards.forEach {
-                it.place(0, y)
-                y += it.height
+            // Read here, so the opening only places the cards again.
+            val open = expansion().coerceIn(0f, 1f)
+            var y = 0
+            cards.forEachIndexed { index, card ->
+                // The cards below the front one come from the front card's place, and the front
+                // card is on top of them.
+                val placed = if (index == 0) -offset else (y * open).roundToInt() - offset
+                card.place(0, placed, zIndex = (cards.size - index).toFloat())
+                y += card.height
             }
         }
     }
@@ -146,6 +163,7 @@ internal fun IslandCardList(
 @Composable
 private fun IslandListCard(
     chip: QuickActionChipModel.PopupChip,
+    reveal: () -> Float,
     interactive: () -> Boolean,
     baseBlur: IslandCardBlurState,
     gapPx: Int,
@@ -166,7 +184,7 @@ private fun IslandListCard(
     val currentOnDismissed by rememberUpdatedState(onDismissed)
     val currentOnCardUsed by rememberUpdatedState(onCardUsed)
     val dismissible = chip.onDismissed != null
-    val fade = (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f)
+    val fade = (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f) * reveal()
 
     fun settle(dismiss: Boolean, direction: Float) {
         swipeJob?.cancel()
@@ -277,13 +295,20 @@ private fun IslandListCard(
             // The card moves by layout, so its glass follows it; the fade has to reach the glass.
             CompositionLocalProvider(
                 LocalIslandCardBlurState provides
-                    IslandCardBlurState(shift = baseBlur.shift, alpha = baseBlur.alpha * fade)
+                    IslandCardBlurState(
+                        shift = baseBlur.shift,
+                        alpha = baseBlur.alpha * fade,
+                        // The cards slide in and out of the stack, so glass and content fade as one.
+                        glassFollowsAlpha = true,
+                    )
             ) {
                 PopupBody(chip)
             }
         }
     }
 }
+
+private val AlwaysRevealed: () -> Float = { 1f }
 
 /** A clip a bit wider than the list, so a card being swiped away is not cut at once. */
 private class ListClipShape(private val slackPx: Float) : Shape {

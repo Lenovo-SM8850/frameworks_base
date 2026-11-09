@@ -23,6 +23,7 @@ import android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALW
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
@@ -81,6 +82,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
@@ -100,6 +102,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -137,6 +140,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandEdge
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalDynamicIslandWidth
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalHidePopup
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandGlassAlpha
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandCosStyle
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandContentProgress
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandContentSpatialMotion
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
@@ -157,6 +161,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
 
 private val SwipeSlackMax = 96.dp
 private val PopupMaxWidth = 400.dp
@@ -174,6 +180,13 @@ private val StackPeekDropNear = 9.dp
 private const val StackPeekScaleFar = 0.95f
 private const val StackPeekScaleNear = 0.975f
 private val StackShape = RoundedCornerShape(32.dp)
+
+// Dot colours over a dark and over a light backdrop.
+private val DotsOnDark = Color.White
+private val DotsOnLight = Color(0xFF1B1B1F)
+
+// How long the stack takes to open as a list, and to close again.
+private const val ListExpandMillis = 320
 
 // Material expressive default springs. Content staging is specific to the island.
 // The default threshold ends the spring 1% short, a visible jump on a travel this long.
@@ -222,9 +235,23 @@ fun IslandPopup(
     val currentOnMorphActiveChanged by rememberUpdatedState(onMorphActiveChanged)
     val currentOnHidden by rememberUpdatedState(onHidden)
     val hidePopupAction = remember { { currentChip.hidePopup() } }
-    // The ColorOS style shows every activity at once, one card under another, instead of paging.
-    val listMode = cos && chips.size > 1
-    val canPage = chips.size > 1 && !listMode
+    // Both styles stack their cards; the page indicator opens them as a list, one card under
+    // another, and closes the list again. A closed or reopened popup starts as the stack.
+    var listExpanded by remember { mutableStateOf(false) }
+    // 0 is the stack, 1 the list. The cards other than the front one slide out from under it.
+    val expansion = remember { Animatable(0f) }
+    // The list stays until a collapse has run to its end.
+    val listShown by remember {
+        derivedStateOf { currentChips.size > 1 && (listExpanded || expansion.value > 0f) }
+    }
+    // The peeks of the stack go once the list has fully opened.
+    val stackPeeksShown by remember {
+        derivedStateOf {
+            currentChips.size > 1 && !(listExpanded && expansion.value >= 1f)
+        }
+    }
+    val hasIndicator = chips.size > 1
+    val canPage = hasIndicator && !listShown
     val swipeSlack =
         ((LocalConfiguration.current.screenWidthDp - (PopupMaxWidth + PopupPadding * 2).value) / 2f)
             .coerceIn(0f, SwipeSlackMax.value)
@@ -389,6 +416,29 @@ fun IslandPopup(
             ),
     ) {
         val popupView = LocalView.current
+        // The dots sit beside the cards over whatever is behind the popup, so their colour follows
+        // the brightness sampled there and not the theme. Until a sample arrives it is the theme's.
+        val backdrop = rememberIslandBackdrop(popupView, enabled = cos && hasIndicator && isVisible)
+        val themeDotsColor = MaterialTheme.colorScheme.onSurface
+        val veilColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        val dotsColor by
+            animateColorAsState(
+                targetValue =
+                    when (backdrop.isDark) {
+                        true -> DotsOnDark
+                        false -> DotsOnLight
+                        null -> themeDotsColor
+                    },
+                animationSpec = tween(200),
+                label = "islandDotsColor",
+            )
+        // A thin edge of the opposite shade keeps the dots readable where the backdrop is mixed.
+        val dotsOutlineColor =
+            when (backdrop.isDark) {
+                true -> DotsOnLight.copy(alpha = 0.35f)
+                false -> DotsOnDark.copy(alpha = 0.45f)
+                null -> Color.Transparent
+            }
         var popupBoundsInScreen by remember { mutableStateOf<Rect?>(null) }
         val cardScaleX = remember { Animatable(1f) }
         val cardScaleY = remember { Animatable(1f) }
@@ -397,7 +447,13 @@ fun IslandPopup(
         val cardTranslationY = remember { Animatable(0f) }
         val cardShiftX = remember { Animatable(0f) }
         val reveal = remember { Animatable(1f) }
+        // Height of the front card of the list, reported by the list when it is measured.
+        val listFrontHeightPx = remember { IntArray(1) }
         val veil = remember { Animatable(0f) }
+        // The card's content fades and sharpens in as the card grows, and out as it shrinks.
+        val cosContent = remember { Animatable(1f) }
+        val cosContentBlur = remember { Animatable(0f) }
+        val cosContentBlurPx = with(density) { CosCardContentBlur.toPx() }
         // The stack behind the setting-on card is not in its layer, so it follows the card's reveal
         // and fade instead of showing before the card or staying through the close.
         val cosStackAlpha = { if (cos) (reveal.value * cardAlpha.value).coerceIn(0f, 1f) else 1f }
@@ -442,8 +498,15 @@ fun IslandPopup(
         val displayedChip = chips.firstOrNull { it.chipId == displayedChipId } ?: viewModel
         val frontIndex = chips.indexOfFirst { it.chipId == displayedChipId }
         val revealedChip =
-            if (chips.size > 1 && !listMode && frontIndex >= 0) chips[(frontIndex + 1).mod(chips.size)]
+            if (chips.size > 1 && !listShown && frontIndex >= 0) chips[(frontIndex + 1).mod(chips.size)]
             else null
+        // The list starts with the front card, so it stays where it is; the others follow it in the
+        // order the stack shows them.
+        val listChips =
+            remember(chips, displayedChipId) {
+                val front = chips.indexOfFirst { it.chipId == displayedChipId }.coerceAtLeast(0)
+                chips.drop(front) + chips.take(front)
+            }
         val swipeScope = rememberCoroutineScope()
         val swipeDismissible = viewModel.onDismissed != null
         val fadeDistancePx = with(density) { maxOf(swipeSlack + PopupPadding, 64.dp).toPx() }
@@ -538,6 +601,38 @@ fun IslandPopup(
             dismissed.onDismissed?.invoke()
         }
 
+        val currentVisible by rememberUpdatedState(isVisible)
+        // The dots open the stack as a list and, while it is open, close it again. Their label
+        // says what the next tap does; the tap that opens the list keeps the default one.
+        val dotsClickLabel =
+            if (listExpanded) stringResource(R.string.privacy_dialog_collapse_action) else null
+        // Which side of the card the dots are on, as the layout placed them.
+        var dotsRightOfCard by remember { mutableStateOf(sideEdge?.edge != DynamicIslandEdge.RIGHT) }
+        // The indicator opens the stack as a list and, tapped again, closes it. The front card does
+        // not move: the others slide down from under it, and back under it when it closes.
+        val toggleList: () -> Unit = {
+            if (currentChips.size > 1 && currentVisible && !isAnimating) {
+                listExpanded = !listExpanded
+                val target = if (listExpanded) 1f else 0f
+                swipeScope.launch { expansion.animateTo(target, tween(ListExpandMillis, easing = CosCardGrow)) }
+            }
+        }
+
+        // The list has nothing to show for a single card, and a new group of cards starts closed.
+        LaunchedEffect(chips.size) {
+            if (chips.size <= 1) {
+                listExpanded = false
+                expansion.snapTo(0f)
+            }
+        }
+        // A reopened popup is the stack, also when the close that ended it never reached its end.
+        LaunchedEffect(isVisible) {
+            if (isVisible) {
+                listExpanded = false
+                expansion.snapTo(0f)
+            }
+        }
+
         // An external selection or removal must not leave the old page mid-drag.
         LaunchedEffect(viewModel.chipId, chips.map { it.chipId }) {
             swipeJob?.cancel()
@@ -562,23 +657,39 @@ fun IslandPopup(
                     pendingLaunch = null
                     swipeX = 0f
                     swipeY = 0f
+                    // A close that was cut short by a reopening must not leave the list behind.
+                    listExpanded = false
+                    expansion.snapTo(0f)
                 }
 
+                if (isVisible) {
+                    // The bounds of the card are those of its last opening until it has been laid
+                    // out again, and its first frame would be drawn away from the island. It stays
+                    // hidden until then.
+                    cardAlpha.snapTo(0f)
+                    // Its glass is not in its layer and follows the reveal, so that goes too.
+                    reveal.snapTo(0f)
+                    repeat(2) { withFrameNanos {} }
+                }
                 val chip = chipBoundsInScreen
                 val popup = popupBoundsInScreen
                 val fromX = if (chip != null && popup != null) chip.center.x - popup.center.x else 0f
-                // The card grows from the top of the island and shrinks back into it, so its top
-                // follows the island's top and never rises above the island.
-                val fromY = if (chip != null && popup != null) chip.top - popup.top else 0f
+                // The card grows from the middle of the island and shrinks back into it.
+                val fromY =
+                    if (chip != null && popup != null) chip.center.y - popup.center.y else 0f
                 if (isVisible && popup != null) {
-                    cardScaleX.snapTo(0.4f)
-                    cardScaleY.snapTo(0.4f)
+                    cardScaleX.snapTo(CosCardStartScale)
+                    cardScaleY.snapTo(CosCardStartScale)
                     cardShiftX.snapTo(fromX)
                     cardTranslationY.snapTo(fromY)
                     reveal.snapTo(0f)
                     veil.snapTo(1f)
+                    cosContent.snapTo(0f)
+                    cosContentBlur.snapTo(cosContentBlurPx)
                     cardAlpha.snapTo(1f)
                     coroutineScope {
+                        launch { cosContent.animateTo(1f, tween(300, easing = CosCardEase)) }
+                        launch { cosContentBlur.animateTo(0f, tween(300, easing = CosCardEase)) }
                         launch { cardShiftX.animateTo(0f, tween(300, easing = CosCardGrow)) }
                         launch { cardTranslationY.animateTo(0f, tween(300, easing = CosCardGrow)) }
                         launch { reveal.animateTo(1f, tween(300, easing = CosCardGrow)) }
@@ -604,9 +715,19 @@ fun IslandPopup(
                     } else {
                         coroutineScope {
                             launch { cardAlpha.animateTo(0f, tween(50, delayMillis = CosCardCloseMillis - 50)) }
+                            launch { cosContent.animateTo(0f, tween(150, easing = CosCardEase)) }
+                            launch {
+                                cosContentBlur.animateTo(
+                                    cosContentBlurPx,
+                                    tween(CosCardCloseMillis, easing = CosCardEase),
+                                )
+                            }
                             for (scale in listOf(cardScaleX, cardScaleY)) {
                                 launch {
-                                    scale.animateTo(0.4f, tween(CosCardCloseMillis, easing = CosCardEase))
+                                    scale.animateTo(
+                                        CosCardStartScale,
+                                        tween(CosCardCloseMillis, easing = CosCardEase),
+                                    )
                                 }
                             }
                             launch {
@@ -616,11 +737,14 @@ fun IslandPopup(
                                 cardTranslationY.animateTo(fromY, tween(CosCardCloseMillis, easing = CosCardMove))
                             }
                             launch { reveal.animateTo(0f, tween(CosCardCloseMillis, easing = CosCardEase)) }
-                            veil.animateTo(1f, tween(200, easing = CosCardEase))
+                            veil.animateTo(1f, tween(150, easing = CosCardEase))
                         }
                     }
                 }
                 if (isVisible) { isAnimating = false } else {
+                    // Once the card is gone, so the list does not turn into the stack in view.
+                    listExpanded = false
+                    expansion.snapTo(0f)
                     val launch = pendingLaunch
                     pendingLaunch = null
                     currentOnHidden()
@@ -665,6 +789,8 @@ fun IslandPopup(
                     surfaceProgress.snapTo(0f)
                     currentOnMorphActiveChanged(false)
                     pendingLaunch = null
+                    listExpanded = false
+                    expansion.snapTo(0f)
                     currentOnHidden()
                     return@LaunchedEffect
                 }
@@ -682,6 +808,9 @@ fun IslandPopup(
                 withFrameNanos {}
                 withFrameNanos {}
                 handoffAlpha.animateTo(0f, tween(100))
+                // Gone from view, so the list does not turn into the stack in it.
+                listExpanded = false
+                expansion.snapTo(0f)
                 val launch = pendingLaunch
                 pendingLaunch = null
                 currentOnHidden()
@@ -715,12 +844,15 @@ fun IslandPopup(
                 },
             content = {
                 Box {
-                    if (canPage && !revealingStack) {
+                    if (stackPeeksShown && !revealingStack) {
                         if (chips.size > 2) {
                             PopupPeek(
                                 scale = StackPeekScaleFar,
                                 offsetY = StackPeekDropFar,
-                                alpha = { visibleContentAlpha() * 0.55f * cosStackAlpha() },
+                                alpha = {
+                                    visibleContentAlpha() * 0.55f * cosStackAlpha() *
+                                        (1f - expansion.value.coerceIn(0f, 1f))
+                                },
                                 progress = {
                                     if (dismissedBySwipe) 0f else progress.value.coerceIn(0f, 1f)
                                 },
@@ -729,13 +861,27 @@ fun IslandPopup(
                         PopupPeek(
                             scale = StackPeekScaleNear,
                             offsetY = StackPeekDropNear,
-                            alpha = { visibleContentAlpha() * 0.8f * cosStackAlpha() },
+                            alpha = {
+                                visibleContentAlpha() * 0.8f * cosStackAlpha() *
+                                    (1f - expansion.value.coerceIn(0f, 1f))
+                            },
                             progress = {
                                 if (dismissedBySwipe) 0f else progress.value.coerceIn(0f, 1f)
                             },
                         )
                     }
     if (!cos) {
+                    // The window blur of the glass ignores the layer alpha below, so it takes the
+                    // same fade, and only that one: the content fades out early in a collapse while
+                    // the surface still has to carry the glass down to the island.
+                    val containerAlpha = {
+                        (if (dismissedBySwipe) 0f else handoffAlpha.value) *
+                            (1f - dismissProgress) *
+                            (1f - (expansion.value * 4f).coerceIn(0f, 1f))
+                    }
+                    CompositionLocalProvider(
+                        LocalIslandGlassAlpha provides containerAlpha
+                    ) {
                     PopupSurface(
                         surfaceKey = displayedChipId,
                         backgroundAlpha = 1f - dismissProgress,
@@ -752,11 +898,12 @@ fun IslandPopup(
                         modifier =
                             Modifier.fillMaxSize().graphicsLayer {
                                 translationX = swipeX
-                                alpha =
-                                    (if (dismissedBySwipe) 0f else handoffAlpha.value) *
-                                        (1f - dismissProgress)
+                                // The front card of an open list has a surface of its own, so the
+                                // container makes way for it as the list opens.
+                                alpha = containerAlpha()
                             },
                     ) {}
+                    }
 } else { Box {} }
                 }
                 Box(
@@ -764,9 +911,9 @@ fun IslandPopup(
                         Modifier
                             // Keeps taps on blank parts of the card from closing the popup.
                             .pointerInput(Unit) { detectTapGestures {} }
-                            .pointerInput(swipeDismissible, chips.size, isVisible, listMode) {
+                            .pointerInput(swipeDismissible, chips.size, isVisible, listShown) {
                                 // The list handles the swipe of each card itself.
-                                if (listMode) return@pointerInput
+                                if (listShown) return@pointerInput
                                 val paging = chips.size > 1
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -865,9 +1012,11 @@ fun IslandPopup(
                                     this.alpha = cardAlpha.value * (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f)
                                     this.translationX = cardShiftX.value + swipeX
                                     this.translationY = cardTranslationY.value
-                                    this.transformOrigin = TransformOrigin(0.5f, 0f)
+                                    this.transformOrigin = TransformOrigin.Center
                                     this.clip = reveal.value < 1f
-                                    if (this.clip) this.shape = CosRevealShape(reveal.value, cosCornerPx)
+                                    if (this.clip) {
+                                        this.shape = CosRevealShape(reveal.value, cosCornerPx)
+                                    }
                                 } else {
                                 alpha =
                                     visibleContentAlpha() *
@@ -882,10 +1031,12 @@ fun IslandPopup(
                                     drawContent()
                                     if (veil.value > 0f) {
                                         // The stack tail below the card is transparent; the veil
-                                        // covers the card, or the whole list with its gaps.
+                                        // covers the card, or the whole list with its gaps. It has
+                                        // the colour of the glass, as that cannot be shown until the
+                                        // card has grown; black would show as a black card first.
                                         val tail = if (canPage) StackTailHeight.toPx() else 0f
                                         drawRect(
-                                            Color.Black,
+                                            lerp(CosIslandColor, veilColor, reveal.value),
                                             size = Size(size.width, (size.height - tail).coerceAtLeast(0f)),
                                             alpha = veil.value,
                                         )
@@ -914,6 +1065,16 @@ fun IslandPopup(
 
                                 }
                             }
+                            // The content alone, under the veil: it fades and sharpens as the card
+                            // opens and the other way as it closes.
+                            .graphicsLayer {
+                                if (cos) {
+                                    alpha = cosContent.value
+                                    val b = cosContentBlur.value
+                                    renderEffect =
+                                        if (b > 0.5f) BlurEffect(b, b, TileMode.Decal) else null
+                                }
+                            }
                 ) {
                     CompositionLocalProvider(
                         LocalHidePopup provides hidePopupAction,
@@ -924,7 +1085,9 @@ fun IslandPopup(
                         },
                         LocalPopupMarqueeEnabled provides
                             (isVisible && !isAnimating && swipeX == 0f && swipeY == 0f),
-                        LocalPopupContainer provides !cos,
+                        // An open list gives every card a surface of its own.
+                        LocalPopupContainer provides (!cos && !listShown),
+                        LocalIslandCosStyle provides cos,
                         // The window blur ignores the veil and the layer alpha, so it fades with them.
                         LocalIslandGlassAlpha provides {
                             if (cos) cardAlpha.value * (1f - veil.value)
@@ -947,12 +1110,15 @@ fun IslandPopup(
                                         // The glass has the full size of the card and is not in
                                         // the reveal clip, so it comes in only once the card has
                                         // nearly grown. Earlier it would blur the island above it.
-                                        ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f),
+                                        ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f) *
+                                        (if (cos) cardAlpha.value else 1f),
                             ),
                     ) {
-                        if (listMode) {
+                        if (listShown) {
                             IslandCardList(
-                                chips = chips,
+                                chips = listChips,
+                                expansion = { expansion.value },
+                                onFrontHeight = { listFrontHeightPx[0] = it },
                                 interactive = { isVisible && !isAnimating },
                                 fadeDistancePx = fadeDistancePx,
                                 dismissThresholdPx = dismissThresholdPx,
@@ -975,23 +1141,48 @@ fun IslandPopup(
                 }
                 Box(
                     modifier = Modifier.graphicsLayer {
-                        // With two cards the dots leave together with the dismissed one.
+                        // With two cards the dots leave together with the dismissed one. They stay
+                        // while the stack is open as a list, as the way back to the stack.
                         alpha = visibleContentAlpha() * handoffAlpha.value * cosStackAlpha() *
                             (if (chips.size > 2) 1f else 1f - dismissProgress)
                     }
+                        .onGloballyPositioned { coordinates ->
+                            val bounds = coordinates.boundsInScreen(popupView)
+                            backdrop.setBounds(
+                                android.graphics.Rect(
+                                    bounds.left.roundToInt(),
+                                    bounds.top.roundToInt(),
+                                    bounds.right.roundToInt(),
+                                    bounds.bottom.roundToInt(),
+                                )
+                            )
+                        }
                 ) {
-                    if (canPage) {
-                        PageDots(
-                            count = chips.size,
-                            index =
-                                chips.indexOfFirst { it.chipId == displayedChipId }
-                                    .coerceAtLeast(0),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            onClick = {
-                                val index = chips.indexOfFirst { it.chipId == displayedChipId }.coerceAtLeast(0)
-                                onPageSelected(chips[(index + 1).mod(chips.size)])
-                            },
-                        )
+                    if (hasIndicator) {
+                        if (cos) {
+                            CosPageDots(
+                                count = chips.size,
+                                index =
+                                    chips.indexOfFirst { it.chipId == displayedChipId }
+                                        .coerceAtLeast(0),
+                                color = dotsColor,
+                                outlineColor = dotsOutlineColor,
+                                cardOnLeft = dotsRightOfCard,
+                                onClickLabel = dotsClickLabel,
+                                onClick = toggleList,
+                            )
+                        } else {
+                            PageDots(
+                                count = chips.size,
+                                index =
+                                    chips.indexOfFirst { it.chipId == displayedChipId }
+                                        .coerceAtLeast(0),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                cardOnLeft = dotsRightOfCard,
+                                onClickLabel = dotsClickLabel,
+                                onClick = toggleList,
+                            )
+                        }
                     }
                 }
                 Box {
@@ -1013,6 +1204,7 @@ fun IslandPopup(
                         ) {
                             CompositionLocalProvider(
                                 LocalPopupContainer provides true,
+                                LocalIslandCosStyle provides cos,
                                 LocalPopupCameraClearance provides cameraClearance,
                                 LocalPopupMarqueeEnabled provides false,
                             ) {
@@ -1026,7 +1218,10 @@ fun IslandPopup(
             val padding = PopupPadding.roundToPx()
             val stackTail = if (canPage) StackTailHeight.roundToPx() else 0
             val indicator = measurables[2].measure(Constraints())
-            val indicatorSpace = if (canPage) indicator.width + PageIndicatorPadding.roundToPx() else 0
+            // The ColorOS dots carry their own space to the card inside their touch area.
+            val indicatorGap = if (cos) 0 else PageIndicatorPadding.roundToPx()
+            // The dots stay beside the front card when the stack is open as a list.
+            val indicatorSpace = if (hasIndicator) indicator.width + indicatorGap else 0
             val width = constraints.maxWidth
             val contentWidth =
                 minOf(PopupMaxWidth.roundToPx(), width - 2 * padding - 2 * indicatorSpace)
@@ -1052,7 +1247,7 @@ fun IslandPopup(
                         maxWidth = contentWidth,
                         maxHeight =
                             (constraints.maxHeight - targetTop.roundToInt() - padding -
-                                    if (listMode) ListBottomMargin.roundToPx() else 0)
+                                    if (listShown) ListBottomMargin.roundToPx() else 0)
                                 .coerceAtLeast(0),
                     )
                 )
@@ -1073,7 +1268,13 @@ fun IslandPopup(
                 layoutDirection,
                 IntSize(revealed.width + 2 * padding, revealed.height + 2 * padding),
             )
-            val cardHeight = (body.height - stackTail).coerceAtLeast(1)
+            // The list is taller than its front card, which is the card the popup is built around.
+            val frontListHeight = if (listShown) listFrontHeightPx[0] else 0
+            val cardHeight =
+                (if (frontListHeight > 0) frontListHeight else body.height - stackTail)
+                    .coerceAtLeast(1)
+            // What the list holds below the front card.
+            val listRest = (body.height - cardHeight - stackTail).coerceAtLeast(0)
             val targetOffset =
                 contentPositionProvider.calculatePosition(
                     anchorBounds = popupAnchorBounds,
@@ -1109,7 +1310,7 @@ fun IslandPopup(
                     bounds,
                     IntSize(indicator.width, indicator.height),
                     width,
-                    PageIndicatorPadding.roundToPx(),
+                    indicatorGap,
                     preferStart = sideEdge?.edge == DynamicIslandEdge.RIGHT,
                 )
             // While the front card is swiped away, move the dots to the card taking its place.
@@ -1122,7 +1323,7 @@ fun IslandPopup(
                             Rect(left, top, left + revealed.width, top + revealed.height),
                             IntSize(indicator.width, indicator.height),
                             width,
-                            PageIndicatorPadding.roundToPx(),
+                            indicatorGap,
                             preferStart = sideEdge?.edge == DynamicIslandEdge.RIGHT,
                         )
                     IntOffset(
@@ -1134,20 +1335,31 @@ fun IslandPopup(
                 } else {
                     frontIndicatorOffset
                 }
+            val rightOfCard = frontIndicatorOffset.x + indicator.width / 2f >= bounds.center.x
+            if (dotsRightOfCard != rightOfCard) dotsRightOfCard = rightOfCard
             viewport =
                 Rect(
                     bounds.left - bodyX,
                     bounds.top - bodyY,
                     bounds.right - bodyX,
-                    bounds.bottom - bodyY + stackTail,
+                    // The normal style clips its content to the container; the cards of an open
+                    // list are below it, so the clip makes room for them as the popup opens.
+                    bounds.bottom - bodyY + stackTail +
+                        if (listShown) listRest * fraction.coerceIn(0f, 1f) else 0f,
                 )
+            // The cards of a list below the front one take touch too.
+            val cardsBottom = if (listShown) bodyY + body.height.toFloat() else 0f
             touchBounds =
-                if (canPage) {
+                if (hasIndicator) {
                     Rect(
                         minOf(bounds.left, indicatorOffset.x.toFloat()),
                         minOf(bounds.top, indicatorOffset.y.toFloat()),
                         maxOf(bounds.right, (indicatorOffset.x + indicator.width).toFloat()),
-                        maxOf(bounds.bottom + stackTail, (indicatorOffset.y + indicator.height).toFloat()),
+                        maxOf(
+                            bounds.bottom + stackTail,
+                            cardsBottom,
+                            (indicatorOffset.y + indicator.height).toFloat(),
+                        ),
                     )
                 } else {
                     Rect(bounds.left, bounds.top, bounds.right, bounds.bottom + stackTail)
@@ -1214,13 +1426,24 @@ private fun BoxScope.PopupPeek(
                 translationY = offsetY.toPx()
             }
     ) {
-        PopupSurface(
-            shape = StackShape,
-            shadowElevation = 4.dp * progress(),
-            containerProgress = progress(),
-            blurFraction = progress(),
-            modifier = Modifier.fillMaxSize(),
-        ) {}
+        // The ColorOS glass of a peek is composited at its full size whatever the layer alpha is, so
+        // it follows the peek's fade and comes in only as the front card's glass does.
+        CompositionLocalProvider(
+            LocalIslandCardBlurState provides
+                IslandCardBlurState(
+                    alpha =
+                        alpha().coerceIn(0f, 1f) *
+                            ((progress() - 0.9f) / 0.1f).coerceIn(0f, 1f)
+                )
+        ) {
+            PopupSurface(
+                shape = StackShape,
+                shadowElevation = 4.dp * progress(),
+                containerProgress = progress(),
+                blurFraction = progress(),
+                modifier = Modifier.fillMaxSize(),
+            ) {}
+        }
     }
 }
 
@@ -1374,19 +1597,32 @@ internal fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
         PopupContentModel.None -> Unit
     }
 }
-/** Reveals the card from a small rounded rectangle in its middle out to its full size. */
-private class CosRevealShape(private val fraction: Float, private val cornerPx: Float) : Shape {
+
+/** Scale the ColorOS card opens from and closes to, in the middle of the island. */
+private const val CosCardStartScale = 0.4f
+
+/** Blur of the card's content when it starts to open and when it has closed. */
+private val CosCardContentBlur = 12.dp
+
+/** The island capsule's colour, which the card starts in. */
+private val CosIslandColor = Color.Black
+
+/** The visible part of the ColorOS card while it grows: from a small square in its middle. */
+private class CosRevealShape(
+    private val fraction: Float,
+    private val cornerPx: Float,
+) : Shape {
     override fun createOutline(
         size: Size,
         layoutDirection: LayoutDirection,
         density: Density,
     ): Outline {
-        val start = size.width * 0.12f
-        val w = start + (size.width - start) * fraction
-        val h = start + (size.height - start) * fraction
+        val square = size.width * 0.12f
+        val startH = minOf(square, size.height)
+        val w = square + (size.width - square) * fraction
+        val h = startH + (size.height - startH) * fraction
         val left = (size.width - w) / 2f
-        // Kept to the top of the card, where the island is.
-        val top = 0f
+        val top = (size.height - h) / 2f
         val r = minOf(cornerPx, w / 2f, h / 2f)
         return Outline.Rounded(RoundRect(left, top, left + w, top + h, CornerRadius(r)))
     }
