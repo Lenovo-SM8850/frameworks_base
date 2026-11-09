@@ -336,6 +336,7 @@ fun IslandContainer(
                     visible = selectedChip != null && !popupVisible,
                     hole = cutoutSpec.holeSize,
                     tall = chip.isCallChip(),
+                    heightScale = rememberDynamicIslandSizeScale().second,
                     onGone = {
                         present = false
                         leaving[0] = null

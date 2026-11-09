@@ -24,7 +24,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -68,8 +67,6 @@ import kotlinx.coroutines.launch
 internal object CosIsland {
     val MinHeight = 36.dp
     val MaxWidth = 280.dp
-    val MinWidth = 136.dp
-    val Padding = 5.dp
     val IconSize = 20.dp
     val TextSize = 14.sp
     val TextColor = Color(0xE6FFFFFF)
@@ -80,7 +77,6 @@ internal object CosIsland {
 
     val StrokeWidth = 1.3.dp
     val StrokeColor = Color(0x44FFFFFF)
-    val EdgePadding = 9.dp
     val ContentBlur = 9.dp
 
     val Move = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
@@ -114,13 +110,13 @@ internal fun CosIslandShell(
     visible: Boolean,
     hole: Dp,
     onGone: () -> Unit,
+    heightScale: Float = 1f,
     modifier: Modifier = Modifier,
     tall: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
     val holePx = with(density) { hole.toPx() }
-    val (_, heightScale) = rememberDynamicIslandSizeScale()
     val heightPx = with(density) { CosIsland.height(hole, heightScale, tall).toPx() }
     val currentHeightPx by rememberUpdatedState(heightPx)
     val extraPx = with(density) { CosIsland.ExtraWidth.toPx() }
@@ -258,12 +254,11 @@ internal fun CosIslandShell(
         Layout(
             content = {
                 Box(
-                    // The size includes the padding that keeps the content clear of the rounded ends.
+                    // The content keeps itself clear of the rounded ends, so no padding is added here.
                     Modifier.wrapContentSize()
                         // The content lambda already shows the new chip while the old one
                         // closes, so its size has to be taken whatever the shown key is.
                         .onSizeChanged { natural = it }
-                        .padding(horizontal = CosIsland.EdgePadding)
                         .graphicsLayer {
                             scaleX = scale.value
                             scaleY = scale.value
