@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -74,6 +75,12 @@ fun islandGlassCards(): Boolean {
     val container = LocalPopupContainer.current
     return rememberDynamicIslandColorOSStyle() && !container
 }
+
+/**
+ * Set by the island popup in the ColorOS style, also for a card that sits in a container with its
+ * own surface, such as the media card above its lyrics, where [islandGlassCards] is false.
+ */
+internal val LocalIslandCosStyle = staticCompositionLocalOf { false }
 
 private val GlassCardShape = RoundedCornerShape(28.dp)
 private val GlassTintDark = Color.White.copy(alpha = 0.10f)
@@ -299,6 +306,12 @@ fun IslandGlassProgress(progress: Float, accent: Color, modifier: Modifier = Mod
 data class IslandCardBlurState(
     val shift: Offset = Offset.Zero,
     val alpha: Float = 1f,
+    /**
+     * The glass takes [alpha] as its own opacity, and the card content is left to the layer it is
+     * in, so the glass and the content fade with the same alpha. Otherwise the glass is drawn at
+     * full strength whatever [alpha] is, and only [alpha] reaching zero removes it.
+     */
+    val glassFollowsAlpha: Boolean = false,
 )
 
 internal val LocalIslandCardBlurState = compositionLocalOf { IslandCardBlurState() }

@@ -23,10 +23,12 @@ import android.view.View
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -36,6 +38,8 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -83,6 +87,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -669,40 +674,6 @@ private val MediaBarsHeight = 13.dp
  * and the rest after it. Both sides take the same width so the gap stays over the camera.
  */
 @Composable
-internal fun PageDots(count: Int, index: Int, color: Color, onClick: () -> Unit) {
-    val visible = minOf(count, MaxPageDots)
-    val first = (index - visible / 2).coerceIn(0, count - visible)
-    Row(
-        modifier =
-            Modifier.clickable(onClick = onClick)
-                .padding(horizontal = PageDotsTapPadding, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(PageDotSpacing),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        repeat(visible) { slot ->
-            val isCurrent = first + slot == index
-            val width by
-                animateDpAsState(
-                    targetValue = if (isCurrent) PageDotActiveWidth else PageDotSize,
-                    label = "pageDotWidth",
-                )
-            Box(
-                modifier =
-                    Modifier.size(width = width, height = PageDotSize)
-                        .background(
-                            color = color.copy(alpha = if (isCurrent) 0.9f else 0.45f),
-                            shape = CircleShape,
-                        )
-            )
-        }
-    }
-}
-
-/**
- * A [Row] that, given a [cameraGap], keeps the first [leadingCount] children before a centred gap
- * and the rest after it. Both sides take the same width so the gap stays over the camera.
- */
-@Composable
 private fun CameraSplitRow(
     leadingCount: Int,
     cameraGap: Dp?,
@@ -774,12 +745,6 @@ internal val LocalIslandContentSpatialMotion = staticCompositionLocalOf { true }
 internal val LocalDynamicIslandWidth = staticCompositionLocalOf { 120.dp }
 internal val CameraSplitSpacing = 8.dp
 internal const val AlarmCountdownTickMs = 30_000L
-private const val MaxPageDots = 5
-private val PageDotSize = 4.dp
-private val PageDotActiveWidth = 10.dp
-private val PageDotSpacing = 3.dp
-private val PageDotsTapPadding = 4.dp
-
 private val DynamicIslandEmbeddedGapFallbackWidth = 38.dp
 private val DynamicIslandEmbeddedGapMinWidth = 34.dp
 private val DynamicIslandEmbeddedGapMaxWidth = 88.dp
@@ -1095,6 +1060,73 @@ internal fun rememberDynamicIslandWidth(cutoutSpec: DynamicIslandCutoutSpec): Dp
         (ceil(width.value / 4f) * 4f).dp.coerceAtLeast(120.dp)
     }
 }
+
+/**
+ * The page indicator of the normal style popup: a pill of dots beside the card. The touch target is
+ * at least [PageDotsTouchSize] square and the pill sits at the edge of it that faces the card, so
+ * the popup's gap to the card is the visible one. [cardOnLeft] is true when the card is to the left
+ * of the dots. [onClickLabel] names what a tap does for accessibility services.
+ */
+@Composable
+internal fun PageDots(
+    count: Int,
+    index: Int,
+    color: Color,
+    onClick: () -> Unit,
+    cardOnLeft: Boolean = true,
+    onClickLabel: String? = null,
+) {
+    val visible = minOf(count, MaxPageDots)
+    val first = (index - visible / 2).coerceIn(0, count - visible)
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier =
+            Modifier.defaultMinSize(minWidth = PageDotsTouchSize, minHeight = PageDotsTouchSize)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = onClickLabel,
+                    onClick = onClick,
+                ),
+        contentAlignment = if (cardOnLeft) Alignment.CenterStart else Alignment.CenterEnd,
+    ) {
+        Column(
+            modifier =
+                Modifier.clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f))
+                    // The press shows on the pill, not on the whole touch target.
+                    .indication(interactionSource, LocalIndication.current)
+                    .padding(horizontal = PageDotsTapPadding, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(PageDotSpacing),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            repeat(visible) { slot ->
+                val isCurrent = first + slot == index
+                val height by
+                    animateDpAsState(
+                        targetValue = if (isCurrent) PageDotActiveHeight else PageDotSize,
+                        label = "pageDotHeight",
+                    )
+                Box(
+                    modifier =
+                        Modifier.size(width = PageDotSize, height = height)
+                            .background(
+                                color = color.copy(alpha = if (isCurrent) 0.9f else 0.45f),
+                                shape = CircleShape,
+                            )
+                )
+            }
+        }
+    }
+}
+
+private const val MaxPageDots = 5
+private val PageDotSize = 4.dp
+private val PageDotActiveHeight = 10.dp
+private val PageDotSpacing = 3.dp
+private val PageDotsTapPadding = 4.dp
+private val PageDotsTouchSize = 48.dp
 
 /** What sits at one rounded end of a capsule, which decides how far it must stay from the edge. */
 internal sealed interface CapsuleEnd {
