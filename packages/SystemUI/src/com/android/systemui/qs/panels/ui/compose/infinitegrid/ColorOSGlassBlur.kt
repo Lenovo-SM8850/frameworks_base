@@ -126,12 +126,6 @@ private object ColorOSGlassBlurTune {
 private const val ColorOSGlassMinAlpha = 0.01f
 
 /**
- * The veil over the glass of the light panel: the pale blue-grey MiraCLO lays over the blur of its
- * light ColorOS panel while the glass is on.
- */
-private val ColorOSLightPanelTint = Color(0x59F0F2F7)
-
-/**
  * The white laid over the blur behind the glass of the light panel's pills, tiles that are off,
  * sliders and media card. The material SurfaceFlinger draws for them is faint over the pale blur of
  * the light panel, so the glass reads as flat. ColorOS shows them as clearly lighter than the panel
@@ -370,14 +364,13 @@ internal fun Modifier.colorOSGlassBlur(
 /**
  * The glass behind the whole shade, the notifications and the panel alike: a region of the panel
  * material over the full window, which the glass of the pills, the tiles and the sliders is drawn
- * over. The light panel has [ColorOSLightPanelTint] over it. [alpha] is how much of the shade is
- * out, 0 hides it. Nothing is drawn where SurfaceFlinger cannot blur, and the scrim of the shade
- * keeps its own colour then.
+ * over. The tint of the light panel is the scrim colour, see ScrimController. [alpha] is how much of
+ * the shade is out, 0 hides it. Nothing is drawn where SurfaceFlinger cannot blur, and the scrim of
+ * the shade keeps its own colour then.
  */
 @Composable
 internal fun ColorOSBackdrop(alpha: () -> Float, modifier: Modifier = Modifier) {
     val blur = rememberColorOSGlassBlur(alpha) ?: return
-    val tintAlpha = alpha
     CompositionLocalProvider(LocalColorOSGlassBlur provides blur) {
         Spacer(
             modifier.colorOSGlassBlur(
@@ -386,12 +379,5 @@ internal fun ColorOSBackdrop(alpha: () -> Float, modifier: Modifier = Modifier) 
                 wholeWindow = true,
             )
         )
-        if (!colorOSDarkPanel()) {
-            Spacer(
-                modifier
-                    .graphicsLayer { this.alpha = tintAlpha().coerceIn(0f, 1f) }
-                    .background(ColorOSLightPanelTint)
-            )
-        }
     }
 }
