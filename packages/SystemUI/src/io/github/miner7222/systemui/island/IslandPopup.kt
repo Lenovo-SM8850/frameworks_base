@@ -133,12 +133,23 @@ import com.android.systemui.statusbar.quickactions.ui.compose.CosCardEase
 import com.android.systemui.statusbar.quickactions.ui.compose.CosCardGrow
 import com.android.systemui.statusbar.quickactions.ui.compose.CosCardMove
 import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandCutoutEdge
+import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandEdge
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalDynamicIslandWidth
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalHidePopup
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandGlassAlpha
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandContentProgress
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandContentSpatialMotion
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupCameraClearance
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
 import com.android.systemui.statusbar.quickactions.ui.compose.PageDots
+import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
+import com.android.systemui.statusbar.quickactions.ui.compose.SystemEventPopup
 import com.android.systemui.statusbar.quickactions.ui.compose.islandBoundsInScreen
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberDynamicIslandSizeScale
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupColorMode
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sign
@@ -146,17 +157,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandEdge
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalHidePopup
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandGlassAlpha
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupCameraClearance
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
-import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
-import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.SystemEventPopup
-import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupColorMode
-import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
 private val SwipeSlackMax = 96.dp
 private val PopupMaxWidth = 400.dp
@@ -927,7 +927,11 @@ fun IslandPopup(
                                     },
                                 alpha =
                                     (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f) *
-                                        (1f - dismissProgress) * reveal.value,
+                                        (1f - dismissProgress) *
+                                        // The glass has the full size of the card and is not in
+                                        // the reveal clip, so it comes in only once the card has
+                                        // nearly grown. Earlier it would blur the island above it.
+                                        ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f),
                             ),
                     ) {
                         PopupPages(

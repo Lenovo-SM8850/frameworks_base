@@ -32,12 +32,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon as MaterialIcon
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -69,12 +75,56 @@ fun islandGlassCards(): Boolean {
 }
 
 private val GlassCardShape = RoundedCornerShape(28.dp)
-private val GlassTint = Color.White.copy(alpha = 0.10f)
-private val GlassButtonFill = Color.White.copy(alpha = 0.16f)
+private val GlassTintDark = Color.White.copy(alpha = 0.10f)
+private val GlassTintLight = Color.White.copy(alpha = 0.55f)
 private val GlassPrimaryFill = Color(0xFF2F7BFF)
 
-/** Dark fill for devices without a blur region, so the white text keeps its contrast. */
-private val GlassNoBlurFill = Color(0xE62C2C2E)
+/**
+ * The glass of every ColorOS style island card. The content follows the theme, so it stays
+ * readable over the pale blur of the light theme. With liquid glass on, the card uses that glass.
+ */
+@Composable
+internal fun IslandGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val blurState = LocalIslandCardBlurState.current
+    // Move the blur by layout and fade it with the card; it must not stay behind a card that is
+    // being dragged or closed.
+    val glassModifier =
+        modifier
+            .offset { IntOffset(blurState.shift.x.roundToInt(), blurState.shift.y.roundToInt()) }
+            .graphicsLayer { alpha = blurState.alpha }
+    if (liquidGlassEnabled()) {
+        PopupSurface(shape = GlassCardShape, modifier = glassModifier, content = content)
+        return
+    }
+    val colors = MaterialTheme.colorScheme
+    val currentContent by rememberUpdatedState(content)
+    // Moves between the two parents below without losing the state of the card.
+    val body = remember {
+        movableContentOf {
+            CompositionLocalProvider(
+                LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+                content = currentContent,
+            )
+        }
+    }
+    // The blur of the surface is composited outside the card layer at its full size, whatever the
+    // layer alpha is. So there is no surface until the card has grown, or it would blur the island.
+    if (blurState.alpha <= 0f) {
+        Box(modifier = modifier) { body() }
+        return
+    }
+    AxBlurSurface(
+        modifier = glassModifier,
+        shape = GlassCardShape,
+        cornerRadius = 28.dp,
+        // Without a blur region the card is a plain fill in the theme's surface colour.
+        surfaceColor = colors.surfaceContainerHigh.copy(alpha = 0.9f),
+        tintColor = if (colors.surface.luminance() < 0.5f) GlassTintDark else GlassTintLight,
+        highlight = ColorOSTileRim,
+    ) {
+        body()
+    }
+}
 
 /**
  * The ColorOS style live card used by the island features with the ColorOS style on: a glyph, a
@@ -90,61 +140,31 @@ fun IslandGlassCard(
     primaryAction: PopupActionModel? = null,
     secondaryAction: PopupActionModel? = null,
     primaryActionColor: Color = Color.Unspecified,
-    secondaryActionColor: Color = GlassButtonFill,
+    secondaryActionColor: Color = Color.Unspecified,
     below: (@Composable () -> Unit)? = null,
 ) {
     val liquid = liquidGlassEnabled()
     val primaryFill =
         primaryActionColor.takeOrElse { if (liquid) LiquidGlassBlue else GlassPrimaryFill }
-    val blurState = LocalIslandCardBlurState.current
-    val cardModifier =
-        modifier
-            .widthIn(min = 300.dp, max = 400.dp)
-            // The blur is composited outside the card layer, so move it by layout and fade it
-            // with the card; it must not stay behind a card that is being dragged or closed.
-            .offset { IntOffset(blurState.shift.x.roundToInt(), blurState.shift.y.roundToInt()) }
-            .graphicsLayer { alpha = blurState.alpha }
-            .pressScale(enabled = onClick != null, pressedScale = 0.97f) { onClick?.invoke() }
-    if (liquid) {
-        // Liquid glass: PopupSurface draws the blur, tint and rim, and keeps the content off the
-        // camera lens, so the body adds no clearance of its own.
-        PopupSurface(shape = GlassCardShape, modifier = cardModifier) {
-            GlassCardBody(
-                primary,
-                secondary,
-                glyph,
-                primaryAction,
-                secondaryAction,
-                primaryFill,
-                secondaryActionColor,
-                below,
-                clearance = 0.dp,
-            )
-        }
-        return
-    }
-    AxBlurSurface(
-        modifier = cardModifier,
-        shape = GlassCardShape,
-        cornerRadius = 28.dp,
-        surfaceColor = GlassNoBlurFill,
-        tintColor = GlassTint,
-        highlight = ColorOSTileRim,
+    IslandGlassSurface(
+        modifier =
+            modifier
+                .widthIn(min = 300.dp, max = 400.dp)
+                .pressScale(enabled = onClick != null, pressedScale = 0.97f) { onClick?.invoke() },
     ) {
-        CompositionLocalProvider(LocalContentColor provides Color.White) {
-            GlassCardBody(
-                primary,
-                secondary,
-                glyph,
-                primaryAction,
-                secondaryAction,
-                primaryFill,
-                secondaryActionColor,
-                below,
-                // Keep the content off the camera lens; the glass runs up around it.
-                clearance = LocalPopupCameraClearance.current,
-            )
-        }
+        GlassCardBody(
+            primary,
+            secondary,
+            glyph,
+            primaryAction,
+            secondaryAction,
+            primaryFill,
+            secondaryActionColor,
+            below,
+            // Liquid glass keeps the content off the camera lens itself; the plain glass runs up
+            // around the camera, so its content keeps the clearance.
+            clearance = if (liquid) 0.dp else LocalPopupCameraClearance.current,
+        )
     }
 }
 
@@ -176,7 +196,7 @@ private fun GlassCardBody(
                     fontSize = 26.sp,
                     lineHeight = 30.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = LocalContentColor.current,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -187,7 +207,7 @@ private fun GlassCardBody(
                             text = it,
                             fontSize = 14.sp,
                             lineHeight = 18.sp,
-                            color = Color.White.copy(alpha = 0.7f),
+                            color = LocalContentColor.current.copy(alpha = 0.7f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -199,8 +219,19 @@ private fun GlassCardBody(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    primaryAction?.let { GlassRoundButton(it, fill = primaryFill, size = 52) }
-                    secondaryAction?.let { GlassRoundButton(it, fill = secondaryFill, size = 48) }
+                    primaryAction?.let {
+                        GlassRoundButton(it, fill = primaryFill, tint = Color.White, size = 52)
+                    }
+                    secondaryAction?.let {
+                        val customColor = secondaryFill != Color.Unspecified
+                        GlassRoundButton(
+                            it,
+                            fill = if (customColor) secondaryFill
+                                else LocalContentColor.current.copy(alpha = 0.16f),
+                            tint = if (customColor) Color.White else LocalContentColor.current,
+                            size = 48,
+                        )
+                    }
                 }
             }
         }
@@ -209,7 +240,7 @@ private fun GlassCardBody(
 }
 
 @Composable
-private fun GlassRoundButton(action: PopupActionModel, fill: Color, size: Int) {
+private fun GlassRoundButton(action: PopupActionModel, fill: Color, tint: Color, size: Int) {
     Box(
         modifier =
             Modifier.size(size.dp)
@@ -226,15 +257,15 @@ private fun GlassRoundButton(action: PopupActionModel, fill: Color, size: Int) {
                     imageVector = vector,
                     contentDescription = null,
                     modifier = Modifier.size(26.dp),
-                    tint = Color.White,
+                    tint = tint,
                 )
-            icon != null -> Icon(icon = icon, modifier = Modifier.size(24.dp), tint = Color.White)
+            icon != null -> Icon(icon = icon, modifier = Modifier.size(24.dp), tint = tint)
             else ->
                 Text(
                     text = action.label.take(2),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
+                    color = tint,
                 )
         }
     }
@@ -248,7 +279,7 @@ fun IslandGlassProgress(progress: Float, accent: Color, modifier: Modifier = Mod
             modifier
                 .fillMaxWidth()
                 .height(4.dp)
-                .background(Color.White.copy(alpha = 0.18f), CircleShape)
+                .background(LocalContentColor.current.copy(alpha = 0.18f), CircleShape)
     ) {
         Box(
             modifier =

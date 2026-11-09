@@ -189,6 +189,11 @@ fun PopupSurface(
         }
         return
     }
+    // The ColorOS style cards all share one glass, the media card included.
+    if (islandGlassCards()) {
+        IslandGlassSurface(modifier = modifier, content = body)
+        return
+    }
     // Every background runs all the way up around the camera; the content is only pushed down by
     // the clearance so it stays off the lens.
     when (colorMode) {
