@@ -204,9 +204,13 @@ fun IslandContainer(
     val selectedChip = chips.getOrNull(selectedIndex)
     val shownChip = chips.firstOrNull { it.isPopupShown }
 
+    // By id: a shown chip that only updates must not take the island back from the card used last.
+    LaunchedEffect(shownChip?.chipId) {
+        shownChip?.let { selectedChipId = it.chipId }
+    }
+
     LaunchedEffect(shownChip) {
         if (shownChip != null) {
-            selectedChipId = shownChip.chipId
             popupAnchorChip = shownChip
             popupVisible = true
         } else if (popupAnchorChip != null) {
@@ -480,6 +484,7 @@ fun IslandContainer(
                     chips = pages,
                     appHandleBounds = appHandleBounds,
                     onPageSelected = ::selectChip,
+                    onCardUsed = { selectedChipId = it.chipId },
                     onMorphActiveChanged = { active ->
                         popupOwnsIsland = active
                         if (active) popupHidesContent = true

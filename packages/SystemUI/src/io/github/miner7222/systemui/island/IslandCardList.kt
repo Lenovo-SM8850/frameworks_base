@@ -63,7 +63,8 @@ private const val DismissGraceMillis = 1000L
  * The ColorOS style popup for several island activities: every card is shown at once, one under
  * another at the popup width, in the order of [chips]. A horizontal swipe dismisses one card and
  * the cards below close up; when the list is taller than the room it has, it scrolls vertically.
- * [onDismissed] runs once a card has left the screen and must remove its chip.
+ * [onDismissed] runs once a card has left the screen and must remove its chip. [onCardUsed] runs when
+ * a control of a card takes a touch.
  */
 @Composable
 internal fun IslandCardList(
@@ -74,6 +75,7 @@ internal fun IslandCardList(
     flingVelocityPx: Float,
     flingMinDistancePx: Float,
     onDismissed: (QuickActionChipModel.PopupChip) -> Unit,
+    onCardUsed: (QuickActionChipModel.PopupChip) -> Unit,
 ) {
     val density = LocalDensity.current
     val gapPx = with(density) { CardGap.roundToPx() }
@@ -111,6 +113,7 @@ internal fun IslandCardList(
                         flingVelocityPx = flingVelocityPx,
                         flingMinDistancePx = flingMinDistancePx,
                         onDismissed = onDismissed,
+                        onCardUsed = onCardUsed,
                     )
                 }
             }
@@ -151,6 +154,7 @@ private fun IslandListCard(
     flingVelocityPx: Float,
     flingMinDistancePx: Float,
     onDismissed: (QuickActionChipModel.PopupChip) -> Unit,
+    onCardUsed: (QuickActionChipModel.PopupChip) -> Unit,
 ) {
     var swipeX by remember { mutableFloatStateOf(0f) }
     var dismissing by remember { mutableStateOf(false) }
@@ -160,6 +164,7 @@ private fun IslandListCard(
     val currentChip by rememberUpdatedState(chip)
     val currentInteractive by rememberUpdatedState(interactive)
     val currentOnDismissed by rememberUpdatedState(onDismissed)
+    val currentOnCardUsed by rememberUpdatedState(onCardUsed)
     val dismissible = chip.onDismissed != null
     val fade = (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f)
 
@@ -252,7 +257,20 @@ private fun IslandListCard(
     ) {
         Box(
             modifier =
-                Modifier.offset { IntOffset(swipeX.roundToInt(), 0) }
+                Modifier.pointerInput(Unit) {
+                        // In the main pass the controls of the card have already had the touch,
+                        // while the swipe above and the list's scroll have not.
+                        awaitEachGesture {
+                            var used = awaitFirstDown(requireUnconsumed = false).isConsumed
+                            while (!used) {
+                                val event = awaitPointerEvent()
+                                used = event.changes.any { it.isConsumed }
+                                if (event.changes.none { it.pressed }) break
+                            }
+                            if (used && currentInteractive()) currentOnCardUsed(currentChip)
+                        }
+                    }
+                    .offset { IntOffset(swipeX.roundToInt(), 0) }
                     .graphicsLayer { alpha = fade },
             propagateMinConstraints = true,
         ) {
