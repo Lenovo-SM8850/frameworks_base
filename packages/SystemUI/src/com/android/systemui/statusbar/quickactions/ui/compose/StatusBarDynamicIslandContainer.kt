@@ -317,6 +317,7 @@ fun StatusBarDynamicIslandContainer(
                     hole = cutoutSpec.holeSize,
                     moons = chips.size > 1,
                     tall = chip.isCallChip(),
+                    heightScale = rememberDynamicIslandSizeScale().second,
                     onGone = {
                         present = false
                         leaving[0] = null
@@ -345,7 +346,6 @@ fun StatusBarDynamicIslandContainer(
                 ) {
                     StatusBarDynamicIslandChip(
                         viewModel = chip,
-                        pageCount = 1,
                         cutoutSpec = cutoutSpec,
                         onChipBoundsChanged = { bounds -> anchorBounds = bounds },
                         onTap = { if (chip.isPopupShown) chip.hidePopup() else chip.showPopup() },
@@ -417,7 +417,6 @@ fun StatusBarDynamicIslandContainer(
                     ProvideDynamicIslandPillTurns(sideEdge?.quarterTurns ?: 0) {
                         StatusBarDynamicIslandChip(
                             viewModel = chip,
-                            pageCount = chips.size,
                             modifier = Modifier.swipeUpToHide(chip.chipId, thresholdPx) { currentChip.hide() }
                                 .pointerInput(chips.size, chip.chipId) {
                                     detectHorizontalDragGestures(

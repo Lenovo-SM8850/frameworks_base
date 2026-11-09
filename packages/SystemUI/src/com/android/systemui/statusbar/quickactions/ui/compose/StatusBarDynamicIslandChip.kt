@@ -22,13 +22,18 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -82,10 +87,16 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import com.android.compose.ui.graphics.painter.rememberDrawablePainter
 import com.android.systemui.common.shared.model.Icon as IconModel
 import com.android.systemui.common.ui.compose.Icon
+import com.android.systemui.common.ui.compose.load
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
@@ -94,6 +105,8 @@ import com.android.systemui.statusbar.quickactions.shared.model.PopupContentMode
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.shared.model.chipText
 import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.sqrt
 import kotlinx.coroutines.coroutineScope
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -101,22 +114,32 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
+@Composable
+private fun islandContentMotion(): Modifier {
+    val progress = LocalIslandContentProgress.current
+    val spatialMotion = LocalIslandContentSpatialMotion.current
+    return Modifier.graphicsLayer {
+        val fraction = progress().coerceIn(0f, 1f)
+        alpha = fraction
+        scaleX = if (spatialMotion) 0.92f + 0.08f * fraction else 1f
+        scaleY = scaleX
+    }
+}
+
 /** Single centered status bar capsule styled like a compact dynamic island. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun StatusBarDynamicIslandChip(
     viewModel: QuickActionChipModel.PopupChip,
-    pageCount: Int,
     cutoutSpec: DynamicIslandCutoutSpec,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
-    pageIndex: Int = 0,
-    onNextPage: () -> Unit = {},
     onChipBoundsChanged: (Rect) -> Unit = {},
     /** Draw for the ColorOS island shell, which supplies the capsule, instead of our own. */
     cos: Boolean = false,
 ) {
     val isMediaChip = viewModel.popupContent is PopupContentModel.Media
+    val contentMotion = islandContentMotion()
     val chipShape = RoundedCornerShape(50)
     val cosMedia = (viewModel.popupContent as? PopupContentModel.Media)?.takeIf { cos }?.model
     val cosArtTint =
@@ -142,7 +165,7 @@ fun StatusBarDynamicIslandChip(
     val view = LocalView.current
     val boundsModifier =
         Modifier.onGloballyPositioned { coordinates ->
-            onChipBoundsChanged(coordinates.boundsInScreen(view))
+            onChipBoundsChanged(coordinates.islandBoundsInScreen(view))
         }
     val hapticOnTap: () -> Unit = {
         view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -161,9 +184,6 @@ fun StatusBarDynamicIslandChip(
         UtilityStatusIslandChip(
             viewModel = viewModel,
             onTap = hapticOnTap,
-            pageCount = pageCount,
-            pageIndex = pageIndex,
-            onNextPage = onNextPage,
             cutoutSpec = cutoutSpec,
             widthScale = widthScale,
             heightScale = heightScale,
@@ -174,245 +194,185 @@ fun StatusBarDynamicIslandChip(
         return
     }
 
-    val compactWidth = compactIslandWidthFor(viewModel.popupContent)?.times(widthScale)
-    val hasInlineTimer = viewModel.popupContent is PopupContentModel.Stopwatch
-    val trailingDecorationWidth =
-        when (val popupContent = viewModel.popupContent) {
-            is PopupContentModel.Media ->
-                if (popupContent.model.isPlaying) {
-                    14.dp
-                } else {
-                    pageDotsWidth(pageCount)
-                }
-            is PopupContentModel.ScreenRecord -> pageDotsWidth(pageCount).coerceAtLeast(11.dp)
-            else -> pageDotsWidth(pageCount)
-        }
-    val leadingDecorationWidth =
-        when {
-            viewModel.icons.isEmpty() -> 0.dp
-            else -> 18.dp + (8.dp * (viewModel.icons.size - 1))
-        }
-    val maxTextWidth =
-        ((CompactIslandMaxWidth * widthScale) - 24.dp - leadingDecorationWidth - trailingDecorationWidth)
-            .coerceAtLeast(56.dp)
-
-    val collapseState = rememberDynamicIslandCollapseState(viewModel.isPopupShown)
     val isStartAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START
     val startGap = if (isStartAnchored) cutoutSpec.embeddedGapWidth else 0.dp
-
-    // A chip centred on the camera keeps its icon and text on either side of the lens, so short
-    // labels such as "REC" are not hidden behind it.
     val cameraGap =
         cutoutSpec.embeddedGapWidth.takeIf {
-            !isMediaChip && !isStartAnchored && cutoutSpec.cutoutCenterX != null
+            !isStartAnchored && cutoutSpec.cutoutCenterX != null
         }
 
-    CameraSplitRow(
-        leadingCount = viewModel.icons.size,
-        cameraGap = cameraGap,
-        modifier =
-            modifier
-                .then(boundsModifier)
-                .then(
-                    if (cos) {
-                        Modifier.height(
-                                CosIsland.height(
-                                    cutoutSpec.holeSize,
-                                    heightScale,
-                                    viewModel.isCallChip(),
-                                )
-                            )
-                            .widthIn(
-                                min =
-                                    if (viewModel.isCallChip()) CosIsland.CallMinWidth
-                                    else CosIsland.MinWidth,
-                                max = CosIsland.MaxWidth,
-                            )
-                            // The tint is inside the capsule, not a box over its rounded ends.
-                            .background(cosArtTint, RoundedCornerShape(50))
-                    } else {
-                        Modifier.defaultMinSize(minHeight = 32.dp * heightScale)
-                            .widthIn(
-                                min = if (isStartAnchored) startGap else (compactWidth ?: 0.dp),
-                                max =
-                                    (compactWidth ?: (CompactIslandMaxWidth * widthScale)) +
-                                        startGap,
-                            )
-                            .graphicsLayer {
-                                scaleX = collapseState.scale
-                                if (isStartAnchored) transformOrigin = TransformOrigin(0f, 0.5f)
-                            }
-                            .clip(chipShape)
-                            .background(Color.Black)
-                            .border(width = 1.dp, color = chipOutline, shape = chipShape)
-                    }
+    BoxWithConstraints(modifier = modifier, propagateMinConstraints = true) {
+        val textHeight = with(LocalDensity.current) {
+            val height = (32.dp * heightScale)
+                .coerceAtMost(maxHeight).roundToPx()
+            (height - 2 * (7.dp * heightScale).roundToPx()).coerceAtLeast(1).toDp()
+        }
+        val density = LocalDensity.current
+        val textStyle =
+            if (cos) {
+                MaterialTheme.typography.labelLarge.copy(
+                    fontSize = CosIsland.TextSize,
+                    fontWeight = FontWeight.Medium,
                 )
-                .combinedClickable(
-                    onClick = hapticOnTap,
-                    onLongClick = mediaOpenApp?.let { { hapticOnLongPress() } },
-                )
-                .then(
-                    if (cos) {
-                        Modifier.padding(horizontal = CosIsland.Padding)
-                    } else {
-                        Modifier.padding(
-                                start = if (isStartAnchored) startGap else 10.dp * widthScale,
-                                end = if (isStartAnchored) 8.dp * widthScale else 12.dp * widthScale,
-                                top = 7.dp * heightScale,
-                                bottom = 7.dp * heightScale,
-                            )
-                            .graphicsLayer { alpha = collapseState.contentAlpha }
-                    }
-                ),
-        horizontalArrangement =
-            if (isMediaChip && !isStartAnchored) {
-                Arrangement.SpaceBetween
             } else {
-                Arrangement.spacedBy(8.dp)
-            },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        viewModel.icons.forEachIndexed { index, chipIcon ->
-            val isArtworkLike =
-                index == 0 &&
-                    (viewModel.popupContent is PopupContentModel.Media ||
-                        viewModel.popupContent is PopupContentModel.LiveScore)
-            UprightContent {
-                Icon(
-                    icon = chipIcon.icon,
-                    modifier = Modifier
-                        .size(
-                            when {
-                                cos && isArtworkLike -> CosIsland.IconSize
-                                cos -> CosIsland.IconSize * 0.8f
-                                isArtworkLike -> 18.dp
-                                else -> 16.dp
-                            }
-                        )
-                        .then(
-                            if (isArtworkLike) {
-                                Modifier.clip(CircleShape)
-                            } else {
-                                Modifier
-                            }
-                        ),
-                    tint = if (isArtworkLike) Color.Unspecified else chipContentColor,
+                collapsedIslandTextStyle(availableHeight = textHeight)
+            }
+        // Plain icons are smaller than artwork.
+        val largeLeading = isMediaChip || viewModel.popupContent is PopupContentModel.LiveScore
+        val leadingEnd =
+            viewModel.icons.firstOrNull()?.let {
+                CapsuleEnd.Round(
+                    when {
+                        cos && largeLeading -> CosIsland.IconSize
+                        cos -> CosIsland.IconSize * 0.8f
+                        largeLeading -> IslandGlyphSize
+                        else -> 16.dp
+                    }
                 )
             }
-        }
-
-        viewModel.chipText
-            ?.takeIf {
-                !isMediaChip &&
-                    viewModel.popupContent !is PopupContentModel.ScreenRecord &&
-                    !hasInlineTimer &&
-                    it.isNotBlank()
-            }
-            ?.let { text ->
-                UprightContent {
-                    Text(
-                        text = text,
-                        style =
-                            if (cos) {
-                                MaterialTheme.typography.labelLarge.copy(
-                                    fontSize = CosIsland.TextSize,
-                                    fontWeight = FontWeight.Medium,
+        val trailingEnd =
+            CapsuleEnd.Box(
+                if (isMediaChip) MediaBarsHeight else density.textCapHeight(textStyle.fontSize)
+            )
+        CameraSplitRow(
+            leadingCount = 1,
+            cameraGap = cameraGap,
+            modifier =
+                Modifier
+                    .then(boundsModifier)
+                    .then(
+                        if (cos) {
+                            val cosHeight =
+                                CosIsland.height(cutoutSpec.holeSize, heightScale, viewModel.isCallChip())
+                            val fittedMinWidth =
+                                (rememberCosIslandMinWidth(
+                                        cameraGap = cameraGap ?: CosIslandDefaultCameraGap,
+                                        height = cosHeight,
+                                    ) * widthScale)
+                                    .coerceAtMost(CosIsland.MaxWidth)
+                            Modifier.height(cosHeight)
+                                .widthIn(
+                                    min =
+                                        if (viewModel.isCallChip()) CosIsland.CallMinWidth
+                                        else fittedMinWidth,
+                                    max = CosIsland.MaxWidth,
                                 )
-                            } else {
-                                MaterialTheme.typography.labelLarge
-                            },
-                        color = if (cos) CosIsland.TextColor else chipContentColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier =
-                            Modifier.widthIn(
-                                max =
-                                    if (isStartAnchored) minOf(maxTextWidth, 88.dp)
-                                    else maxTextWidth
-                            ),
+                                // The tint is inside the capsule, not a box over its rounded ends.
+                                .background(cosArtTint, RoundedCornerShape(50))
+                        } else {
+                            Modifier.defaultMinSize(
+                                    minHeight = (32.dp * heightScale)
+                                )
+                                .width(
+                                    maxOf(
+                                        LocalDynamicIslandWidth.current * widthScale,
+                                        cutoutSpec.minimumWidth,
+                                    )
+                                )
+                                .clip(chipShape)
+                                .background(Color.Black)
+                                .border(
+                                    width = DynamicIslandOutlineWidth,
+                                    color = chipOutline,
+                                    shape = chipShape,
+                                )
+                        }
                     )
-                }
-            }
-
-        // A connected Bluetooth device shows its Fast Pair artwork after the glyph, which puts it
-        // on the far side of the lens when the island is centred on a camera.
-        (viewModel.popupContent as? PopupContentModel.SystemEvent)
-            ?.takeIf { it.kind == SystemEventKind.Bluetooth }
-            ?.image
-            ?.let { artwork ->
-                UprightContent {
-                    Icon(
-                        icon = artwork,
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(20.dp),
+                    .combinedClickable(
+                        onClick = hapticOnTap,
+                        onLongClick = mediaOpenApp?.let { { hapticOnLongPress() } },
                     )
-                }
-            }
-
-        when (val popupContent = viewModel.popupContent) {
-            is PopupContentModel.Media -> {
-                val artworkDrawable =
-                    remember(popupContent.model.artworkIcon) {
-                        (popupContent.model.artworkIcon as? IconModel.Loaded)?.drawable
+                    // Before the vertical padding, so it sees the full capsule height.
+                    .capsuleEnds(
+                        leading = leadingEnd,
+                        trailing = trailingEnd,
+                        // The glyph actually drawn sets the gap, so a smaller icon keeps the same
+                        // space to the side as above and below it.
+                        glyph =
+                            leadingEnd?.diameter
+                                ?: if (cos) CosIsland.IconSize else IslandGlyphSize,
+                        symmetric = cameraGap != null,
+                        fixedStart = if (cos) null else startGap.takeIf { isStartAnchored },
+                    )
+                    .then(
+                        if (cos) Modifier else Modifier.padding(vertical = 7.dp * heightScale)
+                    ),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                viewModel.icons.forEachIndexed { index, chipIcon ->
+                    val isArtworkLike =
+                        index == 0 && viewModel.popupContent is PopupContentModel.LiveScore
+                    UprightContent {
+                        if (index == 0 && isMediaChip) {
+                            val mediaModel = (viewModel.popupContent as? PopupContentModel.Media)?.model
+                            val isArtwork = mediaModel?.let {
+                                it.artworkIcon != null && it.artworkIcon !== it.appIcon
+                            } == true
+                            CollapsedMediaArtwork(chipIcon.icon, isArtwork, contentMotion, cos)
+                        } else {
+                            Icon(
+                                icon = chipIcon.icon,
+                                modifier =
+                                    Modifier.size(
+                                            when {
+                                                cos && isArtworkLike -> CosIsland.IconSize
+                                                cos -> CosIsland.IconSize * 0.8f
+                                                isArtworkLike -> 18.dp
+                                                else -> 16.dp
+                                            }
+                                        )
+                                        .then(contentMotion)
+                                        .then(if (isArtworkLike) Modifier.clip(CircleShape) else Modifier),
+                                tint = if (isArtworkLike) Color.Unspecified else chipContentColor,
+                            )
+                        }
                     }
-                if (popupContent.model.isPlaying) {
+                }
+                (viewModel.popupContent as? PopupContentModel.SystemEvent)
+                    ?.takeIf { it.kind == SystemEventKind.Bluetooth }
+                    ?.image
+                    ?.let { artwork ->
+                        UprightContent {
+                            Icon(
+                                icon = artwork,
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(20.dp).then(contentMotion),
+                            )
+                        }
+                    }
+            }
+            when (val popupContent = viewModel.popupContent) {
+                is PopupContentModel.Media -> {
+                    val artworkDrawable =
+                        remember(popupContent.model.artworkIcon) {
+                            (popupContent.model.artworkIcon as? IconModel.Loaded)?.drawable
+                        }
                     UprightContent {
                         AudioReactiveBars(
-                            isPlaying = true,
+                            isPlaying = popupContent.model.isPlaying,
                             color = chipContentColor,
                             artworkDrawable = artworkDrawable,
-                        )
-                    }
-                } else if (pageCount > 1) {
-                    UprightContent {
-                        PageDots(
-                            count = pageCount,
-                            index = pageIndex,
-                            color = chipContentColor,
-                            onClick = onNextPage,
+                            modifier = contentMotion,
+                            maxBarHeight = MediaBarsHeight,
                         )
                     }
                 }
-            }
-            is PopupContentModel.ScreenRecord ->
-                when (val model = popupContent.model) {
-                    is ScreenRecordPopupModel.Starting ->
-                        StatusContent(
-                            text = viewModel.chipText.orEmpty(),
-                            color = chipContentColor,
-                            pageCount = pageCount,
-                            pageIndex = pageIndex,
-                            onNextPage = onNextPage,
-                        )
-                    is ScreenRecordPopupModel.Recording ->
-                        StatusContent(
-                            text = viewModel.chipText.orEmpty(),
-                            color = chipContentColor,
-                            pageCount = pageCount,
-                            pageIndex = pageIndex,
-                            onNextPage = onNextPage,
-                        )
-                }
-            is PopupContentModel.Stopwatch ->
-                StatusContent(
-                    text =
-                        popupContent.model.elapsedTimeText
-                            ?: rememberElapsedDurationText(
-                                popupContent.model.baseElapsedRealtimeMs
-                            ),
-                    color = chipContentColor,
-                    pageCount = pageCount,
-                    pageIndex = pageIndex,
-                    onNextPage = onNextPage,
-                )
-            else -> {
-                if (pageCount > 1) {
+                else -> {
+                    val text = collapsedIslandText(viewModel)
                     UprightContent {
-                        PageDots(
-                            count = pageCount,
-                            index = pageIndex,
-                            color = chipContentColor,
-                            onClick = onNextPage,
+                        Text(
+                            text = text,
+                            style = textStyle,
+                            color = if (cos) CosIsland.TextColor else chipContentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.then(contentMotion),
                         )
                     }
                 }
@@ -422,12 +382,42 @@ fun StatusBarDynamicIslandChip(
 }
 
 @Composable
+private fun CollapsedMediaArtwork(
+    icon: IconModel,
+    isArtwork: Boolean,
+    modifier: Modifier = Modifier,
+    cos: Boolean = false,
+) {
+    if (!isArtwork) {
+        Box(modifier.size(if (cos) CosIsland.IconSize else 18.dp), contentAlignment = Alignment.Center) {
+            Icon(icon = icon, modifier = Modifier.size(16.dp), tint = Color.Unspecified)
+        }
+        return
+    }
+    Image(
+        painter =
+            when (icon) {
+                is IconModel.Loaded -> rememberDrawablePainter(icon.drawable)
+                is IconModel.Resource -> painterResource(icon.resId)
+            },
+        contentDescription = icon.contentDescription?.load(),
+        contentScale = ContentScale.Crop,
+        alignment = Alignment.Center,
+        modifier =
+            modifier.layout { measurable, constraints ->
+                val size = minOf((if (cos) CosIsland.IconSize else 18.dp).roundToPx(), constraints.maxWidth, constraints.maxHeight)
+                val child = measurable.measure(Constraints.fixed(size, size))
+                val width = constraints.constrainWidth(size)
+                val height = constraints.constrainHeight(size)
+                layout(width, height) { child.place((width - size) / 2, (height - size) / 2) }
+            }.clip(CircleShape),
+    )
+}
+
+@Composable
 private fun UtilityStatusIslandChip(
     viewModel: QuickActionChipModel.PopupChip,
     onTap: () -> Unit,
-    pageCount: Int,
-    pageIndex: Int,
-    onNextPage: () -> Unit,
     cutoutSpec: DynamicIslandCutoutSpec,
     widthScale: Float = 1f,
     heightScale: Float = 1f,
@@ -435,200 +425,161 @@ private fun UtilityStatusIslandChip(
     chipOutline: Color,
     modifier: Modifier = Modifier,
 ) {
-    val collapseState = rememberDynamicIslandCollapseState(viewModel.isPopupShown)
     val isStartAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START
     val contentTint = viewModel.contentTint ?: chipContentColor
     val startText =
-        when (val popupContent = viewModel.popupContent) {
-            is PopupContentModel.Alarm ->
-                rememberAlarmCountdownText(popupContent.model.triggerTimeMs)
+        when (val content = viewModel.popupContent) {
+            is PopupContentModel.Alarm -> rememberAlarmCountdownText(content.model.triggerTimeMs)
             else -> viewModel.startText
         }
-    val dotsWidth = pageDotsWidth(pageCount)
-    val rightSegmentWidth =
-        (when (viewModel.popupContent) {
-            is PopupContentModel.Flashlight -> 52.dp
-            is PopupContentModel.Alarm -> 72.dp
-            is PopupContentModel.Charging -> 56.dp
-            else -> 80.dp
-        }) * widthScale
-    val connectedIslandWidth =
-        ((CompactUtilityConnectedIslandChromeWidth * widthScale) +
-                cutoutSpec.embeddedGapWidth +
-                rightSegmentWidth +
-                dotsWidth +
-                (if (startText != null) CompactUtilityStartTextWidth * widthScale else 0.dp))
-            .coerceIn(
-                CompactUtilityConnectedIslandMinWidth * widthScale,
-                CompactUtilityConnectedIslandMaxWidth * widthScale,
-            )
-    // Centred on a camera, the two sides have to be as wide as each other, or the gap drifts off
-    // the lens towards the shorter side and the text ends up behind it.
     val splitAroundCamera = !isStartAnchored && cutoutSpec.cutoutCenterX != null
-    val utilityText =
-        when (val popupContent = viewModel.popupContent) {
-            is PopupContentModel.ScreenRecord ->
-                when (val model = popupContent.model) {
-                    is ScreenRecordPopupModel.Starting -> "${model.secondsUntilStarted}s"
-                    is ScreenRecordPopupModel.Recording ->
-                        rememberElapsedDurationText(model.startElapsedRealtimeMs)
-                }
-            is PopupContentModel.Stopwatch ->
-                popupContent.model.elapsedTimeText
-                    ?: rememberElapsedDurationText(popupContent.model.baseElapsedRealtimeMs)
-            is PopupContentModel.Alarm -> viewModel.chipText.orEmpty()
-            is PopupContentModel.Charging -> viewModel.chipText.orEmpty()
-            is PopupContentModel.Flashlight -> viewModel.chipText.orEmpty()
-            else -> ""
-        }
+    val contentMotion = islandContentMotion()
+    val startGap = if (isStartAnchored) cutoutSpec.embeddedGapWidth else 0.dp
+    val utilityText = collapsedIslandText(viewModel)
 
     val icon: @Composable () -> Unit = {
         UprightContent {
             Icon(
                 icon = viewModel.icons.first().icon,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(16.dp).then(contentMotion),
                 tint = contentTint,
             )
         }
     }
-    val startLabel: @Composable () -> Unit = {
-        if (startText != null) {
-            UprightContent {
-                Text(
-                    text = startText,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = contentTint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+    BoxWithConstraints(modifier = modifier, propagateMinConstraints = true) {
+        val textHeight = with(LocalDensity.current) {
+            val height = (32.dp * heightScale)
+                .coerceAtMost(maxHeight).roundToPx()
+            (height - 2 * (7.dp * heightScale).roundToPx()).coerceAtLeast(1).toDp()
         }
-    }
-    val pageDots: @Composable () -> Unit = {
-        if (pageCount > 1) {
-            UprightContent {
-                PageDots(
-                    count = pageCount,
-                    index = pageIndex,
-                    color = chipContentColor,
-                    onClick = onNextPage,
-                )
-            }
-        }
-    }
-
-    CameraSplitRow(
-        leadingCount = if (startText != null) 2 else 1,
-        cameraGap = cutoutSpec.embeddedGapWidth.takeIf { splitAroundCamera },
-        modifier =
-            modifier
-                .graphicsLayer {
-                    scaleX = collapseState.scale
-                    if (isStartAnchored) transformOrigin = TransformOrigin(0f, 0.5f)
-                }
-                .defaultMinSize(minHeight = 32.dp * heightScale)
-                .then(
-                    when {
-                        isStartAnchored -> Modifier
-                        splitAroundCamera ->
-                            Modifier.widthIn(
-                                min = CompactUtilityConnectedIslandMinWidth * widthScale,
-                                max = CompactUtilityCameraSplitMaxWidth * widthScale,
-                            )
-                        else -> Modifier.width(connectedIslandWidth)
+        val density = LocalDensity.current
+        val textStyle = collapsedIslandTextStyle(availableHeight = textHeight)
+        CameraSplitRow(
+            leadingCount = 1,
+            cameraGap = cutoutSpec.embeddedGapWidth.takeIf { splitAroundCamera },
+            modifier =
+                Modifier
+                    .defaultMinSize(minHeight = (32.dp * heightScale))
+                    .width(maxOf(LocalDynamicIslandWidth.current * widthScale, cutoutSpec.minimumWidth))
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black)
+                    .border(
+                        width = DynamicIslandOutlineWidth,
+                        color = chipOutline,
+                        shape = RoundedCornerShape(50),
+                    )
+                    .clickable(onClick = onTap)
+                    // Before the vertical padding, so it sees the full capsule height.
+                    .capsuleEnds(
+                        leading = CapsuleEnd.Round(16.dp),
+                        trailing = CapsuleEnd.Box(density.textCapHeight(textStyle.fontSize)),
+                        glyph = 16.dp,
+                        symmetric = splitAroundCamera,
+                        fixedStart = startGap.takeIf { isStartAnchored },
+                    )
+                    .padding(vertical = 7.dp * heightScale),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                icon()
+                if (startText != null) {
+                    UprightContent {
+                        Text(
+                            text = startText,
+                            style = textStyle,
+                            color = contentTint,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = contentMotion,
+                        )
                     }
-                )
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black)
-                .border(width = 1.dp, color = chipOutline, shape = RoundedCornerShape(50))
-                .clickable(onClick = onTap)
-                .graphicsLayer { alpha = collapseState.contentAlpha }
-                .then(
-                    if (splitAroundCamera) Modifier.padding(horizontal = 10.dp * widthScale)
-                    else Modifier
-                ),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (splitAroundCamera) {
-            icon()
-            startLabel()
-            UprightContent {
-                Text(
-                    text = utilityText,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = contentTint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                }
             }
-            pageDots()
-        } else if (isStartAnchored) {
-            Spacer(modifier = Modifier.width(cutoutSpec.embeddedGapWidth))
-            icon()
-            if (startText != null) {
-                Spacer(modifier = Modifier.width(6.dp * widthScale))
-                startLabel()
-            }
-            Spacer(modifier = Modifier.width(6.dp * widthScale))
-            UprightContent {
-                Text(
-                    text = utilityText,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = contentTint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Start,
-                    modifier =
-                        Modifier.widthIn(min = 36.dp * widthScale, max = rightSegmentWidth)
-                            .padding(vertical = 7.dp * heightScale),
-                )
-            }
-            if (pageCount > 1) Spacer(modifier = Modifier.width(4.dp * widthScale))
-            pageDots()
-            Spacer(modifier = Modifier.width(10.dp * widthScale))
-        } else {
-            Spacer(modifier = Modifier.width(10.dp * widthScale))
-            icon()
-            if (startText != null) {
-                Spacer(modifier = Modifier.width(6.dp * widthScale))
-                startLabel()
-            }
-            Spacer(modifier = Modifier.width(cutoutSpec.embeddedGapWidth))
             UprightContent {
                 Row(
-                    modifier =
-                        Modifier.width(rightSegmentWidth + dotsWidth)
-                            .padding(
-                                start = 6.dp * widthScale,
-                                top = 7.dp * heightScale,
-                                bottom = 7.dp * heightScale,
-                                end = 6.dp * widthScale,
-                            ),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = utilityText,
-                        style = MaterialTheme.typography.labelLarge,
+                        style = textStyle,
                         color = contentTint,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.End,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = contentMotion.wrapContentHeight(Alignment.CenterVertically),
                     )
-                    pageDots()
                 }
             }
-            Spacer(modifier = Modifier.width(10.dp * widthScale))
         }
     }
 }
 
-/**
- * The time left until the alarm as short text such as `in 7h 5m`, kept current once a minute. Null
- * when there is no upcoming alarm to count down to, e.g. while one is ringing.
- */
+@Composable
+private fun collapsedIslandText(viewModel: QuickActionChipModel.PopupChip): String =
+    when (val content = viewModel.popupContent) {
+        is PopupContentModel.ScreenRecord ->
+            compactIslandDurationText(
+                when (val model = content.model) {
+                    is ScreenRecordPopupModel.Starting ->
+                        "0:${model.secondsUntilStarted.toString().padStart(2, '0')}"
+                    is ScreenRecordPopupModel.Recording ->
+                        rememberElapsedDurationText(model.startElapsedRealtimeMs)
+                }
+            )
+        is PopupContentModel.Stopwatch ->
+            compactIslandDurationText(
+                content.model.elapsedTimeText
+                    ?: rememberElapsedDurationText(content.model.baseElapsedRealtimeMs)
+            )
+        is PopupContentModel.Timer ->
+            compactIslandDurationText(
+                content.model.remainingTimeText
+                    ?: rememberRemainingDurationText(content.model.endElapsedRealtimeMs)
+            )
+        is PopupContentModel.Alarm ->
+            viewModel.chipText.orEmpty()
+        is PopupContentModel.SystemEvent -> {
+            val startMs = content.callStartTimeMs.takeIf { content.kind == SystemEventKind.Call }
+            if (startMs != null) {
+                val base = remember(startMs) {
+                    android.os.SystemClock.elapsedRealtime() -
+                        (System.currentTimeMillis() - startMs).coerceAtLeast(0L)
+                }
+                compactIslandDurationText(rememberElapsedDurationText(base))
+            } else {
+                viewModel.chipText.orEmpty()
+            }
+        }
+        else -> viewModel.chipText.orEmpty()
+    }
+
+private val CompactIslandDurationPattern = Regex("""([\p{Nd}]+):([\p{Nd}]{2})(?::([\p{Nd}]{2}))?""")
+
+private fun compactIslandDurationText(text: String): String {
+    val match = CompactIslandDurationPattern.find(text) ?: return text.take(5)
+    val fields = match.groupValues.drop(1).map { field ->
+        field.fold(0L) { value, digit ->
+            (value * 10L + digit.digitToInt()).coerceAtMost(10_000L)
+        }
+    }
+    val hasHours = match.groupValues[3].isNotEmpty()
+    val totalMinutes = if (hasHours) fields[0] * 60L + fields[1] else fields[0]
+    val hours = totalMinutes / 60L
+    val sign = if (text.trimStart().startsWith("+")) "+" else ""
+    if (hours >= 100L) return "${sign}99:59"
+    val first = if (hours > 0L) hours else totalMinutes
+    val second =
+        if (hours > 0L) totalMinutes % 60L
+        else if (hasHours) fields[2] else fields[1]
+    return "$sign${first.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}"
+}
+
+/** Compact countdown for the collapsed island; popup clock formats remain separate. */
 @Composable
 private fun rememberAlarmCountdownText(triggerTimeMs: Long): String? {
     val now by
@@ -649,45 +600,72 @@ private fun compactIslandAlarmCountdownText(triggerTimeMs: Long, now: Long): Str
     return "+${(bounded / 60L).toString().padStart(2, '0')}:${(bounded % 60L).toString().padStart(2, '0')}"
 }
 
+/**
+ * The narrowest ColorOS capsule content, from the longest text the trailing side shows, so the
+ * capsule keeps its width while a timer counts. A camera in the middle needs room of its own and
+ * the same width on both sides; without one the glyph and the text sit side by side.
+ */
 @Composable
-private fun StatusContent(
-    text: String,
-    color: Color,
-    pageCount: Int,
-    pageIndex: Int,
-    onNextPage: () -> Unit,
-) {
-    UprightContent {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge,
-                color = color,
-                maxLines = 1,
-            )
-            if (pageCount > 1) {
-                PageDots(count = pageCount, index = pageIndex, color = color, onClick = onNextPage)
+private fun rememberCosIslandMinWidth(cameraGap: Dp?, height: Dp): Dp {
+    val style =
+        MaterialTheme.typography.labelLarge.copy(
+            fontSize = CosIsland.TextSize,
+            fontWeight = FontWeight.Medium,
+        )
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val context = LocalContext.current
+    val full = context.getString(R.string.dynamic_island_charging_full)
+    val flashlight = context.getString(R.string.dynamic_island_flashlight_short)
+    return remember(style, measurer, density, full, flashlight, cameraGap, height) {
+        val text =
+            listOf("+99:59", "100%", full, flashlight).maxOf { sample ->
+                measurer
+                    .measure(
+                        text = sample,
+                        style = style,
+                        density = density,
+                        softWrap = false,
+                        maxLines = 1,
+                    )
+                    .multiParagraph
+                    .maxIntrinsicWidth
             }
-        }
+        val textWidth = (text / density.density).dp
+        val content =
+            if (cameraGap != null) maxOf(CosIsland.IconSize, textWidth) * 2 + cameraGap
+            else CosIsland.IconSize + CosIslandGlyphTextGap + textWidth
+        // The same insets the capsule applies, taken for the text at the trailing end.
+        val (start, end) =
+            capsuleInsets(
+                height = with(density) { height.toPx() },
+                leading = null,
+                trailing = CapsuleEnd.Box(density.textCapHeight(style.fontSize)),
+                glyph = CosIsland.IconSize,
+                density = density,
+                symmetric = cameraGap != null,
+            )
+        (content + with(density) { (start + end).toDp() }).coerceAtMost(CosIsland.MaxWidth)
     }
 }
 
-/** Width of [PageDots] for [count] pages, including the padding that makes it tappable. */
-private fun pageDotsWidth(count: Int): Dp {
-    if (count <= 1) return 0.dp
-    val visible = minOf(count, MaxPageDots)
-    return PageDotActiveWidth +
-        (PageDotSize + PageDotSpacing) * (visible - 1) +
-        PageDotsTapPadding * 2
-}
+private val CosIslandGlyphTextGap = 12.dp
 
 /**
- * One dot per stacked chip with the current one stretched, so it shows how many chips are stacked
- * and where this one is among them. A tap goes to the next chip. With more than [MaxPageDots]
- * chips, the dots follow the current one.
+ * Camera gap the narrowest capsule keeps room for on a screen without a cutout in the middle: the
+ * gap of a 30dp punch hole, so the capsule is as wide as on a screen that has one.
+ */
+private val CosIslandDefaultCameraGap = 50.dp
+
+/** Leading artwork diameter of the normal capsule; it also sets the space around the glyph. */
+private val IslandGlyphSize = 18.dp
+
+/** The tallest the media bars grow, which is their visible height at the trailing end. */
+private val MediaBarsHeight = 13.dp
+
+/**
+ * A [Row] that, given a [cameraGap], keeps the first [leadingCount] children before a centred gap
+ * and the rest after it. Both sides take the same width so the gap stays over the camera.
  */
 @Composable
 internal fun PageDots(count: Int, index: Int, color: Color, onClick: () -> Unit) {
@@ -793,24 +771,14 @@ private fun CameraSplitRow(
 internal val LocalIslandContentProgress = staticCompositionLocalOf<() -> Float> { { 1f } }
 internal val LocalIslandContentSpatialMotion = staticCompositionLocalOf { true }
 internal val LocalDynamicIslandWidth = staticCompositionLocalOf { 120.dp }
-private val CameraSplitSpacing = 8.dp
-private val CompactUtilityStartTextWidth = 36.dp
-private const val AlarmCountdownTickMs = 30_000L
+internal val CameraSplitSpacing = 8.dp
+internal const val AlarmCountdownTickMs = 30_000L
 private const val MaxPageDots = 5
 private val PageDotSize = 4.dp
 private val PageDotActiveWidth = 10.dp
 private val PageDotSpacing = 3.dp
 private val PageDotsTapPadding = 4.dp
-private val CompactIslandMaxWidth = 192.dp
-private val CompactMediaIslandWidth = 108.dp
-private val CompactTimerIslandWidth = 116.dp
-private val CompactRecordingIslandWidth = 88.dp
-private val CompactAlarmIslandWidth = 92.dp
-private val CompactUtilityIslandWidth = 74.dp
-private val CompactUtilityConnectedIslandChromeWidth = 42.dp
-private val CompactUtilityConnectedIslandMinWidth = 132.dp
-private val CompactUtilityConnectedIslandMaxWidth = 188.dp
-private val CompactUtilityCameraSplitMaxWidth = 232.dp
+
 private val DynamicIslandEmbeddedGapFallbackWidth = 38.dp
 private val DynamicIslandEmbeddedGapMinWidth = 34.dp
 private val DynamicIslandEmbeddedGapMaxWidth = 88.dp
@@ -1057,7 +1025,6 @@ fun DisplayCutout.dynamicIslandHoleWithin(
     pathBounds.roundOut(hole)
     return hole
 }
-
 private fun PopupContentModel.isUtilityStatusContent(): Boolean {
     return this is PopupContentModel.ScreenRecord ||
         this is PopupContentModel.Stopwatch ||
@@ -1065,22 +1032,6 @@ private fun PopupContentModel.isUtilityStatusContent(): Boolean {
         this is PopupContentModel.Alarm ||
         this is PopupContentModel.Charging ||
         this is PopupContentModel.Flashlight
-}
-
-private fun compactIslandWidthFor(content: PopupContentModel): Dp? {
-    return when (content) {
-        is PopupContentModel.Media -> CompactMediaIslandWidth
-        is PopupContentModel.ScreenRecord ->
-            when (content.model) {
-                is ScreenRecordPopupModel.Starting -> CompactTimerIslandWidth
-                is ScreenRecordPopupModel.Recording -> CompactRecordingIslandWidth
-            }
-        is PopupContentModel.Stopwatch -> CompactTimerIslandWidth
-        is PopupContentModel.Alarm -> CompactAlarmIslandWidth
-        is PopupContentModel.Flashlight -> CompactUtilityIslandWidth
-        is PopupContentModel.Charging -> CompactUtilityIslandWidth
-        else -> null
-    }
 }
 
 @Composable
@@ -1144,44 +1095,96 @@ internal fun rememberDynamicIslandWidth(cutoutSpec: DynamicIslandCutoutSpec): Dp
     }
 }
 
-private data class DynamicIslandCollapseState(val scale: Float, val contentAlpha: Float)
+/** What sits at one rounded end of a capsule, which decides how far it must stay from the edge. */
+internal sealed interface CapsuleEnd {
+    /** A circle (icon or artwork) centred vertically. */
+    data class Round(val diameter: Dp) : CapsuleEnd
 
-@Composable
-private fun rememberDynamicIslandCollapseState(isOpen: Boolean): DynamicIslandCollapseState {
-    val scaleX = remember { Animatable(1f, visibilityThreshold = 0.0005f) }
-    val currentIsOpen by rememberUpdatedState(isOpen)
-
-    LaunchedEffect(Unit) {
-        snapshotFlow { currentIsOpen }
-            .drop(1)
-            .collectLatest { open ->
-                if (open) {
-                    scaleX.animateTo(
-                        targetValue = 0f,
-                        animationSpec = DynamicIslandMotion.PillShrink,
-                    )
-                } else {
-                    scaleX.animateTo(
-                        targetValue = 1f,
-                        animationSpec =
-                            keyframes {
-                               durationMillis = 380
-                                0f at 0
-                                1.08f at 240 using FastOutSlowInEasing
-                                0.96f at 320
-                                1f at 380
-                            },
-                    )
-                }
-            }
-    }
-    val fadeThreshold = 0.7f
-    val alpha = (scaleX.value / fadeThreshold).coerceIn(0f, 1f)
-    return DynamicIslandCollapseState(scale = scaleX.value, contentAlpha = alpha)
+    /** Text or bars with a visible [height], centred vertically. */
+    data class Box(val height: Dp) : CapsuleEnd
 }
 
-private fun LayoutCoordinates.boundsInScreen(view: android.view.View): Rect {
-    val location = IntArray(2)
-    view.getLocationOnScreen(location)
-    return boundsInRoot().translate(Offset(location[0].toFloat(), location[1].toFloat()))
+/** Share of the font size that capital letters rise above the baseline. */
+private const val CapHeightRatio = 0.72f
+
+/** Ink height of capital letters, which is what the eye measures; the line box is taller. */
+internal fun Density.textCapHeight(fontSize: TextUnit): Dp =
+    if (fontSize != TextUnit.Unspecified) (fontSize.toPx() * CapHeightRatio).toDp() else 0.dp
+
+/**
+ * Horizontal distance in px from the capsule end to [end], so its outer edge keeps [gap] from the
+ * rounded outline. A round item needs exactly [gap]; a box needs its corners [gap] from the arc.
+ */
+internal fun capsuleEndInset(radius: Float, gap: Float, end: CapsuleEnd, density: Density): Float =
+    when (end) {
+        is CapsuleEnd.Round -> gap
+        is CapsuleEnd.Box -> {
+            val half = with(density) { end.height.toPx() } / 2f
+            val reach = radius - gap
+            if (half >= reach) radius else max(gap, radius - sqrt(reach * reach - half * half))
+        }
+    }
+
+/**
+ * The start and end insets in px for a capsule of [height] px. A null [leading] means a round glyph
+ * of size [glyph]. With [symmetric] both sides take the larger inset, which keeps a centred camera
+ * gap over the camera.
+ */
+internal fun capsuleInsets(
+    height: Float,
+    leading: CapsuleEnd?,
+    trailing: CapsuleEnd,
+    glyph: Dp,
+    density: Density,
+    symmetric: Boolean = false,
+): Pair<Float, Float> {
+    val radius = height / 2f
+    val gap = ((height - with(density) { glyph.toPx() }) / 2f).coerceAtLeast(0f)
+    val start = capsuleEndInset(radius, gap, leading ?: CapsuleEnd.Round(glyph), density)
+    val end = capsuleEndInset(radius, gap, trailing, density)
+    return if (symmetric) max(start, end).let { it to it } else start to end
+}
+
+/**
+ * Keeps content evenly spaced inside a capsule whose ends are fully rounded (radius = height / 2).
+ * The content's outer edge stays [gap] from the outline on every side, the rounded end included,
+ * where gap = (height - glyph) / 2 is the space above and below the leading glyph. A round item
+ * needs x = gap; a box of visible height h needs x = R - sqrt((R - gap)^2 - (h / 2)^2). The insets
+ * come from the real height at layout time, so they follow the size and camera settings.
+ *
+ * Place it directly inside the capsule. The height is the fixed one if there is one, else the
+ * minimum, else the bounded maximum, else the content's own. [fixedStart] replaces the start inset
+ * (a camera sits at that end).
+ */
+internal fun Modifier.capsuleEnds(
+    leading: CapsuleEnd?,
+    trailing: CapsuleEnd,
+    glyph: Dp,
+    symmetric: Boolean = false,
+    fixedStart: Dp? = null,
+): Modifier = layout { measurable, constraints ->
+    val height =
+        when {
+            constraints.hasFixedHeight -> constraints.maxHeight
+            constraints.minHeight > 0 -> constraints.minHeight
+            constraints.hasBoundedHeight -> constraints.maxHeight
+            else -> measurable.minIntrinsicHeight(if (constraints.hasBoundedWidth) constraints.maxWidth else 0)
+        }
+    val (startInset, endInset) =
+        capsuleInsets(height.toFloat(), leading, trailing, glyph, this, symmetric)
+    val start = fixedStart?.roundToPx() ?: startInset.roundToInt()
+    val end = endInset.roundToInt()
+    val inset = start + end
+    val placeable =
+        measurable.measure(
+            constraints.copy(
+                minWidth = (constraints.minWidth - inset).coerceAtLeast(0),
+                maxWidth =
+                    if (constraints.hasBoundedWidth) (constraints.maxWidth - inset).coerceAtLeast(0)
+                    else Constraints.Infinity,
+            )
+        )
+    layout(constraints.constrainWidth(placeable.width + inset), placeable.height) {
+        placeable.placeRelative(start, 0)
+    }
 }
