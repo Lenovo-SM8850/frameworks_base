@@ -19,6 +19,7 @@ package com.android.systemui.statusbar.quickactions.alarm.ui.viewmodel
 import androidx.compose.runtime.getValue
 import android.app.AlarmManager
 import android.app.Notification
+import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.UserInfo
 import android.text.format.DateFormat
@@ -51,6 +52,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import com.android.systemui.statusbar.quickactions.popups.shared.PopupItemDismissal
+import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 import com.android.systemui.statusbar.quickactions.popups.shared.toSendPopupAction
 import java.util.Locale
 import kotlinx.coroutines.channels.awaitClose
@@ -195,6 +197,7 @@ constructor(
                                 emphasized = true,
                             )
                     ),
+                dismissAction = activeNotification?.dismissAction(),
             )
         val contentDescription =
             alarm?.let {
@@ -283,13 +286,42 @@ private fun NotificationEntry.hasSnoozeAction(): Boolean {
     return snoozeAction() != null
 }
 
-private fun NotificationEntry.snoozeAction() =
-    sbn.notification.actions.orEmpty().firstOrNull { action ->
-        action.title?.toString()?.contains("snooze", ignoreCase = true) == true
-    }?.actionIntent
-        ?: sbn.notification.actions.orEmpty()
-            .takeIf {
-                sbn.notification.category == Notification.CATEGORY_ALARM && it.size > 1
-            }
+/**
+ * The action that ends the alarm: one marked as a delete, one whose intent dismisses or stops the
+ * alarm, or else the only action left once snooze is set aside. Its own title is its label, as the
+ * alarm app wrote it.
+ */
+private fun NotificationEntry.dismissAction(): PopupActionModel? {
+    val snooze = snoozeAction()
+    val others = sbn.notification.actions.orEmpty().filter { it.actionIntent != snooze }
+    val action =
+        others.firstOrNull { it.semanticAction == Notification.Action.SEMANTIC_ACTION_DELETE }
+            ?: others.firstOrNull { it.actionIntent.intentActionMatches("dismiss", "stop") }
+            ?: others.singleOrNull()
+    val label = action?.title?.toString()?.takeIf { it.isNotBlank() } ?: return null
+    return action.actionIntent.toSendPopupAction(label)
+}
+
+/**
+ * The action that snoozes the alarm. Notification actions carry no snooze meaning, so it is found
+ * by its intent, which does not depend on the language, then by an English title, then as the
+ * first of the several actions a ringing alarm has.
+ */
+private fun NotificationEntry.snoozeAction(): PendingIntent? {
+    val actions = sbn.notification.actions.orEmpty()
+    return actions.firstOrNull { it.actionIntent.intentActionMatches("snooze") }?.actionIntent
+        ?: actions.firstOrNull { action ->
+            action.title?.toString()?.contains("snooze", ignoreCase = true) == true
+        }?.actionIntent
+        ?: actions
+            .takeIf { sbn.notification.category == Notification.CATEGORY_ALARM && it.size > 1 }
             ?.firstOrNull()
             ?.actionIntent
+}
+
+/** Whether the intent behind this pending intent has an action naming one of [words]. */
+private fun PendingIntent?.intentActionMatches(vararg words: String): Boolean {
+    // SystemUI holds GET_INTENT_SENDER_INTENT, so it may read the intent of another app's action.
+    val action = this?.let { runCatching { it.intent?.action }.getOrNull() } ?: return false
+    return words.any { action.contains(it, ignoreCase = true) }
+}
