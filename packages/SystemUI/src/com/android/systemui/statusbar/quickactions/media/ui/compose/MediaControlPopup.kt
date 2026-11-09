@@ -295,7 +295,7 @@ fun MediaControlPopup(
                     customActions.getOrNull(0)?.let { action ->
                         MediaActionButton(
                             action = action,
-                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            containerColor = Color.Transparent,
                             iconTint = LocalContentColor.current,
                             keepAppColors = true,
                         )
@@ -308,7 +308,7 @@ fun MediaControlPopup(
                     MediaActionButton(
                         action = model.previousAction,
                         iconOverrideId = R.drawable.ic_skip_previous_filled,
-                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        containerColor = Color.Transparent,
                         iconTint = LocalContentColor.current,
                     )
                     MediaActionButton(
@@ -322,7 +322,7 @@ fun MediaControlPopup(
                     MediaActionButton(
                         action = model.nextAction,
                         iconOverrideId = R.drawable.ic_skip_next_filled,
-                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        containerColor = Color.Transparent,
                         iconTint = LocalContentColor.current,
                     )
                 }
@@ -330,7 +330,7 @@ fun MediaControlPopup(
                     customActions.getOrNull(1)?.let { action ->
                         MediaActionButton(
                             action = action,
-                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            containerColor = Color.Transparent,
                             iconTint = LocalContentColor.current,
                             keepAppColors = true,
                         )
