@@ -44,8 +44,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -80,10 +78,7 @@ internal object CosIsland {
     val SwitchWidth = 80.dp
 
     val StrokeWidth = 1.3.dp
-    val StrokeColor = Color(0x40959595)
-    val MoonWidth = 4.dp
-    val MoonGap = 2.dp
-    val MoonColor = Color(0xE64A4A4A)
+    val StrokeColor = Color(0x44FFFFFF)
     val ContentBlur = 9.dp
 
     val Move = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
@@ -116,7 +111,6 @@ internal fun CosIslandShell(
     key: Any,
     visible: Boolean,
     hole: Dp,
-    moons: Boolean,
     onGone: () -> Unit,
     modifier: Modifier = Modifier,
     tall: Boolean = false,
@@ -138,7 +132,6 @@ internal fun CosIslandShell(
     val alpha = remember { Animatable(0f) }
     val blur = remember { Animatable(blurPx) }
     val press = remember { Animatable(1f) }
-    val moonAlpha = remember { Animatable(0f) }
 
     var natural by remember { mutableStateOf(IntSize.Zero) }
     var shownKey by remember { mutableStateOf(key) }
@@ -151,10 +144,6 @@ internal fun CosIslandShell(
     val currentKey by rememberUpdatedState(key)
     val currentVisible by rememberUpdatedState(visible)
     val currentOnGone by rememberUpdatedState(onGone)
-
-    LaunchedEffect(moons) {
-        moonAlpha.animateTo(if (moons) 1f else 0f, tween(300, easing = CosIsland.Move))
-    }
 
     suspend fun nextNatural(): IntSize {
         withFrameNanos {}
@@ -263,12 +252,6 @@ internal fun CosIslandShell(
                         scope.launch { CosIsland.press(press, false) }
                     }
                 }
-                .drawWithContent {
-                    drawContent()
-                    if (moonAlpha.value > 0f && size.width > 0f) {
-                        drawMoons(this, moonAlpha.value)
-                    }
-                }
     ) {
         Layout(
             content = {
@@ -323,21 +306,3 @@ internal fun CosIslandShell(
         }
     }
 }
-
-private fun drawMoons(scope: androidx.compose.ui.graphics.drawscope.DrawScope, alpha: Float) =
-    with(scope) {
-        val r = size.height / 2f
-        val gap = CosIsland.MoonGap.toPx()
-        val thick = CosIsland.MoonWidth.toPx()
-        for (side in listOf(-1f, 1f)) {
-            val edge = if (side < 0) r else size.width - r
-            val inner = Path().apply {
-                addOval(androidx.compose.ui.geometry.Rect(Offset(edge + side * gap, r), r))
-            }
-            val outer = Path().apply {
-                addOval(androidx.compose.ui.geometry.Rect(Offset(edge + side * (gap + thick), r), r))
-            }
-            val moon = Path().apply { op(outer, inner, PathOperation.Difference) }
-            drawPath(moon, CosIsland.MoonColor, alpha = alpha)
-        }
-    }

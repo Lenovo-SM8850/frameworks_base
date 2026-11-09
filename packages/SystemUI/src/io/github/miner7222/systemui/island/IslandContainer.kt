@@ -331,7 +331,6 @@ fun IslandContainer(
                     key = chip.chipId,
                     visible = selectedChip != null && !popupVisible,
                     hole = cutoutSpec.holeSize,
-                    moons = chips.size > 1,
                     tall = chip.isCallChip(),
                     onGone = {
                         present = false
