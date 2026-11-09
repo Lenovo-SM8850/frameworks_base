@@ -24,6 +24,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -67,12 +68,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 internal object CosIsland {
-    val MinHeight = 30.dp
-    val MaxWidth = 202.dp
-    val MinWidth = 100.dp
+    val MinHeight = 36.dp
+    val MaxWidth = 280.dp
+    val MinWidth = 136.dp
     val Padding = 5.dp
     val IconSize = 20.dp
-    val TextSize = 12.sp
+    val TextSize = 14.sp
     val TextColor = Color(0xE6FFFFFF)
 
     val ExtraWidth = 16.dp
@@ -84,6 +85,7 @@ internal object CosIsland {
     val MoonWidth = 4.dp
     val MoonGap = 2.dp
     val MoonColor = Color(0xE64A4A4A)
+    val EdgePadding = 9.dp
     val ContentBlur = 9.dp
 
     val Move = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
@@ -273,10 +275,12 @@ internal fun CosIslandShell(
         Layout(
             content = {
                 Box(
+                    // The size includes the padding that keeps the content clear of the rounded ends.
                     Modifier.wrapContentSize()
                         // The content lambda already shows the new chip while the old one
                         // closes, so its size has to be taken whatever the shown key is.
                         .onSizeChanged { natural = it }
+                        .padding(horizontal = CosIsland.EdgePadding)
                         .graphicsLayer {
                             scaleX = scale.value
                             scaleY = scale.value
