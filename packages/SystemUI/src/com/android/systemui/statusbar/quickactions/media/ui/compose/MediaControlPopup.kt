@@ -18,6 +18,10 @@ package com.android.systemui.statusbar.quickactions.media.ui.compose
 
 import android.content.Context
 import android.database.ContentObserver
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Handler
@@ -33,6 +37,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -67,6 +72,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
@@ -111,25 +120,16 @@ import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPo
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
+import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberAlbumArtAccent
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
+import io.github.miner7222.systemui.island.rememberAppIconBitmap
 import io.github.miner7222.systemui.lyrics.LyricTiming
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Rect
-import android.graphics.drawable.Drawable
-import androidx.compose.foundation.Image
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
-import io.github.miner7222.systemui.island.rememberAppIconBitmap
 
 private val PopupShape = RoundedCornerShape(32.dp)
 private val ArtworkShape = RoundedCornerShape(16.dp)
@@ -205,6 +205,9 @@ fun MediaControlPopup(
     val sharesLyricsSurface = LocalPopupContainer.current &&
         (!model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank())
     val customActions = model.customActions.filter { it.action != null && it.icon != null }.take(2)
+    // The lyrics put the card in a container, where it still has to follow the ColorOS style.
+    val cos = islandCosCards()
+    val hasArtwork = model.artworkIcon != null && model.artworkIcon !== model.appIcon
     PopupSurface(shape = PopupShape, modifier = modifier.widthIn(min = 320.dp, max = 400.dp)) {
         Column(
             modifier =
@@ -225,7 +228,7 @@ fun MediaControlPopup(
                         track = model.songName?.toString() to model.packageName,
                         artwork = model.artworkIcon,
                     ) { artworkIcon ->
-                        MediaArtwork(model = model, artworkIcon = artworkIcon)
+                        MediaArtwork(model = model, artworkIcon = artworkIcon, cos = cos)
                     }
                 }
                 Column(
@@ -262,15 +265,38 @@ fun MediaControlPopup(
                                         lineHeight = 18.sp,
                                         fontWeight = FontWeight.Normal,
                                     ),
-                                color = LocalContentColor.current.copy(alpha = 0.8f),
+                                color =
+                                    LocalContentColor.current.copy(alpha = if (cos) 0.55f else 0.8f),
                             )
                         }
                 }
-                MediaOutputChip(
-                    model = model,
-                    onClick = openOutput,
-                    modifier = Modifier.widthIn(max = 120.dp).align(Alignment.Top),
-                )
+                if (cos) {
+                    // Without album art the app icon is already in the artwork slot.
+                    if (hasArtwork) {
+                        val appIconBitmap =
+                            rememberAppIconBitmap(
+                                model.packageName,
+                                (model.appIcon as? UiIcon.Loaded)?.drawable,
+                                CosAppIconSize,
+                            )
+                        appIconBitmap?.let {
+                            Image(
+                                bitmap = it,
+                                contentDescription = model.appName,
+                                modifier =
+                                    Modifier.size(CosAppIconSize)
+                                        .align(Alignment.Top)
+                                        .clickable(enabled = openApp != null) { openApp?.invoke() },
+                            )
+                        }
+                    }
+                } else {
+                    MediaOutputChip(
+                        model = model,
+                        onClick = openOutput,
+                        modifier = Modifier.widthIn(max = 120.dp).align(Alignment.Top),
+                    )
+                }
             }
 
             if (model.durationMs > 0L) {
@@ -284,10 +310,17 @@ fun MediaControlPopup(
                     onSeekTo = model.seekTo,
                     accent = accent,
                     useWaveform = useWaveform,
+                    plain = cos,
                 )
             }
 
-            Row(
+            if (cos) {
+                CosMediaControls(
+                    model = model,
+                    appAction = customActions.getOrNull(0),
+                    onOutputClick = openOutput,
+                )
+            } else Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -295,8 +328,9 @@ fun MediaControlPopup(
                     customActions.getOrNull(0)?.let { action ->
                         MediaActionButton(
                             action = action,
-                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            containerColor = Color.Transparent,
                             iconTint = LocalContentColor.current,
+                            keepAppColors = true,
                         )
                     }
                 }
@@ -307,7 +341,7 @@ fun MediaControlPopup(
                     MediaActionButton(
                         action = model.previousAction,
                         iconOverrideId = R.drawable.ic_skip_previous_filled,
-                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        containerColor = Color.Transparent,
                         iconTint = LocalContentColor.current,
                     )
                     MediaActionButton(
@@ -321,7 +355,7 @@ fun MediaControlPopup(
                     MediaActionButton(
                         action = model.nextAction,
                         iconOverrideId = R.drawable.ic_skip_next_filled,
-                        containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                        containerColor = Color.Transparent,
                         iconTint = LocalContentColor.current,
                     )
                 }
@@ -329,8 +363,9 @@ fun MediaControlPopup(
                     customActions.getOrNull(1)?.let { action ->
                         MediaActionButton(
                             action = action,
-                            containerColor = LocalContentColor.current.copy(alpha = 0.11f),
+                            containerColor = Color.Transparent,
                             iconTint = LocalContentColor.current,
+                            keepAppColors = true,
                         )
                     }
                 }
@@ -407,15 +442,7 @@ private fun MediaOutputChip(
 ) {
     val name =
         model.outputDevice?.name?.toString() ?: stringResource(R.string.media_seamless_other_device)
-    // The media card shows the same drawable; painting it here must not change its bounds.
-    val outputIcon = model.outputDevice?.icon
-    val icon =
-        remember(outputIcon) {
-            outputIcon?.let { drawable ->
-                val source = if (drawable is AdaptiveIcon) drawable.getDrawable(1) else drawable
-                UiIcon.Loaded(source.constantState?.newDrawable()?.mutate() ?: source, null)
-            }
-        } ?: UiIcon.Resource(R.drawable.ic_media_home_devices, null)
+    val icon = rememberMediaOutputIcon(model)
     val foreground = LocalContentColor.current
     Box(modifier = modifier.widthIn(max = 180.dp)) {
         Row(
@@ -441,6 +468,18 @@ private fun MediaOutputChip(
             )
         }
     }
+}
+
+@Composable
+private fun rememberMediaOutputIcon(model: MediaControlChipModel): UiIcon {
+    // The media card shows the same drawable; painting it here must not change its bounds.
+    val outputIcon = model.outputDevice?.icon
+    return remember(outputIcon) {
+        outputIcon?.let { drawable ->
+            val source = if (drawable is AdaptiveIcon) drawable.getDrawable(1) else drawable
+            UiIcon.Loaded(source.constantState?.newDrawable()?.mutate() ?: source, null)
+        }
+    } ?: UiIcon.Resource(R.drawable.ic_media_home_devices, null)
 }
 
 @Composable
@@ -506,6 +545,7 @@ private fun MediaProgressSection(
     onSeekTo: ((Long) -> Unit)?,
     accent: Color,
     useWaveform: Boolean = false,
+    plain: Boolean = false,
 ) {
     var isScrubbing by remember { mutableStateOf(false) }
     var displayedPositionMs by remember { mutableStateOf(positionMs.coerceIn(0L, durationMs)) }
@@ -611,7 +651,34 @@ private fun MediaProgressSection(
                         )
                     }
 
-            if (useWaveform) {
+            if (plain) {
+                val playedColor = LocalContentColor.current
+                val trackColor = playedColor.copy(alpha = 0.25f)
+                val playedFraction =
+                    (displayedPositionMs.toFloat() / durationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
+                Box(
+                    modifier =
+                        Modifier.fillMaxWidth().height(24.dp).then(gestureModifier).drawBehind {
+                            val thickness = 3.dp.toPx()
+                            val top = (size.height - thickness) / 2f
+                            val radius = CornerRadius(thickness / 2f)
+                            drawRoundRect(
+                                color = trackColor,
+                                topLeft = Offset(0f, top),
+                                size = Size(size.width, thickness),
+                                cornerRadius = radius,
+                            )
+                            if (playedFraction > 0f) {
+                                drawRoundRect(
+                                    color = playedColor,
+                                    topLeft = Offset(0f, top),
+                                    size = Size(size.width * playedFraction, thickness),
+                                    cornerRadius = radius,
+                                )
+                            }
+                        }
+                )
+            } else if (useWaveform) {
                 AndroidView(
                     modifier = Modifier.fillMaxWidth().height(24.dp).then(gestureModifier),
                     factory = { context ->
@@ -739,6 +806,114 @@ private fun MediaProgressSection(
     }
 }
 
+/** The controls row of the ColorOS style: plain glyphs, with only the play button filled. */
+@Composable
+private fun CosMediaControls(
+    model: MediaControlChipModel,
+    appAction: MediaAction?,
+    onOutputClick: (() -> Unit)?,
+) {
+    val foreground = LocalContentColor.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MediaOutputIconButton(model = model, onClick = onOutputClick)
+        MediaActionButton(
+            action = model.previousAction,
+            iconOverrideId = R.drawable.ic_skip_previous_filled,
+            containerColor = Color.Transparent,
+            iconTint = foreground,
+            buttonSize = 40.dp,
+        )
+        MediaActionButton(
+            action = model.playOrPause,
+            containerColor = foreground,
+            iconTint = MaterialTheme.colorScheme.surface,
+            buttonSize = 50.dp,
+            iconSize = 26.dp,
+            emphasized = true,
+        )
+        MediaActionButton(
+            action = model.nextAction,
+            iconOverrideId = R.drawable.ic_skip_next_filled,
+            containerColor = Color.Transparent,
+            iconTint = foreground,
+            buttonSize = 40.dp,
+        )
+        if (appAction != null) {
+            // The app's own glyph, so each app shows its own heart, thumb or plus.
+            MediaActionButton(
+                action = appAction,
+                containerColor = Color.Transparent,
+                iconTint = foreground,
+                buttonSize = 40.dp,
+                keepAppColors = true,
+            )
+        } else {
+            // Keeps the other buttons where they are without the action.
+            Spacer(modifier = Modifier.size(40.dp))
+        }
+    }
+}
+
+/** The output device as a bare icon; it opens the same switcher as [MediaOutputChip]. */
+@Composable
+private fun MediaOutputIconButton(model: MediaControlChipModel, onClick: (() -> Unit)?) {
+    val name =
+        model.outputDevice?.name?.toString() ?: stringResource(R.string.media_seamless_other_device)
+    val icon = rememberMediaOutputIcon(model)
+    Box(
+        modifier =
+            Modifier.size(40.dp)
+                .clip(CircleShape)
+                .alpha(if (onClick != null) 1f else 0.38f)
+                .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
+                .semantics(mergeDescendants = true) { contentDescription = name },
+        contentAlignment = Alignment.Center,
+    ) {
+        UiIconView(
+            icon = icon,
+            modifier = Modifier.size(24.dp).clearAndSetSemantics {},
+            tint = LocalContentColor.current,
+        )
+    }
+}
+
+/**
+ * Whether the glyph has colour of its own. Most apps send plain glyphs, which take the card's
+ * content colour; a coloured one, such as a green check for a saved track, keeps its colours.
+ */
+private fun Drawable.hasOwnColor(): Boolean {
+    // The media card shows the same drawable; drawing here must not change its bounds.
+    val copy = constantState?.newDrawable()?.mutate() ?: this
+    val oldBounds = if (copy === this) Rect(copy.bounds) else null
+    val side = 32
+    val bitmap = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
+    return try {
+        copy.setBounds(0, 0, side, side)
+        copy.draw(Canvas(bitmap))
+        val hsv = FloatArray(3)
+        var colored = 0
+        for (x in 0 until side) {
+            for (y in 0 until side) {
+                val pixel = bitmap.getPixel(x, y)
+                if ((pixel ushr 24) < 128) continue
+                android.graphics.Color.colorToHSV(pixel, hsv)
+                if (hsv[1] > 0.35f && hsv[2] > 0.2f) colored++
+            }
+        }
+        // A few saturated pixels are antialiasing, not colour.
+        colored > side * side / 40
+    } catch (e: RuntimeException) {
+        false
+    } finally {
+        oldBounds?.let { copy.setBounds(it.left, it.top, it.right, it.bottom) }
+        bitmap.recycle()
+    }
+}
+
 @Composable
 private fun MediaActionButton(
     action: MediaAction?,
@@ -748,6 +923,8 @@ private fun MediaActionButton(
     iconSize: Dp = 24.dp,
     emphasized: Boolean = false,
     iconOverrideId: Int? = null,
+    /** Draws a coloured app glyph in its own colours instead of [iconTint]. */
+    keepAppColors: Boolean = false,
 ) {
     val act = action
     if (act == null || (act.icon == null && iconOverrideId == null)) {
@@ -759,6 +936,10 @@ private fun MediaActionButton(
     // The media card shows the same drawable; tinting it here must not change its colors.
     val actionIcon =
         remember(act.icon) { act.icon?.let { it.constantState?.newDrawable()?.mutate() ?: it } }
+    val ownColors =
+        remember(actionIcon, keepAppColors) {
+            keepAppColors && iconOverrideId == null && actionIcon?.hasOwnColor() == true
+        }
     val haptics = LocalHapticFeedback.current
     val contentDescription =
         act.contentDescription?.toString()?.let { ContentDescription.Loaded(it) }
@@ -785,7 +966,7 @@ private fun MediaActionButton(
             UiIconView(
                 icon = actualIcon,
                 modifier = Modifier.size(iconSize).padding(start = if (emphasized) 1.dp else 0.dp),
-                tint = iconTint,
+                tint = if (ownColors) Color.Unspecified else iconTint,
             )
         }
     }
