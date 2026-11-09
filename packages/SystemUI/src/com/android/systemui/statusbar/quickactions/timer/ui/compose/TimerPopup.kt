@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,8 +26,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.android.systemui.common.ui.compose.Icon
 import com.android.systemui.statusbar.quickactions.timer.shared.model.TimerPopupModel
+import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
+import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberRemainingDurationText
@@ -38,6 +44,35 @@ fun TimerPopup(
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val onOpen = rememberPopupLaunchAction(model.onOpen)
+    if (islandGlassCards()) {
+        val actions = rememberPopupActions(model.actions)
+        val remainingText =
+            model.remainingTimeText ?: rememberRemainingDurationText(model.endElapsedRealtimeMs)
+        IslandGlassCard(
+            primary = remainingText,
+            secondary = model.title,
+            glyph = {
+                model.icon?.let {
+                    Icon(icon = it, modifier = Modifier.size(40.dp), tint = accent)
+                }
+            },
+            modifier = modifier,
+            onClick = onOpen,
+            // The first action pauses or resumes and the second ends the timer.
+            primaryAction =
+                actions.getOrNull(0)?.let {
+                    it.copy(
+                        vector =
+                            it.vector
+                                ?: if (model.isRunning) Icons.Rounded.Pause
+                                else Icons.Rounded.PlayArrow
+                    )
+                },
+            secondaryAction =
+                actions.getOrNull(1)?.let { it.copy(vector = it.vector ?: Icons.Rounded.Close) },
+        )
+        return
+    }
     PopupSurface(
         shape = PopupShape,
         modifier =
@@ -70,15 +105,6 @@ fun TimerPopup(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    model.subtitle?.takeIf { it.isNotBlank() }?.let { subtitle ->
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = LocalContentColor.current.copy(alpha = 0.73f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
                 }
             }
 

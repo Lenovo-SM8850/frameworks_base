@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -82,6 +83,10 @@ fun islandGlassCards(): Boolean {
  */
 internal val LocalIslandCosStyle = staticCompositionLocalOf { false }
 
+/** True for a card that follows the ColorOS style, whether it draws its own glass or not. */
+@Composable
+internal fun islandCosCards(): Boolean = LocalIslandCosStyle.current || islandGlassCards()
+
 private val GlassCardShape = RoundedCornerShape(28.dp)
 private val GlassTintDark = Color.White.copy(alpha = 0.10f)
 private val GlassTintLight = Color.White.copy(alpha = 0.55f)
@@ -96,12 +101,16 @@ internal fun IslandGlassSurface(modifier: Modifier = Modifier, content: @Composa
     val blurState = LocalIslandCardBlurState.current
     // Move the blur by layout and fade it with the card; it must not stay behind a card that is
     // being dragged or closed.
-    val glassModifier =
-        modifier
-            .offset { IntOffset(blurState.shift.x.roundToInt(), blurState.shift.y.roundToInt()) }
-            .graphicsLayer { alpha = blurState.alpha }
+    val shiftModifier =
+        modifier.offset {
+            IntOffset(blurState.shift.x.roundToInt(), blurState.shift.y.roundToInt())
+        }
     if (liquidGlassEnabled()) {
-        PopupSurface(shape = GlassCardShape, modifier = glassModifier, content = content)
+        PopupSurface(
+            shape = GlassCardShape,
+            modifier = shiftModifier.graphicsLayer { alpha = blurState.alpha },
+            content = content,
+        )
         return
     }
     val colors = MaterialTheme.colorScheme
@@ -122,7 +131,12 @@ internal fun IslandGlassSurface(modifier: Modifier = Modifier, content: @Composa
         return
     }
     AxBlurSurface(
-        modifier = glassModifier,
+        modifier =
+            shiftModifier.then(
+                if (blurState.glassFollowsAlpha) Modifier
+                else Modifier.graphicsLayer { alpha = blurState.alpha }
+            ),
+        alpha = if (blurState.glassFollowsAlpha) blurState.alpha else 1f,
         shape = GlassCardShape,
         cornerRadius = 28.dp,
         // Without a blur region the card is a plain fill in the theme's surface colour.
@@ -136,7 +150,8 @@ internal fun IslandGlassSurface(modifier: Modifier = Modifier, content: @Composa
 
 /**
  * The ColorOS style live card used by the island features with the ColorOS style on: a glyph, a
- * large primary line over a small label, and up to two round buttons, on frosted glass.
+ * large primary line over a small label, and up to two buttons, on frosted glass. A button whose
+ * action has no icon is drawn as a pill with the label of the action.
  */
 @Composable
 fun IslandGlassCard(
@@ -148,7 +163,9 @@ fun IslandGlassCard(
     primaryAction: PopupActionModel? = null,
     secondaryAction: PopupActionModel? = null,
     primaryActionColor: Color = Color.Unspecified,
-    secondaryActionColor: Color = Color.Unspecified,
+    primaryActionTint: Color = Color.White,
+    secondaryActionColor: Color? = null,
+    secondaryActionTint: Color? = null,
     below: (@Composable () -> Unit)? = null,
 ) {
     val liquid = liquidGlassEnabled()
@@ -167,7 +184,9 @@ fun IslandGlassCard(
             primaryAction,
             secondaryAction,
             primaryFill,
+            primaryActionTint,
             secondaryActionColor,
+            secondaryActionTint,
             below,
             // Liquid glass keeps the content off the camera lens itself; the plain glass runs up
             // around the camera, so its content keeps the clearance.
@@ -184,7 +203,9 @@ private fun GlassCardBody(
     primaryAction: PopupActionModel?,
     secondaryAction: PopupActionModel?,
     primaryFill: Color,
-    secondaryFill: Color,
+    primaryTint: Color,
+    secondaryFill: Color?,
+    secondaryTint: Color?,
     below: (@Composable () -> Unit)?,
     clearance: Dp,
 ) {
@@ -192,17 +213,18 @@ private fun GlassCardBody(
         modifier =
             Modifier.fillMaxWidth()
                 .padding(top = clearance)
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+                .heightIn(min = GlassCardMinHeight)
+                .padding(start = 20.dp, end = 18.dp, top = 12.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) { glyph() }
+            Box(modifier = Modifier.size(50.dp), contentAlignment = Alignment.Center) { glyph() }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = primary,
-                    fontSize = 26.sp,
-                    lineHeight = 30.sp,
+                    fontSize = 30.sp,
+                    lineHeight = 34.sp,
                     fontWeight = FontWeight.Bold,
                     color = LocalContentColor.current,
                     maxLines = 1,
@@ -215,7 +237,7 @@ private fun GlassCardBody(
                             text = it,
                             fontSize = 14.sp,
                             lineHeight = 18.sp,
-                            color = LocalContentColor.current.copy(alpha = 0.7f),
+                            color = LocalContentColor.current.copy(alpha = 0.55f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -224,20 +246,17 @@ private fun GlassCardBody(
             if (primaryAction != null || secondaryAction != null) {
                 Spacer(Modifier.width(12.dp))
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    primaryAction?.let {
-                        GlassRoundButton(it, fill = primaryFill, tint = Color.White, size = 52)
-                    }
+                    primaryAction?.let { GlassActionButton(it, fill = primaryFill, tint = primaryTint) }
                     secondaryAction?.let {
-                        val customColor = secondaryFill != Color.Unspecified
-                        GlassRoundButton(
+                        GlassActionButton(
                             it,
-                            fill = if (customColor) secondaryFill
-                                else LocalContentColor.current.copy(alpha = 0.16f),
-                            tint = if (customColor) Color.White else LocalContentColor.current,
-                            size = 48,
+                            fill = secondaryFill ?: LocalContentColor.current.copy(alpha = 0.16f),
+                            tint = secondaryTint
+                                ?: if (secondaryFill != null) Color.White
+                                else LocalContentColor.current,
                         )
                     }
                 }
@@ -247,34 +266,49 @@ private fun GlassCardBody(
     }
 }
 
+private val GlassCardMinHeight = 100.dp
+
 @Composable
-private fun GlassRoundButton(action: PopupActionModel, fill: Color, tint: Color, size: Int) {
+private fun GlassActionButton(action: PopupActionModel, fill: Color, tint: Color) {
+    val icon = action.icon
+    val vector = action.vector
+    if (vector == null && icon == null) {
+        // Without a glyph the label is the button.
+        Box(
+            modifier =
+                Modifier.height(40.dp)
+                    .pressScale(onClick = action.onClick)
+                    .background(fill, CircleShape)
+                    .padding(horizontal = 18.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = action.label,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = tint,
+                maxLines = 1,
+            )
+        }
+        return
+    }
     Box(
         modifier =
-            Modifier.size(size.dp)
+            Modifier.size(50.dp)
                 .pressScale(onClick = action.onClick)
                 .background(fill, CircleShape)
                 .semantics { contentDescription = action.label },
         contentAlignment = Alignment.Center,
     ) {
-        val icon = action.icon
-        val vector = action.vector
-        when {
-            vector != null ->
-                MaterialIcon(
-                    imageVector = vector,
-                    contentDescription = null,
-                    modifier = Modifier.size(26.dp),
-                    tint = tint,
-                )
-            icon != null -> Icon(icon = icon, modifier = Modifier.size(24.dp), tint = tint)
-            else ->
-                Text(
-                    text = action.label.take(2),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = tint,
-                )
+        if (vector != null) {
+            MaterialIcon(
+                imageVector = vector,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = tint,
+            )
+        } else if (icon != null) {
+            Icon(icon = icon, modifier = Modifier.size(24.dp), tint = tint)
         }
     }
 }

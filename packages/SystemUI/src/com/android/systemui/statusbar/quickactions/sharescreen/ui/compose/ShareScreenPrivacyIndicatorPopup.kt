@@ -18,24 +18,58 @@ package com.android.systemui.statusbar.quickactions.sharescreen.ui.compose
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ScreenShare
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.android.systemui.res.R
+import com.android.systemui.statusbar.quickactions.popups.shared.model.PopupActionModel
 import com.android.systemui.statusbar.quickactions.sharescreen.ui.viewmodel.ShareScreenPrivacyIndicatorPopupViewModel
+import com.android.systemui.statusbar.quickactions.ui.compose.IslandAccents
+import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
+import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 
 @Composable
 fun ShareScreenPrivacyIndicatorPopup(
     viewModel: ShareScreenPrivacyIndicatorPopupViewModel,
     modifier: Modifier = Modifier,
 ) {
+    if (islandGlassCards()) {
+        val stopLabel = stringResource(R.string.screen_share_privacy_indicator_stop_sharing)
+        IslandGlassCard(
+            primary = stopLabel,
+            secondary = null,
+            glyph = {
+                Icon(
+                    imageVector = Icons.Rounded.ScreenShare,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = IslandAccents.Recording,
+                )
+            },
+            modifier = modifier,
+            primaryAction =
+                PopupActionModel(
+                    label = stopLabel,
+                    onClick = { viewModel.stopShare() },
+                    vector = Icons.Rounded.Stop,
+                ),
+            primaryActionColor = Color(0xFFFF5F52),
+        )
+        return
+    }
     Surface(
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceBright,
