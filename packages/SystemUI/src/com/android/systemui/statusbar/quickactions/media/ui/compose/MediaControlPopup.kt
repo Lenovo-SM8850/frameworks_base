@@ -33,6 +33,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -113,6 +114,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContaine
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberAlbumArtAccent
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberAppIconBitmap
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -122,6 +124,8 @@ import kotlinx.coroutines.launch
 
 private val PopupShape = RoundedCornerShape(32.dp)
 private val ArtworkShape = RoundedCornerShape(16.dp)
+private val CosArtworkShape = RoundedCornerShape(12.dp)
+private val CosAppIconSize = 28.dp
 
 /** Displays a popup containing the Media controls in QuickActionsOverlay. */
 @Composable
@@ -436,29 +440,54 @@ private fun MediaOutputChip(
 }
 
 @Composable
-private fun MediaArtwork(model: MediaControlChipModel, artworkIcon: UiIcon?) {
+private fun MediaArtwork(model: MediaControlChipModel, artworkIcon: UiIcon?, cos: Boolean = false) {
     val contentDescription = model.appName?.let { ContentDescription.Loaded(it) }
-    val artwork =
-        artworkIcon
-            ?: model.appIcon
-            ?: UiIcon.Resource(
-                resId = com.android.internal.R.drawable.ic_audio_media,
-                contentDescription = contentDescription,
+    // Without artwork the app icon stands in; keep it icon-sized inside the artwork frame. The
+    // artwork of a model without any is its app icon.
+    val isArtwork = artworkIcon != null && artworkIcon !== model.appIcon
+    val frameSize = if (cos) 56.dp else 64.dp
+    val appIconSize = if (cos) 32.dp else 36.dp
+    // The same loader as the corner icon of the ColorOS card, so both show the complete icon.
+    val appIconBitmap =
+        if (isArtwork) {
+            null
+        } else {
+            rememberAppIconBitmap(
+                model.packageName,
+                (model.appIcon as? UiIcon.Loaded)?.drawable,
+                appIconSize,
             )
-    // Without artwork the app icon stands in; keep it icon-sized inside the artwork frame.
-    val isArtwork = model.artworkIcon != null && model.artworkIcon !== model.appIcon
+        }
     Box(
         modifier =
-            Modifier.size(64.dp)
-                .clip(ArtworkShape)
+            Modifier.size(frameSize)
+                .clip(if (cos) CosArtworkShape else ArtworkShape)
                 .background(LocalContentColor.current.copy(alpha = 0.08f)),
         contentAlignment = Alignment.Center,
     ) {
-        UiIconView(
-            icon = artwork,
-            modifier = Modifier.size(if (isArtwork) 64.dp else 36.dp),
-            tint = Color.Unspecified,
-        )
+        if (artworkIcon != null && isArtwork) {
+            UiIconView(
+                icon = artworkIcon,
+                modifier = Modifier.size(frameSize),
+                tint = Color.Unspecified,
+            )
+        } else if (appIconBitmap != null) {
+            Image(
+                bitmap = appIconBitmap,
+                contentDescription = model.appName,
+                modifier = Modifier.size(appIconSize),
+            )
+        } else {
+            UiIconView(
+                icon =
+                    UiIcon.Resource(
+                        resId = com.android.internal.R.drawable.ic_audio_media,
+                        contentDescription = contentDescription,
+                    ),
+                modifier = Modifier.size(appIconSize),
+                tint = Color.Unspecified,
+            )
+        }
     }
 }
 
