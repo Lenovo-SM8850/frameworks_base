@@ -176,6 +176,7 @@ fun StatusBarPopup(
     cos: Boolean = false,
     chips: List<QuickActionChipModel.PopupChip> = listOf(viewModel),
     onPageSelected: (QuickActionChipModel.PopupChip) -> Unit = {},
+    onCardUsed: (QuickActionChipModel.PopupChip) -> Unit = {},
     onMorphActiveChanged: (Boolean) -> Unit = {},
     onHidden: () -> Unit = {},
     appHandleBounds: List<android.graphics.Rect> = emptyList(),
@@ -935,6 +936,7 @@ fun StatusBarPopup(
                                 flingVelocityPx = flingVelocityPx,
                                 flingMinDistancePx = flingMinDistancePx,
                                 onDismissed = dismissListCard,
+                                onCardUsed = onCardUsed,
                             )
                         } else {
                             PopupPages(
