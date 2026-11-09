@@ -359,6 +359,7 @@ fun StatusBarDynamicIslandChip(
                             artworkDrawable = artworkDrawable,
                             modifier = contentMotion,
                             maxBarHeight = MediaBarsHeight,
+                            centered = cos,
                         )
                     }
                 }
