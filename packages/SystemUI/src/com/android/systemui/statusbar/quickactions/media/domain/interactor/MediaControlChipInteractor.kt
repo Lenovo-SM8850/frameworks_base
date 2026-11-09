@@ -22,6 +22,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.database.ContentObserver
 import android.media.MediaMetadata
+import android.media.Rating
 import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -676,6 +677,42 @@ private fun MediaController.resolvePlaybackInfo(context: Context): PlaybackInfo 
         playOrPause = playOrPauseAction,
         nextAction = nextAction,
         previousAction = previousAction,
+        heartAction = heartAction(context, metadata, playbackState),
+    )
+}
+
+/**
+ * A heart for a session that rates tracks with hearts, so an app without a button of its own for
+ * it still gets one. The rating comes from the user rating of the track, or its rating, and the
+ * heart sets the opposite through the session.
+ */
+private fun MediaController.heartAction(
+    context: Context,
+    metadata: MediaMetadata?,
+    playbackState: PlaybackState?,
+): MediaAction? {
+    val rating =
+        (metadata?.getRating(MediaMetadata.METADATA_KEY_USER_RATING)
+                ?: metadata?.getRating(MediaMetadata.METADATA_KEY_RATING))
+            ?.takeIf { it.ratingStyle == Rating.RATING_HEART }
+    val canRate =
+        ratingType == Rating.RATING_HEART &&
+            ((playbackState?.actions ?: 0L) and PlaybackState.ACTION_SET_RATING) != 0L
+    if (rating == null && !canRate) return null
+    val hearted = rating?.hasHeart() == true
+    val controls = transportControls
+    return MediaAction(
+        icon =
+            context.getDrawable(
+                if (hearted) R.drawable.ic_heart else R.drawable.ic_media_heart_outline
+            ),
+        action = Runnable { controls.setRating(Rating.newHeartRating(!hearted)) },
+        contentDescription =
+            context.getString(
+                if (hearted) R.string.accessibility_control_change_unfavorite
+                else R.string.accessibility_control_change_favorite
+            ),
+        background = null,
     )
 }
 
@@ -747,6 +784,7 @@ private data class PlaybackInfo(
     val playOrPause: MediaAction?,
     val nextAction: MediaAction?,
     val previousAction: MediaAction?,
+    val heartAction: MediaAction? = null,
 )
 
 private data class MediaControlState(
@@ -776,5 +814,11 @@ private fun MediaControlChipModel.withPlaybackInfo(playbackInfo: PlaybackInfo?):
         canBeScrubbed = canBeScrubbed || playbackInfo.canSeek,
         isPlaying = playbackInfo.isPlaying,
         isPaused = playbackInfo.isPaused,
+        // The app's own buttons come first; the heart only fills in for an app that has none.
+        customActions =
+            playbackInfo.heartAction
+                ?.takeIf { customActions.none { it.action != null && it.icon != null } }
+                ?.let { listOf(it) + customActions }
+                ?: customActions,
     )
 }
