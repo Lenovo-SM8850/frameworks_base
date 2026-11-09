@@ -18,6 +18,10 @@ package com.android.systemui.statusbar.quickactions.media.ui.compose
 
 import android.content.Context
 import android.database.ContentObserver
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Handler
@@ -293,6 +297,7 @@ fun MediaControlPopup(
                             action = action,
                             containerColor = LocalContentColor.current.copy(alpha = 0.11f),
                             iconTint = LocalContentColor.current,
+                            keepAppColors = true,
                         )
                     }
                 }
@@ -327,6 +332,7 @@ fun MediaControlPopup(
                             action = action,
                             containerColor = LocalContentColor.current.copy(alpha = 0.11f),
                             iconTint = LocalContentColor.current,
+                            keepAppColors = true,
                         )
                     }
                 }
@@ -752,6 +758,39 @@ private fun MediaProgressSection(
     }
 }
 
+/**
+ * Whether the glyph has colour of its own. Most apps send plain glyphs, which take the card's
+ * content colour; a coloured one, such as a green check for a saved track, keeps its colours.
+ */
+private fun Drawable.hasOwnColor(): Boolean {
+    // The media card shows the same drawable; drawing here must not change its bounds.
+    val copy = constantState?.newDrawable()?.mutate() ?: this
+    val oldBounds = if (copy === this) Rect(copy.bounds) else null
+    val side = 32
+    val bitmap = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
+    return try {
+        copy.setBounds(0, 0, side, side)
+        copy.draw(Canvas(bitmap))
+        val hsv = FloatArray(3)
+        var colored = 0
+        for (x in 0 until side) {
+            for (y in 0 until side) {
+                val pixel = bitmap.getPixel(x, y)
+                if ((pixel ushr 24) < 128) continue
+                android.graphics.Color.colorToHSV(pixel, hsv)
+                if (hsv[1] > 0.35f && hsv[2] > 0.2f) colored++
+            }
+        }
+        // A few saturated pixels are antialiasing, not colour.
+        colored > side * side / 40
+    } catch (e: RuntimeException) {
+        false
+    } finally {
+        oldBounds?.let { copy.setBounds(it.left, it.top, it.right, it.bottom) }
+        bitmap.recycle()
+    }
+}
+
 @Composable
 private fun MediaActionButton(
     action: MediaAction?,
@@ -761,6 +800,8 @@ private fun MediaActionButton(
     iconSize: Dp = 24.dp,
     emphasized: Boolean = false,
     iconOverrideId: Int? = null,
+    /** Draws a coloured app glyph in its own colours instead of [iconTint]. */
+    keepAppColors: Boolean = false,
 ) {
     val act = action
     if (act == null || (act.icon == null && iconOverrideId == null)) {
@@ -772,6 +813,10 @@ private fun MediaActionButton(
     // The media card shows the same drawable; tinting it here must not change its colors.
     val actionIcon =
         remember(act.icon) { act.icon?.let { it.constantState?.newDrawable()?.mutate() ?: it } }
+    val ownColors =
+        remember(actionIcon, keepAppColors) {
+            keepAppColors && iconOverrideId == null && actionIcon?.hasOwnColor() == true
+        }
     val haptics = LocalHapticFeedback.current
     val contentDescription =
         act.contentDescription?.toString()?.let { ContentDescription.Loaded(it) }
@@ -798,7 +843,7 @@ private fun MediaActionButton(
             UiIconView(
                 icon = actualIcon,
                 modifier = Modifier.size(iconSize).padding(start = if (emphasized) 1.dp else 0.dp),
-                tint = iconTint,
+                tint = if (ownColors) Color.Unspecified else iconTint,
             )
         }
     }
