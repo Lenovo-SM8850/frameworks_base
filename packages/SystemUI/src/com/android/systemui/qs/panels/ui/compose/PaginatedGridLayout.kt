@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -43,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.integerResource
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,7 +74,6 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.forNothingColumns
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.inNothingLayoutOrder
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.isNothingReflow
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingQSColumns
-import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingQSMaxContentWidth
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingLayout
 import com.android.systemui.qs.panels.ui.compose.toolbar.EditModeButton
 import com.android.systemui.qs.panels.ui.viewmodel.PaginatedGridViewModel
@@ -212,8 +209,6 @@ constructor(
         val pages = pagesWithPlacements.first
 
         val pagerState = rememberPagerState(0) { pages.size }
-        val pagerMaxWidth =
-            if (nothingStyle) rememberNothingQSMaxContentWidth(nothingColumns) else Dp.Unspecified
 
         LaunchedEffect(listening, pagerState) {
             snapshotFlow { listening() }
@@ -259,20 +254,13 @@ constructor(
             /* Use negative padding equal with value equal to content padding. That way, each page
              * layout extends to the sides, but the content is as if there was no padding. That
              * way, the clipping bounds of the HorizontalPager extend beyond the tiles in each page.
+             * The Nothing style grid caps and centers its own cells, so its pager spans the panel
+             * and the tiles of the next page are not clipped while they slide in.
              */
             HorizontalPager(
                 state = pagerState,
                 modifier =
                     Modifier.sysuiResTag("qs_pager")
-                        .then(
-                            if (nothingStyle) {
-                                Modifier.fillMaxWidth()
-                                    .wrapContentWidth()
-                                    .widthIn(max = pagerMaxWidth)
-                            } else {
-                                Modifier
-                            }
-                        )
                         .padding(horizontal = { -contentPaddingValue.roundToPx() })
                         .nestedScroll(nestedScrollConnection),
                 contentPadding = contentPadding,
