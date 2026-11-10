@@ -1036,7 +1036,34 @@ public class GraphicsEnvironment {
     private boolean chooseDriver(
             Context context, Bundle coreSettings, PackageManager pm, String packageName,
             ApplicationInfo ai) {
-        final String driverPackageName = chooseDriverInternal(coreSettings, ai);
+        // Keep the same safety boundary as the AOSP slot-based selection, even without slots.
+        String driverPackageName = null;
+        if (!ai.isPrivilegedApp() && (!ai.isSystemApp() || ai.isUpdatedSystemApp())
+                && coreSettings.getInt(Settings.Global.UPDATABLE_DRIVER_ALL_APPS, 0)
+                        != UPDATABLE_DRIVER_GLOBAL_OPT_IN_OFF) {
+            final String overrides = coreSettings.getString("updatable_driver_app_overrides", "");
+            for (String entry : overrides.split(",")) {
+                final int separator = entry.indexOf('=');
+                if (separator <= 0 || !packageName.equals(entry.substring(0, separator))) {
+                    continue;
+                }
+                final String candidate = entry.substring(separator + 1);
+                try {
+                    final ApplicationInfo driver = pm.getApplicationInfo(candidate,
+                            PackageManager.MATCH_SYSTEM_ONLY | PackageManager.GET_META_DATA);
+                    if (driver.metaData != null
+                            && driver.metaData.containsKey("io.github.miner7222.gpudrivers")) {
+                        driverPackageName = candidate;
+                    }
+                } catch (PackageManager.NameNotFoundException e) {
+                    // A removed driver leaves the ordinary selection in charge.
+                }
+                break;
+            }
+        }
+        if (driverPackageName == null) {
+            driverPackageName = chooseDriverInternal(coreSettings, ai);
+        }
         if (driverPackageName == null) {
             return false;
         }
