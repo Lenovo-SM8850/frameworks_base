@@ -16,8 +16,6 @@
 
 package com.android.systemui.qs.panels.ui.compose.infinitegrid
 
-import android.database.ContentObserver
-import android.os.UserHandle
 import android.provider.Settings
 import android.service.quicksettings.Tile.STATE_ACTIVE
 import android.service.quicksettings.Tile.STATE_INACTIVE
@@ -29,7 +27,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.android.compose.theme.LocalAndroidColorScheme
+import io.github.miner7222.systemui.qs.SharedQsAppearanceSettings
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
@@ -488,41 +486,7 @@ private fun Modifier.swingAnimation(toggleCount: Int): Modifier {
 
 @Composable
 fun rememberQSTileAnimationStyle(): Int {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readAnimationStyle(): Int {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver,
-                Settings.System.QS_TILE_ANIMATION_STYLE,
-                0,
-                UserHandle.USER_CURRENT,
-            )
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    var animationStyle by remember { mutableIntStateOf(readAnimationStyle()) }
-
-    DisposableEffect(contentResolver) {
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { animationStyle = readAnimationStyle() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_TILE_ANIMATION_STYLE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return animationStyle
+    val settings = SharedQsAppearanceSettings.get(LocalContext.current)
+    val value by settings.systemInt(Settings.System.QS_TILE_ANIMATION_STYLE, 0, 0)
+    return value
 }
