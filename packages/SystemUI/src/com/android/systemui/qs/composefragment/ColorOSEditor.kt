@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +66,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -77,6 +80,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.android.compose.modifiers.thenIf
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGap
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSIconRowGap
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.SmallTileContent
@@ -94,6 +99,10 @@ private const val QS_TILES_DEFAULT = "default"
 
 private val EditorBadge = 22.dp
 private val EditorHorizontalPadding = 8.dp
+
+/** Widest editor on a tablet: four tile columns with their gaps and the padding around them. */
+private val ColorOSEditorTabletMaxWidth =
+    (CommonTileDefaults.ColorOSTileHeight + ColorOSGap) * 4 + EditorHorizontalPadding * 2
 private val EditorCellMin = 84.dp
 private val EditorBadgeFill = Color(0xFF5B5B60)
 private val EditorAccent = Color(0xFF0068FF) // ColorOS Accent Blue
@@ -232,7 +241,13 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
 
     val labelColor = MaterialTheme.colorScheme.onSurface
 
-    BoxWithConstraints(modifier.fillMaxWidth()) {
+    // A tablet keeps the editor to the width of its four tile columns, like the panel.
+    val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    BoxWithConstraints(
+        modifier.fillMaxWidth().thenIf(tablet) {
+            Modifier.wrapContentWidth().widthIn(max = ColorOSEditorTabletMaxWidth)
+        }
+    ) {
         val columns = 4 // ColorOS standard phone grid is 4 columns
         // The grid lives inside the padded scroll column, so size cells from the inner width,
         // otherwise the last column overflows and gets clipped at the screen edge.

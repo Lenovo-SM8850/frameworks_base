@@ -326,7 +326,9 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     BoxWithConstraints(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         // ColorOS is built on four equal columns with a 17dp gap. The round tiles, the pills, the
         // media card and sliders share the columns. The tile diameter is capped separately so
-        // extra room does not stretch it. Short screens still shrink it, see colorOSFit.
+        // extra room does not stretch it, and a capped panel keeps the width of its four columns
+        // and sits centered, instead of stretching the cards over the whole space. Short screens
+        // still shrink the tiles, see colorOSFit.
         val fullColumnSize = (maxWidth - ColorOSGap * 3) / 4
         val tileColumnSize = minOf(fullColumnSize, maximumTileSize)
         // Without the labels the round tile rows are shorter and further apart.
@@ -340,7 +342,8 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
         SideEffect { onFitChanged(fit.fits) }
         val tileSize = fit.tileSize
         // Half of the panel holds the media card, the other half the sliders and the ringer.
-        val columnSize = fullColumnSize
+        val capped = maximumTileSize != Dp.Infinity
+        val columnSize = if (capped) minOf(fullColumnSize, tileSize) else fullColumnSize
         val halfWidth = columnSize * 2 + ColorOSGap
         val sliderSlot = columnSize
         val rowCard = pillTile
@@ -349,7 +352,15 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
             LocalColorOSGridRows provides fit.rows,
             LocalColorOSGlassBlur provides glassBlur,
         ) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = spacedBy(ColorOSGap)) {
+            Column(
+                modifier =
+                    if (capped) {
+                        Modifier.width(columnSize * 4 + ColorOSGap * 3)
+                    } else {
+                        Modifier.fillMaxWidth()
+                    },
+                verticalArrangement = spacedBy(ColorOSGap),
+            ) {
                 // The room the shade header keeps above the panel, with the two buttons at the top.
                 // The status line in it is drawn by the shade header. The gap of the column is
                 // part of the height, so the panel ends up where it was without the buttons.
