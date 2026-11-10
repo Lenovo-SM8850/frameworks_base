@@ -21,8 +21,6 @@ package com.android.systemui.qs.panels.ui.compose.infinitegrid
 import android.content.Context
 import android.content.res.Resources
 import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
 import android.os.Trace
 import android.os.UserHandle
 import android.provider.Settings
@@ -62,7 +60,6 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -143,7 +140,6 @@ import com.android.systemui.qs.ui.composable.QuickSettingsShade
 import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import platform.test.motion.compose.values.MotionTestValueKey
@@ -935,82 +931,16 @@ fun Modifier.tileCombinedClickable(
 
 @Composable
 fun rememberTileShapeMode(): Int {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readShapeMode(): Int {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver, Settings.System.QS_TILE_SHAPE, 0,
-                UserHandle.USER_CURRENT
-            )
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    var shapeMode by remember { mutableIntStateOf(readShapeMode()) }
-
-    DisposableEffect(contentResolver) {
-        val observer = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    shapeMode = readShapeMode()
-                }
-            }
-        }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_TILE_SHAPE),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        onDispose {
-            contentResolver.unregisterContentObserver(observer)
-        }
-    }
-
-    return shapeMode
+    val settings = SharedQsAppearanceSettings.get(LocalContext.current)
+    val value by settings.systemInt(Settings.System.QS_TILE_SHAPE, 0, 0)
+    return value
 }
 
 @Composable
 fun rememberTileHaptic(): Boolean {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readHapticEnabled(): Boolean {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver, Settings.System.QS_TILE_HAPTIC, 1,
-                UserHandle.USER_CURRENT
-            ) != 0
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    var hapticEnabled by remember { mutableStateOf(readHapticEnabled()) }
-
-    DisposableEffect(contentResolver) {
-        val observer = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    hapticEnabled = readHapticEnabled()
-                }
-            }
-        }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_TILE_HAPTIC),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        onDispose {
-            contentResolver.unregisterContentObserver(observer)
-        }
-    }
-
-    return hapticEnabled
+    val settings = SharedQsAppearanceSettings.get(LocalContext.current)
+    val value by settings.systemInt(Settings.System.QS_TILE_HAPTIC, 1, 0)
+    return value != 0
 }
 
 @Composable
@@ -1112,42 +1042,14 @@ data class NothingLayout(
 fun TileSpec.supportsNothingQuad(): Boolean = spec == "bt"
 
 /**
- * Reads the Nothing style quad tiles (Bluetooth by default) and tile layout with a single
- * [ContentObserver] for both settings.
+ * Reads the saved quad tiles and tile layout from shared appearance state.
  */
 @Composable
 fun rememberNothingLayout(): NothingLayout {
-    val context = LocalContext.current
-
-    fun readRaw(): Pair<String, String> {
-        val resolver = context.contentResolver
-        return Pair(
-            Settings.Secure.getStringForUser(resolver, QS_TILE_QUAD_SPECS, UserHandle.USER_CURRENT)
-                ?: "bt",
-            Settings.Secure.getStringForUser(resolver, QS_TILE_LAYOUT, UserHandle.USER_CURRENT)
-                ?: "",
-        )
-    }
-
-    val raw by produceState(initialValue = readRaw()) {
-        val resolver = context.contentResolver
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                value = readRaw()
-            }
-        }
-        resolver.registerContentObserver(
-            Settings.Secure.getUriFor(QS_TILE_QUAD_SPECS), false, observer, UserHandle.USER_ALL
-        )
-        resolver.registerContentObserver(
-            Settings.Secure.getUriFor(QS_TILE_LAYOUT), false, observer, UserHandle.USER_ALL
-        )
-        try {
-            awaitCancellation()
-        } finally {
-            resolver.unregisterContentObserver(observer)
-        }
-    }
+    val settings = SharedQsAppearanceSettings.get(LocalContext.current)
+    val quadSpecs by settings.secureString(QS_TILE_QUAD_SPECS, "bt")
+    val layout by settings.secureString(QS_TILE_LAYOUT, "")
+    val raw = quadSpecs to layout
 
     val quadTiles = remember(raw.first) {
         if (raw.first.isBlank()) emptySet()
@@ -1298,81 +1200,15 @@ fun List<NothingSliderItem>.forNothingColumns(columns: Int): List<NothingSliderI
 
 @Composable
 fun rememberQSTileLabelHide(): Boolean {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readLabelHideEnabled(): Boolean {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver, Settings.System.QS_TILE_LABEL_HIDE, 0,
-                UserHandle.USER_CURRENT
-            ) != 0
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    var labelHideEnabled by remember { mutableStateOf(readLabelHideEnabled()) }
-
-    DisposableEffect(contentResolver) {
-        val observer = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    labelHideEnabled = readLabelHideEnabled()
-                }
-            }
-        }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_TILE_LABEL_HIDE),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        onDispose {
-            contentResolver.unregisterContentObserver(observer)
-        }
-    }
-
-    return labelHideEnabled
+    val settings = SharedQsAppearanceSettings.get(LocalContext.current)
+    val value by settings.systemInt(Settings.System.QS_TILE_LABEL_HIDE, 0, 0)
+    return value != 0
 }
 
 @Composable
 fun rememberQSTileIconShapeKey(): String {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readValue(): String {
-        return try {
-            Settings.System.getStringForUser(
-                contentResolver, Settings.System.QS_TILE_ICON_SHAPE,
-                UserHandle.USER_CURRENT
-            ) ?: "circle"
-        } catch (_: Throwable) {
-            "circle"
-        }
-    }
-
-    var value by remember { mutableStateOf(readValue()) }
-
-    DisposableEffect(contentResolver) {
-        val observer = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    value = readValue()
-                }
-            }
-        }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_TILE_ICON_SHAPE),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        onDispose {
-            contentResolver.unregisterContentObserver(observer)
-        }
-    }
-
+    val settings = SharedQsAppearanceSettings.get(LocalContext.current)
+    val value by settings.systemString(Settings.System.QS_TILE_ICON_SHAPE, "circle")
     return value
 }
 

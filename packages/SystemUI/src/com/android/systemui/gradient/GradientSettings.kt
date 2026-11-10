@@ -27,12 +27,9 @@ import android.os.UserHandle
 import android.provider.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -46,6 +43,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.platform.LocalContext
 import com.android.internal.R as internalR
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.SharedQsAppearanceSettings
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -229,30 +227,12 @@ private data class GradientConfig(
     val startArgb: Int,
     val endArgb: Int,
     val angle: Float,
-) {
-    companion object {
-        fun read(resolver: ContentResolver, key: String) =
-            GradientConfig(
-                enabled = GradientSettings.read(resolver, key, 0) != 0,
-                mode =
-                    GradientSettings.read(
-                        resolver,
-                        Settings.System.CUSTOM_GRADIENT_COLOR_MODE,
-                        GradientSettings.MODE_ACCENT,
-                    ),
-                startArgb =
-                    GradientSettings.read(resolver, Settings.System.CUSTOM_GRADIENT_START_COLOR, 0),
-                endArgb =
-                    GradientSettings.read(resolver, Settings.System.CUSTOM_GRADIENT_END_COLOR, 0),
-                angle = GradientSettings.readAngle(resolver),
-            )
-    }
-}
+)
 
 /**
  * Live gradient of the surface owning [settingKey], already resolved against the current Material
- * theme, or null when the surface has the gradient disabled. A single observer covers the switch,
- * the color mode, both colors and the angle.
+ * theme, or null when the surface has the gradient disabled. The switch, the color mode, both
+ * colors and the angle are read from the process-wide observers of [SharedQsAppearanceSettings].
  */
 @Composable
 fun rememberGradient(settingKey: String): GradientColors? {
@@ -260,20 +240,23 @@ fun rememberGradient(settingKey: String): GradientColors? {
     val primary = MaterialTheme.colorScheme.primary
     val secondary = MaterialTheme.colorScheme.secondary
 
-    var config by
-        remember(context, settingKey) {
-            mutableStateOf(GradientConfig.read(context.contentResolver, settingKey))
-        }
+    val settings = SharedQsAppearanceSettings.get(context)
+    val enabled by settings.systemInt(settingKey, 0)
+    val mode by settings.systemInt(
+        Settings.System.CUSTOM_GRADIENT_COLOR_MODE, GradientSettings.MODE_ACCENT)
+    val startArgb by settings.systemInt(Settings.System.CUSTOM_GRADIENT_START_COLOR, 0)
+    val endArgb by settings.systemInt(Settings.System.CUSTOM_GRADIENT_END_COLOR, 0)
+    val angle by settings.systemInt(
+        Settings.System.CUSTOM_GRADIENT_ANGLE, GradientSettings.DEFAULT_ANGLE)
 
-    DisposableEffect(context, settingKey) {
-        val observer =
-            GradientSettings.registerObserver(context, settingKey) {
-                config = GradientConfig.read(context.contentResolver, settingKey)
-            }
-        onDispose { GradientSettings.unregisterObserver(context, observer) }
-    }
-
-    val current = config
+    val current =
+        GradientConfig(
+            enabled = enabled != 0,
+            mode = mode,
+            startArgb = startArgb,
+            endArgb = endArgb,
+            angle = GradientSettings.normalizeAngle(angle.toFloat()),
+        )
     return remember(current, primary, secondary) {
         if (current.enabled) {
             val (start, end) =
