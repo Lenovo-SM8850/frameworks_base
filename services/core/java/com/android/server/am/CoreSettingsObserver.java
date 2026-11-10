@@ -135,6 +135,7 @@ class CoreSettingsObserver extends ContentObserver {
         sGlobalSettingToTypeMap.put(Settings.Global.GPU_DEBUG_LAYERS_GLES, String.class);
         sGlobalSettingToTypeMap.put(Settings.Global.GPU_DEBUG_LAYER_APP, String.class);
         sGlobalSettingToTypeMap.put(Settings.Global.UPDATABLE_DRIVER_ALL_APPS, int.class);
+        sGlobalSettingToTypeMap.put("updatable_driver_app_overrides", String.class);
         sGlobalSettingToTypeMap.put(
                 Settings.Global.UPDATABLE_DRIVER_PRODUCTION_OPT_IN_APPS, String.class);
         sGlobalSettingToTypeMap.put(
