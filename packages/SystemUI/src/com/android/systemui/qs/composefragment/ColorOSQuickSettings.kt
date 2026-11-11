@@ -199,6 +199,9 @@ private const val COLOROS_FULL_THRESHOLD = 0.995f
 /** Diameter of the selected-mode bubble of the ringer switch, relative to the pill height. */
 private const val ColorOSRingerBubbleRatio = 0.68f
 
+/** A ringer glyph to the height of the switch, small enough to leave room beside the bubble. */
+private const val ColorOSRingerIconRatio = 0.28f
+
 /**
  * Extra space between the ringer row and the round tiles, ColorOS leaves a bit more there. The
  * pager adds [ColorOSGridHeadroom] on top of this, inside its bounds, so the gap is 6dp in all.
@@ -986,6 +989,14 @@ private val ColorOSRingerBlue = Color(0xFF1A7CFF)
 private fun colorOSRingerLightBubble(mode: Int): Color =
     if (mode == AudioManager.RINGER_MODE_NORMAL) ColorOSRingerBlue else ColorOSRingerRed
 
+/**
+ * The bubble and glyph of the selected mode of the ringer switch, which a ringer tile of one cell
+ * always shows: it is lit in every mode, as on ColorOS, and its glyph tells the mode.
+ */
+internal fun colorOSRingerActiveColors(mode: Int, dark: Boolean): Pair<Color, Color> =
+    if (dark) ColorOSActiveFill to ColorOSRingerRed
+    else colorOSRingerLightBubble(mode) to Color.White
+
 /** How far the end buttons are pulled towards the middle, in segments, by the selected bubble. */
 private const val ColorOSRingerNudge = 0.1f
 
@@ -1088,6 +1099,7 @@ internal fun ColorOSRingerSwitch(
                     audioManager = audioManager,
                     modifier =
                         Modifier.weight(1f).fillMaxHeight().graphicsLayer { translationX = shift },
+                    iconSize = minOf(22.dp, height * ColorOSRingerIconRatio),
                 )
             }
         }
@@ -1105,6 +1117,7 @@ private fun ColorOSRingerButton(
     glass: ColorOSGlass,
     audioManager: AudioManager?,
     modifier: Modifier = Modifier,
+    iconSize: Dp = 22.dp,
 ) {
     val pressSource = remember { MutableInteractionSource() }
     val scale by
@@ -1166,7 +1179,7 @@ private fun ColorOSRingerButton(
         contentAlignment = Alignment.Center,
     ) {
         val iconModifier =
-            Modifier.size(22.dp).graphicsLayer {
+            Modifier.size(iconSize).graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }

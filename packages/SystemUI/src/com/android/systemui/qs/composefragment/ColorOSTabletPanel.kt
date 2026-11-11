@@ -388,11 +388,13 @@ internal fun ColorOSRingerToggle(
                     AudioManager.RINGER_MODE_VIBRATE,
                 )
         }
+    val (fill, glyph) = colorOSRingerActiveColors(ringerMode.value, glass.dark)
     ColorOSRoundItem(
         icon = icon,
         label = stringResource(label),
         glass = glass,
         size = size,
+        active = fill to glyph,
         labelsHidden = labelsHidden,
         onClick = { audioManager?.setRingerModeInternal(next) },
         modifier = modifier,
