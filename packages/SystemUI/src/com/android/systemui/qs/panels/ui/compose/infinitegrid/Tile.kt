@@ -169,7 +169,9 @@ internal val LocalColorOSQsStyle = compositionLocalOf { false }
 private val ColorOSBlue = Color(0xFF0068FF)
 private val ColorOSGreen = Color(0xFF16A34A)
 private val ColorOSRed = Color(0xFFF2453D)
+private val ColorOSOrange = Color(0xFFFF8A1F)
 private val ColorOSInk = Color(0xFF1C1C1E)
+private val ColorOSDndPurple = Color(0xFF5A47FF)
 private val COLOROS_DATA_TILES = setOf("cell", "mobile_data", "mobiledata")
 private val COLOROS_WIFI_TILES = setOf("wifi")
 
@@ -179,8 +181,11 @@ private const val ColorOSUnavailableAlpha = 0.6f
 /** How much of its colour the label and icon of a wide ColorOS tile that cannot be used keep. */
 private const val ColorOSUnavailableContentAlpha = 0.55f
 
-/** Tiles whose icon is dark ink on the white bubble of a dark panel, instead of blue. */
-private val COLOROS_INK_TILES = setOf("dnd", "dark", "night")
+/** Tiles whose icon is dark ink on the white active bubble, instead of blue. */
+private val COLOROS_INK_TILES = setOf("dark", "night")
+
+/** Do not disturb tiles, the modes tile included, whose icon is purple while active. */
+private val COLOROS_DND_TILES = setOf("dnd", "modes_dnd")
 
 /** Tiles that ColorOS marks with a small down chevron after the label, as they open more. */
 private val COLOROS_DROPDOWN_TILES =
@@ -1308,11 +1313,10 @@ private object TileDefaults {
     }
 
     /**
-     * ColorOS style: translucent "glass" tiles that let the shade blur show through. On a dark
-     * panel an active tile shows a white bubble with a coloured icon; on a light panel the bubble
-     * is filled with the colour and the icon is white. Mobile data uses green, auto rotate red,
-     * and everything else blue, except do not disturb and dark mode, whose icon is dark ink on the
-     * white bubble of a dark panel.
+     * ColorOS style: translucent "glass" tiles that let the shade blur show through. An active
+     * tile shows a white bubble with a coloured icon on a dark and on a light panel. Mobile data
+     * uses green, auto rotate red, airplane mode orange, do not disturb purple, dark mode and
+     * night light dark ink, and everything else blue.
      */
     @Composable
     @ReadOnlyComposable
@@ -1323,7 +1327,9 @@ private object TileDefaults {
             when {
                 spec in COLOROS_DATA_TILES -> ColorOSGreen
                 spec == "rotation" -> ColorOSRed
-                darkPanel && spec in COLOROS_INK_TILES -> ColorOSInk
+                spec == "airplane" -> ColorOSOrange
+                spec in COLOROS_DND_TILES -> ColorOSDndPurple
+                spec in COLOROS_INK_TILES -> ColorOSInk
                 else -> ColorOSBlue
             }
         val glass =
@@ -1332,8 +1338,9 @@ private object TileDefaults {
         // ColorOS. The pill and the round tiles keep the glass.
         val bubbleOff =
             if (darkPanel) Color.White.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.06f)
-        val bubbleOn = if (darkPanel) ColorOSActiveFill else accent
-        val iconOn = if (darkPanel) accent else Color.White
+        // An active tile is a white bubble with its colour in the icon, on a dark or a light panel.
+        val bubbleOn = ColorOSActiveFill
+        val iconOn = accent
         // The labels of a dark panel are softer than full white, like in ColorOS.
         val primary = if (darkPanel) onSurface.copy(alpha = 0.90f) else onSurface
         val secondary = onSurface.copy(alpha = if (darkPanel) 0.60f else 0.70f)

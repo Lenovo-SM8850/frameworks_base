@@ -36,11 +36,14 @@ import kotlinx.coroutines.withContext
 /**
  * The animation of a tile: how it turns on, and how it turns off when that differs. [scale] sizes
  * the clip against the icon box, for a glyph that ColorOS draws larger than the others.
+ * [fadesFromOn] is whether the glyph fades from the on color while the tile turns off; when it is
+ * false the glyph keeps the off color for the whole clip.
  */
 private class ColorOSTileClip(
     @RawRes val on: Int,
     @RawRes val off: Int? = null,
     val scale: Float = 1f,
+    val fadesFromOn: Boolean = true,
 )
 
 private val ColorOSTileClips =
@@ -51,7 +54,7 @@ private val ColorOSTileClips =
         "bt" to ColorOSTileClip(R.raw.coloros_tile_bluetooth, scale = 1.17f),
         "cell" to ColorOSTileClip(R.raw.coloros_tile_cellular),
         "airplane" to ColorOSTileClip(R.raw.coloros_tile_airplane),
-        "dnd" to ColorOSTileClip(R.raw.coloros_tile_dnd),
+        "dnd" to ColorOSTileClip(R.raw.coloros_tile_dnd, fadesFromOn = false),
         "location" to ColorOSTileClip(R.raw.coloros_tile_location),
         "rotation" to ColorOSTileClip(R.raw.coloros_tile_rotation, R.raw.coloros_tile_rotation_inactive),
         "flashlight" to ColorOSTileClip(R.raw.coloros_tile_flashlight),
@@ -124,7 +127,7 @@ internal fun colorOSTileLottie(
     // While the clip loads nothing is drawn, so the regular icon does not flash before it.
     val composition = shown ?: return !failed
     val on = if (active) onColor else lastOn.color
-    val start = if (playing && !active) on else offColor
+    val start = if (playing && !active && clip.fadesFromOn) on else offColor
     val end = if (playing && !active) offColor else on
     val properties =
         rememberLottieDynamicProperties(
