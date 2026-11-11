@@ -27,9 +27,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
@@ -99,13 +99,15 @@ private class ColorOSMediaLayoutDimensions(extraHeight: Dp) {
 }
 
 private val ColorOSMediaButtonSize = 44.dp
-private val ColorOSMediaOutputIconSize = 24.dp
+
+/** The output glyph of the card: ColorOS has a 24dp output button on its media card. */
+private val ColorOSMediaOutputIconSize = 18.dp
 
 /** The headphones of the output button are larger than its other icons, like in ColorOS. */
-private val ColorOSMediaHeadphonesIconSize = 32.dp
+private val ColorOSMediaHeadphonesIconSize = 22.dp
 
 /** The icon of the device the sound goes to, when it is not headphones. */
-private val ColorOSMediaDeviceIconSize = 26.dp
+private val ColorOSMediaDeviceIconSize = 18.dp
 
 /**
  * How much larger the text of the idle card is than the title style it is set in. The playing
