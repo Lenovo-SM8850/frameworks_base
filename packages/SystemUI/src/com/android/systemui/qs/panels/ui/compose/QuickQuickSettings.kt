@@ -54,8 +54,24 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingLay
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.rememberNothingQSColumns
 import com.android.systemui.qs.panels.ui.viewmodel.BounceableTileViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.QuickQuickSettingsViewModel
+import com.android.systemui.qs.pipeline.shared.TileSpec
 import com.android.systemui.qs.shared.ui.QuickSettings.Elements.toElementKey
 import com.android.systemui.res.R
+import io.github.miner7222.systemui.qs.ColorOSTabletGap
+import io.github.miner7222.systemui.qs.ColorOSTabletTileSize
+import com.android.systemui.qs.composefragment.colorOSPinnedOf
+import com.android.systemui.qs.composefragment.rememberColorOSPinned
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridColumns
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTablet
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTileSize
+import androidx.compose.runtime.compositionLocalOf
+import com.android.systemui.qs.composefragment.ColorOSTabletColumns
+import com.android.systemui.qs.composefragment.ColorOSTabletEntry
+import com.android.systemui.qs.composefragment.ColorOSTabletItem
+import com.android.systemui.qs.composefragment.colorOSTabletEntries
+import com.android.systemui.qs.composefragment.colorOSTabletSpan
+import com.android.systemui.qs.composefragment.rememberColorOSTabletLayout
+import com.android.systemui.qs.composefragment.rememberColorOSTabletMetrics
 
 @Composable
 fun ContentScope.QuickQuickSettings(
@@ -65,6 +81,11 @@ fun ContentScope.QuickQuickSettings(
 ) {
     if (LocalNothingQsStyle.current) {
         NothingQuickQuickSettings(viewModel, modifier, listening)
+        return
+    }
+
+    if (LocalColorOSQsStyle.current && LocalColorOSTablet.current) {
+        ColorOSTabletQuickQuickSettings(viewModel, modifier, listening)
         return
     }
 
@@ -168,6 +189,104 @@ private fun <T> List<SizedTile<T>>.widenLastIconTiles(
             }
         }
         .toList()
+
+/**
+ * The collapsed panel of the large screen ColorOS style: the entries of the expanded panel that are
+ * one row tall, in the same order and sizes on the same four columns, for its first rows. The items
+ * that are not tiles are drawn by [LocalColorOSTabletItemContent].
+ */
+@Composable
+private fun ContentScope.ColorOSTabletQuickQuickSettings(
+    viewModel: QuickQuickSettingsViewModel,
+    modifier: Modifier,
+    listening: () -> Boolean,
+) {
+    val metrics = rememberColorOSTabletMetrics()
+    val all = viewModel.allTileViewModels
+    val saved by rememberColorOSTabletLayout()
+    val largeSpecs by viewModel.iconTilesViewModel.largeTiles.collectAsStateWithLifecycle()
+    val large = remember(largeSpecs) { largeSpecs.mapTo(HashSet()) { it.spec } }
+    val bySpec = remember(all) { all.associateBy { it.tile.spec.spec } }
+    val rowsShown = viewModel.tileRows
+    val shown =
+        remember(all, saved, large, rowsShown) {
+            val entries =
+                colorOSTabletEntries(saved, all.map { it.tile.spec.spec })
+                    .filter { ColorOSTabletItem.isItem(it.key) || it.key in bySpec }
+                    .map { it to colorOSTabletSpan(it, large) }
+                    .filter { (_, span) -> span.rowSpan == 1 }
+            val placements =
+                calculate2DPlacements(
+                    entries.map { it.second },
+                    ColorOSTabletColumns,
+                    maxRows = rowsShown,
+                )
+            Triple(entries.map { it.first }, entries.map { it.second }, placements)
+        }
+    val (entries, spans, placements) = shown
+    val tiles = placements.mapNotNull { bySpec[entries[it.index].key]?.tile }
+    val squishiness by viewModel.squishinessViewModel.squishiness.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val itemContent = LocalColorOSTabletItemContent.current
+
+    CompositionLocalProvider(LocalColorOSTileSize provides metrics.tile) {
+        Box(modifier = modifier) {
+            GridAnchor()
+            val bounceables = remember(placements) { List(spans.size) { BounceableTileViewModel() } }
+            TwoDimensionalSpannedGrid(
+                columns = ColorOSTabletColumns,
+                columnSpacing = metrics.gap,
+                rowSpacing = metrics.gap,
+                spans = spans,
+                customPlacements = placements,
+                rowHeight = metrics.tile,
+                modifier = Modifier.sysuiResTag("qqs_tile_layout"),
+                keys = { entries[it].key },
+            ) { index, placement ->
+                val entry = entries[index]
+                val tile = bySpec[entry.key]?.tile
+                if (tile == null) {
+                    // An element like the tiles, so it fades out with them.
+                    Element(TileSpec.create(entry.key).toElementKey(), Modifier) {
+                        itemContent?.invoke(entry, placement.colSpan > 1, Modifier)
+                    }
+                    return@TwoDimensionalSpannedGrid
+                }
+                Element(tile.spec.toElementKey(), Modifier) {
+                    Tile(
+                        tile = tile,
+                        iconOnly = placement.colSpan == 1,
+                        squishiness = { squishiness },
+                        coroutineScope = scope,
+                        bounceableInfo =
+                            BounceableInfo(
+                                bounceable = bounceables[index],
+                                previousTile = null,
+                                nextTile = null,
+                                bounceEnd = false,
+                            ),
+                        tileHapticsViewModelFactory = viewModel.tileHapticsViewModelFactory,
+                        detailsViewModel = null,
+                        isVisible = listening,
+                        hideLabel = true,
+                    )
+                }
+            }
+        }
+    }
+
+    TileListener(tiles, listening)
+}
+
+/**
+ * Draws an item of the large screen ColorOS panel that is not a tile (the ringer switch, My Devices)
+ * in the collapsed panel, wide or as one cell. Provided by the host, which has what it needs.
+ */
+internal val LocalColorOSTabletItemContent =
+    compositionLocalOf<(@Composable (ColorOSTabletEntry, Boolean, Modifier) -> Unit)?> { null }
+
+/** Columns a ColorOS pill spans. */
+private const val ColorOSWideSpan = 2
 
 /**
  * Nothing style QQS: the first two rows of the same 2D placements as the expanded panel, on 4

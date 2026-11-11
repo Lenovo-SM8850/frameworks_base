@@ -18,6 +18,7 @@ package com.android.systemui.qs.composefragment
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.res.Configuration
 import android.database.ContentObserver
@@ -179,6 +180,8 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTablet
+import com.android.systemui.qs.panels.ui.compose.LocalColorOSTabletItemContent
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingQsOsColors
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingSliderContent
@@ -806,6 +809,32 @@ constructor(
         }
     }
 
+    private fun openColorOSMedia(intent: PendingIntent) {
+        activityStarter.postStartActivityDismissingKeyguard(intent)
+    }
+
+    /**
+     * Same as the stock player: the app's own output intent when it has one, the system output
+     * switcher otherwise.
+     */
+    private fun showColorOSMediaOutput(mediaData: MediaData) {
+        val deviceIntent = mediaData.device?.intent
+        if (deviceIntent != null) {
+            if (deviceIntent.isActivity) {
+                activityStarter.postStartActivityDismissingKeyguard(deviceIntent)
+            }
+        } else {
+            mediaOutputDialogManager.createAndShow(
+                mediaData.packageName,
+                /* aboveStatusBar= */ true,
+                /* view= */ null,
+                UserHandle.getUserHandleForUid(mediaData.appUid),
+                mediaData.token,
+                /* useSystemColors= */ false,
+            )
+        }
+    }
+
     @Composable
     private fun currentColorOSMedia(): MediaData? {
         if (MediaControlsInComposeFlag.isEnabled) {
@@ -827,6 +856,56 @@ constructor(
         val qqsPadding = viewModel.qqsHeaderHeight
         val bottomPadding = viewModel.qqsBottomPadding
         val colorOSStyle = LocalColorOSQsStyle.current
+        // A large screen keeps its own header; its ColorOS panel has fixed sizes.
+        val colorOSTablet = colorOSStyle && qqsPadding <= 0
+        val colorOSMetrics = rememberColorOSTabletMetrics()
+        // The items of the large screen panel that are not tiles, as the collapsed panel shows them.
+        val colorOSItemContent: @Composable (ColorOSTabletEntry, Boolean, Modifier) -> Unit =
+            { entry, wide, itemModifier ->
+                val glass = colorOSGlass(blurred = LocalColorOSGlassBlur.current != null)
+                val openDevices = {
+                    activityStarter.postStartActivityDismissingKeyguard(
+                        Intent(Settings.ACTION_BLUETOOTH_SETTINGS),
+                        /* delay= */ 0,
+                    )
+                }
+                when (entry.key) {
+                    ColorOSTabletItem.RINGER ->
+                        if (wide) {
+                            ColorOSRingerSwitch(
+                                audioVolumeInteractor,
+                                glass,
+                                colorOSMetrics.tile,
+                                itemModifier.fillMaxWidth(),
+                            )
+                        } else {
+                            ColorOSRingerToggle(
+                                audioVolumeInteractor,
+                                glass,
+                                colorOSMetrics.tile,
+                                labelsHidden = true,
+                                modifier = itemModifier,
+                            )
+                        }
+                    ColorOSTabletItem.MY_DEVICES ->
+                        if (wide) {
+                            ColorOSMyDevices(
+                                glass,
+                                colorOSMetrics.tile,
+                                openDevices,
+                                itemModifier.fillMaxWidth(),
+                            )
+                        } else {
+                            ColorOSMyDevicesToggle(
+                                glass,
+                                colorOSMetrics.tile,
+                                labelsHidden = true,
+                                onClick = openDevices,
+                                modifier = itemModifier,
+                            )
+                        }
+                }
+            }
         val launchProgress by shadeAnimationInteractor.launchProgress.collectAsStateWithLifecycle()
         DisposableEffect(colorOSStyle) {
             viewModel.qqsMediaHost.isOnlyQsMediaHost = colorOSStyle
@@ -881,27 +960,34 @@ constructor(
                             }
                         }
                         .let { state -> { state.value } }
+                // One glass for the round tiles and the media card of the ColorOS style.
+                val qqsGlassBlur =
+                    if (colorOSStyle) {
+                        rememberColorOSGlassBlur {
+                            if (isListening()) {
+                                viewModel.viewAlpha * colorOSLaunchGlassFade(launchProgress) *
+                                    colorOSQqsTileAlpha(viewModel.expansionState.progress) *
+                                    (QuickQuickSettings.rootElementKey.currentAlpha() ?: 1f)
+                            } else {
+                                0f
+                            }
+                        }
+                    } else {
+                        null
+                    }
                 val Tiles =
                     @Composable {
-                        val glassBlur =
-                            if (colorOSStyle) {
-                                rememberColorOSGlassBlur {
-                                    if (isListening()) {
-                                        viewModel.viewAlpha * colorOSLaunchGlassFade(launchProgress) *
-                                            colorOSQqsTileAlpha(viewModel.expansionState.progress) *
-                                            (QuickQuickSettings.rootElementKey.currentAlpha() ?: 1f)
-                                    } else {
-                                        0f
-                                    }
-                                }
-                            } else {
-                                null
+                        CompositionLocalProvider(LocalColorOSGlassBlur provides qqsGlassBlur) {
+                            // The large screen panel's tiles keep to its four columns, centred.
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                                QuickQuickSettings(
+                                    viewModel = viewModel.quickQuickSettingsViewModel,
+                                    modifier =
+                                        if (colorOSTablet) Modifier.width(colorOSMetrics.width)
+                                        else Modifier,
+                                    listening = isListening,
+                                )
                             }
-                        CompositionLocalProvider(LocalColorOSGlassBlur provides glassBlur) {
-                            QuickQuickSettings(
-                                viewModel = viewModel.quickQuickSettingsViewModel,
-                                listening = isListening,
-                            )
                         }
                     }
                 val Media =
@@ -970,12 +1056,18 @@ constructor(
                                 )
                                 .padding(horizontal = qsHorizontalMargin())
                     ) {
-                        QuickQuickSettingsLayout(
-                            brightness = BrightnessSlider,
-                            tiles = Tiles,
-                            media = Media,
-                            mediaInRow = viewModel.qqsMediaInRow,
-                        )
+                        CompositionLocalProvider(
+                            LocalColorOSTablet provides colorOSTablet,
+                            LocalColorOSTabletItemContent provides colorOSItemContent,
+                        ) {
+                            QuickQuickSettingsLayout(
+                                brightness = BrightnessSlider,
+                                tiles = Tiles,
+                                media = Media,
+                                mediaInRow = viewModel.qqsMediaInRow,
+                                spacing = if (colorOSTablet) colorOSMetrics.gap else null,
+                            )
+                        }
                     }
                 }
             }
@@ -1205,37 +1297,8 @@ constructor(
                                                     data = data,
                                                     artFill = colorOSArtFill,
                                                     extraHeight = extraHeight,
-                                                    onOpen = { intent ->
-                                                        activityStarter
-                                                            .postStartActivityDismissingKeyguard(
-                                                                intent
-                                                            )
-                                                    },
-                                                    onOutputSwitcher = { mediaData ->
-                                                        // Same as the stock player: the app's own
-                                                        // output intent when it has one, the
-                                                        // system output switcher otherwise.
-                                                        val deviceIntent = mediaData.device?.intent
-                                                        if (deviceIntent != null) {
-                                                            if (deviceIntent.isActivity) {
-                                                                activityStarter
-                                                                    .postStartActivityDismissingKeyguard(
-                                                                        deviceIntent
-                                                                    )
-                                                            }
-                                                        } else {
-                                                            mediaOutputDialogManager.createAndShow(
-                                                                mediaData.packageName,
-                                                                /* aboveStatusBar= */ true,
-                                                                /* view= */ null,
-                                                                UserHandle.getUserHandleForUid(
-                                                                    mediaData.appUid
-                                                                ),
-                                                                mediaData.token,
-                                                                /* useSystemColors= */ false,
-                                                            )
-                                                        }
-                                                    },
+                                                    onOpen = ::openColorOSMedia,
+                                                    onOutputSwitcher = ::showColorOSMediaOutput,
                                                     modifier = mediaModifier,
                                                 )
                                             }
@@ -1954,12 +2017,17 @@ fun QuickQuickSettingsLayout(
     tiles: @Composable () -> Unit,
     media: @Composable () -> Unit,
     mediaInRow: Boolean,
+    /** Gap between the parts, the tile gap of a panel style that has its own. */
+    spacing: Dp? = null,
 ) {
     val brightnessSettings = rememberQsBrightnessSettings()
     val sliderAtTop = brightnessSettings.sliderAtTop
     val showSlider = brightnessSettings.showSlider
 
-    Column(verticalArrangement = spacedBy(dimensionResource(R.dimen.qs_tile_margin_vertical))) {
+    Column(
+        verticalArrangement =
+            spacedBy(spacing ?: dimensionResource(R.dimen.qs_tile_margin_vertical))
+    ) {
         if (showSlider == 2 && sliderAtTop) {
             brightness()
         }
