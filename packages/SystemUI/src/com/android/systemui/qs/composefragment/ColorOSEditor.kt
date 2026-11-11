@@ -94,6 +94,7 @@ import com.android.systemui.qs.QSHost
 import com.android.systemui.res.R
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.gestures.detectTapGestures
 
 private const val QS_TILES_SETTING = "sysui_qs_tiles"
 private const val QS_TILES_DEFAULT = "default"
@@ -245,7 +246,10 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
     // A tablet keeps the editor to the width of its four tile columns, like the panel.
     val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     BoxWithConstraints(
-        modifier.fillMaxWidth().thenIf(tablet) {
+        modifier
+            .pointerInput(Unit) { detectTapGestures {} }
+            .fillMaxWidth()
+            .thenIf(tablet) {
             Modifier.wrapContentWidth().widthIn(max = ColorOSEditorTabletMaxWidth)
         }
     ) {
