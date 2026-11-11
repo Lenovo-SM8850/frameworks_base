@@ -94,6 +94,8 @@ import com.android.systemui.qs.QSHost
 import com.android.systemui.res.R
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import com.android.systemui.grid.ui.compose.GridSpan
+import com.android.systemui.grid.ui.compose.calculate2DPlacements
 import androidx.compose.foundation.gestures.detectTapGestures
 
 private const val QS_TILES_SETTING = "sysui_qs_tiles"
@@ -172,15 +174,47 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
     val dragState = remember { ColorOSEditDragState() }
 
     // Keep activeSpecs in sync when view model emits and no drag is active
-    LaunchedEffect(currentTiles) {
-        if (!dragState.isDragging) {
-            activeSpecs = currentTiles.map { it.tileSpec }
+    // A tablet edits the whole panel: its tiles and the items that are not tiles, in one order.
+    val tabletEditor = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val tabletSaved by rememberColorOSTabletLayout()
+    val smallItems =
+        remember(tabletSaved) { tabletSaved.orEmpty().filter { it.small }.mapTo(HashSet()) { it.key } }
+
+    // Edits are kept here and saved with Done; leaving the editor any other way drops them.
+    var dirty by remember { mutableStateOf(false) }
+    var pendingSmall by remember { mutableStateOf<Set<String>?>(null) }
+    var pendingLarge by remember { mutableStateOf<Set<TileSpec>?>(null) }
+    val savedLarge by editViewModel.iconTilesViewModel.largeTiles.collectAsStateWithLifecycle()
+
+    LaunchedEffect(currentTiles, tabletSaved) {
+        if (!dragState.isDragging && !dirty) {
+            activeSpecs =
+                if (tabletEditor) {
+                    colorOSTabletEntries(tabletSaved, currentTiles.map { it.tileSpec.spec })
+                        .map { TileSpec.create(it.key) }
+                } else {
+                    currentTiles.map { it.tileSpec }
+                }
         }
     }
 
-    fun commit(newActive: List<TileSpec>) {
-        val distinctActive = newActive.distinct()
-        activeSpecs = distinctActive
+    fun commit(newActive: List<TileSpec>, small: Set<String> = pendingSmall ?: smallItems) {
+        activeSpecs = newActive.distinct()
+        pendingSmall = small
+        dirty = true
+    }
+
+    /** Saves the edits: the tiles, the panel's order and small items, and the wide tiles. */
+    fun save() {
+        if (!dirty) return
+        val distinctActive = activeSpecs
+        if (tabletEditor) {
+            val small = pendingSmall ?: smallItems
+            writeColorOSTabletLayout(
+                context,
+                distinctActive.map { ColorOSTabletEntry(it.spec, small = it.spec in small) },
+            )
+        }
 
         // Preserve unmounted or third-party tile specs in Settings not in bySpec
         val hidden =
@@ -196,7 +230,13 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                 .map(TileSpec::create)
                 .filter { it !in bySpec }
 
-        editViewModel.setTiles((distinctActive + hidden).distinct())
+        editViewModel.setTiles(
+            (distinctActive.filterNot { ColorOSTabletItem.isItem(it.spec) } + hidden).distinct()
+        )
+        // A tile added in this session is not current yet, so a resize would skip it. Set all
+        // the wide tiles at once instead.
+        if (tabletEditor) pendingLarge?.let { editViewModel.iconTilesViewModel.setLargeTiles(it) }
+        dirty = false
     }
 
     // The pinned slots: the two cards of the first row and the pill next to the ringer. A slot is
@@ -257,14 +297,51 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
         // The grid lives inside the padded scroll column, so size cells from the inner width,
         // otherwise the last column overflows and gets clipped at the screen edge.
         val cellW = (maxWidth - EditorHorizontalPadding * 2) / columns
-        val cellH =
-            CommonTileDefaults.ColorOSTileHeight +
-                CommonTileDefaults.ClassicLabelHeight +
-                ColorOSIconRowGap
+        val cellH = EditorRowPitch
         val cellWPx = with(density) { cellW.toPx() }
         val cellHPx = with(density) { cellH.toPx() }
 
         fun slotOf(index: Int) = Offset((index % columns) * cellWPx, (index / columns) * cellHPx)
+
+        // On a tablet a tile can be made wide, two columns like a pill in the panel; tapping an
+        // added tile switches it. The pinned tiles are pills in the panel anyway.
+        val largeTiles = pendingLarge ?: savedLarge
+        val largeKeys = remember(largeTiles) { largeTiles.mapTo(HashSet()) { it.spec } }
+        fun spanOf(spec: TileSpec?): GridSpan =
+            when {
+                spec == null -> GridSpan(1, 1)
+                tablet ->
+                    colorOSTabletSpan(
+                        ColorOSTabletEntry(spec.spec, small = spec.spec in (pendingSmall ?: smallItems)),
+                        largeKeys,
+                    )
+                else -> GridSpan(1, 1)
+            }
+        fun widthOf(spec: TileSpec?): Int = spanOf(spec).colSpan
+        fun heightOf(spec: TileSpec?): Int = spanOf(spec).rowSpan
+
+        // Where the tiles of [order] go on the columns, as (row, column).
+        fun flowOf(order: List<TileSpec?>): List<Pair<Int, Int>> {
+            val placed = calculate2DPlacements(order.map(::spanOf), columns).associateBy { it.index }
+            return order.indices.map { i -> placed[i]?.let { it.row to it.col } ?: (0 to 0) }
+        }
+        fun rowsOf(order: List<TileSpec?>): Int =
+            flowOf(order).zip(order).maxOfOrNull { (cell, spec) -> cell.first + heightOf(spec) } ?: 0
+        fun cellOffset(cell: Pair<Int, Int>) = Offset(cell.second * cellWPx, cell.first * cellHPx)
+
+        // The index in [base] a tile dropped at [center] goes to: the tile under it or after it.
+        fun targetIndexAt(center: Offset, base: List<TileSpec>): Int {
+            val row = (center.y / cellHPx).toInt().coerceAtLeast(0)
+            val col = (center.x / cellWPx).toInt().coerceIn(0, columns - 1)
+            val cells = flowOf(base)
+            for (i in base.indices) {
+                val (r, c) = cells[i]
+                val inside =
+                    row in r until r + heightOf(base[i]) && col in c until c + widthOf(base[i])
+                if (inside || r > row || (r == row && col < c)) return i
+            }
+            return base.size
+        }
 
         // Root vertical scroll container. Disabled while dragging to avoid gesture interception.
         Column(
@@ -293,7 +370,17 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                             .filter { known.isEmpty() || it in known }
                             .distinct()
                             .map(TileSpec::create)
-                    commit(defaults)
+                    if (tabletEditor) {
+                        pendingLarge =
+                            defaults.filter { it.spec in ColorOSTabletDefaultWide }.toSet()
+                        commit(
+                            colorOSTabletEntries(null, defaults.map { it.spec })
+                                .map { TileSpec.create(it.key) },
+                            small = emptySet(),
+                        )
+                    } else {
+                        commit(defaults)
+                    }
                 }
                 Text(
                     text = stringResource(R.string.qs_coloros_edit_title),
@@ -304,6 +391,7 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                     modifier = Modifier.weight(1f),
                 )
                 EditorTextButton(stringResource(R.string.quick_settings_done), EditorAccent) {
+                    save()
                     editViewModel.stopEditing()
                 }
             }
@@ -318,6 +406,7 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
             )
 
             // Pinned slots
+            if (!tablet) {
             Text(
                 text = stringResource(R.string.qs_coloros_edit_pinned),
                 color = labelColor.copy(alpha = 0.7f),
@@ -365,6 +454,8 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                 }
             }
 
+            }
+
             // Section 1 Header: Added tiles
             Text(
                 text = stringResource(R.string.qs_coloros_edit_added),
@@ -375,8 +466,43 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
             )
 
             // Section 1: Active Tiles Grid
-            val activeRows = ((activeSpecs.size + (if (dragState.dragSection == DragSection.AVAILABLE && dragState.hoverActiveIndex != null) 1 else 0)) + columns - 1) / columns
+            // The added tiles as they are shown during a drag: the dragged one moved to where it
+            // hovers, or a gap where a tile from below would go.
+            val dragFrom = dragState.initialIndex
+            val hoverIndex = dragState.hoverActiveIndex
+            val shownOrder: List<TileSpec?> =
+                when (dragState.dragSection) {
+                    DragSection.ACTIVE ->
+                        if (
+                            !dragState.isHoveringAvailable &&
+                                hoverIndex != null &&
+                                hoverIndex != dragFrom &&
+                                dragFrom in activeSpecs.indices
+                        ) {
+                            activeSpecs.toMutableList<TileSpec?>().apply {
+                                add(hoverIndex.coerceIn(0, lastIndex), removeAt(dragFrom))
+                            }
+                        } else {
+                            activeSpecs
+                        }
+                    DragSection.AVAILABLE ->
+                        if (hoverIndex != null) {
+                            activeSpecs.toMutableList<TileSpec?>().apply {
+                                add(hoverIndex.coerceIn(0, size), null)
+                            }
+                        } else {
+                            activeSpecs
+                        }
+                    null -> activeSpecs
+                }
+            val shownCells = flowOf(shownOrder)
+            val cellBySpec =
+                shownOrder.indices
+                    .mapNotNull { i -> shownOrder[i]?.let { it to shownCells[i] } }
+                    .toMap()
+            val activeRows = rowsOf(shownOrder)
             val activeGridHeight = cellH * activeRows.coerceAtLeast(1)
+
 
             Box(
                 Modifier.fillMaxWidth()
@@ -396,53 +522,31 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                 }
 
                 activeSpecs.forEachIndexed { index, spec ->
-                    val tile = bySpec[spec] ?: return@forEachIndexed
+                    val tile = bySpec[spec]
+                    if (tile == null && !ColorOSTabletItem.isItem(spec.spec)) return@forEachIndexed
                     val isBeingDragged = dragState.draggingSpec == spec
 
-                    // Calculate virtual slot accounting for ongoing drag displacements
-                    val virtualSlotIndex =
-                        when (dragState.dragSection) {
-                            DragSection.ACTIVE -> {
-                                val from = dragState.initialIndex
-                                val hover = dragState.hoverActiveIndex
-                                if (isBeingDragged) {
-                                    from
-                                } else if (dragState.isHoveringAvailable) {
-                                    if (index > from) index - 1 else index
-                                } else if (hover != null && hover != from) {
-                                    if (from < hover) {
-                                        if (index in (from + 1)..hover) index - 1 else index
-                                    } else {
-                                        if (index in hover until from) index + 1 else index
-                                    }
-                                } else {
-                                    index
-                                }
-                            }
-                            DragSection.AVAILABLE -> {
-                                val hover = dragState.hoverActiveIndex
-                                if (hover != null && index >= hover) index + 1 else index
-                            }
-                            null -> index
-                        }
-
-                    val slot = slotOf(virtualSlotIndex)
-                    val animatedOffset by
-                        animateIntOffsetAsState(
-                            targetValue = IntOffset(slot.x.roundToInt(), slot.y.roundToInt()),
-                            animationSpec =
-                                spring(
-                                    dampingRatio = 0.8f,
-                                    stiffness = Spring.StiffnessMediumLow,
-                                ),
-                            label = "coloros active slot $spec",
-                        )
-
                     key(spec) {
+                        val slot = cellOffset(cellBySpec[spec] ?: (0 to 0))
+                        val target = IntOffset(slot.x.roundToInt(), slot.y.roundToInt())
+                        val moving by
+                            animateIntOffsetAsState(
+                                targetValue = target,
+                                animationSpec =
+                                    spring(
+                                        dampingRatio = 0.8f,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    ),
+                                label = "coloros active slot $spec",
+                            )
+                        // Items move to their new places as they are edited. While the editor
+                        // opens and its tiles come in, everything is put where it belongs at once.
+                        val animatedOffset =
+                            if (dirty || dragState.isDragging) moving else target
                         Box(
                             Modifier.offset { animatedOffset }
-                                .width(cellW)
-                                .height(cellH)
+                                .width(cellW * widthOf(spec))
+                                .height(cellH * heightOf(spec))
                                 .graphicsLayer {
                                     alpha = if (isBeingDragged) 0.22f else 1f
                                 }
@@ -453,7 +557,8 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                                                 HapticFeedbackType.LongPress
                                             )
                                             val startRoot =
-                                                dragState.activeGridBounds.topLeft + slotOf(index)
+                                                dragState.activeGridBounds.topLeft +
+                                                    cellOffset(flowOf(activeSpecs)[index])
                                             dragState.draggingSpec = spec
                                             dragState.dragSection = DragSection.ACTIVE
                                             dragState.initialIndex = index
@@ -482,16 +587,8 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                                                 dragState.isHoveringAvailable = false
                                                 val centerActive =
                                                     centerRoot - dragState.activeGridBounds.topLeft
-                                                val col =
-                                                    (centerActive.x / cellWPx)
-                                                        .toInt()
-                                                        .coerceIn(0, columns - 1)
-                                                val row =
-                                                    (centerActive.y / cellHPx)
-                                                        .toInt()
-                                                        .coerceAtLeast(0)
                                                 val target =
-                                                    (row * columns + col)
+                                                    targetIndexAt(centerActive, activeSpecs - spec)
                                                         .coerceIn(0, activeSpecs.lastIndex)
 
                                                 if (target != dragState.hoverActiveIndex) {
@@ -529,10 +626,49 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                                         onDragCancel = { dragState.reset() },
                                     )
                                 }
-                                .clickable(enabled = selectedPin != null) { assignPin(spec) }
+                                .clickable(
+                                    enabled =
+                                        selectedPin != null ||
+                                            (tablet && (tile != null ||
+                                                ColorOSTabletItem.isResizable(spec.spec)))
+                                ) {
+                                    when {
+                                        selectedPin != null -> assignPin(spec)
+                                        ColorOSTabletItem.isResizable(spec.spec) -> {
+                                            val current = pendingSmall ?: smallItems
+                                            val small =
+                                                if (spec.spec in current) current - spec.spec
+                                                else current + spec.spec
+                                            commit(activeSpecs, small)
+                                        }
+                                        else -> {
+                                            pendingLarge =
+                                                if (spec in largeTiles) largeTiles - spec
+                                                else largeTiles + spec
+                                            dirty = true
+                                        }
+                                    }
+                                }
                         ) {
+                            if (tile == null) {
+                                EditorItemTile(
+                                    key = spec.spec,
+                                    span = spanOf(spec),
+                                    badge = {
+                                        EditorBadgeIcon(
+                                            iconRes = R.drawable.ic_remove,
+                                            backgroundColor = EditorBadgeFill,
+                                            contentDescription = colorOSItemLabel(spec.spec),
+                                        ) {
+                                            commit(activeSpecs - spec)
+                                        }
+                                    },
+                                )
+                                return@Box
+                            }
                             EditorTile(
                                 tile = tile,
+                                wide = widthOf(spec) > 1,
                                 badge = {
                                     if (tile.isRemovable) {
                                         EditorBadgeIcon(
@@ -578,7 +714,13 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
             }
 
             // Section 2: Available Tiles Grid
-            val availableSpecs = availableTiles.map { it.tileSpec }
+            val availableSpecs =
+                availableTiles.map { it.tileSpec } +
+                    if (tabletEditor) {
+                        ColorOSTabletItem.ALL.map(TileSpec::create).filterNot { it in activeSpecs }
+                    } else {
+                        emptyList()
+                    }
             val availableRows = (availableSpecs.size + columns - 1) / columns
             val availableGridHeight = cellH * availableRows.coerceAtLeast(1)
 
@@ -605,7 +747,8 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                 }
 
                 availableSpecs.forEachIndexed { index, spec ->
-                    val tile = bySpec[spec] ?: return@forEachIndexed
+                    val tile = bySpec[spec]
+                    if (tile == null && !ColorOSTabletItem.isItem(spec.spec)) return@forEachIndexed
                     val isBeingDragged = dragState.draggingSpec == spec
                     val slot = slotOf(index)
 
@@ -648,16 +791,8 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                                             ) {
                                                 val centerActive =
                                                     centerRoot - dragState.activeGridBounds.topLeft
-                                                val col =
-                                                    (centerActive.x / cellWPx)
-                                                        .toInt()
-                                                        .coerceIn(0, columns - 1)
-                                                val row =
-                                                    (centerActive.y / cellHPx)
-                                                        .toInt()
-                                                        .coerceAtLeast(0)
                                                 val target =
-                                                    (row * columns + col)
+                                                    targetIndexAt(centerActive, activeSpecs)
                                                         .coerceIn(0, activeSpecs.size)
 
                                                 if (target != dragState.hoverActiveIndex) {
@@ -699,6 +834,24 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                                     }
                                 }
                         ) {
+                            if (tile == null) {
+                                EditorItemTile(
+                                    key = spec.spec,
+                                    span = GridSpan(1, 1),
+                                    badge = {
+                                        EditorBadgeIcon(
+                                            iconRes = R.drawable.ic_add,
+                                            backgroundColor = EditorAccent,
+                                            contentDescription = colorOSItemLabel(spec.spec),
+                                        ) {
+                                            if (!activeSpecs.contains(spec)) {
+                                                commit(activeSpecs + spec)
+                                            }
+                                        }
+                                    },
+                                )
+                                return@Box
+                            }
                             EditorTile(
                                 tile = tile,
                                 badge = {
@@ -724,7 +877,8 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
         // Floating Drag Overlay: Renders above all composables when an item is being dragged
         if (dragState.isDragging && dragState.draggingSpec != null) {
             val draggedTile = bySpec[dragState.draggingSpec]
-            if (draggedTile != null) {
+            val draggedItem = dragState.draggingSpec?.spec?.takeIf { ColorOSTabletItem.isItem(it) }
+            if (draggedTile != null || draggedItem != null) {
                 Box(
                     Modifier.offset {
                             IntOffset(
@@ -733,19 +887,29 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                             )
                         }
                         .zIndex(200f)
-                        .width(cellW)
-                        .height(cellH)
+                        .width(cellW * widthOf(dragState.draggingSpec))
+                        .height(cellH * heightOf(dragState.draggingSpec))
                         .graphicsLayer {
                             scaleX = 1.12f
                             scaleY = 1.12f
                             alpha = 0.95f
                         }
                 ) {
-                    EditorTile(
-                        tile = draggedTile,
-                        badge = null,
-                        isLifted = true,
-                    )
+                    if (draggedTile != null) {
+                        EditorTile(
+                            tile = draggedTile,
+                            wide = widthOf(dragState.draggingSpec) > 1,
+                            badge = null,
+                            isLifted = true,
+                        )
+                    } else if (draggedItem != null) {
+                        EditorItemTile(
+                            key = draggedItem,
+                            span = spanOf(dragState.draggingSpec),
+                            badge = null,
+                            isLifted = true,
+                        )
+                    }
                 }
             }
         }
@@ -760,6 +924,7 @@ private fun EditorTile(
     tile: EditTileViewModel,
     badge: (@Composable () -> Unit)?,
     isLifted: Boolean = false,
+    wide: Boolean = false,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -773,6 +938,41 @@ private fun EditorTile(
         }
 
     val elevation = if (isLifted) 10.dp else 0.dp
+
+    if (wide) {
+        // A wide tile is a pill with its icon and label, as in the panel.
+        val pill = RoundedCornerShape(percent = 50)
+        Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .height(CommonTileDefaults.ColorOSTileHeight)
+                    .shadow(elevation, pill)
+                    .clip(pill)
+                    .background(fill, pill)
+                    .border(1.dp, colorOSTileRim(), pill)
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SmallTileContent(
+                    iconProvider = { tile.icon },
+                    color = onSurface,
+                    size = { CommonTileDefaults.LargeTileIconSize },
+                )
+                Text(
+                    text = tile.label.text,
+                    color = onSurface.copy(alpha = 0.9f),
+                    fontSize = 13.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 10.dp).weight(1f),
+                )
+            }
+            if (badge != null) {
+                Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp)) { badge() }
+            }
+        }
+        return
+    }
 
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box {
@@ -807,6 +1007,155 @@ private fun EditorTile(
             style = LocalTextStyle.current.copy(lineBreak = TileLabelLineBreak),
             modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
         )
+    }
+}
+
+/** The label of an item of the large screen panel that is not a tile. */
+@Composable
+private fun colorOSItemLabel(key: String): String =
+    stringResource(
+        when (key) {
+            ColorOSTabletItem.MEDIA -> R.string.controls_media_title
+            ColorOSTabletItem.BRIGHTNESS -> R.string.quick_settings_brightness_dialog_title
+            ColorOSTabletItem.VOLUME -> R.string.media_output_dialog_accessibility_seekbar
+            ColorOSTabletItem.RINGER -> R.string.volume_ringer_status_normal
+            else -> R.string.qs_coloros_my_devices
+        }
+    )
+
+private fun colorOSItemIcon(key: String): Int =
+    when (key) {
+        ColorOSTabletItem.MEDIA -> R.drawable.ic_music_note
+        ColorOSTabletItem.BRIGHTNESS -> R.drawable.ic_coloros_brightness
+        ColorOSTabletItem.VOLUME -> R.drawable.ic_coloros_volume
+        ColorOSTabletItem.RINGER -> R.drawable.ic_volume_ringer
+        else -> R.drawable.ic_coloros_my_devices
+    }
+
+/**
+ * An item of the large screen panel in the editor, in its cells: a card for the media card, the
+ * sliders and the wide items, a round tile with its label for a one cell item.
+ */
+@Composable
+private fun EditorItemTile(
+    key: String,
+    span: GridSpan,
+    badge: (@Composable () -> Unit)?,
+    isLifted: Boolean = false,
+) {
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val fill =
+        if (isLifted) {
+            if (dark) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.85f)
+        } else {
+            if (dark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.55f)
+        }
+    val label = colorOSItemLabel(key)
+    val round = span.colSpan == 1 && span.rowSpan == 1
+    // Like the tiles, an item is as tall as the tiles of its rows and the gaps between them, and the
+    // space for the labels under its last row is the gap below it.
+    Box(
+        if (round) Modifier.fillMaxWidth()
+        else
+            Modifier.fillMaxWidth()
+                .height(
+                    CommonTileDefaults.ColorOSTileHeight + EditorRowPitch * (span.rowSpan - 1)
+                )
+                .padding(horizontal = 4.dp)
+    ) {
+        if (round) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.size(CommonTileDefaults.ColorOSTileHeight)
+                        .clip(CircleShape)
+                        .background(fill, CircleShape)
+                        .border(1.dp, colorOSTileRim(), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(colorOSItemIcon(key)),
+                        contentDescription = null,
+                        tint = onSurface,
+                        modifier = Modifier.size(CommonTileDefaults.LargeTileIconSize),
+                    )
+                }
+                Text(
+                    text = label,
+                    color = onSurface.copy(alpha = 0.9f),
+                    fontSize = 12.sp,
+                    lineHeight = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
+                )
+            }
+        } else {
+            if (span.rowSpan == 1) {
+                // A one row item is a pill with its icon and label in a row, as the wide tiles
+                // beside it.
+                val pill = RoundedCornerShape(percent = 50)
+                Row(
+                    Modifier.matchParentSize()
+                        .clip(pill)
+                        .background(fill, pill)
+                        .border(1.dp, colorOSTileRim(), pill)
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        painter = painterResource(colorOSItemIcon(key)),
+                        contentDescription = null,
+                        tint = onSurface,
+                        modifier = Modifier.size(CommonTileDefaults.LargeTileIconSize),
+                    )
+                    Text(
+                        text = label,
+                        color = onSurface.copy(alpha = 0.9f),
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 10.dp).weight(1f),
+                    )
+                }
+                if (badge != null) {
+                    Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp)) {
+                        badge()
+                    }
+                }
+                return@Box
+            }
+            val shape = RoundedCornerShape(24.dp)
+            Column(
+                Modifier.matchParentSize()
+                    .clip(shape)
+                    .background(fill, shape)
+                    .border(1.dp, colorOSTileRim(), shape)
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    painter = painterResource(colorOSItemIcon(key)),
+                    contentDescription = null,
+                    tint = onSurface,
+                    modifier = Modifier.size(CommonTileDefaults.LargeTileIconSize),
+                )
+                Text(
+                    text = label,
+                    color = onSurface.copy(alpha = 0.9f),
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+        if (badge != null) {
+            Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp)) { badge() }
+        }
     }
 }
 
@@ -890,3 +1239,14 @@ private fun EditorTextButton(text: String, color: Color, onClick: () -> Unit) {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
+
+/**
+ * Tiles that are wide in the panel's default layout, as the Wi-Fi, Bluetooth and mobile data cards
+ * of ColorOS.
+ */
+private val ColorOSTabletDefaultWide =
+    setOf("internet", "wifi", "bt", "bluetooth", ColorOSTabletCellTile)
+
+/** Height of a row of the editor: a round tile, its label and the gap to the next row. */
+private val EditorRowPitch =
+    CommonTileDefaults.ColorOSTileHeight + CommonTileDefaults.ClassicLabelHeight + ColorOSIconRowGap
