@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.android.systemui.qs.panels.domain.interactor.IconTilesInteractor
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @SysUISingleton
@@ -72,7 +73,14 @@ constructor(
     @Background private val bgDispatcher: CoroutineDispatcher,
     gridLayoutTypeInteractor: GridLayoutTypeInteractor,
     gridLayoutMap: Map<GridLayoutType, @JvmSuppressWildcards GridLayout>,
+    private val iconTilesInteractor: IconTilesInteractor,
 ) {
+    /** The tiles drawn wide, for an editor that resizes tiles itself. */
+    val largeTiles: StateFlow<Set<TileSpec>> = iconTilesInteractor.largeTilesSpecs
+
+    /** Makes [spec] a one column tile with [toIcon], a wide one otherwise. */
+    fun resizeTile(spec: TileSpec, toIcon: Boolean) = iconTilesInteractor.resize(spec, toIcon)
+
     private val _isEditing = MutableStateFlow(false)
 
     /**
