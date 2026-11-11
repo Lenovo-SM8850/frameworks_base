@@ -1145,9 +1145,16 @@ constructor(
                                     } else {
                                         Dp.Unspecified
                                     }
+                                val largeTileSpecs by
+                                    containerViewModel.editModeViewModel.largeTiles
+                                        .collectAsStateWithLifecycle()
                                 Box {
                                     GridAnchor()
                                     ColorOSQuickSettingsLayout(
+                                        largeTiles =
+                                            remember(largeTileSpecs) {
+                                                largeTileSpecs.mapTo(HashSet()) { it.spec }
+                                            },
                                         tiles = containerViewModel.tileGridViewModel.tileViewModels,
                                         gridLayout = containerViewModel.tileGridViewModel.gridLayout,
                                         infiniteGridLayout = infiniteGridLayout,

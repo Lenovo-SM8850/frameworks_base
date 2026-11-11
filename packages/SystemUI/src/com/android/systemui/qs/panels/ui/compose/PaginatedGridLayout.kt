@@ -63,6 +63,7 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridColumns
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridFooterHeight
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridHeadroom
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGridRows
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSPageInset
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingPagePlacements
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalNothingPageSliders
@@ -82,6 +83,7 @@ import com.android.systemui.qs.panels.ui.viewmodel.toolbar.EditModeButtonViewMod
 import com.android.systemui.qs.pipeline.shared.TileSpec
 import com.android.systemui.res.R
 import javax.inject.Inject
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTablet
 
 class PaginatedGridLayout
 @Inject
@@ -124,10 +126,12 @@ constructor(
                 emptyList()
             }
         val largeTiles by viewModel.largeTiles.collectAsStateWithLifecycle()
+        val colorOSTablet = LocalColorOSTablet.current
         val pagesWithPlacements =
             remember(
                 tiles,
                 rows,
+                colorOSTablet,
                 colorOSStyle,
                 nothingStyle,
                 largeTiles,
@@ -195,6 +199,11 @@ constructor(
                             grouped[pageIndex].orEmpty().map { orderedTiles[it.index] }
                         }
                         .ifEmpty { listOf(emptyList()) }
+                } else if (colorOSStyle && colorOSTablet) {
+                    // Wide tiles take two of the four columns, so pages are rows of cells.
+                    colorOSRowsOf(tiles) { if (largeTiles.contains(it.spec)) 2 else 1 }
+                        .chunked(rows)
+                        .map { it.flatten() }
                 } else if (colorOSStyle) {
                     tiles.chunked(rows * ColorOSGridColumns)
                 } else {
@@ -228,6 +237,9 @@ constructor(
             snapshotFlow { pagerState.currentPage == 0 }.collect { viewModel.inFirstPage = it }
         }
 
+        // The ColorOS pager of a large screen spans the panel, and each page keeps to the tile
+        // columns in its middle. The pages are spaced so the next one starts at the edge.
+        val colorOSPageInset = if (colorOSStyle) LocalColorOSPageInset.current else 0.dp
         Column(modifier) {
             val contentPaddingValue =
                 if (pages.size > 1) {
@@ -237,8 +249,8 @@ constructor(
                 }
             val contentPadding =
                 PaddingValues(
-                    start = contentPaddingValue,
-                    end = contentPaddingValue,
+                    start = contentPaddingValue + colorOSPageInset,
+                    end = contentPaddingValue + colorOSPageInset,
                     top = if (colorOSStyle) ColorOSGridHeadroom else 0.dp,
                 )
             val nestedScrollConnection =
@@ -264,7 +276,8 @@ constructor(
                         .padding(horizontal = { -contentPaddingValue.roundToPx() })
                         .nestedScroll(nestedScrollConnection),
                 contentPadding = contentPadding,
-                pageSpacing = if (pages.size > 1) InterPageSpacing else 0.dp,
+                pageSpacing =
+                    if (pages.size > 1) InterPageSpacing + colorOSPageInset else 0.dp,
                 beyondViewportPageCount = 1,
                 verticalAlignment = Alignment.Top,
             ) {
@@ -293,6 +306,25 @@ constructor(
             )
         }
     }
+}
+
+/**
+ * Splits [tiles] into rows of the ColorOS grid's columns, in order: a tile that does not fit the
+ * rest of a row starts the next one.
+ */
+internal fun <T> colorOSRowsOf(tiles: List<T>, width: (T) -> Int): List<List<T>> {
+    val rows = mutableListOf<MutableList<T>>()
+    var used = ColorOSGridColumns
+    for (tile in tiles) {
+        val w = width(tile).coerceIn(1, ColorOSGridColumns)
+        if (used + w > ColorOSGridColumns) {
+            rows += mutableListOf<T>()
+            used = 0
+        }
+        rows.last() += tile
+        used += w
+    }
+    return rows
 }
 
 private const val NOTHING_ROWS_PER_PAGE = 4

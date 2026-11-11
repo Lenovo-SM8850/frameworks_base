@@ -78,7 +78,7 @@ internal fun rememberColorOSMediaArtwork(icon: android.graphics.drawable.Icon?):
     }
 
 /** Height of the card the sizes below are drawn for, the two tile rows of a phone. */
-private val ColorOSMediaBaseHeight = 145.dp
+internal val ColorOSMediaBaseHeight = 145.dp
 
 /** Text and buttons grow at half the rate of the card, to stay near the labels around it. */
 private fun colorOSMediaScale(extraHeight: Dp): Float =
