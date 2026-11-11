@@ -1020,6 +1020,9 @@ object CommonTileDefaults {
         @ReadOnlyComposable
         get() = dimensionResource(id = R.dimen.focus_ring_tight_corner_radius)
 
+    /** Glyph of a round ColorOS tile to its diameter: ColorOS has a 24dp glyph on a 52dp tile. */
+    const val ColorOSIconRatio = 24f / 52f
+
     // The size of the icon in the tile with an icon and a label.
     val LargeTileIconSize: Dp
         @Composable

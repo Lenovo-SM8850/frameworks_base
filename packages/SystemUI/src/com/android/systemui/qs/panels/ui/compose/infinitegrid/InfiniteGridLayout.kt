@@ -19,6 +19,7 @@ package com.android.systemui.qs.panels.ui.compose.infinitegrid
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -112,6 +113,22 @@ const val ColorOSMinGridRows = 2
  */
 internal val LocalColorOSGridRows = compositionLocalOf { ColorOSGridRows }
 
+/**
+ * How far the ColorOS pager reaches past the tile columns on each side. A large screen panel keeps
+ * to the width of its four columns, but its pager spans the whole panel so the tiles of the next
+ * page slide in whole instead of being cut off at the edge of the columns.
+ */
+internal val LocalColorOSPageInset = compositionLocalOf { 0.dp }
+
+/** Whether the ColorOS panel is the large screen one, with fixed sizes and resizable tiles. */
+internal val LocalColorOSTablet = compositionLocalOf { false }
+
+/** Gap between the round tiles of the ColorOS grid; a large screen panel has its own. */
+internal val LocalColorOSGap = compositionLocalOf { ColorOSGap }
+
+/** Gap between rows of round tiles of the ColorOS grid when the panel sets one. */
+internal val LocalColorOSRowGap = compositionLocalOf<Dp?> { null }
+
 /** Height of the pager footer (build number or data usage, page dots, edit button). */
 val ColorOSGridFooterHeight = 48.dp
 
@@ -197,6 +214,7 @@ constructor(
         }
 
         // Tiles or largeTiles may be updated while this is composed, so listen to any changes
+        val colorOSTablet = LocalColorOSTablet.current
         val sizedTiles =
             remember(
                 tiles,
@@ -204,12 +222,16 @@ constructor(
                 largeTilesSpan,
                 colorOSStyle,
                 columns,
+                colorOSTablet,
             ) {
                 // ColorOS style: the fixed wide tiles (Wi-Fi, mobile data, Bluetooth) are drawn
                 // separately by the ColorOS layout, so every tile in this grid is a round icon
                 // tile.
                 tiles.map {
-                    val wide = !colorOSStyle && largeTiles.contains(it.spec)
+                    // The large screen ColorOS panel draws a tile made wide as a pill.
+                    val wide =
+                        (!colorOSStyle || colorOSTablet) &&
+                            largeTiles.contains(it.spec)
                     SizedTileImpl(it, if (wide) largeTilesSpan.coerceAtMost(columns) else 1)
                 }
             }
@@ -224,9 +246,9 @@ constructor(
         val spans by remember(sizedTiles) { derivedStateOf { sizedTiles.fastMap { it.width } } }
         VerticalSpannedGrid(
             columns = columns,
-            columnSpacing = if (colorOSStyle) ColorOSGap else qsTileColumnSpacing(columns),
+            columnSpacing = if (colorOSStyle) LocalColorOSGap.current else qsTileColumnSpacing(columns),
             rowSpacing =
-                if (colorOSStyle) colorOSIconRowGap(labelsHidden)
+                if (colorOSStyle) LocalColorOSRowGap.current ?: colorOSIconRowGap(labelsHidden)
                 else qsTileRowSpacing(columns, classicStyle),
             spans = spans,
             keys = { sizedTiles[it].tile.spec },
@@ -240,9 +262,8 @@ constructor(
                 Tile(
                     tile = it.tile,
                     iconOnly =
-                        colorOSStyle ||
-                            classicStyle ||
-                            iconTilesViewModel.isIconTile(it.tile.spec),
+                        if (colorOSStyle) it.width == 1
+                        else classicStyle || iconTilesViewModel.isIconTile(it.tile.spec),
                     squishiness = { squishiness },
                     tileHapticsViewModelFactory = tileHapticsViewModelFactory,
                     coroutineScope = scope,
@@ -513,6 +534,8 @@ constructor(
         tile: TileViewModel,
         listening: () -> Boolean,
         modifier: Modifier = Modifier,
+        iconOnly: Boolean = false,
+        shared: Boolean = true,
     ) {
         val context = LocalContext.current
         val textFeedbackViewModel =
@@ -521,10 +544,10 @@ constructor(
             }
         val scope = rememberCoroutineScope()
         val bounceable = remember(tile) { BounceableTileViewModel() }
-        Element(tile.spec.toElementKey(), modifier) {
+        val content: @Composable () -> Unit = {
             Tile(
                 tile = tile,
-                iconOnly = false,
+                iconOnly = iconOnly,
                 squishiness = { 1f },
                 tileHapticsViewModelFactory = tileHapticsViewModelFactory,
                 coroutineScope = scope,
@@ -540,6 +563,11 @@ constructor(
                 requestToggleTextFeedback = textFeedbackViewModel::requestShowFeedback,
                 enableRevealEffect = false,
             )
+        }
+        if (shared) {
+            Element(tile.spec.toElementKey(), modifier) { content() }
+        } else {
+            Box(modifier) { content() }
         }
     }
 
