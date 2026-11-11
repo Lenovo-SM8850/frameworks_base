@@ -539,20 +539,24 @@ fun LargeTileContent(
                         }
                 }
         ) {
+            // A Remix look passes its own icon size; ColorOS sizes the glyph to its bubble.
+            val bubbleIconSize =
+                if (colorOSStyle) CommonTileDefaults.largeTileBubbleIconSize(lottieSpec)
+                else iconSize
             val animated =
                 colorOSTileLottie(
                     spec = lottieSpec,
                     active = active,
                     offColor = MaterialTheme.colorScheme.onSurface,
                     onColor = colors.icon,
-                    size = iconSize,
+                    size = bubbleIconSize,
                     modifier = Modifier.align(Alignment.Center),
                 )
             if (!animated) {
                 SmallTileContent(
                     iconProvider = iconProvider,
                     color = colors.icon,
-                    size = { iconSize },
+                    size = { bubbleIconSize },
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
@@ -1028,18 +1032,46 @@ object CommonTileDefaults {
         @Composable
         @ReadOnlyComposable
         get() =
-            if (DesktopSizing.isEnabled) {
+            if (LocalColorOSQsStyle.current) {
+                LocalColorOSTileSize.current * ColorOSIconRatio
+            } else if (DesktopSizing.isEnabled) {
                 smallIconSize
             } else {
                 largeIconSize
             }
+
+    /** The glyph in the icon bubble of a wide tile: ColorOS sizes it to the bubble, not the tile. */
+    val LargeTileBubbleIconSize: Dp
+        @Composable
+        @ReadOnlyComposable
+        get() =
+            if (LocalColorOSQsStyle.current) ToggleTargetSize * ColorOSIconRatio
+            else LargeTileIconSize
+
+    /**
+     * The Wi-Fi glyph of a ColorOS wide tile fills more of its bubble than the round tile glyph
+     * does of its tile: 24dp in a 42dp bubble against 28dp in a 62dp tile.
+     */
+    const val ColorOSBubbleWifiIconRatio = 24f / 42f
+
+    /** [LargeTileBubbleIconSize] for the tile [spec], the drawable fallback included. */
+    @Composable
+    @ReadOnlyComposable
+    fun largeTileBubbleIconSize(spec: String?): Dp =
+        if (LocalColorOSQsStyle.current && (spec == "wifi" || spec == "internet")) {
+            ToggleTargetSize * ColorOSBubbleWifiIconRatio
+        } else {
+            LargeTileBubbleIconSize
+        }
 
     // The size of the icon in the tile with an icon only.
     val SmallTileIconSize: Dp
         @Composable
         @ReadOnlyComposable
         get() =
-            if (DesktopSizing.isEnabled) {
+            if (LocalColorOSQsStyle.current) {
+                LocalColorOSTileSize.current * ColorOSIconRatio
+            } else if (DesktopSizing.isEnabled) {
                 largeIconSize
             } else {
                 smallIconSize
