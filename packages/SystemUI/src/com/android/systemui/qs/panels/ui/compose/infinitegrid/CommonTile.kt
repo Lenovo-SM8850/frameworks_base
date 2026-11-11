@@ -530,14 +530,14 @@ fun LargeTileContent(
                     active = active,
                     offColor = MaterialTheme.colorScheme.onSurface,
                     onColor = colors.icon,
-                    size = CommonTileDefaults.LargeTileIconSize,
+                    size = CommonTileDefaults.LargeTileBubbleIconSize,
                     modifier = Modifier.align(Alignment.Center),
                 )
             if (!animated) {
                 SmallTileContent(
                     iconProvider = iconProvider,
                     color = colors.icon,
-                    size = { CommonTileDefaults.LargeTileIconSize },
+                    size = { CommonTileDefaults.LargeTileBubbleIconSize },
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
@@ -995,18 +995,30 @@ object CommonTileDefaults {
         @Composable
         @ReadOnlyComposable
         get() =
-            if (DesktopSizing.isEnabled) {
+            if (LocalColorOSQsStyle.current) {
+                LocalColorOSTileSize.current * ColorOSIconRatio
+            } else if (DesktopSizing.isEnabled) {
                 smallIconSize
             } else {
                 largeIconSize
             }
+
+    /** The glyph in the icon bubble of a wide tile: ColorOS sizes it to the bubble, not the tile. */
+    val LargeTileBubbleIconSize: Dp
+        @Composable
+        @ReadOnlyComposable
+        get() =
+            if (LocalColorOSQsStyle.current) ToggleTargetSize * ColorOSIconRatio
+            else LargeTileIconSize
 
     // The size of the icon in the tile with an icon only.
     val SmallTileIconSize: Dp
         @Composable
         @ReadOnlyComposable
         get() =
-            if (DesktopSizing.isEnabled) {
+            if (LocalColorOSQsStyle.current) {
+                LocalColorOSTileSize.current * ColorOSIconRatio
+            } else if (DesktopSizing.isEnabled) {
                 largeIconSize
             } else {
                 smallIconSize
