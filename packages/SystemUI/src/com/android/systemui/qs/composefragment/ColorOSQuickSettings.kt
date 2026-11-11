@@ -1250,6 +1250,12 @@ private val ColorOSHeaderButtonInset = 6.dp
 private val ColorOSHeaderButtonRaise = 5.5.dp
 
 /**
+ * Height a large screen panel keeps at its top for the edit and settings buttons, the buttons and
+ * the gap under them. Its own header stays as it is.
+ */
+internal val ColorOSTabletHeaderHeight = ColorOSHeaderButtonSize + ColorOSTabletGap
+
+/**
  * The glyphs of the two header buttons are drawn at different sizes, as the ColorOS gear is larger
  * in its circle than the pencil is.
  */
@@ -1273,6 +1279,7 @@ internal fun ColorOSHeaderButtons(
     modifier: Modifier = Modifier,
     onEditLongClick: ((Expandable) -> Unit)? = null,
     onSettingsLongClick: ((Expandable) -> Unit)? = null,
+    raised: Boolean = true,
 ) {
     val glass = colorOSGlass(blurred = LocalColorOSGlassBlur.current != null)
     // The same settings that hid the buttons of the footer. A hidden button keeps its place, so
@@ -1283,7 +1290,7 @@ internal fun ColorOSHeaderButtons(
         modifier =
             modifier
                 .fillMaxWidth()
-                .offset(y = -ColorOSHeaderButtonRaise)
+                .offset(y = if (raised) -ColorOSHeaderButtonRaise else 0.dp)
                 .padding(horizontal = ColorOSHeaderButtonInset),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top,
@@ -1317,6 +1324,52 @@ internal fun ColorOSHeaderButtons(
     }
 }
 
+/** The glass of the header buttons, for buttons drawn by another component. */
+@Composable
+internal fun Modifier.colorOSHeaderGlass(shape: Shape): Modifier =
+    glassSurface(colorOSGlass(blurred = LocalColorOSGlassBlur.current != null), shape)
+
+/** Size of the round buttons in the top row of the large screen panel. */
+internal val ColorOSTabletHeaderButtonSize = ColorOSHeaderButtonSize
+
+/**
+ * Size of the footer buttons of the large screen panel: smaller than the header buttons of a phone,
+ * as the edit and settings buttons of the ColorOS tablet panel.
+ */
+internal val ColorOSTabletFooterButtonSize = 34.dp
+
+/**
+ * The edit button at the start of the top row of the large screen panel, with the glyph as large as
+ * the footer buttons beside it. The footer setting that hides it leaves its place empty.
+ */
+@Composable
+internal fun ColorOSTabletEditButton(
+    size: Dp = ColorOSTabletFooterButtonSize,
+    modifier: Modifier = Modifier,
+    onEdit: (Expandable) -> Unit,
+) {
+    val showEdit by rememberSystemSettingEnabled(Settings.System.QS_FOOTER_SHOW_EDIT)
+    if (!showEdit) {
+        Spacer(modifier.size(size))
+        return
+    }
+    Box(modifier) { ColorOSHeaderButton(
+        iconRes = R.drawable.ic_edit,
+        iconSize = ColorOSTabletHeaderIconSize,
+        region = QsHeaderImageTint.Region.EDIT,
+        description = stringResource(R.string.accessibility_quick_settings_edit),
+        glass = colorOSGlass(blurred = LocalColorOSGlassBlur.current != null),
+        onClick = onEdit,
+        size = size,
+    ) }
+}
+
+/** Size of the stock footer buttons, which the large screen panel keeps. */
+internal val ColorOSTabletStockButtonSize = 40.dp
+
+/** Glyph size of the footer buttons of the large screen panel. */
+private val ColorOSTabletHeaderIconSize = 18.dp
+
 @Composable
 private fun ColorOSHeaderButton(
     iconRes: Int,
@@ -1326,6 +1379,7 @@ private fun ColorOSHeaderButton(
     glass: ColorOSGlass,
     onClick: (Expandable) -> Unit,
     onLongClick: ((Expandable) -> Unit)? = null,
+    size: Dp = ColorOSHeaderButtonSize,
 ) {
     val pressSource = remember { MutableInteractionSource() }
     val onLightImage by QsHeaderImageTint.lightFlow(region).collectAsState()
@@ -1338,7 +1392,7 @@ private fun ColorOSHeaderButton(
         useModifierBasedImplementation = true,
         defaultMinSize = false,
         modifier =
-            Modifier.size(ColorOSHeaderButtonSize)
+            Modifier.size(size)
                 .onGloballyPositioned {
                     // Where the header image is sampled to tell if the glyph has to be dark.
                     val b = it.boundsInWindow()
@@ -1357,7 +1411,7 @@ private fun ColorOSHeaderButton(
                 }
                 .glassSurface(glass, CircleShape),
     ) {
-        Box(Modifier.size(ColorOSHeaderButtonSize), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(size), contentAlignment = Alignment.Center) {
             Icon(
                 painter = painterResource(iconRes),
                 contentDescription = null,

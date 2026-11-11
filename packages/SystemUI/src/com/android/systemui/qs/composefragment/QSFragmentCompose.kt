@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -999,6 +1000,14 @@ constructor(
         // The ColorOS header is taller than the stock one. A large screen header (no qqs padding)
         // is not changed by the style.
         val colorOSHeader = LocalColorOSQsStyle.current && qqsPadding > 0
+        // A large screen keeps its own header, so the ColorOS panel puts the edit and settings
+        // buttons in a row of its own at its top, and the footer leaves them out.
+        val colorOSTabletHeader = LocalColorOSQsStyle.current && qqsPadding <= 0
+        // In portrait the large screen panel's tiles open where the collapsed ones are, without the
+        // space the panel keeps above them.
+        val colorOSSameTop =
+            colorOSTabletHeader &&
+                LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
         val qsExtraPadding =
             dimensionResource(
                 if (colorOSHeader) {
@@ -1069,7 +1078,8 @@ constructor(
                             modifier =
                                 Modifier.height {
                                     qqsPadding +
-                                        if (colorOSHeader) 0 else qsExtraPadding.roundToPx()
+                                        if (colorOSHeader || colorOSSameTop) 0
+                                        else qsExtraPadding.roundToPx()
                                 }
                         )
                         val BrightnessSlider: @Composable () -> Unit = {
@@ -1124,7 +1134,9 @@ constructor(
                                 Modifier.fillMaxWidth()
                                     .sysuiResTag(ResIdTags.quickSettingsPanel)
                                     .padding(
-                                        top = QuickSettingsShade.Dimensions.VerticalPadding,
+                                        top =
+                                            if (colorOSSameTop) 0.dp
+                                            else QuickSettingsShade.Dimensions.VerticalPadding,
                                         start = qsHorizontalMargin(),
                                         end = qsHorizontalMargin(),
                                     )
@@ -1138,9 +1150,12 @@ constructor(
                                         with(density) {
                                             (viewModel.qsScrollHeight -
                                                     qqsPadding -
-                                                    qsExtraPadding.roundToPx() -
-                                                    QuickSettingsShade.Dimensions.VerticalPadding
-                                                        .roundToPx() -
+                                                    (if (colorOSSameTop) 0
+                                                    else
+                                                        qsExtraPadding.roundToPx() +
+                                                            QuickSettingsShade.Dimensions
+                                                                .VerticalPadding
+                                                                .roundToPx()) -
                                                     ColorOSBottomPadding.roundToPx())
                                                 .toDp()
                                         }
@@ -1151,7 +1166,20 @@ constructor(
                                     containerViewModel.editModeViewModel.largeTiles
                                         .collectAsStateWithLifecycle()
                                 Box {
-                                    GridAnchor()
+                                    if (colorOSTabletHeader) {
+                                        // At the start of the four columns, as in the collapsed
+                                        // panel, so the panel opens straight down.
+                                        Box(
+                                            Modifier.fillMaxWidth(),
+                                            contentAlignment = Alignment.TopCenter,
+                                        ) {
+                                            Box(Modifier.width(rememberColorOSTabletMetrics().width)) {
+                                                GridAnchor()
+                                            }
+                                        }
+                                    } else {
+                                        GridAnchor()
+                                    }
                                     ColorOSQuickSettingsLayout(
                                         largeTiles =
                                             remember(largeTileSpecs) {
@@ -1224,17 +1252,36 @@ constructor(
                                                     viewModel.editModeButtonViewModelFactory
                                                         .create()
                                                 }
-                                            val settings by
-                                                viewModel.footerActionsViewModel.settings
-                                                    .collectAsStateWithLifecycle(null)
-                                            ColorOSHeaderButtons(
-                                                onEdit = { editButton.onButtonClick() },
-                                                onSettings = settings?.onClick,
-                                                onEditLongClick = settings?.onLongClick,
-                                                onSettingsLongClick =
-                                                    viewModel.footerActionsViewModel
-                                                        .onPowerMenuClick,
-                                            )
+                                            if (colorOSTabletHeader) {
+                                                // The footer's buttons on the panel glass: edit,
+                                                // the active apps, user, settings and power.
+                                                FooterActions(
+                                                    viewModel = viewModel.footerActionsViewModel,
+                                                    leading = {
+                                                        ColorOSTabletEditButton {
+                                                            editButton.onButtonClick()
+                                                        }
+                                                    },
+                                                    buttonSize = ColorOSTabletFooterButtonSize,
+                                                    buttonBackground = { shape ->
+                                                        colorOSHeaderGlass(shape)
+                                                    },
+                                                    chrome = false,
+                                                )
+                                            } else {
+                                                val settings by
+                                                    viewModel.footerActionsViewModel.settings
+                                                        .collectAsStateWithLifecycle(null)
+                                                ColorOSHeaderButtons(
+                                                    onEdit = { editButton.onButtonClick() },
+                                                    onSettings = settings?.onClick,
+                                                    onEditLongClick = settings?.onLongClick,
+                                                    onSettingsLongClick =
+                                                        viewModel.footerActionsViewModel
+                                                            .onPowerMenuClick,
+                                                    raised = colorOSHeader,
+                                                )
+                                            }
                                         },
                                         onOpenDevices = {
                                             activityStarter.postStartActivityDismissingKeyguard(
@@ -1316,7 +1363,29 @@ constructor(
                             Modifier.sysuiResTag(ResIdTags.qsFooterActions),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (LocalColorOSQsStyle.current) {
+                                if (colorOSTabletHeader) {
+                                    // The stock footer, its buttons on the panel glass.
+                                    val editButton = rememberViewModel("FooterEdit") {
+                                        viewModel.editModeButtonViewModelFactory.create()
+                                    }
+                                    ColorOSTabletEditButton(
+                                        size = ColorOSTabletStockButtonSize,
+                                        modifier =
+                                            Modifier.padding(
+                                                start =
+                                                    dimensionResource(
+                                                        R.dimen.qs_content_horizontal_padding
+                                                    ) + 4.dp
+                                            ),
+                                    ) {
+                                        editButton.onButtonClick()
+                                    }
+                                    FooterActions(
+                                        viewModel = viewModel.footerActionsViewModel,
+                                        modifier = Modifier.weight(1f),
+                                        buttonBackground = { shape -> colorOSHeaderGlass(shape) },
+                                    )
+                                } else if (LocalColorOSQsStyle.current) {
                                     val showEdit by rememberSystemSettingEnabled(
                                         android.provider.Settings.System.QS_FOOTER_SHOW_EDIT
                                     )
@@ -1333,10 +1402,12 @@ constructor(
                                         )
                                     }
                                 }
-                                FooterActions(
-                                    viewModel = viewModel.footerActionsViewModel,
-                                    modifier = Modifier.weight(1f),
-                                )
+                                if (!colorOSTabletHeader) {
+                                    FooterActions(
+                                        viewModel = viewModel.footerActionsViewModel,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                             }
                         }
                     }

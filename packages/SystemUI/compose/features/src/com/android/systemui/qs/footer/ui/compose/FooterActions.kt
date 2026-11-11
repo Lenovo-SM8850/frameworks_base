@@ -44,6 +44,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -117,6 +119,10 @@ import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import com.android.compose.modifiers.thenIf
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
 
 @Composable
 fun ContentScope.FooterActionsWithAnimatedVisibility(
@@ -176,7 +182,15 @@ fun rememberSystemSettingEnabled(
 
 /** The Quick Settings footer actions row. */
 @Composable
-fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifier) {
+fun FooterActions(
+    viewModel: FooterActionsViewModel,
+    modifier: Modifier = Modifier,
+    showSettingsButton: Boolean = true,
+    leading: (@Composable () -> Unit)? = null,
+    buttonSize: Dp? = null,
+    buttonBackground: (@Composable Modifier.(Shape) -> Modifier)? = null,
+    chrome: Boolean = true,
+) {
     val context = LocalContext.current
 
     // Collect alphas as soon as we are composed, even when not visible.
@@ -232,18 +246,22 @@ fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifi
         }
 
     val horizontalPadding = dimensionResource(R.dimen.qs_content_horizontal_padding)
+    val topPadding = dimensionResource(R.dimen.qs_footer_actions_top_padding)
+    val bottomPadding = dimensionResource(R.dimen.qs_footer_actions_bottom_padding)
     Row(
         modifier
             .fillMaxWidth()
             .graphicsLayer { this.alpha = alpha }
-            .then(backgroundModifier)
-            .padding(
-                top = dimensionResource(R.dimen.qs_footer_actions_top_padding),
-                bottom = dimensionResource(R.dimen.qs_footer_actions_bottom_padding),
-                start = horizontalPadding,
-                end = horizontalPadding,
-            )
-            .layout { measurable, constraints ->
+            // Without its chrome the row is only the buttons, for a host that places them.
+            .thenIf(chrome) {
+                backgroundModifier.padding(
+                    top = topPadding,
+                    bottom = bottomPadding,
+                    start = horizontalPadding,
+                    end = horizontalPadding,
+                )
+            }
+            .thenIf(chrome) { Modifier.layout { measurable, constraints ->
                 // All buttons have a 4dp padding to increase their touch size. To be consistent
                 // with the View implementation, we want to left-most and right-most buttons to be
                 // visually aligned with the left and right sides of this row. So we let this
@@ -261,10 +279,15 @@ fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifi
                 val width = constraints.constrainWidth(placeable.width - additionalWidth)
                 val height = constraints.constrainHeight(placeable.height)
                 layout(width, height) { placeable.place(-inset, 0) }
-            },
+            } },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CompositionLocalProvider(LocalContentColor provides contentColor) {
+        CompositionLocalProvider(
+            LocalContentColor provides contentColor,
+            LocalFooterButtonSize provides buttonSize,
+            LocalFooterButtonBackground provides buttonBackground,
+        ) {
+            leading?.invoke()
             val useModifierBasedExpandable = true
 
             // The viewModel to show, in order of priority:
@@ -291,7 +314,7 @@ fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifi
             val showSettings by rememberSystemSettingEnabled(Settings.System.QS_FOOTER_SHOW_SETTINGS)
             val showPowerMenu by rememberSystemSettingEnabled(Settings.System.QS_FOOTER_SHOW_POWER_MENU)
 
-            if (showSettings) {
+            if (showSettings && showSettingsButton) {
                 IconButton(
                     { settings },
                     useModifierBasedExpandable,
@@ -429,14 +452,27 @@ private fun IconButton(
     modifier: Modifier = Modifier,
 ) {
     val colors = buttonColorsForModel(model)
+    val size = LocalFooterButtonSize.current
+    // On a background of the host the glyph takes the content colour, as the host's buttons do.
+    val tint =
+        if (
+            LocalFooterButtonBackground.current != null &&
+                model !is FooterActionsButtonViewModel.UserSwitcherViewModel
+        ) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            // The user's picture keeps its own colours.
+            colors.icon
+        }
     CircleExpandable(
         color = colors.background,
         onClick = model.onClick,
         onLongClick = model.onLongClick,
-        modifier = modifier,
+        // Hosted buttons keep a gap between them, as the host's own row does.
+        modifier = if (size != null) modifier.padding(start = 8.dp).size(size) else modifier,
         useModifierBasedImplementation = useModifierBasedExpandable,
     ) {
-        FooterIcon(model.icon, Modifier.size(20.dp), colors.icon)
+        FooterIcon(model.icon, Modifier.size(20.dp), tint)
     }
 }
 
@@ -514,24 +550,44 @@ private fun CircleExpandable(
     onLongClick: ((Expandable) -> Unit)? = null,
     interactionSource: MutableInteractionSource? = null,
     useModifierBasedImplementation: Boolean,
+    useHostBackground: Boolean = true,
     content: @Composable (Expandable) -> Unit,
 ) {
+    // A host background replaces the button's own fill and border.
+    val hostBackground = LocalFooterButtonBackground.current?.takeIf { useHostBackground }
+    // At the button's own size the background is drawn where its fill was, inside the larger touch
+    // area, so the buttons keep their gaps. A size of the host's is the size of the background.
+    val outerBackground = hostBackground != null && LocalFooterButtonSize.current != null
     Expandable(
-        color = color,
-        contentColor = contentColor,
-        borderStroke = borderStroke,
+        color = if (hostBackground != null) Color.Transparent else color,
+        contentColor =
+            if (hostBackground != null) MaterialTheme.colorScheme.onSurface else contentColor,
+        borderStroke = if (hostBackground != null) null else borderStroke,
         shape = CircleShape,
         onClick = onClick,
         onLongClick = onLongClick,
         interactionSource = interactionSource,
         modifier =
-            modifier.borderOnFocus(
-                color = MaterialTheme.colorScheme.secondary,
-                cornerSize = CornerSize(percent = 50),
-            ),
+            modifier
+                .then(if (outerBackground) Modifier.hostBackground(CircleShape) else Modifier)
+                .borderOnFocus(
+                    color = MaterialTheme.colorScheme.secondary,
+                    cornerSize = CornerSize(percent = 50),
+                ),
         useModifierBasedImplementation = useModifierBasedImplementation,
-        content = content,
-    )
+    ) { expandable ->
+        if (hostBackground != null && !outerBackground) {
+            Box(
+                Modifier.defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
+                    .hostBackground(CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                content(expandable)
+            }
+        } else {
+            content(expandable)
+        }
+    }
 }
 
 /** A dot that indicates new changes. */
@@ -556,13 +612,19 @@ private fun TextButton(
     modifier: Modifier = Modifier,
 ) {
     val colors = textButtonColors()
+    // On a host background the pill is as tall as the hosted buttons, and only once it has text.
+    val hostSize = LocalFooterButtonSize.current
     CircleExpandable(
         color = colors.background,
         contentColor = colors.content,
         borderStroke = colors.border,
-        modifier = modifier.padding(horizontal = 4.dp),
+        modifier =
+            modifier.padding(horizontal = 4.dp).then(
+                if (hostSize != null) Modifier.heightIn(min = hostSize) else Modifier
+            ),
         onClick = onClick,
         useModifierBasedImplementation = useModifierBasedExpandable,
+        useHostBackground = text.isNotBlank(),
     ) {
         Row(
             Modifier.padding(horizontal = dimensionResource(R.dimen.qs_footer_padding)),
@@ -772,3 +834,10 @@ private object FooterActionsDefaults {
             border = null,
         )
 }
+
+/** Size of the icon buttons when the host sets one. */
+private val LocalFooterButtonSize = compositionLocalOf<Dp?> { null }
+
+/** Background the host draws behind every button instead of their own fill. */
+private val LocalFooterButtonBackground =
+    compositionLocalOf<(@Composable Modifier.(Shape) -> Modifier)?> { null }
