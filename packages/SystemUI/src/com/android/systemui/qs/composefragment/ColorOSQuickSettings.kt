@@ -137,6 +137,13 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.content.Context
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.os.UserHandle
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
 
 /** Tile specs that ColorOS pins to the fixed wide slots, in order of preference. */
 private val COLOROS_WIFI_SPECS = listOf("internet", "wifi")
@@ -783,6 +790,8 @@ private fun ColorOSVerticalSlider(
     fullIconTint: Color? = null,
     snap: (Float) -> Float = { it },
     onLongPress: (() -> Unit)? = null,
+    onIconTap: (() -> Unit)? = null,
+    iconOverrideTint: Color? = null,
 ) {
     val view = LocalView.current
     val scope = rememberCoroutineScope()
@@ -811,7 +820,10 @@ private fun ColorOSVerticalSlider(
     val currentOnStop by rememberUpdatedState(onStop)
     val currentSnap by rememberUpdatedState(snap)
     val currentOnLongPress by rememberUpdatedState(onLongPress)
+    val currentOnIconTap by rememberUpdatedState(onIconTap)
     val shape = RoundedCornerShape(percent = 50)
+    // The icon at the foot of the slider, as far as a tap on it reaches.
+    val iconZone = with(LocalDensity.current) { (ColorOSSliderIconBottomInset * 2 + iconSize).toPx() }
 
     Box(
         modifier =
@@ -827,6 +839,8 @@ private fun ColorOSVerticalSlider(
                         down.consume()
                         val start = local
                         val height = size.height.coerceAtLeast(1)
+                        // A tap on the icon does not set a level; moving from it still does.
+                        var onIcon = currentOnIconTap != null && down.position.y >= height - iconZone
                         // A finger that stays down without moving does not set a level, it fires
                         // the long press. Once that fired the rest of the gesture is ignored.
                         val longPressTimeout = viewConfiguration.longPressTimeoutMillis
@@ -853,6 +867,11 @@ private fun ColorOSVerticalSlider(
                                 viewConfiguration.touchSlop
                             ) {
                                 longPressJob?.cancel()
+                                onIcon = false
+                            }
+                            if (onIcon) {
+                                change.consume()
+                                continue
                             }
                             val delta = (down.position.y - change.position.y) / height
                             local = (start + delta).coerceIn(0f, 1f)
@@ -860,7 +879,9 @@ private fun ColorOSVerticalSlider(
                             change.consume()
                         }
                         longPressJob?.cancel()
-                        if (!longPressed) {
+                        if (onIcon && !longPressed) {
+                            currentOnIconTap?.invoke()
+                        } else if (!longPressed) {
                             local = currentSnap(local)
                             settling = true
                             currentOnStop(local)
@@ -882,6 +903,7 @@ private fun ColorOSVerticalSlider(
             contentDescription = null,
             tint =
                 when {
+                    iconOverrideTint != null -> iconOverrideTint
                     fullIconTint != null && local >= COLOROS_FULL_THRESHOLD -> fullIconTint
                     local > 0.18f -> iconTint
                     else -> glass.iconOff
@@ -908,10 +930,16 @@ internal fun ColorOSBrightnessSlider(
     val fraction =
         if (gamma < 0) 0.5f else ((gamma - min).toFloat() / span).coerceIn(0f, 1f)
     fun toGamma(f: Float) = GammaBrightness((min + f * span).toInt().coerceIn(min, max))
+    val context = LocalContext.current
+    val automatic by rememberColorOSAutoBrightness()
 
     ColorOSVerticalSlider(
         fraction = fraction,
-        iconRes = R.drawable.ic_coloros_brightness,
+        // Automatic brightness shows the sun with an A, in yellow.
+        iconRes =
+            if (automatic) R.drawable.ic_coloros_brightness_auto else R.drawable.ic_coloros_brightness,
+        iconOverrideTint = if (automatic) ColorOSBrightnessAuto else null,
+        onIconTap = { setColorOSAutoBrightness(context, !automatic) },
         iconTint = ColorOSSliderIconOnFill,
         // At full brightness only the sun icon turns orange, like the 🔆 emoji.
         fullIconTint = ColorOSBrightnessFull,
@@ -1449,4 +1477,48 @@ private fun ContentScope.ColorOSTabletLayout(
             },
         )
     }
+}
+
+/** Yellow of the automatic brightness icon on the slider. */
+private val ColorOSBrightnessAuto = Color(0xFFFFC107)
+
+/** Whether automatic brightness is on, kept up to date while the setting changes. */
+@Composable
+private fun rememberColorOSAutoBrightness(): State<Boolean> {
+    val context = LocalContext.current
+    fun read() =
+        Settings.System.getIntForUser(
+            context.contentResolver,
+            Settings.System.SCREEN_BRIGHTNESS_MODE,
+            Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
+            UserHandle.USER_CURRENT,
+        ) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+    val state = remember(context) { mutableStateOf(read()) }
+    DisposableEffect(context) {
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    state.value = read()
+                }
+            }
+        context.contentResolver.registerContentObserver(
+            Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS_MODE),
+            false,
+            observer,
+            UserHandle.USER_ALL,
+        )
+        state.value = read()
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+    return state
+}
+
+private fun setColorOSAutoBrightness(context: Context, automatic: Boolean) {
+    Settings.System.putIntForUser(
+        context.contentResolver,
+        Settings.System.SCREEN_BRIGHTNESS_MODE,
+        if (automatic) Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+        else Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
+        UserHandle.USER_CURRENT,
+    )
 }
