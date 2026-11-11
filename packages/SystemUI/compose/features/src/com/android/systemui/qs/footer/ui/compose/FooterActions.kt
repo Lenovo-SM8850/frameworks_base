@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -122,6 +123,8 @@ import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.Shape
 
 @Composable
 fun ContentScope.FooterActionsWithAnimatedVisibility(
@@ -181,7 +184,11 @@ fun rememberSystemSettingEnabled(
 
 /** The Quick Settings footer actions row. */
 @Composable
-fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifier) {
+fun FooterActions(
+    viewModel: FooterActionsViewModel,
+    modifier: Modifier = Modifier,
+    buttonBackground: (@Composable Modifier.(Shape) -> Modifier)? = null,
+) {
     val context = LocalContext.current
 
     // Collect alphas as soon as we are composed, even when not visible.
@@ -269,7 +276,10 @@ fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifi
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CompositionLocalProvider(LocalContentColor provides contentColor) {
+        CompositionLocalProvider(
+            LocalContentColor provides contentColor,
+            LocalFooterButtonBackground provides buttonBackground,
+        ) {
             val useModifierBasedExpandable = true
 
             // The viewModel to show, in order of priority:
@@ -351,6 +361,9 @@ private fun AnimatedFooterTextButton(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             onClick = onClick,
             useModifierBasedImplementation = useModifierBasedExpandable,
+            // A host background is drawn apart from this button's alpha, so only once the button
+            // has text and shows, not as a bar while it is hidden.
+            useHostBackground = textViewModel != null && alpha > 0f,
         ) {
             transition.AnimatedContent(
                 transitionSpec = {
@@ -434,6 +447,17 @@ private fun IconButton(
     modifier: Modifier = Modifier,
 ) {
     val colors = buttonColorsForModel(model)
+    // On a background of the host the glyph takes the content colour, as the host's buttons do.
+    val tint =
+        if (
+            LocalFooterButtonBackground.current != null &&
+                model !is FooterActionsButtonViewModel.UserSwitcherViewModel
+        ) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            // The user's picture keeps its own colours.
+            colors.icon
+        }
     CircleExpandable(
         color = colors.background,
         onClick = model.onClick,
@@ -441,7 +465,7 @@ private fun IconButton(
         modifier = modifier,
         useModifierBasedImplementation = useModifierBasedExpandable,
     ) {
-        FooterIcon(model.icon, Modifier.size(20.dp), colors.icon)
+        FooterIcon(model.icon, Modifier.size(20.dp), tint)
     }
 }
 
@@ -519,12 +543,16 @@ private fun CircleExpandable(
     onLongClick: ((Expandable) -> Unit)? = null,
     interactionSource: MutableInteractionSource? = null,
     useModifierBasedImplementation: Boolean,
+    useHostBackground: Boolean = true,
     content: @Composable (Expandable) -> Unit,
 ) {
+    // A host background replaces the button's own fill and border.
+    val hostBackground = LocalFooterButtonBackground.current?.takeIf { useHostBackground }
     Expandable(
-        color = color,
-        contentColor = contentColor,
-        borderStroke = borderStroke,
+        color = if (hostBackground != null) Color.Transparent else color,
+        contentColor =
+            if (hostBackground != null) MaterialTheme.colorScheme.onSurface else contentColor,
+        borderStroke = if (hostBackground != null) null else borderStroke,
         shape = CircleShape,
         onClick = onClick,
         onLongClick = onLongClick,
@@ -535,8 +563,19 @@ private fun CircleExpandable(
                 cornerSize = CornerSize(percent = 50),
             ),
         useModifierBasedImplementation = useModifierBasedImplementation,
-        content = content,
-    )
+    ) { expandable ->
+        if (hostBackground != null) {
+            Box(
+                Modifier.defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
+                    .hostBackground(CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                content(expandable)
+            }
+        } else {
+            content(expandable)
+        }
+    }
 }
 
 /** A dot that indicates new changes. */
@@ -847,3 +886,7 @@ private object FooterActionsDefaults {
             border = null,
         )
 }
+
+/** Background the host draws behind every button instead of their own fill. */
+private val LocalFooterButtonBackground =
+    compositionLocalOf<(@Composable Modifier.(Shape) -> Modifier)?> { null }

@@ -1058,6 +1058,9 @@ constructor(
         // The ColorOS header is taller than the stock one. A large screen header (no qqs padding)
         // is not changed by the style.
         val colorOSHeader = LocalColorOSQsStyle.current && qqsPadding > 0
+        // The large screen panel shows the edit button and the footer buttons on glass in the
+        // footer row.
+        val colorOSTabletHeader = LocalColorOSQsStyle.current && qqsPadding <= 0
         val qsExtraPadding =
             dimensionResource(
                 if (colorOSHeader) {
@@ -1411,7 +1414,29 @@ constructor(
                             Modifier.sysuiResTag(ResIdTags.qsFooterActions),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (LocalColorOSQsStyle.current) {
+                                if (colorOSTabletHeader) {
+                                    // The stock footer, its buttons on the panel glass.
+                                    val editButton = rememberViewModel("FooterEdit") {
+                                        viewModel.editModeButtonViewModelFactory.create()
+                                    }
+                                    ColorOSTabletEditButton(
+                                        size = ColorOSTabletStockButtonSize,
+                                        modifier =
+                                            Modifier.padding(
+                                                start =
+                                                    dimensionResource(
+                                                        R.dimen.qs_content_horizontal_padding
+                                                    ) + 4.dp
+                                            ),
+                                    ) {
+                                        editButton.onButtonClick()
+                                    }
+                                    FooterActions(
+                                        viewModel = viewModel.footerActionsViewModel,
+                                        modifier = Modifier.weight(1f),
+                                        buttonBackground = { shape -> colorOSHeaderGlass(shape) },
+                                    )
+                                } else if (LocalColorOSQsStyle.current) {
                                     val showEdit by rememberSystemSettingEnabled(
                                         android.provider.Settings.System.QS_FOOTER_SHOW_EDIT
                                     )
@@ -1428,10 +1453,12 @@ constructor(
                                         )
                                     }
                                 }
-                                FooterActions(
-                                    viewModel = viewModel.footerActionsViewModel,
-                                    modifier = Modifier.weight(1f),
-                                )
+                                if (!colorOSTabletHeader) {
+                                    FooterActions(
+                                        viewModel = viewModel.footerActionsViewModel,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                             }
                         }
                     }
