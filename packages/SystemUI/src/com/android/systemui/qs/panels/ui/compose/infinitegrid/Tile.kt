@@ -172,6 +172,7 @@ internal val LocalColorOSQsStyle = compositionLocalOf { false }
 private val ColorOSBlue = Color(0xFF0068FF)
 private val ColorOSGreen = Color(0xFF16A34A)
 private val ColorOSRed = Color(0xFFF2453D)
+private val ColorOSOrange = Color(0xFFFF8A1F)
 private val ColorOSInk = Color(0xFF1C1C1E)
 private val COLOROS_DATA_TILES = setOf("cell", "mobile_data", "mobiledata")
 private val COLOROS_WIFI_TILES = setOf("wifi")
@@ -1272,7 +1273,8 @@ private object TileDefaults {
             when {
                 spec in COLOROS_DATA_TILES -> ColorOSGreen
                 spec == "rotation" -> ColorOSRed
-                darkPanel && spec in COLOROS_INK_TILES -> ColorOSInk
+                spec == "airplane" -> ColorOSOrange
+                spec in COLOROS_INK_TILES -> ColorOSInk
                 else -> ColorOSBlue
             }
         val glass =
@@ -1281,8 +1283,9 @@ private object TileDefaults {
         // ColorOS. The pill and the round tiles keep the glass.
         val bubbleOff =
             if (darkPanel) Color.White.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.06f)
-        val bubbleOn = if (darkPanel) ColorOSActiveFill else accent
-        val iconOn = if (darkPanel) accent else Color.White
+        // An active tile is a white bubble with its colour in the icon, on a dark or a light panel.
+        val bubbleOn = ColorOSActiveFill
+        val iconOn = accent
         // The labels of a dark panel are softer than full white, like in ColorOS.
         val primary = if (darkPanel) onSurface.copy(alpha = 0.90f) else onSurface
         val secondary = onSurface.copy(alpha = if (darkPanel) 0.60f else 0.70f)
