@@ -81,6 +81,14 @@ internal object CosIsland {
 
     val Move = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
     val SwitchGrow = CubicBezierEasing(0.17f, 0.23f, 0.83f, 0.95f)
+    /** The capsule coming out of the camera, past its middle width. */
+    val Offset = CubicBezierEasing(0.3f, 0f, 0.83f, 0.88f)
+    /** The capsule overshooting its width as its content comes in. */
+    val Return = CubicBezierEasing(0.17f, 0.12f, 0.67f, 1f)
+    /** Width the capsule passes on its way out, and how much taller and then lower it is. */
+    val MiddleWidth = 80.dp
+    val ExtraHeight = 3.dp
+    val ReduceHeight = 1.dp
     val SwitchSettle = CubicBezierEasing(0.17f, 0.56f, 0.1f, 1f)
     private val PressDown = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
     private val PressUp = CubicBezierEasing(0f, 0f, 0.2f, 1f)
@@ -121,6 +129,9 @@ internal fun CosIslandShell(
     val currentHeightPx by rememberUpdatedState(heightPx)
     val extraPx = with(density) { CosIsland.ExtraWidth.toPx() }
     val switchPx = with(density) { CosIsland.SwitchWidth.toPx() }
+    val middlePx = with(density) { CosIsland.MiddleWidth.toPx() }
+    val extraHeightPx = with(density) { CosIsland.ExtraHeight.toPx() }
+    val reduceHeightPx = with(density) { CosIsland.ReduceHeight.toPx() }
     val maxWidthPx = with(density) { CosIsland.MaxWidth.roundToPx() }
     val blurPx = with(density) { CosIsland.ContentBlur.toPx() }
 
@@ -149,17 +160,25 @@ internal fun CosIslandShell(
         return snapshotFlow { natural }.first { it.width > 0 }
     }
 
+    // Out of the camera as a dot, past a middle width a little taller than the capsule, then wider
+    // than the content as the content comes in, then settling to the content's width.
     suspend fun appear() = coroutineScope {
-        val target = nextNatural().width.toFloat()
+        val target = nextNatural().width.toFloat().coerceAtLeast(1f)
         launch { width.animateTo(holePx, tween(50, easing = CosIsland.Move)) }
         height.animateTo(holePx, tween(50, easing = CosIsland.Move))
-        launch { width.animateTo(target + extraPx, tween(300, easing = CosIsland.Move)) }
-        launch { height.animateTo(currentHeightPx, tween(300, easing = CosIsland.Move)) }
-        launch { alpha.animateTo(1f, tween(250, delayMillis = 50, easing = CosIsland.Move)) }
-        launch { blur.animateTo(0f, tween(250, delayMillis = 50, easing = CosIsland.Move)) }
-        scale.animateTo(1.1f, tween(300, easing = CosIsland.Move))
-        launch { width.animateTo(target, tween(500, easing = CosIsland.Move)) }
-        scale.animateTo(1f, tween(500, easing = CosIsland.Move))
+        launch { width.animateTo(middlePx, tween(200, easing = CosIsland.Offset)) }
+        height.animateTo(currentHeightPx + extraHeightPx, tween(200, easing = CosIsland.Offset))
+        scale.snapTo(middlePx / target)
+        launch { width.animateTo(target + extraPx, tween(300, easing = CosIsland.Return)) }
+        launch {
+            height.animateTo(currentHeightPx - reduceHeightPx, tween(300, easing = CosIsland.Return))
+        }
+        launch { alpha.animateTo(1f, tween(300, easing = CosIsland.Return)) }
+        launch { blur.animateTo(0f, tween(300, easing = CosIsland.Return)) }
+        scale.animateTo((target + extraPx) / target, tween(300, easing = CosIsland.Return))
+        launch { width.animateTo(target, tween(400, easing = CosIsland.Move)) }
+        launch { height.animateTo(currentHeightPx, tween(400, easing = CosIsland.Move)) }
+        scale.animateTo(1f, tween(400, easing = CosIsland.Move))
     }
 
     suspend fun disappear() = coroutineScope {
