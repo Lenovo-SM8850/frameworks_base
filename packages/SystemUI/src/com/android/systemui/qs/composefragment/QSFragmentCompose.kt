@@ -41,6 +41,7 @@ import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -72,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1388,14 +1390,21 @@ constructor(
     private fun EditModeElement(modifier: Modifier = Modifier) {
         // No need for top padding, the Scaffold inside takes care of the correct insets
         val horizontalPadding = QuickSettingsShade.Dimensions.HorizontalPadding
-        EditMode(
-            viewModel = viewModel.containerViewModel.editModeViewModel,
-            modifier =
-                modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = { horizontalPadding.roundToPx() })
-                    .padding(top = { viewModel.qqsHeaderHeight }),
-        )
+        // A tap on an empty part of the ColorOS editor stays in it, instead of reaching the shade,
+        // which closes the panel and the editor with it.
+        Box(
+            modifier.thenIf(LocalColorOSQsStyle.current) {
+                Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures {} }
+            }
+        ) {
+            EditMode(
+                viewModel = viewModel.containerViewModel.editModeViewModel,
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = { horizontalPadding.roundToPx() })
+                        .padding(top = { viewModel.qqsHeaderHeight }),
+            )
+        }
     }
 
     private fun Modifier.collapseExpandSemanticAction(label: String): Modifier {
