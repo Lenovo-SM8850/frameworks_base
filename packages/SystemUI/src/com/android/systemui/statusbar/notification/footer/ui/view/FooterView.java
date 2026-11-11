@@ -34,14 +34,20 @@ import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.util.AttributeSet;
 import android.util.IndentingPrintWriter;
 import android.view.View;
+import android.view.ViewRootImpl;
+import android.view.ViewTreeObserver;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 
 import com.android.internal.graphics.ColorUtils;
+import com.android.internal.graphics.drawable.BackgroundBlurDrawable;
 import com.android.systemui.common.shared.colors.SurfaceEffectColors;
 import com.android.systemui.qs.shared.style.LiquidGlass;
 import com.android.systemui.res.R;
@@ -116,6 +122,39 @@ public class FooterView extends StackScrollerDecorView {
     public void setClearAllButtonVisible(boolean visible, boolean animate,
             Consumer<Boolean> onAnimationEnded) {
         setSecondaryVisible(visible, animate, onAnimationEnded);
+        syncClearAllGlass();
+    }
+
+    private final ViewTreeObserver.OnPreDrawListener mGlassPreDrawListener = () -> {
+        syncClearAllGlass();
+        return true;
+    };
+
+    private void syncClearAllGlass() {
+        syncButtonGlass(mClearAllButton, isClearAllButtonVisible());
+        syncButtonGlass(mSettingsButton, true);
+        syncButtonGlass(mHistoryButton, true);
+    }
+
+    /** Match each button and its ancestors, rather than only the clear-all logical state. */
+    private void syncButtonGlass(View button, boolean visible) {
+        if (button == null
+                || !(button.getBackground() instanceof LayerDrawable layers)
+                || layers.getNumberOfLayers() == 0
+                || !(layers.getDrawable(0) instanceof InsetDrawable inset)
+                || !(inset.getDrawable() instanceof BackgroundBlurDrawable blur)) {
+            return;
+        }
+        final float contentAlpha = mContent.getVisibility() == VISIBLE ? mContent.getAlpha() : 0f;
+        final float alpha = visible ? contentAlpha : 0f;
+        blur.setAlpha((int) (255 * alpha));
+        if (blur.setVisible(alpha > 0f, false)) postInvalidateOnAnimation();
+    }
+
+    private void hideButtonGlass() {
+        syncButtonGlass(mClearAllButton, false);
+        syncButtonGlass(mSettingsButton, false);
+        syncButtonGlass(mHistoryButton, false);
     }
 
     /** See {@link this#setShouldBeHidden} below. */
@@ -304,7 +343,87 @@ public class FooterView extends StackScrollerDecorView {
     /**
      * Update the text and background colors for the current color palette and night mode setting.
      */
+    /** Whether the ColorOS QS panel style is selected. */
+    private boolean isColorOSPanel() {
+        return android.provider.Settings.System.getIntForUser(mContext.getContentResolver(),
+                android.provider.Settings.System.QS_PANEL_STYLE, 0,
+                android.os.UserHandle.USER_CURRENT) == QS_PANEL_STYLE_COLOROS;
+    }
+
+    /** Value of {@link android.provider.Settings.System#QS_PANEL_STYLE} for the ColorOS panel. */
+    private static final int QS_PANEL_STYLE_COLOROS = 2;
+
+    /** Blur radius of the glass of the ColorOS tiles. */
+    private static final float COLOROS_GLASS_BLUR_DP = 22.5f;
+
+    /** White tint of the glass of the ColorOS tiles on the light panel. */
+    private static final int COLOROS_LIGHT_TILE_TINT = 0x66FFFFFF;
+
+    /** Corner and top and bottom inset of the button background, which the glass keeps. */
+    private static final float FOOTER_BUTTON_CORNER_DP = 20f;
+    private static final float FOOTER_BUTTON_INSET_DP = 4f;
+
+    /**
+     * {@code background}, the button's own, with the glass of the ColorOS tiles in place of its fill:
+     * SurfaceFlinger's tile material where the shade can blur, otherwise the translucent fill and
+     * rim the tiles have without a blur. The shape, padding and ripple stay those of {@code background}.
+     */
+    private Drawable colorOSGlass(Drawable background) {
+        final boolean dark = (getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        final float density = getResources().getDisplayMetrics().density;
+        final float corner = FOOTER_BUTTON_CORNER_DP * density;
+        final int inset = Math.round(FOOTER_BUTTON_INSET_DP * density);
+        // The translucent fill and rim stay under the blur, so a button keeps its background
+        // when no blur region is drawn for it. They follow the view's alpha like the rest.
+        final GradientDrawable fill = new GradientDrawable();
+        fill.setCornerRadius(corner);
+        fill.setColor(dark ? 0x24FFFFFF : 0x8CFFFFFF);
+        fill.setStroke(Math.max(1, Math.round(density)), dark ? 0x38FFFFFF : 0xF2FFFFFF);
+        final ViewRootImpl root = getViewRootImpl();
+        BackgroundBlurDrawable blur = null;
+        if (mIsBlurSupported && root != null) {
+            blur = root.createBackgroundBlurDrawable();
+            blur.setMaterial(dark ? BackgroundBlurDrawable.MATERIAL_TILE_DARK
+                    : BackgroundBlurDrawable.MATERIAL_TILE_LIGHT);
+            blur.setColor(dark ? 0 : COLOROS_LIGHT_TILE_TINT);
+            blur.setBlurRadius((int) (COLOROS_GLASS_BLUR_DP * density));
+            blur.setCornerRadius(corner);
+        }
+        // The fill of the background goes; its ripple and padding stay.
+        final Drawable own = background.mutate();
+        own.clearColorFilter();
+        own.setAlpha(255);
+        if (own instanceof LayerDrawable layers && layers.getNumberOfLayers() > 0
+                && layers.getDrawable(0) instanceof InsetDrawable item
+                && item.getDrawable() instanceof GradientDrawable shape) {
+            shape.setColor(Color.TRANSPARENT);
+        }
+        // The blur stays the first layer, where syncButtonGlass() looks for it.
+        return blur != null
+                ? new LayerDrawable(new Drawable[] {new InsetDrawable(blur, 0, inset, 0, inset),
+                        new InsetDrawable(fill, 0, inset, 0, inset), own})
+                : new LayerDrawable(
+                        new Drawable[] {new InsetDrawable(fill, 0, inset, 0, inset), own});
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // The glass needs the window, which the view did not have when its colours were set.
+        if (isColorOSPanel()) updateColors();
+        getViewTreeObserver().addOnPreDrawListener(mGlassPreDrawListener);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnPreDrawListener(mGlassPreDrawListener);
+        hideButtonGlass();
+        super.onDetachedFromWindow();
+    }
+
     public void updateColors() {
+        hideButtonGlass();
         Resources.Theme theme = mContext.getTheme();
         final @ColorInt int onSurface = mContext.getColor(
                 com.android.internal.R.color.materialColorOnSurface);
@@ -358,14 +477,17 @@ public class FooterView extends StackScrollerDecorView {
             }
         }
 
-        mClearAllButton.setBackground(clearAllBg);
+        // The ColorOS shade gives these buttons the glass of its tiles.
+        final boolean colorOS = isColorOSPanel();
+        mClearAllButton.setBackground(colorOS ? colorOSGlass(clearAllBg) : clearAllBg);
         mClearAllButton.setTextColor(onSurface);
 
-        mSettingsButton.setBackground(settingsBg);
+        mSettingsButton.setBackground(colorOS ? colorOSGlass(settingsBg) : settingsBg);
         mSettingsButton.setCompoundDrawableTintList(ColorStateList.valueOf(onSurface));
 
-        mHistoryButton.setBackground(historyBg);
+        mHistoryButton.setBackground(colorOS ? colorOSGlass(historyBg) : historyBg);
         mHistoryButton.setCompoundDrawableTintList(ColorStateList.valueOf(onSurface));
+        syncClearAllGlass();
 
         mSeenNotifsFooterTextView.setTextColor(onSurface);
         mSeenNotifsFooterTextView.setCompoundDrawableTintList(ColorStateList.valueOf(onSurface));
