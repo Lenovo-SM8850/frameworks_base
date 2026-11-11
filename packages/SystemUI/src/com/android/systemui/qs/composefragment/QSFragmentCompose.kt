@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -1061,6 +1062,11 @@ constructor(
         // The large screen panel shows the edit button and the footer buttons on glass in the
         // footer row.
         val colorOSTabletHeader = LocalColorOSQsStyle.current && qqsPadding <= 0
+        // In portrait the large screen panel's tiles open where the collapsed ones are, without the
+        // space the panel keeps above them.
+        val colorOSSameTop =
+            colorOSTabletHeader &&
+                LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
         val qsExtraPadding =
             dimensionResource(
                 if (colorOSHeader) {
@@ -1131,7 +1137,8 @@ constructor(
                             modifier =
                                 Modifier.height {
                                     qqsPadding +
-                                        if (colorOSHeader) 0 else qsExtraPadding.roundToPx()
+                                        if (colorOSHeader || colorOSSameTop) 0
+                                        else qsExtraPadding.roundToPx()
                                 }
                         )
                         val BrightnessSlider: @Composable () -> Unit = {
@@ -1186,7 +1193,9 @@ constructor(
                                 Modifier.fillMaxWidth()
                                     .sysuiResTag(ResIdTags.quickSettingsPanel)
                                     .padding(
-                                        top = QuickSettingsShade.Dimensions.VerticalPadding,
+                                        top =
+                                            if (colorOSSameTop) 0.dp
+                                            else QuickSettingsShade.Dimensions.VerticalPadding,
                                         start = qsHorizontalMargin(),
                                         end = qsHorizontalMargin(),
                                     )
@@ -1200,9 +1209,12 @@ constructor(
                                         with(density) {
                                             (viewModel.qsScrollHeight -
                                                     qqsPadding -
-                                                    qsExtraPadding.roundToPx() -
-                                                    QuickSettingsShade.Dimensions.VerticalPadding
-                                                        .roundToPx() -
+                                                    (if (colorOSSameTop) 0
+                                                    else
+                                                        qsExtraPadding.roundToPx() +
+                                                            QuickSettingsShade.Dimensions
+                                                                .VerticalPadding
+                                                                .roundToPx()) -
                                                     ColorOSBottomPadding.roundToPx())
                                                 .toDp()
                                         }
@@ -1214,7 +1226,20 @@ constructor(
                                         .largeTiles
                                         .collectAsStateWithLifecycle()
                                 Box {
-                                    GridAnchor()
+                                    if (colorOSTabletHeader) {
+                                        // At the start of the four columns, as in the collapsed
+                                        // panel, so the panel opens straight down.
+                                        Box(
+                                            Modifier.fillMaxWidth(),
+                                            contentAlignment = Alignment.TopCenter,
+                                        ) {
+                                            Box(Modifier.width(rememberColorOSTabletMetrics().width)) {
+                                                GridAnchor()
+                                            }
+                                        }
+                                    } else {
+                                        GridAnchor()
+                                    }
                                     ColorOSQuickSettingsLayout(
                                         largeTiles =
                                             remember(largeTileSpecs) {
