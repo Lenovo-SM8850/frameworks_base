@@ -90,6 +90,7 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.TileLabelLineBreak
 import com.android.systemui.qs.panels.ui.viewmodel.EditModeViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.EditTileViewModel
 import com.android.systemui.qs.pipeline.shared.TileSpec
+import com.android.systemui.qs.QSHost
 import com.android.systemui.res.R
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -273,12 +274,20 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 EditorTextButton(stringResource(R.string.reset), labelColor.copy(alpha = 0.85f)) {
+                    // The default tiles as this device has them: the same list the panel starts
+                    // with, so a split internet tile resets to Wi-Fi and mobile data, without the
+                    // tiles it cannot show.
+                    val known = allTiles.mapTo(HashSet()) { it.tileSpec.spec }
                     val defaults =
-                        context.resources
-                            .getString(R.string.quick_settings_tiles_default)
-                            .split(",")
+                        QSHost.getDefaultSpecs(context.resources)
                             .map { it.trim() }
                             .filter { it.isNotEmpty() }
+                            .map { spec ->
+                                if (spec == "internet" && spec !in known && "wifi" in known) "wifi"
+                                else spec
+                            }
+                            .filter { known.isEmpty() || it in known }
+                            .distinct()
                             .map(TileSpec::create)
                     commit(defaults)
                 }
