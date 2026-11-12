@@ -16,7 +16,15 @@
 
 package com.android.systemui.statusbar.quickactions.ui.compose
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Region
+import android.os.UserHandle
+import android.view.View
 import android.view.ViewTreeObserver
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
 import androidx.compose.animation.AnimatedVisibility
@@ -111,6 +119,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import com.android.systemui.Dependency
+import com.android.systemui.broadcast.BroadcastDispatcher
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.alarm.ui.compose.AlarmPopup
 import com.android.systemui.statusbar.quickactions.charging.ui.compose.ChargingPopup
@@ -419,7 +429,8 @@ fun StatusBarPopup(
         properties =
             PopupProperties(
                 flags =
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                         WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 dismissOnBackPress = true,
@@ -428,6 +439,7 @@ fun StatusBarPopup(
             ),
     ) {
         val popupView = LocalView.current
+        IslandPopupSystemDialogs { currentChip.hidePopup() }
         // The dots sit beside the cards over whatever is behind the popup, so their colour follows
         // the brightness sampled there and not the theme. Until a sample arrives it is the theme's.
         val backdrop = rememberIslandBackdrop(popupView, enabled = cos && hasIndicator && isVisible)
@@ -832,6 +844,7 @@ fun StatusBarPopup(
             }
         }
 
+        val currentAppHandles by rememberUpdatedState(appHandleBounds)
         DisposableEffect(popupView) {
             val listener =
                 ViewTreeObserver.OnComputeInternalInsetsListener { info ->
@@ -844,8 +857,12 @@ fun StatusBarPopup(
                         (touchBounds.left - with(density) { swipeSlack.toPx() }).roundToInt(),
                         touchBounds.top.roundToInt(),
                         (touchBounds.right + with(density) { swipeSlack.toPx() }).roundToInt(),
-                        touchBounds.bottom.roundToInt(),
+                        minOf(
+                            touchBounds.bottom.roundToInt(),
+                            islandPopupTouchableBottom(popupView),
+                        ),
                     )
+                    excludeIslandAppHandles(info.touchableRegion, popupView, currentAppHandles)
                 }
             popupView.viewTreeObserver.addOnComputeInternalInsetsListener(listener)
             onDispose { popupView.viewTreeObserver.removeOnComputeInternalInsetsListener(listener) }
@@ -1686,4 +1703,64 @@ internal fun popupPageFraction(swipe: Float, distance: Float, settling: Float?):
 internal fun popupDismissProgress(offset: Float, threshold: Float): Float {
     val distance = (abs(offset) / threshold.coerceAtLeast(1f)).coerceIn(0f, 1f)
     return ((distance - 0.4f) / 0.6f).coerceIn(0f, 1f)
+}
+
+internal fun islandPopupTouchableBottom(view: View): Int {
+    val metrics = view.context.getSystemService(WindowManager::class.java).maximumWindowMetrics
+    val insets =
+        metrics.windowInsets.getInsets(
+            WindowInsets.Type.systemGestures() or WindowInsets.Type.navigationBars()
+        )
+    val location = IntArray(2)
+    view.getLocationOnScreen(location)
+    return (metrics.bounds.bottom - insets.bottom - location[1]).coerceIn(0, view.height)
+}
+
+@Composable
+internal fun IslandPopupSystemDialogs(onDismiss: () -> Unit) {
+    val view = LocalView.current
+    val dismiss by rememberUpdatedState(onDismiss)
+    DisposableEffect(view) {
+        val dispatcher = Dependency.get(BroadcastDispatcher::class.java)
+        val receiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (intent.action == Intent.ACTION_CLOSE_SYSTEM_DIALOGS) dismiss()
+                }
+            }
+        dispatcher.registerReceiver(
+            receiver,
+            IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS),
+            executor = view.context.mainExecutor,
+            user = UserHandle.ALL,
+        )
+        onDispose { dispatcher.unregisterReceiver(receiver) }
+    }
+}
+
+internal fun excludeIslandAppHandles(region: Region, view: View, bounds: List<android.graphics.Rect>) {
+    val location = IntArray(2)
+    view.getLocationOnScreen(location)
+    bounds.forEach { handle ->
+        val local = android.graphics.Rect(handle)
+        local.offset(-location[0], -location[1])
+        region.op(local, Region.Op.DIFFERENCE)
+    }
+}
+
+@Composable
+internal fun IslandPopupGestureInsets(appHandleBounds: List<android.graphics.Rect>) {
+    val view = LocalView.current
+    val handles by rememberUpdatedState(appHandleBounds)
+    DisposableEffect(view) {
+        val listener =
+            ViewTreeObserver.OnComputeInternalInsetsListener { info ->
+                // Home starts below the popup even when the window covers the whole screen.
+                info.setTouchableInsets(ViewTreeObserver.InternalInsetsInfo.TOUCHABLE_INSETS_REGION)
+                info.touchableRegion.set(0, 0, view.width, islandPopupTouchableBottom(view))
+                excludeIslandAppHandles(info.touchableRegion, view, handles)
+            }
+        view.viewTreeObserver.addOnComputeInternalInsetsListener(listener)
+        onDispose { view.viewTreeObserver.removeOnComputeInternalInsetsListener(listener) }
+    }
 }

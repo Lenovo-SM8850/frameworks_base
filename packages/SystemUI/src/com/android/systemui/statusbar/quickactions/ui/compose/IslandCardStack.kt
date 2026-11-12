@@ -786,6 +786,7 @@ internal fun CosIslandPopup(
         properties =
             PopupProperties(
                 flags =
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                         WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -794,6 +795,8 @@ internal fun CosIslandPopup(
                 usePlatformDefaultWidth = false,
             ),
     ) {
+        IslandPopupSystemDialogs { hide() }
+        IslandPopupGestureInsets(appHandleBounds)
         Box(
             Modifier.fillMaxSize().clickable(
                 interactionSource = remember { MutableInteractionSource() },
