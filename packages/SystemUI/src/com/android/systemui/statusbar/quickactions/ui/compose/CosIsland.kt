@@ -21,6 +21,8 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -58,6 +60,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -159,6 +163,7 @@ internal fun CosIslandShell(
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
     val holePx = with(density) { hole.toPx() }
     val heightPx = with(density) { CosIsland.height(holeHeight, heightScale, tall).toPx() }
     val currentHeightPx by rememberUpdatedState(heightPx)
@@ -206,6 +211,7 @@ internal fun CosIslandShell(
     val alpha = remember { Animatable(0f) }
     val blur = remember { Animatable(blurPx) }
     val press = remember { Animatable(1f) }
+    val motionMutex = remember { MutatorMutex() }
 
     var natural by remember { mutableStateOf(IntSize.Zero) }
     var shownKey by remember { mutableStateOf(key) }
@@ -225,43 +231,60 @@ internal fun CosIslandShell(
         return snapshotFlow { natural }.first { it.width > 0 }
     }
 
-    // Out of the camera as a dot, past a middle width a little taller than the capsule, then wider
-    // than the content as the content comes in, then settling to the content's width.
+    // Each phase waits for all bounds so interrupted animations cannot overtake one another.
     suspend fun appear() = coroutineScope {
+        alpha.snapTo(0f)
+        blur.snapTo(blurPx)
+        scale.snapTo(0f)
         val target = nextNatural().width.toFloat().coerceAtLeast(1f)
-        launch { width.animateTo(holePx, tween(50, easing = CosIsland.Move)) }
-        launch { height.animateTo(holePx, tween(50, easing = CosIsland.Move)) }
-        top.animateTo((heightPx - holePx) / 2, tween(50, easing = CosIsland.Move))
-        launch { width.animateTo(middlePx, tween(200, easing = CosIsland.Offset)) }
-        launch { height.animateTo(currentHeightPx + extraHeightPx, tween(200, easing = CosIsland.Offset)) }
-        top.animateTo(-extraHeightPx, tween(200, easing = CosIsland.Offset))
-        scale.snapTo(middlePx / target)
-        launch { width.animateTo(target + extraPx, tween(300, easing = CosIsland.Return)) }
-        launch {
-            height.animateTo(currentHeightPx - reduceHeightPx, tween(300, easing = CosIsland.Return))
+        coroutineScope {
+            val motion = tween<Float>(50, easing = CosIsland.Move)
+            launch { width.animateTo(holePx, motion) }
+            launch { height.animateTo(holePx, motion) }
+            top.animateTo((currentHeightPx - holePx) / 2, motion)
         }
-        launch { top.animateTo(reduceHeightPx, tween(300, easing = CosIsland.Return)) }
-        launch { alpha.animateTo(1f, tween(300, easing = CosIsland.Return)) }
-        launch { blur.animateTo(0f, tween(300, easing = CosIsland.Return)) }
-        scale.animateTo((target + extraPx) / target, tween(300, easing = CosIsland.Return))
-        launch { width.animateTo(target, tween(400, easing = CosIsland.Move)) }
-        launch { height.animateTo(currentHeightPx, tween(400, easing = CosIsland.Move)) }
-        launch { top.animateTo(0f, tween(400, easing = CosIsland.Move)) }
-        scale.animateTo(1f, tween(400, easing = CosIsland.Move))
+        coroutineScope {
+            val motion = tween<Float>(200, easing = CosIsland.Offset)
+            launch { width.animateTo(middlePx, motion) }
+            launch { height.animateTo(currentHeightPx + extraHeightPx, motion) }
+            top.animateTo(-extraHeightPx, motion)
+        }
+        scale.snapTo(middlePx / target)
+        coroutineScope {
+            val motion = tween<Float>(300, easing = CosIsland.Return)
+            launch { width.animateTo(target + extraPx, motion) }
+            launch { height.animateTo(currentHeightPx - reduceHeightPx, motion) }
+            launch { top.animateTo(reduceHeightPx, motion) }
+            launch { alpha.animateTo(1f, motion) }
+            launch { blur.animateTo(0f, motion) }
+            scale.animateTo((target + extraPx) / target, motion)
+        }
+        coroutineScope {
+            val motion = tween<Float>(400, easing = CosIsland.Move)
+            launch { width.animateTo(target, motion) }
+            launch { height.animateTo(currentHeightPx, motion) }
+            launch { top.animateTo(0f, motion) }
+            scale.animateTo(1f, motion)
+        }
     }
 
     suspend fun disappear() = coroutineScope {
-        val linear300 = tween<Float>(300, easing = LinearEasing)
-        val linear200 = tween<Float>(200, easing = LinearEasing)
-        launch { width.animateTo(holePx, linear300) }
-        launch { height.animateTo(holePx, linear300) }
-        launch { top.animateTo((heightPx - holePx) / 2, linear300) }
-        launch { alpha.animateTo(0f, linear200) }
-        launch { blur.animateTo(blurPx, linear200) }
-        scale.animateTo(0.1f, linear300)
-        launch { width.animateTo(0f, tween(50, easing = LinearEasing)) }
-        launch { height.animateTo(0f, tween(50, easing = LinearEasing)) }
-        top.animateTo(heightPx / 2, tween(50, easing = LinearEasing))
+        coroutineScope {
+            val linear300 = tween<Float>(300, easing = LinearEasing)
+            val linear200 = tween<Float>(200, easing = LinearEasing)
+            launch { width.animateTo(holePx, linear300) }
+            launch { height.animateTo(holePx, linear300) }
+            launch { top.animateTo((heightPx - holePx) / 2, linear300) }
+            launch { alpha.animateTo(0f, linear200) }
+            launch { blur.animateTo(blurPx, linear200) }
+            scale.animateTo(0.1f, linear300)
+        }
+        coroutineScope {
+            val motion = tween<Float>(50, easing = LinearEasing)
+            launch { width.animateTo(0f, motion) }
+            launch { height.animateTo(0f, motion) }
+            top.animateTo(heightPx / 2, motion)
+        }
     }
 
     suspend fun switchTo(newKey: Any) = coroutineScope {
@@ -283,23 +306,49 @@ internal fun CosIslandShell(
         width.animateTo(target, tween(500, easing = CosIsland.SwitchSettle))
     }
 
-    LaunchedEffect(Unit) {
-        snapshotFlow { currentVisible to currentKey }
-            .collectLatest { (shown, newKey) ->
-                busy = true
-                when {
-                    !shown -> {
-                        disappear()
-                        currentOnGone()
-                    }
-                    newKey != shownKey && alpha.value > 0.5f -> switchTo(newKey)
-                    else -> {
-                        shownKey = newKey
-                        if (alpha.value < 1f || width.value < 1f) appear()
+    val animateShell by rememberUpdatedState<suspend (Boolean, Any) -> Unit> { shown, newKey ->
+        when {
+            !shown -> {
+                disappear()
+                currentOnGone()
+            }
+            newKey != shownKey && alpha.value > 0.5f -> switchTo(newKey)
+            else -> {
+                shownKey = newKey
+                if (alpha.value < 1f || width.value < 1f) appear()
+            }
+        }
+    }
+    val settleShell by rememberUpdatedState<suspend () -> Unit> {
+        shownKey = currentKey
+        shownContent = content
+        alpha.snapTo(if (currentVisible) 1f else 0f)
+        blur.snapTo(if (currentVisible) 0f else blurPx)
+        scale.snapTo(if (currentVisible) 1f else 0f)
+        width.snapTo(if (currentVisible) natural.width.toFloat() else 0f)
+        height.snapTo(if (currentVisible) heightPx else 0f)
+        top.snapTo(if (currentVisible) 0f else heightPx / 2)
+    }
+    LaunchedEffect(configuration.windowConfiguration.rotation, heightPx, holePx, maxWidthPx, blurPx) {
+        try {
+            snapshotFlow { currentVisible to currentKey }
+                .collectLatest { (shown, newKey) ->
+                    // Idle size updates must not cancel a partially revealed shell.
+                    motionMutex.mutate(MutatePriority.UserInput) {
+                        busy = true
+                        try {
+                            animateShell(shown, newKey)
+                        } finally {
+                            busy = false
+                        }
                     }
                 }
-                busy = false
+        } finally {
+            // Settle only when the effect ends, preserving ordinary transition interruptions.
+            withContext(NonCancellable) {
+                motionMutex.mutate(MutatePriority.UserInput) { settleShell() }
             }
+        }
     }
 
     // Follow the height scale live while the island is up.
@@ -307,7 +356,11 @@ internal fun CosIslandShell(
         snapshotFlow { currentHeightPx to busy }
             .collectLatest { (h, isBusy) ->
                 if (!isBusy && currentVisible && height.value > 0f) {
-                    height.animateTo(h, tween(300, easing = CosIsland.Move))
+                    motionMutex.mutate {
+                        if (!busy && currentVisible) {
+                            height.animateTo(h, tween(300, easing = CosIsland.Move))
+                        }
+                    }
                 }
             }
     }
@@ -315,8 +368,15 @@ internal fun CosIslandShell(
     LaunchedEffect(Unit) {
         snapshotFlow { natural.width to busy }
             .collectLatest { (w, isBusy) ->
-                if (!isBusy && w > 0 && currentVisible) {
-                    width.animateTo(w.toFloat(), tween(300, easing = CosIsland.Move))
+                if (!isBusy && !busy && w > 0 && currentVisible) {
+                    motionMutex.mutate {
+                        if (!busy && currentVisible) coroutineScope {
+                            launch {
+                                width.animateTo(w.toFloat(), tween(300, easing = CosIsland.Move))
+                            }
+                            height.animateTo(currentHeightPx, tween(300, easing = CosIsland.Move))
+                        }
+                    }
                 }
             }
     }
