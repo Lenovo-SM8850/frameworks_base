@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -332,6 +333,13 @@ fun StatusBarDynamicIslandContainer(
                     multiple = chips.size > 1,
                     widthScale = rememberDynamicIslandSizeScale().first,
                     startAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START,
+                    strokeColor =
+                        if (
+                            chip.colors == ChipColors.SystemTheme ||
+                                chip.colors == ChipColors.DynamicIsland
+                        )
+                            null
+                        else chip.colors.chipOutline(false, MaterialTheme.colorScheme),
                     heightScale = rememberDynamicIslandSizeScale().second,
                     onGone = {
                         present = false
