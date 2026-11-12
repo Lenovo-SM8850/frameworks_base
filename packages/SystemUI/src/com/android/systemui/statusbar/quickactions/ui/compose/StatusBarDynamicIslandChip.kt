@@ -144,6 +144,9 @@ fun StatusBarDynamicIslandChip(
     cos: Boolean = false,
 ) {
     val isMediaChip = viewModel.popupContent is PopupContentModel.Media
+    val media = (viewModel.popupContent as? PopupContentModel.Media)?.model
+    val mediaArtwork =
+        media?.let { it.artworkIcon != null && it.artworkIcon !== it.appIcon } == true
     val contentMotion = islandContentMotion()
     val chipShape = RoundedCornerShape(50)
     val cosMedia = (viewModel.popupContent as? PopupContentModel.Media)?.takeIf { cos }?.model
@@ -314,11 +317,14 @@ fun StatusBarDynamicIslandChip(
                         index == 0 && viewModel.popupContent is PopupContentModel.LiveScore
                     UprightContent {
                         if (index == 0 && isMediaChip) {
-                            val mediaModel = (viewModel.popupContent as? PopupContentModel.Media)?.model
-                            val isArtwork = mediaModel?.let {
-                                it.artworkIcon != null && it.artworkIcon !== it.appIcon
-                            } == true
-                            CollapsedMediaArtwork(chipIcon.icon, isArtwork, contentMotion, cos)
+                            CollapsedMediaArtwork(
+                                chipIcon.icon,
+                                mediaArtwork,
+                                media?.packageName,
+                                chipContentColor,
+                                contentMotion,
+                                cos,
+                            )
                         } else {
                             Icon(
                                 icon = chipIcon.icon,
@@ -391,12 +397,30 @@ fun StatusBarDynamicIslandChip(
 private fun CollapsedMediaArtwork(
     icon: IconModel,
     isArtwork: Boolean,
+    packageName: String?,
+    glyphTint: Color,
     modifier: Modifier = Modifier,
     cos: Boolean = false,
 ) {
     if (!isArtwork) {
-        Box(modifier.size(if (cos) CosIsland.IconSize else 18.dp), contentAlignment = Alignment.Center) {
-            Icon(icon = icon, modifier = Modifier.size(16.dp), tint = Color.Unspecified)
+        val boxSize = if (cos) CosIsland.IconSize else 18.dp
+        // Without artwork, the app icon of the expanded card, already in the icon mask shape.
+        val appIcon = rememberAppIconBitmap(packageName, fallback = null, size = boxSize)
+        Box(modifier.size(boxSize), contentAlignment = Alignment.Center) {
+            if (appIcon != null) {
+                Image(
+                    bitmap = appIcon,
+                    contentDescription = icon.contentDescription?.load(),
+                    modifier = Modifier.size(boxSize),
+                )
+            } else {
+                // A notification glyph is fitted inside the box, not cropped to it.
+                Icon(
+                    icon = icon,
+                    modifier = Modifier.size(if (cos) 14.dp else 16.dp),
+                    tint = glyphTint,
+                )
+            }
         }
         return
     }
