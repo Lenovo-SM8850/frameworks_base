@@ -63,10 +63,26 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import com.android.internal.policy.SystemBarUtils
 
 internal object CosIsland {
     val MinHeight = 36.dp
-    val MaxWidth = 280.dp
+    @Composable
+    fun maxWidth(startAnchored: Boolean): Dp =
+        if (tablet()) 296.dp else if (startAnchored) 168.dp else 202.dp
+    val MinWidth: Dp
+        @Composable get() = if (tablet()) 164.dp else 100.dp
+
+    @Composable
+    private fun tablet(): Boolean {
+        val config = LocalConfiguration.current
+        return minOf(config.screenWidthDp, config.screenHeightDp) >= 600
+    }
+
+    val ContentPadding = 5.dp
     val IconSize = 20.dp
     val TextSize = 14.sp
     val TextColor = Color(0xE6FFFFFF)
@@ -119,24 +135,28 @@ internal fun CosIslandShell(
     hole: Dp,
     onGone: () -> Unit,
     heightScale: Float = 1f,
+    widthScale: Float = 1f,
+    startAnchored: Boolean = false,
+    holeHeight: Dp = hole,
     modifier: Modifier = Modifier,
     tall: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
     val holePx = with(density) { hole.toPx() }
-    val heightPx = with(density) { CosIsland.height(hole, heightScale, tall).toPx() }
+    val heightPx = with(density) { CosIsland.height(holeHeight, heightScale, tall).toPx() }
     val currentHeightPx by rememberUpdatedState(heightPx)
     val extraPx = with(density) { CosIsland.ExtraWidth.toPx() }
     val switchPx = with(density) { CosIsland.SwitchWidth.toPx() }
     val middlePx = with(density) { CosIsland.MiddleWidth.toPx() }
     val extraHeightPx = with(density) { CosIsland.ExtraHeight.toPx() }
     val reduceHeightPx = with(density) { CosIsland.ReduceHeight.toPx() }
-    val maxWidthPx = with(density) { CosIsland.MaxWidth.roundToPx() }
+    val maxWidthPx = with(density) { (CosIsland.maxWidth(startAnchored) * widthScale).roundToPx() }
     val blurPx = with(density) { CosIsland.ContentBlur.toPx() }
 
     val width = remember { Animatable(0f) }
     val height = remember { Animatable(0f) }
+    val top = remember { Animatable(heightPx / 2) }
     val scale = remember { Animatable(0f) }
     val alpha = remember { Animatable(0f) }
     val blur = remember { Animatable(blurPx) }
@@ -165,19 +185,23 @@ internal fun CosIslandShell(
     suspend fun appear() = coroutineScope {
         val target = nextNatural().width.toFloat().coerceAtLeast(1f)
         launch { width.animateTo(holePx, tween(50, easing = CosIsland.Move)) }
-        height.animateTo(holePx, tween(50, easing = CosIsland.Move))
+        launch { height.animateTo(holePx, tween(50, easing = CosIsland.Move)) }
+        top.animateTo((heightPx - holePx) / 2, tween(50, easing = CosIsland.Move))
         launch { width.animateTo(middlePx, tween(200, easing = CosIsland.Offset)) }
-        height.animateTo(currentHeightPx + extraHeightPx, tween(200, easing = CosIsland.Offset))
+        launch { height.animateTo(currentHeightPx + extraHeightPx, tween(200, easing = CosIsland.Offset)) }
+        top.animateTo(-extraHeightPx, tween(200, easing = CosIsland.Offset))
         scale.snapTo(middlePx / target)
         launch { width.animateTo(target + extraPx, tween(300, easing = CosIsland.Return)) }
         launch {
             height.animateTo(currentHeightPx - reduceHeightPx, tween(300, easing = CosIsland.Return))
         }
+        launch { top.animateTo(reduceHeightPx, tween(300, easing = CosIsland.Return)) }
         launch { alpha.animateTo(1f, tween(300, easing = CosIsland.Return)) }
         launch { blur.animateTo(0f, tween(300, easing = CosIsland.Return)) }
         scale.animateTo((target + extraPx) / target, tween(300, easing = CosIsland.Return))
         launch { width.animateTo(target, tween(400, easing = CosIsland.Move)) }
         launch { height.animateTo(currentHeightPx, tween(400, easing = CosIsland.Move)) }
+        launch { top.animateTo(0f, tween(400, easing = CosIsland.Move)) }
         scale.animateTo(1f, tween(400, easing = CosIsland.Move))
     }
 
@@ -186,11 +210,13 @@ internal fun CosIslandShell(
         val linear200 = tween<Float>(200, easing = LinearEasing)
         launch { width.animateTo(holePx, linear300) }
         launch { height.animateTo(holePx, linear300) }
+        launch { top.animateTo((heightPx - holePx) / 2, linear300) }
         launch { alpha.animateTo(0f, linear200) }
         launch { blur.animateTo(blurPx, linear200) }
         scale.animateTo(0.1f, linear300)
         launch { width.animateTo(0f, tween(50, easing = LinearEasing)) }
-        height.animateTo(0f, tween(50, easing = LinearEasing))
+        launch { height.animateTo(0f, tween(50, easing = LinearEasing)) }
+        top.animateTo(heightPx / 2, tween(50, easing = LinearEasing))
     }
 
     suspend fun switchTo(newKey: Any) = coroutineScope {
@@ -255,6 +281,7 @@ internal fun CosIslandShell(
     Box(
         modifier =
             modifier
+                .graphicsLayer { translationY = top.value }
                 .graphicsLayer {
                     scaleX = press.value
                     scaleY = press.value

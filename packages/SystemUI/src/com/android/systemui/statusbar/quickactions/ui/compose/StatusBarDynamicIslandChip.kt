@@ -135,6 +135,8 @@ data class DynamicIslandCutoutSpec(
     val minimumHeight: Dp = 0.dp,
     val minimumWidth: Dp = 0.dp,
     val cutoutWidth: Dp = 0.dp,
+    val holeHeight: Dp = 20.dp,
+    val holeCenterY: Dp? = null,
 )
 internal val DynamicIslandCutoutFillMargin = 1.5.dp
 internal val DynamicIslandOutlineWidth = 1.dp
@@ -270,6 +272,8 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
             DynamicIslandCutoutSpec(
                 embeddedGapWidth = DynamicIslandEmbeddedGapFallbackWidth,
                 horizontalOffset = 0.dp,
+                holeHeight = snapshot.heightCutout?.height()?.toDp() ?: 20.dp,
+                holeCenterY = snapshot.heightCutout?.exactCenterY()?.toDp(),
                 minimumHeight = snapshot.heightCutout?.let { cutoutMinimumHeight(it.height().toDp()) }
                     ?: 0.dp,
             )
@@ -298,6 +302,8 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
                 anchor = anchor,
                 cutoutCenterX = if (centreOnCamera) topCutout.exactCenterX() else null,
                 holeSize = topCutout.width().toDp(),
+                holeHeight = topCutout.height().toDp(),
+                holeCenterY = topCutout.exactCenterY().toDp(),
                 minimumHeight = minimumHeight,
                 minimumWidth = cutoutMinimumWidth(topCutout.width().toDp(), minimumHeight),
                 cutoutWidth = topCutout.width().toDp(),
