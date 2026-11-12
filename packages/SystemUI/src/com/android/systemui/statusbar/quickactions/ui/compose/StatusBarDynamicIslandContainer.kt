@@ -38,7 +38,9 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredHeightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -75,6 +77,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import com.android.compose.animation.Easings
+import com.android.internal.policy.SystemBarUtils
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.observeDynamicIslandColorOSStyle
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.readDynamicIslandColorOSStyle
 import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
@@ -246,11 +249,17 @@ fun StatusBarDynamicIslandContainer(
     val stackChips = chips.filter { it.popupContent != PopupContentModel.None }
     // The status bar view is shorter than the island, so its height has to be required.
     val islandHeight =
-        maxOf(
+        if (cos) CosIsland.height(cutoutSpec.holeHeight, rememberDynamicIslandSizeScale().second)
+        else maxOf(
             DynamicIslandBaseHeight * rememberDynamicIslandSizeScale().second,
             cutoutSpec.minimumHeight,
         )
 
+    val statusHeight =
+        with(LocalDensity.current) {
+            SystemBarUtils.getStatusBarHeight(LocalContext.current).toDp()
+        }
+    val capsuleTop = (statusHeight - islandHeight) / 2
     Box(
         modifier =
             modifier
@@ -293,8 +302,11 @@ fun StatusBarDynamicIslandContainer(
                 // Docked to a side camera: turn the whole pill with its edge. The reported bounds
                 // above are of the turned pill.
                 .rotatedLayout(sideEdge?.quarterTurns ?: 0)
-                .requiredHeightIn(min = islandHeight),
-        contentAlignment = Alignment.Center,
+                .then(
+                    if (cos) Modifier.requiredHeight(statusHeight)
+                    else Modifier.requiredHeightIn(min = islandHeight)
+                ),
+        contentAlignment = if (cos) Alignment.TopCenter else Alignment.Center,
     ) {
         if (cos) {
             // The shell outlives the selected chip so it can shrink back into the camera hole.
@@ -317,13 +329,18 @@ fun StatusBarDynamicIslandContainer(
                     hole = cutoutSpec.holeSize,
                     moons = chips.size > 1,
                     tall = chip.isCallChip(),
+                    holeHeight = cutoutSpec.holeHeight,
+                    widthScale = rememberDynamicIslandSizeScale().first,
+                    startAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START,
                     heightScale = rememberDynamicIslandSizeScale().second,
                     onGone = {
                         present = false
                         leaving[0] = null
                     },
                     modifier =
-                        Modifier.swipeUpToHide(chip.chipId, slopPx) { currentChip.hide() }
+                        Modifier.offset(y = capsuleTop)
+                            .wrapContentHeight(Alignment.Top, unbounded = true)
+                            .swipeUpToHide(chip.chipId, slopPx) { currentChip.hide() }
                             .pointerInput(chips.size, chip.chipId) {
                                 detectHorizontalDragGestures(
                                     onDragStart = { dragged = 0f },

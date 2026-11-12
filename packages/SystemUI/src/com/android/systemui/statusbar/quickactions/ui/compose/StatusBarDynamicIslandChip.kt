@@ -202,8 +202,8 @@ fun StatusBarDynamicIslandChip(
     val isStartAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START
     val startGap = if (isStartAnchored) cutoutSpec.embeddedGapWidth else 0.dp
     val cameraGap =
-        cutoutSpec.embeddedGapWidth.takeIf {
-            !isStartAnchored && cutoutSpec.cutoutCenterX != null
+        (if (cos) cutoutSpec.holeSize + 8.dp else cutoutSpec.embeddedGapWidth).takeIf {
+            !isStartAnchored && (cos || cutoutSpec.cutoutCenterX != null)
         }
 
     BoxWithConstraints(modifier = modifier, propagateMinConstraints = true) {
@@ -248,19 +248,13 @@ fun StatusBarDynamicIslandChip(
                     .then(
                         if (cos) {
                             val cosHeight =
-                                CosIsland.height(cutoutSpec.holeSize, heightScale, viewModel.isCallChip())
-                            val fittedMinWidth =
-                                (rememberCosIslandMinWidth(
-                                        cameraGap = cameraGap ?: CosIslandDefaultCameraGap,
-                                        height = cosHeight,
-                                    ) * widthScale)
-                                    .coerceAtMost(CosIsland.MaxWidth)
+                                CosIsland.height(cutoutSpec.holeHeight, heightScale, viewModel.isCallChip())
                             Modifier.height(cosHeight)
                                 .widthIn(
                                     min =
                                         if (viewModel.isCallChip()) CosIsland.CallMinWidth
-                                        else fittedMinWidth,
-                                    max = CosIsland.MaxWidth,
+                                        else CosIsland.MinWidth * widthScale,
+                                    max = CosIsland.maxWidth(isStartAnchored) * widthScale,
                                 )
                                 // The tint is inside the capsule, not a box over its rounded ends.
                                 .background(cosArtTint, RoundedCornerShape(50))
@@ -288,16 +282,22 @@ fun StatusBarDynamicIslandChip(
                         onLongClick = mediaOpenApp?.let { { hapticOnLongPress() } },
                     )
                     // Before the vertical padding, so it sees the full capsule height.
-                    .capsuleEnds(
-                        leading = leadingEnd,
-                        trailing = trailingEnd,
-                        // The glyph actually drawn sets the gap, so a smaller icon keeps the same
-                        // space to the side as above and below it.
-                        glyph =
-                            leadingEnd?.diameter
-                                ?: if (cos) CosIsland.IconSize else IslandGlyphSize,
-                        symmetric = cameraGap != null,
-                        fixedStart = if (cos) null else startGap.takeIf { isStartAnchored },
+                    .then(
+                        if (cos)
+                            Modifier.padding(
+                                start =
+                                    CosIsland.ContentPadding +
+                                        if (isStartAnchored) cutoutSpec.holeSize + 8.dp else 0.dp,
+                                end = CosIsland.ContentPadding,
+                            )
+                        else
+                            Modifier.capsuleEnds(
+                                leading = leadingEnd,
+                                trailing = trailingEnd,
+                                glyph = leadingEnd?.diameter ?: IslandGlyphSize,
+                                symmetric = cameraGap != null,
+                                fixedStart = startGap.takeIf { isStartAnchored },
+                            )
                     )
                     .then(
                         if (cos) Modifier else Modifier.padding(vertical = 7.dp * heightScale)
@@ -606,63 +606,6 @@ private fun compactIslandAlarmCountdownText(triggerTimeMs: Long, now: Long): Str
     return "+${(bounded / 60L).toString().padStart(2, '0')}:${(bounded % 60L).toString().padStart(2, '0')}"
 }
 
-/**
- * The narrowest ColorOS capsule content, from the longest text the trailing side shows, so the
- * capsule keeps its width while a timer counts. A camera in the middle needs room of its own and
- * the same width on both sides; without one the glyph and the text sit side by side.
- */
-@Composable
-private fun rememberCosIslandMinWidth(cameraGap: Dp?, height: Dp): Dp {
-    val style =
-        MaterialTheme.typography.labelLarge.copy(
-            fontSize = CosIsland.TextSize,
-            fontWeight = FontWeight.Medium,
-        )
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val context = LocalContext.current
-    val full = context.getString(R.string.dynamic_island_charging_full)
-    val flashlight = context.getString(R.string.dynamic_island_flashlight_short)
-    return remember(style, measurer, density, full, flashlight, cameraGap, height) {
-        val text =
-            listOf("+99:59", "100%", full, flashlight).maxOf { sample ->
-                measurer
-                    .measure(
-                        text = sample,
-                        style = style,
-                        density = density,
-                        softWrap = false,
-                        maxLines = 1,
-                    )
-                    .multiParagraph
-                    .maxIntrinsicWidth
-            }
-        val textWidth = (text / density.density).dp
-        val content =
-            if (cameraGap != null) maxOf(CosIsland.IconSize, textWidth) * 2 + cameraGap
-            else CosIsland.IconSize + CosIslandGlyphTextGap + textWidth
-        // The same insets the capsule applies, taken for the text at the trailing end.
-        val (start, end) =
-            capsuleInsets(
-                height = with(density) { height.toPx() },
-                leading = null,
-                trailing = CapsuleEnd.Box(density.textCapHeight(style.fontSize)),
-                glyph = CosIsland.IconSize,
-                density = density,
-                symmetric = cameraGap != null,
-            )
-        (content + with(density) { (start + end).toDp() }).coerceAtMost(CosIsland.MaxWidth)
-    }
-}
-
-private val CosIslandGlyphTextGap = 12.dp
-
-/**
- * Camera gap the narrowest capsule keeps room for on a screen without a cutout in the middle: the
- * gap of a 30dp punch hole, so the capsule is as wide as on a screen that has one.
- */
-private val CosIslandDefaultCameraGap = 50.dp
-
 /** Leading artwork diameter of the normal capsule; it also sets the space around the glyph. */
 private val IslandGlyphSize = 18.dp
 
@@ -771,6 +714,7 @@ data class DynamicIslandCutoutSpec(
     val minimumHeight: Dp = 0.dp,
     val minimumWidth: Dp = 0.dp,
     val cutoutWidth: Dp = 0.dp,
+    val holeHeight: Dp = 20.dp,
 )
 internal val DynamicIslandCutoutFillMargin = 1.5.dp
 internal val DynamicIslandOutlineWidth = 1.dp
@@ -906,6 +850,7 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
             DynamicIslandCutoutSpec(
                 embeddedGapWidth = DynamicIslandEmbeddedGapFallbackWidth,
                 horizontalOffset = 0.dp,
+                holeHeight = snapshot.heightCutout?.height()?.toDp() ?: 20.dp,
                 minimumHeight = snapshot.heightCutout?.let { cutoutMinimumHeight(it.height().toDp()) }
                     ?: 0.dp,
             )
@@ -934,6 +879,7 @@ fun rememberDynamicIslandCutoutSpec(): DynamicIslandCutoutSpec {
                 anchor = anchor,
                 cutoutCenterX = if (centreOnCamera) topCutout.exactCenterX() else null,
                 holeSize = topCutout.width().toDp(),
+                holeHeight = topCutout.height().toDp(),
                 minimumHeight = minimumHeight,
                 minimumWidth = cutoutMinimumWidth(topCutout.width().toDp(), minimumHeight),
                 cutoutWidth = topCutout.width().toDp(),
