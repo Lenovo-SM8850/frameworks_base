@@ -43,6 +43,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.draw.drawBehind
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupDarkSurface
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -194,14 +200,18 @@ internal fun CosMediaControls(
             iconTint = foreground,
             buttonSize = 40.dp,
         )
-        MediaActionButton(
-            action = model.playOrPause,
-            containerColor = foreground,
-            iconTint = MaterialTheme.colorScheme.surface,
-            buttonSize = 50.dp,
-            iconSize = 26.dp,
-            emphasized = true,
-        )
+        if (LocalPopupDarkSurface.current) {
+            CutOutPlayPause(action = model.playOrPause, buttonSize = 50.dp, iconSize = 26.dp)
+        } else {
+            MediaActionButton(
+                action = model.playOrPause,
+                containerColor = foreground,
+                iconTint = MaterialTheme.colorScheme.surface,
+                buttonSize = 50.dp,
+                iconSize = 26.dp,
+                emphasized = true,
+            )
+        }
         MediaActionButton(
             action = model.nextAction,
             iconOverrideId = R.drawable.ic_skip_next_filled,
@@ -223,6 +233,54 @@ internal fun CosMediaControls(
             Spacer(modifier = Modifier.size(40.dp))
         }
     }
+}
+
+/**
+ * Play/pause on a dark card: a white disc with the glyph cut out of it, so the card shows through
+ * the glyph instead of a second colour.
+ */
+@Composable
+private fun CutOutPlayPause(
+    action: MediaAction?,
+    buttonSize: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+) {
+    val icon = action?.icon
+    val glyph = remember(icon) { icon?.constantState?.newDrawable()?.mutate() ?: icon?.mutate() }
+    val enabled = action?.action != null
+    Box(
+        modifier =
+            Modifier.size(buttonSize)
+                .clip(CircleShape)
+                .alpha(if (enabled) 1f else 0.38f)
+                .clickable(enabled = enabled, role = Role.Button) { action?.action?.run() }
+                .semantics {
+                    contentDescription = action?.contentDescription?.toString().orEmpty()
+                }
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawBehind {
+                    drawCircle(Color.White)
+                    val g = glyph ?: return@drawBehind
+                    val side = iconSize.toPx().toInt()
+                    val left = ((size.width - side) / 2f).toInt()
+                    val top = ((size.height - side) / 2f).toInt()
+                    drawIntoCanvas { canvas ->
+                        val c = canvas.nativeCanvas
+                        val paint =
+                            android.graphics.Paint().apply {
+                                xfermode =
+                                    android.graphics.PorterDuffXfermode(
+                                        android.graphics.PorterDuff.Mode.DST_OUT
+                                    )
+                            }
+                        val layer = c.saveLayer(0f, 0f, size.width, size.height, paint)
+                        g.setTint(android.graphics.Color.BLACK)
+                        g.setBounds(left, top, left + side, top + side)
+                        g.draw(c)
+                        c.restoreToCount(layer)
+                    }
+                },
+    )
 }
 
 /** The output device as a bare icon; it opens the same switcher as [MediaOutputChip]. */

@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
@@ -89,6 +90,13 @@ import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandCosStyle
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupDarkSurface
+import com.android.systemui.statusbar.quickactions.ui.compose.liquidGlassIslandTint
+import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupColorMode
+import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.POPUP_COLOR_MODE_BLUR
+import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.POPUP_COLOR_MODE_SOLID_BLACK
+import com.android.systemui.qs.shared.style.liquidGlassEnabled
+import com.android.systemui.qs.shared.style.liquidGlassRim
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -529,6 +537,12 @@ private fun CosListCard(
             }
         }
     }
+    // The popup background of the settings is drawn from the first frame to the last: the
+    // window blur for the blur and Liquid Glass, a solid fill for the others.
+    val colorMode = rememberPopupColorMode()
+    val liquid = liquidGlassEnabled() && colorMode != POPUP_COLOR_MODE_SOLID_BLACK
+    val blurred = liquid || colorMode == POPUP_COLOR_MODE_BLUR
+    val currentBlurred = rememberUpdatedState(blurred)
     val region = rememberAxBlurRegion { size ->
         val motion =
             Motion(
@@ -563,7 +577,7 @@ private fun CosListCard(
         val dy = ((anchor?.center?.y ?: viewport.top / 2) - centerY) * motion.travel
         val top = (viewport.top - centerY - dy) / motion.scale + size.height / 2
         val bottom = (viewport.bottom - centerY - dy) / motion.scale + size.height / 2
-        val atRest = motion.reveal == 1f && motion.travel == 0f
+        val atRest = motion.reveal == 1f && motion.travel == 0f && motion.scale == 1f
         val topClipped = atRest && top > rect.top
         val bottomClipped = atRest && bottom < rect.bottom
         if (atRest) {
@@ -596,7 +610,8 @@ private fun CosListCard(
                 CornerRadii(radii),
                 CornerRadii(FloatArray(8) { radii[it] * motion.scale }),
             ),
-            motion.alpha,
+            // The region follows the card's geometry and fades with the card and its veil.
+            if (currentBlurred.value) motion.alpha * (1f - motion.veil) else 0f,
         )
     }
     val colors = MaterialTheme.colorScheme
@@ -647,14 +662,20 @@ private fun CosListCard(
                 }
                 .graphicsLayer {
                     val m = frozen
+                    // Clip the finished veil once so the light surface cannot fringe its edge.
+                    compositingStrategy =
+                        if (m.veil > 0f) CompositingStrategy.Offscreen
+                        else CompositingStrategy.Auto
                     alpha = m.alpha
                     scaleX = m.scale
                     scaleY = m.scale
                     translationX = m.shiftX
                     translationY = m.shiftY
                     shadowElevation = 16.dp.toPx()
-                    spotShadowColor = Color.Black.copy(alpha = m.shadow)
-                    ambientShadowColor = Color.Black.copy(alpha = m.shadow)
+                    // A see-through card would show its own shadow as a dark slab.
+                    val shadowAlpha = if (currentBlurred.value) 0f else m.shadow
+                    spotShadowColor = Color.Black.copy(alpha = shadowAlpha)
+                    ambientShadowColor = Color.Black.copy(alpha = shadowAlpha)
                     shape =
                         object : Shape {
                             override fun createOutline(
@@ -687,16 +708,35 @@ private fun CosListCard(
                 ) {}
         ) {
             AxBlurSurface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .then(if (liquid) Modifier.liquidGlassRim(CardShape) else Modifier),
                 shape = CardShape,
                 cornerRadius = 28.dp,
                 region = region,
+                alpha = 1f - frozen.veil,
                 propagateMinConstraints = true,
-                surfaceColor = colors.surfaceContainerHigh.copy(alpha = 0.9f),
+                surfaceColor =
+                    if (liquid) Color(liquidGlassIslandTint(colorMode)).copy(alpha = 0.9f)
+                    else colors.surfaceContainerHigh.copy(alpha = 0.9f),
                 tintColor =
-                    if (colors.surface.luminance() < 0.5f) Color.White.copy(alpha = 0.10f)
-                    else Color.White.copy(alpha = 0.55f),
+                    when {
+                        liquid -> Color(liquidGlassIslandTint(colorMode))
+                        colors.surface.luminance() < 0.5f -> Color.White.copy(alpha = 0.10f)
+                        else -> Color.White.copy(alpha = 0.55f)
+                    },
             ) {
+                if (!blurred) {
+                    Box(
+                        Modifier.matchParentSize()
+                            .graphicsLayer { alpha = 1f - frozen.veil }
+                            .background(
+                                if (colorMode == POPUP_COLOR_MODE_SOLID_BLACK) Color.Black
+                                else colors.surfaceContainerHigh,
+                                CardShape,
+                            )
+                    )
+                }
                 Box(
                     Modifier.fillMaxWidth()
                         .pointerInput(chip.chipId) {
@@ -720,6 +760,8 @@ private fun CosListCard(
                     CompositionLocalProvider(
                         LocalPopupContainer provides true,
                         LocalIslandCosStyle provides true,
+                        LocalPopupDarkSurface provides
+                            (liquid || colorMode == POPUP_COLOR_MODE_SOLID_BLACK),
                         LocalContentColor provides colors.onSurface,
                     ) {
                         PopupBody(chip)
