@@ -58,6 +58,11 @@ import kotlinx.coroutines.withContext
 
 private const val BAR_COUNT = 4
 
+private val CenteredBarPositions = floatArrayOf(9.831f, 20.008f, 30.435f, 40.737f, 51.633f, 62.018f)
+private const val CenteredCanvasSize = 72f
+private const val CenteredBarWidth = 6f
+private const val CenteredBarMaxHeight = 43f
+
 private const val MinimumBarLevel = 0.08f
 private val PausedRestLevels = FloatArray(BAR_COUNT) { MinimumBarLevel }
 
@@ -235,20 +240,36 @@ fun AudioReactiveBars(
         modifier =
             modifier
                 .padding(start = startPadding)
-                .size(width = totalWidth, height = maxBarHeight),
+                .size(
+                    width = if (centered) 20.dp else totalWidth,
+                    height = if (centered) 20.dp else maxBarHeight,
+                ),
     ) {
-        val barPx = barWidth.toPx()
+        val barPx = if (centered) size.width * CenteredBarWidth / CenteredCanvasSize
+            else barWidth.toPx()
         val spacingPx = spacing.toPx()
         val maxH = size.height
         val radius = CornerRadius(barPx / 2f, barPx / 2f)
 
-        for (index in 0 until BAR_COUNT) {
-            val level = displayedLevels[index].value.coerceIn(MinimumBarLevel, 1f)
+        val count = if (centered) CenteredBarPositions.size else BAR_COUNT
+        for (index in 0 until count) {
+            val sample = index.toFloat() * (BAR_COUNT - 1) / (count - 1)
+            val low = sample.toInt()
+            val high = (low + 1).coerceAtMost(BAR_COUNT - 1)
+            val level =
+                (displayedLevels[low].value * (1f - (sample - low)) +
+                    displayedLevels[high].value * (sample - low))
+                    .coerceIn(MinimumBarLevel, 1f)
 
-            val left = index * (barPx + spacingPx)
+            val left = if (centered) {
+                size.width * (CenteredBarPositions[index] - CenteredBarWidth / 2f) /
+                    CenteredCanvasSize
+            } else index * (barPx + spacingPx)
             if (centered) {
                 // Plain bars that move up and down from the middle; at rest they are round dots.
-                val barH = (maxH * level).coerceAtLeast(barPx)
+                val barH =
+                    (maxH * CenteredBarMaxHeight / CenteredCanvasSize * level)
+                        .coerceAtLeast(barPx)
                 drawRoundRect(
                     color = CenteredBarColor,
                     topLeft = Offset(left, (maxH - barH) / 2f),
