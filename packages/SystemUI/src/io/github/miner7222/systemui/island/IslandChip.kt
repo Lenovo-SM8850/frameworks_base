@@ -143,6 +143,9 @@ fun IslandChip(
     cos: Boolean = false,
 ) {
     val isMediaChip = viewModel.popupContent is PopupContentModel.Media
+    val media = (viewModel.popupContent as? PopupContentModel.Media)?.model
+    val mediaArtwork =
+        media?.let { it.artworkIcon != null && it.artworkIcon !== it.appIcon } == true
     val contentMotion = islandContentMotion()
     val chipShape = RoundedCornerShape(50)
     val cosMedia = (viewModel.popupContent as? PopupContentModel.Media)?.takeIf { cos }?.model
@@ -198,6 +201,7 @@ fun IslandChip(
         return
     }
 
+    val leadingTextMargin = if (cos && viewModel.icons.size == 1) CosIsland.TextMargin * 2 else 0.dp
     val isStartAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START
     val startGap = if (isStartAnchored) cutoutSpec.embeddedGapWidth else 0.dp
     val cameraGap =
@@ -227,8 +231,7 @@ fun IslandChip(
             viewModel.icons.firstOrNull()?.let {
                 CapsuleEnd.Round(
                     when {
-                        cos && largeLeading -> CosIsland.IconSize
-                        cos -> CosIsland.IconSize * 0.8f
+                        cos -> CosIsland.IconSize
                         largeLeading -> IslandGlyphSize
                         else -> 16.dp
                     }
@@ -307,7 +310,22 @@ fun IslandChip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier =
+                    Modifier.padding(
+                        start =
+                            if (
+                                cos &&
+                                    !isMediaChip &&
+                                    !mediaArtwork &&
+                                    viewModel.icons.size == 1 &&
+                                    viewModel.popupContent !is PopupContentModel.LiveScore
+                            )
+                                CosIsland.NormalIconMargin
+                            else 0.dp,
+                        end = leadingTextMargin,
+                    ),
+                horizontalArrangement =
+                    Arrangement.spacedBy(if (cos) CosIsland.IconListGap else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 viewModel.icons.forEachIndexed { index, chipIcon ->
@@ -315,19 +333,21 @@ fun IslandChip(
                         index == 0 && viewModel.popupContent is PopupContentModel.LiveScore
                     UprightContent {
                         if (index == 0 && isMediaChip) {
-                            val mediaModel = (viewModel.popupContent as? PopupContentModel.Media)?.model
-                            val isArtwork = mediaModel?.let {
-                                it.artworkIcon != null && it.artworkIcon !== it.appIcon
-                            } == true
-                            CollapsedMediaArtwork(chipIcon.icon, isArtwork, contentMotion, cos)
+                            CollapsedMediaArtwork(
+                                chipIcon.icon,
+                                mediaArtwork,
+                                media?.packageName,
+                                chipContentColor,
+                                contentMotion,
+                                cos,
+                            )
                         } else {
                             Icon(
                                 icon = chipIcon.icon,
                                 modifier =
                                     Modifier.size(
                                             when {
-                                                cos && isArtworkLike -> CosIsland.IconSize
-                                                cos -> CosIsland.IconSize * 0.8f
+                                                cos -> CosIsland.IconSize
                                                 isArtworkLike -> 18.dp
                                                 else -> 16.dp
                                             }
@@ -363,7 +383,13 @@ fun IslandChip(
                             isPlaying = popupContent.model.isPlaying,
                             color = chipContentColor,
                             artworkDrawable = artworkDrawable,
-                            modifier = contentMotion,
+                            modifier =
+                                if (cos) {
+                                    Modifier.padding(
+                                        start = CosIsland.TextMargin * 2,
+                                        end = CosIsland.NormalIconMargin,
+                                    ).then(contentMotion)
+                                } else contentMotion,
                             maxBarHeight = MediaBarsHeight,
                             centered = cos,
                         )
@@ -374,12 +400,19 @@ fun IslandChip(
                     UprightContent {
                         Text(
                             text = text,
+                            modifier =
+                                if (cos)
+                                    Modifier.padding(
+                                            start = CosIsland.TextMargin,
+                                            end = CosIsland.TextGoneMargin,
+                                        )
+                                        .then(contentMotion)
+                                else Modifier.then(contentMotion),
                             style = textStyle,
                             color = if (cos) CosIsland.TextColor else chipContentColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.End,
-                            modifier = Modifier.then(contentMotion),
                         )
                     }
                 }
@@ -392,12 +425,30 @@ fun IslandChip(
 private fun CollapsedMediaArtwork(
     icon: IconModel,
     isArtwork: Boolean,
+    packageName: String?,
+    glyphTint: Color,
     modifier: Modifier = Modifier,
     cos: Boolean = false,
 ) {
     if (!isArtwork) {
-        Box(modifier.size(if (cos) CosIsland.IconSize else 18.dp), contentAlignment = Alignment.Center) {
-            Icon(icon = icon, modifier = Modifier.size(16.dp), tint = Color.Unspecified)
+        val boxSize = if (cos) CosIsland.IconSize else 18.dp
+        // Without artwork, the app icon of the expanded card, already in the icon mask shape.
+        val appIcon = rememberAppIconBitmap(packageName, fallback = null, size = boxSize)
+        Box(modifier.size(boxSize), contentAlignment = Alignment.Center) {
+            if (appIcon != null) {
+                Image(
+                    bitmap = appIcon,
+                    contentDescription = icon.contentDescription?.load(),
+                    modifier = Modifier.size(boxSize),
+                )
+            } else {
+                // A notification glyph is fitted inside the box, not cropped to it.
+                Icon(
+                    icon = icon,
+                    modifier = Modifier.size(if (cos) 14.dp else 16.dp),
+                    tint = glyphTint,
+                )
+            }
         }
         return
     }
