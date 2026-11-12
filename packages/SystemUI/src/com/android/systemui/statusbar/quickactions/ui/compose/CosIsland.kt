@@ -41,11 +41,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -55,17 +54,69 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.asin
 import kotlin.math.roundToInt
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import com.android.systemui.Dependency
+import com.android.systemui.plugins.DarkIconDispatcher
+import com.android.systemui.res.R
+
+/**
+ * Crescent strokes drawn next to the island when several islands are stacked. Each moon is a round
+ * capped arc of a circle that passes through the cap centres (3.1dp, 0.9dp) and (3.1dp, 17.1dp)
+ * and the point (1.2dp, 9dp) of a 4dp x 18dp box; the right moon mirrors the left one.
+ */
+internal class CosIslandMoons(density: Density) {
+    val stroke = Stroke(width = with(density) { StrokeWidth.toPx() }, cap = StrokeCap.Round)
+    val left: Path
+    val right: Path
+
+    init {
+        val (boxW, boxH, capX, capY, midX) =
+            with(density) {
+                listOf(4.dp.toPx(), 18.dp.toPx(), 3.1.dp.toPx(), 0.9.dp.toPx(), 1.2.dp.toPx())
+            }
+        val midY = boxH / 2f
+        val halfChord = midY - capY
+        val sagitta = capX - midX
+        val radius = (halfChord * halfChord + sagitta * sagitta) / (2f * sagitta)
+        val centerX = midX + radius
+        val halfSweep = Math.toDegrees(asin((halfChord / radius).toDouble())).toFloat()
+        val oval = Rect(Offset(centerX, midY), radius)
+        left =
+            Path().apply {
+                arcTo(oval, 180f + halfSweep, -2f * halfSweep, true)
+            }
+        val mirrored = Rect(Offset(boxW - centerX, midY), radius)
+        right =
+            Path().apply {
+                arcTo(mirrored, -halfSweep, 2f * halfSweep, true)
+            }
+    }
+
+    companion object {
+        val StrokeWidth = 1.75.dp
+        const val Alpha = 0.9f
+    }
+}
 
 internal object CosIsland {
     val MinHeight = 36.dp
@@ -92,9 +143,6 @@ internal object CosIsland {
 
     val StrokeWidth = 1.3.dp
     val StrokeColor = Color(0x40959595)
-    val MoonWidth = 4.dp
-    val MoonGap = 2.dp
-    val MoonColor = Color(0xE64A4A4A)
     val ContentBlur = 9.dp
 
     val Move = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
@@ -135,11 +183,11 @@ internal fun CosIslandShell(
     key: Any,
     visible: Boolean,
     hole: Dp,
-    moons: Boolean,
     onGone: () -> Unit,
     heightScale: Float = 1f,
     widthScale: Float = 1f,
     startAnchored: Boolean = false,
+    multiple: Boolean = false,
     holeHeight: Dp = hole,
     modifier: Modifier = Modifier,
     tall: Boolean = false,
@@ -157,6 +205,34 @@ internal fun CosIslandShell(
     val maxWidthPx = with(density) { (CosIsland.maxWidth(startAnchored) * widthScale).roundToPx() }
     val blurPx = with(density) { CosIsland.ContentBlur.toPx() }
 
+    val moons = remember(density.density) { CosIslandMoons(density) }
+    val moonAlpha = remember { Animatable(0f) }
+    LaunchedEffect(multiple, visible) {
+        moonAlpha.animateTo(if (multiple && visible) 1f else 0f, tween(300, easing = LinearEasing))
+    }
+    var darkIntensity by remember { mutableFloatStateOf(0f) }
+    var shellBounds by remember { mutableStateOf(android.graphics.Rect()) }
+    var darkAreas by remember { mutableStateOf(ArrayList<android.graphics.Rect>()) }
+    DisposableEffect(Unit) {
+        val dispatcher = Dependency.get(DarkIconDispatcher::class.java)
+        val receiver =
+            object : DarkIconDispatcher.DarkReceiver {
+                override fun onDarkChanged(
+                    areas: ArrayList<android.graphics.Rect>,
+                    intensity: Float,
+                    tint: Int,
+                ) {
+                    darkAreas = ArrayList(areas)
+                    darkIntensity = intensity
+                }
+            }
+        dispatcher.addDarkReceiver(receiver)
+        onDispose { dispatcher.removeDarkReceiver(receiver) }
+    }
+    val sampledIntensity =
+        if (DarkIconDispatcher.isInAreas(darkAreas, shellBounds)) darkIntensity else 0f
+    val moonTint = if (sampledIntensity < 0.15f) Color(0xE64A4A4A) else Color(0xFF141414)
+
     val width = remember { Animatable(0f) }
     val height = remember { Animatable(0f) }
     val top = remember { Animatable(heightPx / 2) }
@@ -164,7 +240,6 @@ internal fun CosIslandShell(
     val alpha = remember { Animatable(0f) }
     val blur = remember { Animatable(blurPx) }
     val press = remember { Animatable(1f) }
-    val moonAlpha = remember { Animatable(0f) }
 
     var natural by remember { mutableStateOf(IntSize.Zero) }
     var shownKey by remember { mutableStateOf(key) }
@@ -177,10 +252,6 @@ internal fun CosIslandShell(
     val currentKey by rememberUpdatedState(key)
     val currentVisible by rememberUpdatedState(visible)
     val currentOnGone by rememberUpdatedState(onGone)
-
-    LaunchedEffect(moons) {
-        moonAlpha.animateTo(if (moons) 1f else 0f, tween(300, easing = CosIsland.Move))
-    }
 
     suspend fun nextNatural(): IntSize {
         withFrameNanos {}
@@ -290,6 +361,40 @@ internal fun CosIslandShell(
         modifier =
             modifier
                 .graphicsLayer { translationY = top.value }
+                .onGloballyPositioned {
+                    val r = it.boundsInWindow()
+                    shellBounds =
+                        android.graphics.Rect(
+                            r.left.roundToInt(),
+                            r.top.roundToInt(),
+                            r.right.roundToInt(),
+                            r.bottom.roundToInt(),
+                        )
+                }
+                .drawWithContent {
+                    drawContent()
+                    val w = 4.dp.toPx()
+                    val h = 18.dp.toPx()
+                    val a = moonAlpha.value
+                    val inset = if (currentVisible) 0f else (1f - a) * 6.dp.toPx()
+                    translate(inset, (size.height - h) / 2f) {
+                        drawPath(
+                            moons.left,
+                            moonTint,
+                            alpha = CosIslandMoons.Alpha * a,
+                            style = moons.stroke,
+                        )
+                    }
+                    translate(size.width - w - inset, (size.height - h) / 2f) {
+                        drawPath(
+                            moons.right,
+                            moonTint,
+                            alpha = CosIslandMoons.Alpha * a,
+                            style = moons.stroke,
+                        )
+                    }
+                }
+                .padding(horizontal = 6.dp)
                 .graphicsLayer {
                     scaleX = press.value
                     scaleY = press.value
@@ -302,12 +407,6 @@ internal fun CosIslandShell(
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                         } while (event.changes.any { it.pressed })
                         scope.launch { CosIsland.press(press, false) }
-                    }
-                }
-                .drawWithContent {
-                    drawContent()
-                    if (moonAlpha.value > 0f && size.width > 0f) {
-                        drawMoons(this, moonAlpha.value)
                     }
                 }
     ) {
@@ -365,21 +464,3 @@ internal fun CosIslandShell(
         }
     }
 }
-
-private fun drawMoons(scope: androidx.compose.ui.graphics.drawscope.DrawScope, alpha: Float) =
-    with(scope) {
-        val r = size.height / 2f
-        val gap = CosIsland.MoonGap.toPx()
-        val thick = CosIsland.MoonWidth.toPx()
-        for (side in listOf(-1f, 1f)) {
-            val edge = if (side < 0) r else size.width - r
-            val inner = Path().apply {
-                addOval(androidx.compose.ui.geometry.Rect(Offset(edge + side * gap, r), r))
-            }
-            val outer = Path().apply {
-                addOval(androidx.compose.ui.geometry.Rect(Offset(edge + side * (gap + thick), r), r))
-            }
-            val moon = Path().apply { op(outer, inner, PathOperation.Difference) }
-            drawPath(moon, CosIsland.MoonColor, alpha = alpha)
-        }
-    }
