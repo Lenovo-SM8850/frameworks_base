@@ -75,7 +75,7 @@ fun SystemEventPopup(model: PopupContentModel.SystemEvent, modifier: Modifier = 
             return
         }
     val accent = model.accent ?: IslandAccents.Connectivity
-    if (islandGlassCards()) {
+    if (islandCosCards()) {
         SystemEventGlassCard(model = model, accent = accent, modifier = modifier)
         return
     }

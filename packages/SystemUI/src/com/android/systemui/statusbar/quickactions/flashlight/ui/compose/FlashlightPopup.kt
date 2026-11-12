@@ -68,7 +68,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
+import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -81,7 +81,7 @@ fun FlashlightPopup(
     modifier: Modifier = Modifier,
 ) {
     val accent = IslandAccents.Flashlight
-    if (islandGlassCards()) {
+    if (islandCosCards()) {
         val level = model.level
         val maxLevel = model.maxLevel
         val strengthSlider: (@Composable () -> Unit)? =

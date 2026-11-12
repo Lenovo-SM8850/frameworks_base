@@ -169,6 +169,29 @@ internal val CosCardGrow = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
 internal val CosCardCorner = 32.dp
 internal const val CosCardCloseMillis = 400
 
+internal data class IslandSwipeThresholds(
+    val fadeDistancePx: Float,
+    val dismissDistancePx: Float,
+    val flingVelocityPx: Float,
+    val flingDistancePx: Float,
+)
+
+@Composable
+internal fun islandSwipeThresholds(): IslandSwipeThresholds {
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val slack = ((screenWidth - PopupMaxWidth - PopupPadding * 2) / 2).coerceIn(0.dp, SwipeSlackMax)
+    return with(LocalDensity.current) {
+        val fade = maxOf(slack + PopupPadding, 64.dp).toPx()
+        IslandSwipeThresholds(
+            fade,
+            fade * 0.6f,
+            SwipeFlingVelocity.toPx(),
+            SwipeFlingMinDistance.toPx(),
+        )
+    }
+}
+
+
 /**
  * Reuses the popup window as a shared container: it starts at the island's screen bounds and hands
  * those bounds back only after collapsing. The original chip stays laid out for touch and cutout
@@ -193,6 +216,20 @@ fun StatusBarPopup(
     onHidden: () -> Unit = {},
     appHandleBounds: List<android.graphics.Rect> = emptyList(),
 ) {
+    if (cos) {
+        CosIslandPopup(
+            viewModel,
+            isVisible,
+            chipBoundsInScreen,
+            chips,
+            onCardUsed,
+            onPageSelected,
+            onMorphActiveChanged,
+            onHidden,
+            appHandleBounds,
+        )
+        return
+    }
     val density = LocalDensity.current
     val collapsedWidth = LocalDynamicIslandWidth.current
     // The pill changes shape under the open card, so its bounds move during the entrance. Anchor
@@ -485,13 +522,14 @@ fun StatusBarPopup(
             }
         val swipeScope = rememberCoroutineScope()
         val swipeDismissible = viewModel.onDismissed != null
-        val fadeDistancePx = with(density) { maxOf(swipeSlack + PopupPadding, 64.dp).toPx() }
-        val dismissThresholdPx = fadeDistancePx * 0.6f
+        val swipeThresholds = islandSwipeThresholds()
+        val fadeDistancePx = swipeThresholds.fadeDistancePx
+        val dismissThresholdPx = swipeThresholds.dismissDistancePx
         val dismissProgress by remember {
             derivedStateOf { popupDismissProgress(swipeX, dismissThresholdPx) }
         }
-        val flingVelocityPx = with(density) { SwipeFlingVelocity.toPx() }
-        val flingMinDistancePx = with(density) { SwipeFlingMinDistance.toPx() }
+        val flingVelocityPx = swipeThresholds.flingVelocityPx
+        val flingMinDistancePx = swipeThresholds.flingDistancePx
         val pageThresholdPx = with(density) { PageDragThreshold.toPx() }
 
         fun settleSwipe(target: Float, dismiss: Boolean) {

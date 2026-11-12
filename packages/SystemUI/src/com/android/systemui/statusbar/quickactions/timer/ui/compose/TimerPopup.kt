@@ -29,7 +29,7 @@ import com.android.systemui.statusbar.quickactions.timer.shared.model.TimerPopup
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
+import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberRemainingDurationText
@@ -44,7 +44,7 @@ fun TimerPopup(
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val onOpen = rememberPopupLaunchAction(model.onOpen)
-    if (islandGlassCards()) {
+    if (islandCosCards()) {
         val actions = rememberPopupActions(model.actions)
         val remainingText =
             model.remainingTimeText ?: rememberRemainingDurationText(model.endElapsedRealtimeMs)

@@ -41,7 +41,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.IslandAccents
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
+import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 import com.android.systemui.statusbar.quickactions.ui.compose.pressScale
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
 
@@ -55,7 +55,7 @@ fun LiveScorePopup(
 ) {
     val onOpen = rememberPopupLaunchAction(model.onOpen)
     val accent = IslandAccents.Score
-    if (islandGlassCards()) {
+    if (islandCosCards()) {
         val title = model.title?.takeIf { it.isNotBlank() }
         val subtitle = model.subtitle?.takeIf { it.isNotBlank() }
         val subtitleLine: (@Composable () -> Unit)? =

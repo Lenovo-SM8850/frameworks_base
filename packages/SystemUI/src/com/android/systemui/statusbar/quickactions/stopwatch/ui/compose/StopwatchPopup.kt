@@ -49,7 +49,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
+import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 import com.android.systemui.statusbar.quickactions.ui.compose.pressScale
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberElapsedDurationText
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
@@ -76,7 +76,7 @@ fun StopwatchPopup(
             )
         }
     }
-    if (islandGlassCards()) {
+    if (islandCosCards()) {
         IslandGlassCard(
             primary =
                 model.elapsedTimeText ?: rememberElapsedDurationText(model.baseElapsedRealtimeMs),

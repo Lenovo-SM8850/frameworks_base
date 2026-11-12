@@ -98,6 +98,10 @@ private val GlassPrimaryFill = Color(0xFF2F7BFF)
  */
 @Composable
 internal fun IslandGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    if (LocalIslandCosStyle.current && LocalPopupContainer.current) {
+        Box(modifier = modifier, propagateMinConstraints = true) { content() }
+        return
+    }
     val blurState = LocalIslandCardBlurState.current
     // Move the blur by layout and fade it with the card; it must not stay behind a card that is
     // being dragged or closed.

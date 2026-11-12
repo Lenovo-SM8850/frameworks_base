@@ -56,7 +56,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalHidePopup
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupActionChips
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
+import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 import com.android.systemui.statusbar.quickactions.ui.compose.pressScale
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupActions
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction
@@ -82,7 +82,7 @@ fun AlarmPopup(
                 infiniteRepeatable(tween(1000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
             label = "alarm_breathe_scale",
         )
-    if (islandGlassCards()) {
+    if (islandCosCards()) {
         IslandGlassCard(
             primary = model.fullTimeText,
             secondary =

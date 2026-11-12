@@ -55,7 +55,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.IslandAccents
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlassCard
 import com.android.systemui.statusbar.quickactions.ui.compose.IslandGlyphBadge
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
-import com.android.systemui.statusbar.quickactions.ui.compose.islandGlassCards
+import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberElapsedDurationText
 private val PopupShape = RoundedCornerShape(32.dp)
 
@@ -83,7 +83,7 @@ fun ScreenRecordPopup(
                 infiniteRepeatable(tween(800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
             label = "rec_alpha",
         )
-    if (islandGlassCards()) {
+    if (islandCosCards()) {
         IslandGlassCard(
             primary =
                 when (model) {
