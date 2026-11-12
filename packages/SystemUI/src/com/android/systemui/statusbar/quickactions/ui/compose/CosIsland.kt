@@ -102,7 +102,7 @@ internal object CosIsland {
     val SwitchWidth = 80.dp
 
     val StrokeWidth = 1.3.dp
-    val StrokeColor = Color(0x44FFFFFF)
+    val StrokeColor = Color(0x40959595)
     val ContentBlur = 9.dp
 
     val Move = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
@@ -148,6 +148,7 @@ internal fun CosIslandShell(
     widthScale: Float = 1f,
     startAnchored: Boolean = false,
     multiple: Boolean = false,
+    strokeColor: Color? = null,
     holeHeight: Dp = hole,
     modifier: Modifier = Modifier,
     tall: Boolean = false,
@@ -397,10 +398,11 @@ internal fun CosIslandShell(
                             cornerRadius = CornerRadius(size.height / 2f),
                         )
                         drawContent()
-                        val stroke = CosIsland.StrokeWidth.toPx()
-                        if (size.minDimension > stroke * 2) {
+                        val stroke =
+                            if (sampledIntensity <= 0.13f) CosIsland.StrokeWidth.toPx() else 0f
+                        if (stroke > 0f && size.minDimension > stroke * 2) {
                             drawRoundRect(
-                                CosIsland.StrokeColor,
+                                (strokeColor ?: CosIsland.StrokeColor).copy(alpha = 64f / 255f),
                                 topLeft = Offset(stroke / 2f, stroke / 2f),
                                 size = Size(size.width - stroke, size.height - stroke),
                                 cornerRadius = CornerRadius((size.height - stroke) / 2f),

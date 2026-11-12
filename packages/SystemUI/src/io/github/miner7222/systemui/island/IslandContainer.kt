@@ -106,7 +106,9 @@ import com.android.systemui.statusbar.quickactions.ui.compose.ProvideDynamicIsla
 import com.android.systemui.statusbar.quickactions.ui.compose.isCallChip
 import com.android.systemui.statusbar.quickactions.ui.compose.rotatedLayout
 import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.material3.MaterialTheme
 import com.android.internal.policy.SystemBarUtils
+import com.android.systemui.statusbar.quickactions.ui.compose.ChipColors
 import com.android.systemui.statusbar.quickactions.ui.compose.CosIsland
 
 /** Phone-only centered dynamic island that pages through active popup chips. */
@@ -348,6 +350,13 @@ fun IslandContainer(
                     multiple = chips.size > 1,
                     widthScale = rememberDynamicIslandSizeScale().first,
                     startAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START,
+                    strokeColor =
+                        if (
+                            chip.colors == ChipColors.SystemTheme ||
+                                chip.colors == ChipColors.DynamicIsland
+                        )
+                            null
+                        else chip.colors.chipOutline(false, MaterialTheme.colorScheme),
                     heightScale = rememberDynamicIslandSizeScale().second,
                     onGone = {
                         present = false
