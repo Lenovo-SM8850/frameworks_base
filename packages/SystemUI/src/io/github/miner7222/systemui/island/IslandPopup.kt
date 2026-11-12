@@ -441,7 +441,8 @@ fun IslandPopup(
         properties =
             PopupProperties(
                 flags =
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                         WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 dismissOnBackPress = true,
@@ -450,6 +451,7 @@ fun IslandPopup(
             ),
     ) {
         val popupView = LocalView.current
+        IslandPopupSystemDialogs { currentChip.hidePopup() }
         // The dots sit beside the cards over whatever is behind the popup, so their colour follows
         // the brightness sampled there and not the theme. Until a sample arrives it is the theme's.
         val backdrop = rememberIslandBackdrop(popupView, enabled = cos && hasIndicator && isVisible)
@@ -853,6 +855,7 @@ fun IslandPopup(
             }
         }
 
+        val currentAppHandles by rememberUpdatedState(appHandleBounds)
         DisposableEffect(popupView) {
             val listener =
                 ViewTreeObserver.OnComputeInternalInsetsListener { info ->
@@ -865,8 +868,12 @@ fun IslandPopup(
                         (touchBounds.left - with(density) { swipeSlack.toPx() }).roundToInt(),
                         touchBounds.top.roundToInt(),
                         (touchBounds.right + with(density) { swipeSlack.toPx() }).roundToInt(),
-                        touchBounds.bottom.roundToInt(),
+                        minOf(
+                            touchBounds.bottom.roundToInt(),
+                            islandPopupTouchableBottom(popupView),
+                        ),
                     )
+                    excludeIslandAppHandles(info.touchableRegion, popupView, currentAppHandles)
                 }
             popupView.viewTreeObserver.addOnComputeInternalInsetsListener(listener)
             onDispose { popupView.viewTreeObserver.removeOnComputeInternalInsetsListener(listener) }
