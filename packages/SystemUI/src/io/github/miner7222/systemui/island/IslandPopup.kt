@@ -1600,7 +1600,13 @@ internal fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Top,
                     ) {
-                        MediaControlPopup(model = model, useWaveform = useWaveform)
+                        MediaControlPopup(
+                            model = model,
+                            useWaveform = useWaveform,
+                            modifier =
+                                if (LocalIslandCosStyle.current) Modifier.fillMaxWidth()
+                                else Modifier,
+                        )
                         CompositionLocalProvider(LocalPopupCameraClearance provides 0.dp) {
                             LyricsCard(model = model)
                         }
@@ -1619,7 +1625,10 @@ internal fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
                     }
                 }
             } else {
-                Box(modifier = mediaClickModifier) {
+                Box(
+                    modifier = mediaClickModifier,
+                    propagateMinConstraints = LocalIslandCosStyle.current,
+                ) {
                     MediaControlPopup(model = model, useWaveform = useWaveform)
                 }
             }
