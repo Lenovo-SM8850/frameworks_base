@@ -56,6 +56,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -1621,17 +1622,44 @@ internal fun IslandPopupContent(
                 } else {
                     Modifier
                 }
-            if (hasLyrics) {
-                // One surface holds both cards in a container, so the cards touch and the card keeps
-                // an inset below. Without one they are separate surfaces with a gap between.
-                val sharedSurface = openMediaOnTap && LocalPopupContainer.current
+            if (hasLyrics && openMediaOnTap) {
+                // One surface holds both cards, so the cards touch and the card keeps an inset
+                // below. Outside a popup container, the lyrics get a surface of their own with the
+                // media card, so the ColorOS cards read as one card too.
+                val mediaWithLyrics: @Composable () -> Unit = {
+                    Column(
+                        modifier = mediaClickModifier.padding(bottom = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Top,
+                    ) {
+                        MediaControlPopup(
+                            model = model,
+                            useWaveform = useWaveform,
+                            modifier =
+                                if (LocalIslandCosStyle.current) Modifier.fillMaxWidth()
+                                else Modifier,
+                        )
+                        CompositionLocalProvider(LocalPopupCameraClearance provides 0.dp) {
+                            LyricsCard(model = model)
+                        }
+                    }
+                }
+                if (LocalPopupContainer.current) {
+                    mediaWithLyrics()
+                } else {
+                    PopupSurface(
+                        shape = RoundedCornerShape(32.dp),
+                        modifier = Modifier.widthIn(min = 320.dp, max = 400.dp),
+                    ) {
+                        CompositionLocalProvider(LocalPopupContainer provides true) {
+                            mediaWithLyrics()
+                        }
+                    }
+                }
+            } else if (hasLyrics) {
                 Column(
-                    modifier =
-                        if (sharedSurface) mediaClickModifier.padding(bottom = 12.dp)
-                        else mediaClickModifier,
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement =
-                        if (sharedSurface) Arrangement.Top else Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     MediaControlPopup(
                         model = model,
@@ -1643,7 +1671,10 @@ internal fun IslandPopupContent(
                     }
                 }
             } else if (openMediaOnTap) {
-                Box(modifier = mediaClickModifier) {
+                Box(
+                    modifier = mediaClickModifier,
+                    propagateMinConstraints = LocalIslandCosStyle.current,
+                ) {
                     MediaControlPopup(model = model, useWaveform = useWaveform)
                 }
             } else {
