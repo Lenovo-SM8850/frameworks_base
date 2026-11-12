@@ -64,9 +64,19 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import com.android.internal.policy.SystemBarUtils
+import com.android.systemui.Dependency
+import com.android.systemui.plugins.DarkIconDispatcher
+import com.android.systemui.res.R
 
 internal object CosIsland {
     val MinHeight = 36.dp
@@ -137,6 +147,7 @@ internal fun CosIslandShell(
     heightScale: Float = 1f,
     widthScale: Float = 1f,
     startAnchored: Boolean = false,
+    multiple: Boolean = false,
     holeHeight: Dp = hole,
     modifier: Modifier = Modifier,
     tall: Boolean = false,
@@ -153,6 +164,35 @@ internal fun CosIslandShell(
     val reduceHeightPx = with(density) { CosIsland.ReduceHeight.toPx() }
     val maxWidthPx = with(density) { (CosIsland.maxWidth(startAnchored) * widthScale).roundToPx() }
     val blurPx = with(density) { CosIsland.ContentBlur.toPx() }
+
+    val leftMoon = painterResource(R.drawable.island_left_moon)
+    val rightMoon = painterResource(R.drawable.island_right_moon)
+    val moonAlpha = remember { Animatable(0f) }
+    LaunchedEffect(multiple, visible) {
+        moonAlpha.animateTo(if (multiple && visible) 1f else 0f, tween(300, easing = LinearEasing))
+    }
+    var darkIntensity by remember { mutableFloatStateOf(0f) }
+    var shellBounds by remember { mutableStateOf(android.graphics.Rect()) }
+    var darkAreas by remember { mutableStateOf(ArrayList<android.graphics.Rect>()) }
+    DisposableEffect(Unit) {
+        val dispatcher = Dependency.get(DarkIconDispatcher::class.java)
+        val receiver =
+            object : DarkIconDispatcher.DarkReceiver {
+                override fun onDarkChanged(
+                    areas: ArrayList<android.graphics.Rect>,
+                    intensity: Float,
+                    tint: Int,
+                ) {
+                    darkAreas = ArrayList(areas)
+                    darkIntensity = intensity
+                }
+            }
+        dispatcher.addDarkReceiver(receiver)
+        onDispose { dispatcher.removeDarkReceiver(receiver) }
+    }
+    val sampledIntensity =
+        if (DarkIconDispatcher.isInAreas(darkAreas, shellBounds)) darkIntensity else 0f
+    val moonTint = if (sampledIntensity < 0.15f) Color(0xE64A4A4A) else Color(0xFF141414)
 
     val width = remember { Animatable(0f) }
     val height = remember { Animatable(0f) }
@@ -282,6 +322,34 @@ internal fun CosIslandShell(
         modifier =
             modifier
                 .graphicsLayer { translationY = top.value }
+                .onGloballyPositioned {
+                    val r = it.boundsInWindow()
+                    shellBounds =
+                        android.graphics.Rect(
+                            r.left.roundToInt(),
+                            r.top.roundToInt(),
+                            r.right.roundToInt(),
+                            r.bottom.roundToInt(),
+                        )
+                }
+                .drawWithContent {
+                    drawContent()
+                    val w = 4.dp.toPx()
+                    val h = 18.dp.toPx()
+                    val a = moonAlpha.value
+                    val inset = if (currentVisible) 0f else (1f - a) * 6.dp.toPx()
+                    translate(inset, (size.height - h) / 2f) {
+                        with(leftMoon) {
+                            draw(Size(w, h), alpha = a, colorFilter = ColorFilter.tint(moonTint))
+                        }
+                    }
+                    translate(size.width - w - inset, (size.height - h) / 2f) {
+                        with(rightMoon) {
+                            draw(Size(w, h), alpha = a, colorFilter = ColorFilter.tint(moonTint))
+                        }
+                    }
+                }
+                .padding(horizontal = 6.dp)
                 .graphicsLayer {
                     scaleX = press.value
                     scaleY = press.value

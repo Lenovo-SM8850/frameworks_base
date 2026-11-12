@@ -345,6 +345,7 @@ fun IslandContainer(
                     hole = cutoutSpec.holeSize,
                     tall = chip.isCallChip(),
                     holeHeight = cutoutSpec.holeHeight,
+                    multiple = chips.size > 1,
                     widthScale = rememberDynamicIslandSizeScale().first,
                     startAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START,
                     heightScale = rememberDynamicIslandSizeScale().second,
