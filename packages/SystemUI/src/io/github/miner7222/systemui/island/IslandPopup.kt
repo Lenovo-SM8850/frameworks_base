@@ -192,6 +192,28 @@ private val MorphSpring =
     spring<Float>(dampingRatio = 0.8f, stiffness = 380f, visibilityThreshold = 0.0005f)
 private val EffectsSpring = spring<Float>(dampingRatio = 1f, stiffness = 1600f)
 
+internal data class IslandSwipeThresholds(
+    val fadeDistancePx: Float,
+    val dismissDistancePx: Float,
+    val flingVelocityPx: Float,
+    val flingDistancePx: Float,
+)
+
+@Composable
+internal fun islandSwipeThresholds(): IslandSwipeThresholds {
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val slack = ((screenWidth - PopupMaxWidth - PopupPadding * 2) / 2).coerceIn(0.dp, SwipeSlackMax)
+    return with(LocalDensity.current) {
+        val fade = maxOf(slack + PopupPadding, 64.dp).toPx()
+        IslandSwipeThresholds(
+            fade,
+            fade * 0.6f,
+            SwipeFlingVelocity.toPx(),
+            SwipeFlingMinDistance.toPx(),
+        )
+    }
+}
+
 /**
  * Reuses the popup window as a shared container: it starts at the island's screen bounds and hands
  * those bounds back only after collapsing. The original chip stays laid out for touch and cutout
@@ -521,13 +543,14 @@ fun IslandPopup(
             }
         val swipeScope = rememberCoroutineScope()
         val swipeDismissible = viewModel.onDismissed != null
-        val fadeDistancePx = with(density) { maxOf(swipeSlack + PopupPadding, 64.dp).toPx() }
-        val dismissThresholdPx = fadeDistancePx * 0.6f
+        val swipeThresholds = islandSwipeThresholds()
+        val fadeDistancePx = swipeThresholds.fadeDistancePx
+        val dismissThresholdPx = swipeThresholds.dismissDistancePx
         val dismissProgress by remember {
             derivedStateOf { popupDismissProgress(swipeX, dismissThresholdPx) }
         }
-        val flingVelocityPx = with(density) { SwipeFlingVelocity.toPx() }
-        val flingMinDistancePx = with(density) { SwipeFlingMinDistance.toPx() }
+        val flingVelocityPx = swipeThresholds.flingVelocityPx
+        val flingMinDistancePx = swipeThresholds.flingDistancePx
         val pageThresholdPx = with(density) { PageDragThreshold.toPx() }
 
         fun settleSwipe(target: Float, dismiss: Boolean) {

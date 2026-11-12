@@ -5,14 +5,18 @@ import android.view.WindowManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -36,6 +40,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +61,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -82,8 +89,11 @@ import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandCosStyle
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sign
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
@@ -122,7 +132,12 @@ internal fun CosIslandPopup(
             config.screenWidthDp < config.screenHeightDp -> (config.screenWidthDp - 32).dp
             else -> 456.dp
         }
-    val admitted = chips.take(4)
+    val dismissedIds = remember { mutableStateListOf<Any>() }
+    val admitted = chips.filter { it.chipId !in dismissedIds }.take(4)
+    val swipeThresholds = islandSwipeThresholds()
+    LaunchedEffect(chips.map { it.chipId }) {
+        dismissedIds.removeAll { id -> chips.none { it.chipId == id } }
+    }
     val initialIds = remember { admitted.map { it.chipId } }
     val fixedAnchor = remember(config.windowConfiguration.rotation) { anchor }
     val seenIds = remember { mutableSetOf<Any>() }
@@ -308,6 +323,19 @@ internal fun CosIslandPopup(
                                     retained.removeAll { it.chipId == item.chipId }
                                     placements.remove(item.chipId)
                                 },
+                                swipeThresholds = swipeThresholds,
+                                onDismissed = {
+                                    val next = admitted.firstOrNull { it.chipId != item.chipId }
+                                    if (item.chipId == chip.chipId && next != null) {
+                                        currentPageSelected(next)
+                                    }
+                                    val last = next == null
+                                    dismissedIds.add(item.chipId)
+                                    retained.removeAll { it.chipId == item.chipId }
+                                    placements.remove(item.chipId)
+                                    item.onDismissed?.invoke()
+                                    if (last) hide()
+                                },
                                 modifier = Modifier,
                             )
                         }
@@ -379,6 +407,8 @@ private fun CosListCard(
     onActive: (Boolean) -> Unit,
     onClosed: () -> Unit,
     onRemoved: () -> Unit,
+    swipeThresholds: IslandSwipeThresholds,
+    onDismissed: () -> Unit,
     modifier: Modifier,
 ) {
     val scale = remember { Animatable(if (initial) 0.4f else 1f) }
@@ -398,6 +428,34 @@ private fun CosListCard(
     DisposableEffect(Unit) {
         currentOnActive(true)
         onDispose { currentOnActive(false) }
+    }
+    var swipeX by remember { mutableFloatStateOf(0f) }
+    var dismissing by remember { mutableStateOf(false) }
+    var swipeJob by remember { mutableStateOf<Job?>(null) }
+    val swipeScope = rememberCoroutineScope()
+    val currentDismissed by rememberUpdatedState(onDismissed)
+    val currentChip by rememberUpdatedState(chip)
+    val currentVisible by rememberUpdatedState(visible)
+    val currentThresholds by rememberUpdatedState(swipeThresholds)
+    fun settleSwipe(dismiss: Boolean) {
+        swipeJob?.cancel()
+        swipeJob =
+            swipeScope.launch {
+                if (dismiss) dismissing = true
+                val target =
+                    if (dismiss) sign(swipeX) * maxOf(abs(swipeX), currentThresholds.fadeDistancePx)
+                    else 0f
+                animate(
+                    swipeX,
+                    target,
+                    animationSpec =
+                        if (dismiss) tween(160)
+                        else spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
+                ) { value, _ ->
+                    swipeX = value
+                }
+                if (dismiss) currentDismissed()
+            }
     }
     var frozen by remember { mutableStateOf(Motion()) }
     var measured by remember { mutableStateOf(false) }
@@ -479,7 +537,8 @@ private fun CosListCard(
                 veil.value,
                 if (closed || !entranceStarted) 0f
                 else
-                    fade.value,
+                    fade.value *
+                        (1f - abs(swipeX) / swipeThresholds.fadeDistancePx).coerceIn(0f, 1f),
                 shadow.value,
             )
         measured = true
@@ -497,7 +556,7 @@ private fun CosListCard(
         val resting = position(size)
         val centerY = resting.center.y
         val dx =
-            ((anchor?.center?.x ?: resting.center.x) - resting.center.x) * motion.travel
+            ((anchor?.center?.x ?: resting.center.x) - resting.center.x) * motion.travel + swipeX
         val dy = ((anchor?.center?.y ?: viewport.top / 2) - centerY) * motion.travel
         val top = (viewport.top - centerY - dy) / motion.scale + size.height / 2
         val bottom = (viewport.bottom - centerY - dy) / motion.scale + size.height / 2
@@ -541,6 +600,48 @@ private fun CosListCard(
     Box(modifier.padding(top = 8.dp)) {
         Box(
             Modifier.fillMaxWidth()
+                .pointerInput(chip.chipId) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (
+                            !currentVisible || dismissing || scale.value != 1f || reveal.value != 1f
+                        ) {
+                            return@awaitEachGesture
+                        }
+                        var horizontal: Boolean? = null
+                        var overSlop = 0f
+                        val drag =
+                            awaitTouchSlopOrCancellation(down.id) { change, amount ->
+                                if (horizontal == null) horizontal = abs(amount.x) >= abs(amount.y)
+                                if (horizontal == true) {
+                                    overSlop = amount.x
+                                    change.consume()
+                                }
+                            } ?: return@awaitEachGesture
+                        if (horizontal != true) return@awaitEachGesture
+                        swipeJob?.cancel()
+                        swipeX += overSlop
+                        val tracker = VelocityTracker()
+                        tracker.addPosition(drag.uptimeMillis, drag.position)
+                        val completed =
+                            horizontalDrag(drag.id) { change ->
+                                tracker.addPosition(change.uptimeMillis, change.position)
+                                swipeX += change.positionChange().x
+                                change.consume()
+                            }
+                        val velocity = tracker.calculateVelocity().x
+                        val thresholds = currentThresholds
+                        val flung =
+                            abs(velocity) > thresholds.flingVelocityPx &&
+                                abs(swipeX) > thresholds.flingDistancePx &&
+                                sign(velocity) == sign(swipeX)
+                        settleSwipe(
+                            completed &&
+                                currentChip.onDismissed != null &&
+                                (abs(swipeX) >= thresholds.dismissDistancePx || flung)
+                        )
+                    }
+                }
                 .graphicsLayer {
                     val m = frozen
                     alpha = m.alpha
