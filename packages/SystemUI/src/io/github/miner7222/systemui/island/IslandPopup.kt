@@ -216,6 +216,20 @@ fun IslandPopup(
     onHidden: () -> Unit = {},
     appHandleBounds: List<android.graphics.Rect> = emptyList(),
 ) {
+    if (cos) {
+        CosIslandPopup(
+            viewModel,
+            isVisible,
+            chipBoundsInScreen,
+            chips,
+            onCardUsed,
+            onPageSelected,
+            onMorphActiveChanged,
+            onHidden,
+            appHandleBounds,
+        )
+        return
+    }
     val density = LocalDensity.current
     val collapsedWidth = LocalDynamicIslandWidth.current
     // The pill changes shape under the open card, so its bounds move during the entrance. Anchor

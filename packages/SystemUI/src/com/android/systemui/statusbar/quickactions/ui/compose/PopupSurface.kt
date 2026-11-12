@@ -141,13 +141,17 @@ fun PopupSurface(
 ) {
     val cameraClearance = LocalPopupCameraClearance.current
     val body: @Composable () -> Unit = {
-        Box(Modifier.padding(top = cameraClearance)) { content() }
+        Box(
+            Modifier.padding(top = cameraClearance),
+            propagateMinConstraints = LocalIslandCosStyle.current,
+        ) { content() }
     }
     if (LocalPopupContainer.current) {
+        // The Liquid Glass surface is tinted dark, so its content is white in both themes.
         val contentColor =
-            if (colorMode == POPUP_COLOR_MODE_SOLID_BLACK) Color.White
+            if (colorMode == POPUP_COLOR_MODE_SOLID_BLACK || liquidGlassEnabled()) Color.White
             else MaterialTheme.colorScheme.onSurface
-        Box(modifier = modifier) {
+        Box(modifier = modifier, propagateMinConstraints = LocalIslandCosStyle.current) {
             CompositionLocalProvider(LocalContentColor provides contentColor) { body() }
         }
         return
