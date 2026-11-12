@@ -123,6 +123,9 @@ fun rememberPopupColorMode(): Int {
     return mode
 }
 
+/** Whether the popup content sits on a dark surface: the black background or Liquid Glass. */
+internal val LocalPopupDarkSurface = compositionLocalOf { false }
+
 // The morph supplies one surface for the entire popup, including its lyrics.
 internal val LocalPopupContainer = staticCompositionLocalOf { false }
 
@@ -147,11 +150,18 @@ fun PopupSurface(
         ) { content() }
     }
     if (LocalPopupContainer.current) {
+        // The Liquid Glass surface is tinted dark, so its content is white in both themes.
         val contentColor =
-            if (colorMode == POPUP_COLOR_MODE_SOLID_BLACK) Color.White
+            if (colorMode == POPUP_COLOR_MODE_SOLID_BLACK || liquidGlassEnabled()) Color.White
             else MaterialTheme.colorScheme.onSurface
         Box(modifier = modifier, propagateMinConstraints = LocalIslandCosStyle.current) {
-            CompositionLocalProvider(LocalContentColor provides contentColor) { body() }
+            CompositionLocalProvider(
+                LocalContentColor provides contentColor,
+                LocalPopupDarkSurface provides
+                    (colorMode == POPUP_COLOR_MODE_SOLID_BLACK || liquidGlassEnabled()),
+            ) {
+                body()
+            }
         }
         return
     }
@@ -188,7 +198,12 @@ fun PopupSurface(
                     .liquidGlassRim(shape, strength = containerProgress.coerceIn(0f, 1f))
                     .clip(shape)
         ) {
-            CompositionLocalProvider(LocalContentColor provides Color.White) { surfaceContent() }
+            CompositionLocalProvider(
+                LocalContentColor provides Color.White,
+                LocalPopupDarkSurface provides true,
+            ) {
+                surfaceContent()
+            }
         }
         return
     }
@@ -236,7 +251,7 @@ fun PopupSurface(
                 shadowElevation = shadowElevation,
                 modifier = modifier,
             ) {
-                surfaceContent()
+                CompositionLocalProvider(LocalPopupDarkSurface provides true) { surfaceContent() }
             }
         }
         else -> {
@@ -336,7 +351,19 @@ private fun MorphBlurSurface(
     }
 }
 
+/**
+ * Tint of the Liquid Glass island surface for [colorMode]: a dark gray mixed into the blur under the
+ * card's vertical shade. The blur background is never darker than the default one.
+ */
+internal fun liquidGlassIslandTint(colorMode: Int): Int =
+    if (colorMode == POPUP_COLOR_MODE_BLUR) {
+        LiquidGlassTune.color("island_blur_surface", IslandGlassMix)
+    } else {
+        LiquidGlassTune.color("island_surface", IslandGlassMix)
+    }
+
 private const val PLAIN_BLUR = -1
+private const val IslandGlassMix = 0xB3262626.toInt()
 private const val GlassTint = 0x99000000.toInt()
 private const val HeavyGlassTint = 0xB3000000.toInt()
 private val PopupBlurRadius = 34.dp
