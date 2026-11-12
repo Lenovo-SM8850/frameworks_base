@@ -202,6 +202,7 @@ fun StatusBarDynamicIslandChip(
         return
     }
 
+    val leadingTextMargin = if (cos && viewModel.icons.size == 1) CosIsland.TextMargin * 2 else 0.dp
     val isStartAnchored = cutoutSpec.anchor == DynamicIslandAnchor.START
     val startGap = if (isStartAnchored) cutoutSpec.embeddedGapWidth else 0.dp
     val cameraGap =
@@ -231,8 +232,7 @@ fun StatusBarDynamicIslandChip(
             viewModel.icons.firstOrNull()?.let {
                 CapsuleEnd.Round(
                     when {
-                        cos && largeLeading -> CosIsland.IconSize
-                        cos -> CosIsland.IconSize * 0.8f
+                        cos -> CosIsland.IconSize
                         largeLeading -> IslandGlyphSize
                         else -> 16.dp
                     }
@@ -309,7 +309,22 @@ fun StatusBarDynamicIslandChip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier =
+                    Modifier.padding(
+                        start =
+                            if (
+                                cos &&
+                                    !isMediaChip &&
+                                    !mediaArtwork &&
+                                    viewModel.icons.size == 1 &&
+                                    viewModel.popupContent !is PopupContentModel.LiveScore
+                            )
+                                CosIsland.NormalIconMargin
+                            else 0.dp,
+                        end = leadingTextMargin,
+                    ),
+                horizontalArrangement =
+                    Arrangement.spacedBy(if (cos) CosIsland.IconListGap else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 viewModel.icons.forEachIndexed { index, chipIcon ->
@@ -331,8 +346,7 @@ fun StatusBarDynamicIslandChip(
                                 modifier =
                                     Modifier.size(
                                             when {
-                                                cos && isArtworkLike -> CosIsland.IconSize
-                                                cos -> CosIsland.IconSize * 0.8f
+                                                cos -> CosIsland.IconSize
                                                 isArtworkLike -> 18.dp
                                                 else -> 16.dp
                                             }
@@ -368,7 +382,13 @@ fun StatusBarDynamicIslandChip(
                             isPlaying = popupContent.model.isPlaying,
                             color = chipContentColor,
                             artworkDrawable = artworkDrawable,
-                            modifier = contentMotion,
+                            modifier =
+                                if (cos) {
+                                    Modifier.padding(
+                                        start = CosIsland.TextMargin * 2,
+                                        end = CosIsland.NormalIconMargin,
+                                    ).then(contentMotion)
+                                } else contentMotion,
                             maxBarHeight = MediaBarsHeight,
                             centered = cos,
                         )
@@ -379,12 +399,19 @@ fun StatusBarDynamicIslandChip(
                     UprightContent {
                         Text(
                             text = text,
+                            modifier =
+                                if (cos)
+                                    Modifier.padding(
+                                            start = CosIsland.TextMargin,
+                                            end = CosIsland.TextGoneMargin,
+                                        )
+                                        .then(contentMotion)
+                                else Modifier.then(contentMotion),
                             style = textStyle,
                             color = if (cos) CosIsland.TextColor else chipContentColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.End,
-                            modifier = Modifier.then(contentMotion),
                         )
                     }
                 }

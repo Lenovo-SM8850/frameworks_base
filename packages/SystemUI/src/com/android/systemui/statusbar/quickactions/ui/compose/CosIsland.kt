@@ -133,6 +133,10 @@ internal object CosIsland {
     }
 
     val ContentPadding = 5.dp
+    val TextMargin = 4.dp
+    val TextGoneMargin = 5.dp
+    val NormalIconMargin = 3.dp
+    val IconListGap = 14.dp
     val IconSize = 20.dp
     val TextSize = 14.sp
     val TextColor = Color(0xE6FFFFFF)
