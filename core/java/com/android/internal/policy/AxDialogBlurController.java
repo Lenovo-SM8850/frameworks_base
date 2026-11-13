@@ -92,8 +92,15 @@ public final class AxDialogBlurController {
                 || !isSupported(window.getContext())) {
             return null;
         }
+        // An input method window is floating but is no dialog, and it can attach before it has
+        // a window manager.
+        final WindowManager windowManager = window.getWindowManager();
+        if (windowManager == null
+                || window.getAttributes().type == WindowManager.LayoutParams.TYPE_INPUT_METHOD) {
+            return null;
+        }
         return new AxDialogBlurController(window.getContext(), decor, window, null,
-                window.getWindowManager());
+                windowManager);
     }
 
     public static AxDialogBlurController createToast(Context context, View view,
