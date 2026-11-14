@@ -34,6 +34,7 @@ import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.util.AttributeSet;
 import android.view.View;
+import android.view.ViewTreeObserver;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -47,6 +48,7 @@ import com.android.systemui.common.shared.colors.SurfaceEffectColors;
 import com.android.systemui.qs.shared.style.LiquidGlass;
 import com.android.systemui.res.R;
 import com.android.systemui.statusbar.notification.shared.NotificationAddXOnHoverToDismiss;
+import com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout;
 import com.android.systemui.util.Assert;
 import com.android.systemui.util.DrawableDumpKt;
 
@@ -92,6 +94,52 @@ public class NotificationBackgroundView extends View implements Dumpable,
     private boolean mBlurHiddenInShelf;
     private int mBlurViewAlpha = 255;
     private final Rect mBlurBounds = new Rect();
+    // Negative outside the ColorOS style.
+    private float mColorOSBlurAlpha = -1f;
+    private float mAppliedBlurRegionFade = 1f;
+    // Ancestor alpha changes do not reach this view, so re-read it before each frame.
+    private final ViewTreeObserver.OnPreDrawListener mGlassPreDrawListener = () -> {
+        final float alpha = colorOSBlurAlpha(this, /* withStackAlpha= */ false);
+        // The glass follows the stack fade that setBlurRegionFade() holds back while expanding.
+        if (alpha != mColorOSBlurAlpha
+                || (alpha >= 0f && mBlurRegionFade != mAppliedBlurRegionFade)) {
+            mColorOSBlurAlpha = alpha;
+            updateBlurAlpha();
+            invalidate();
+        }
+        return true;
+    };
+
+    /** Compositor regions do not inherit View alpha or visibility, including group ancestors. */
+    public static float getColorOSBlurAlpha(View view) {
+        final float alpha = colorOSBlurAlpha(view, /* withStackAlpha= */ true);
+        return alpha < 0f ? 1f : alpha;
+    }
+
+    /** Negative outside the ColorOS style. */
+    private static float colorOSBlurAlpha(View view, boolean withStackAlpha) {
+        final View target = view;
+        float alpha = 1f;
+        boolean colorOS = false;
+        while (view != null) {
+            // Rows get the stack's own alpha through setBlurRegionFade().
+            final float viewAlpha = !withStackAlpha && view instanceof NotificationStackScrollLayout
+                    ? 1f : view.getAlpha();
+            alpha *= view.getVisibility() == VISIBLE ? viewAlpha : 0f;
+            if (view instanceof NotificationStackScrollLayout stack) {
+                final float glassAlpha = stack.getColorOSGlassAlpha();
+                if (glassAlpha < 0f) return -1f;
+                colorOS = true;
+                alpha *= glassAlpha;
+            }
+            view = view.getParent() instanceof View parent ? parent : null;
+        }
+        if (!colorOS) return -1f;
+        if (target.getWindowVisibility() != VISIBLE
+                || !target.getGlobalVisibleRect(new Rect())) return 0f;
+        return Math.max(0f, Math.min(1f, alpha));
+    }
+
 
     // True only if the dismiss button is visible.
     private boolean mDrawDismissButtonCutout = false;
@@ -498,6 +546,7 @@ public class NotificationBackgroundView extends View implements Dumpable,
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        getViewTreeObserver().addOnPreDrawListener(mGlassPreDrawListener);
         if (mBlurBackgroundEnabled) {
             createBlurDrawable();
         }
@@ -505,6 +554,7 @@ public class NotificationBackgroundView extends View implements Dumpable,
 
     @Override
     protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnPreDrawListener(mGlassPreDrawListener);
         releaseBlurDrawable();
         super.onDetachedFromWindow();
     }
@@ -553,11 +603,15 @@ public class NotificationBackgroundView extends View implements Dumpable,
     }
 
     private void updateBlurAlpha() {
+        mAppliedBlurRegionFade = mBlurRegionFade;
         if (mBackgroundBlurDrawable == null) {
             return;
         }
+        // The ColorOS glass alpha already includes the row's own alpha (mBlurViewAlpha).
         final int alpha = mBlurRegionSuppressed || mBlurHiddenInShelf
-                ? 0 : Math.round(mDrawableAlpha * mBlurViewAlpha / 255f * mBlurRegionFade);
+                ? 0 : mColorOSBlurAlpha >= 0f
+                        ? Math.round(mDrawableAlpha * mBlurRegionFade * mColorOSBlurAlpha)
+                        : Math.round(mDrawableAlpha * mBlurViewAlpha / 255f * mBlurRegionFade);
         mBackgroundBlurDrawable.setAlpha(alpha);
     }
 
