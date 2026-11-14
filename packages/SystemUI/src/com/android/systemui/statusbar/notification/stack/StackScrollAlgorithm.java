@@ -688,6 +688,18 @@ public class StackScrollAlgorithm {
 
         float expansionFraction = getExpansionFractionWithoutShelf(
                 algorithmState, ambientState);
+        // A resting lockscreen must not shorten a contracted row without remeasuring its
+        // content. Fit fewer rows or use the shelf, keeping the shade's natural row height.
+        // Expanded/group layouts and all transitions retain their existing squishiness.
+        if (view instanceof ExpandableNotificationRow row && !row.isExpanded()
+                && !row.isSummaryWithChildren() && !row.isHeadsUpState()
+                && ambientState.isOnKeyguard()
+                && ambientState.getFractionToShade() == 0f
+                && !ambientState.isExpansionChanging() && !ambientState.isDozing()
+                && ambientState.getDozeAmount() == 0f && !ambientState.isSwipingUp()
+                && !ambientState.isFlingingAfterSwipeUpOnLockscreen()) {
+            expansionFraction = 1f;
+        }
 
         // Add gap between sections.
         final float gap = getGapHeightForChild(ambientState.getSectionProvider(), i, view,
