@@ -581,4 +581,10 @@
     <string name="qs_custom_slider_under">Under tiles</string>
     <string name="qs_custom_slider_by_player">By the player</string>
     <string name="qs_custom_mix_footer">Footer buttons</string>
+
+    <!-- Alternate power menu -->
+    <string name="global_actions_slide_to_power_off">Slide to power off</string>
+    <string name="global_actions_slide_to_restart">Slide to restart</string>
+    <string name="global_actions_add_actions">Add actions</string>
+    <string name="global_actions_arrange_tiles">Arrange tiles</string>
 </resources>
