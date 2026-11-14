@@ -47,6 +47,7 @@ import android.text.style.RelativeSizeSpan;
 import android.util.AttributeSet;
 import android.view.ContextThemeWrapper;
 import android.view.Display;
+import android.view.ViewTreeObserver;
 import android.widget.TextView;
 
 import com.android.settingslib.Utils;
@@ -141,6 +142,25 @@ public class Clock extends TextView implements
     private boolean mIsStatusBar;
     private boolean useStaticColor = false;
     private int lastDynamicColor = -1;
+    private ArrayList<Rect> mLastDarkAreas;
+    private float mLastDarkIntensity;
+    private int mLastDarkTint;
+    private final Rect mLastScreenBounds = new Rect();
+    private final int[] mScreenLocation = new int[2];
+    private final ViewTreeObserver.OnGlobalLayoutListener mDarkLayoutListener = () -> {
+        if (mLastDarkAreas == null) return;
+        getLocationOnScreen(mScreenLocation);
+        final int left = mScreenLocation[0];
+        final int top = mScreenLocation[1];
+        final int right = left + getWidth();
+        final int bottom = top + getHeight();
+        if (mLastScreenBounds.left != left || mLastScreenBounds.top != top
+                || mLastScreenBounds.right != right || mLastScreenBounds.bottom != bottom) {
+            mLastScreenBounds.set(left, top, right, bottom);
+            // Parent layout can move the clock without changing its local bounds.
+            onDarkChanged(mLastDarkAreas, mLastDarkIntensity, mLastDarkTint);
+        }
+    };
 
     private boolean mMaskTextMode = false;
     private final PorterDuffXfermode mDstOutXfermode = new PorterDuffXfermode(PorterDuff.Mode.DST_OUT);
@@ -225,6 +245,7 @@ public class Clock extends TextView implements
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        getViewTreeObserver().addOnGlobalLayoutListener(mDarkLayoutListener);
 
         if (!mAttached) {
             mAttached = true;
@@ -266,6 +287,7 @@ public class Clock extends TextView implements
 
     @Override
     protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnGlobalLayoutListener(mDarkLayoutListener);
         super.onDetachedFromWindow();
         if (mScreenReceiverRegistered) {
             mScreenReceiverRegistered = false;
@@ -399,7 +421,15 @@ public class Clock extends TextView implements
 
     @Override
     public void onDarkChanged(ArrayList<Rect> areas, float darkIntensity, int tint) {
-        mNonAdaptedColor = DarkIconDispatcher.getTint(areas, this, tint);
+        // Keep our own rectangles: the dispatcher may mutate them before the next layout.
+        final ArrayList<Rect> darkAreas = new ArrayList<>(areas.size());
+        for (Rect area : areas) {
+            darkAreas.add(new Rect(area));
+        }
+        mLastDarkAreas = darkAreas;
+        mLastDarkIntensity = darkIntensity;
+        mLastDarkTint = tint;
+        mNonAdaptedColor = DarkIconDispatcher.getTint(darkAreas, this, tint);
         lastDynamicColor = mNonAdaptedColor;
         if (useStaticColor) return;
         setTextColor(lastDynamicColor);
