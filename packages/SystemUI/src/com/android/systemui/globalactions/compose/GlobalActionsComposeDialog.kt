@@ -72,6 +72,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
@@ -80,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.core.graphics.drawable.toBitmap
 import com.android.systemui.globalactions.GlobalActionsDialogLite
+import com.android.systemui.res.R
 import com.android.systemui.statusbar.BlurUtils
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -150,30 +152,48 @@ fun getActionLabel(action: GlobalActionsDialogLite.Action, context: Context): St
         }
         return str
     }
-    
+
+    // Named and anonymous standard actions provide their localized label here, including
+    // device controls and the advanced restart destinations. Preserve dynamic user names above.
     val msgResId = action.getMessageResId()
     if (msgResId != 0) {
-        return try {
-            context.getString(msgResId)
+        try {
+            return context.getString(msgResId)
         } catch (e: Exception) {
-            cleanClassName(action.javaClass.simpleName)
+            // Fall back to a standard label if an action supplies an invalid resource.
         }
     }
-    
-    return cleanClassName(action.javaClass.simpleName)
-}
 
-private val CAMEL_CASE_REGEX = Regex("([a-z])([A-Z])")
-
-fun cleanClassName(name: String): String {
-    return name
-        .replace("GlobalActions", "")
-        .replace("Action", "")
-        .replace("DialogLite", "")
-        .replace("$", "")
-        .replace("4", "Device Controls")
-        .replace(CAMEL_CASE_REGEX, "$1 $2")
-        .trim()
+    val fallbackResId = when (action.javaClass.simpleName) {
+        "PowerOptionsAction" -> com.android.internal.R.string.global_action_power_options
+        "ShutDownAction" -> com.android.internal.R.string.global_action_power_off
+        "EmergencyAffordanceAction", "EmergencyDialerAction" ->
+            com.android.internal.R.string.global_action_emergency
+        "RestartAction" -> com.android.internal.R.string.global_action_restart
+        "RestartSystemAction" -> R.string.global_action_restart_system
+        "RestartRecoveryAction" -> R.string.global_action_restart_recovery
+        "RestartBootloaderAction" -> R.string.global_action_restart_bootloader
+        "RestartFastbootAction" -> R.string.global_action_restart_fastboot
+        "RestartDownloadAction" -> R.string.global_action_restart_download
+        "RestartSystemUIAction" -> R.string.global_action_restart_systemui
+        "ScreenshotAction" -> com.android.internal.R.string.global_action_screenshot
+        "BugReportAction" -> com.android.internal.R.string.bugreport_title
+        "LogoutAction" -> com.android.internal.R.string.global_action_logout
+        "SendFeedbackAction" -> com.android.internal.R.string.global_action_feedback
+        "SystemUpdateAction" -> com.android.settingslib.R.string.system_update_settings_list_item_title
+        "StandbyAction" -> com.android.internal.R.string.global_action_standby
+        "getOnTheGoAction" -> R.string.global_action_onthego
+        "LockDownAction" -> com.android.internal.R.string.global_action_lockdown
+        "LockAction" -> com.android.internal.R.string.global_action_unrestricted_lock
+        "UsersAction" -> R.string.global_action_users
+        "AirplaneModeAction" -> com.android.internal.R.string.global_actions_toggle_airplane_mode
+        "SilentModeToggleAction", "SilentModeTriStateAction" ->
+            com.android.internal.R.string.global_action_toggle_silent_mode
+        "DeviceControlsAction" -> R.string.quick_controls_title
+        // Anonymous actions supply their label through getMessage/getMessageResId above.
+        else -> R.string.accessibility_quick_settings_power_menu
+    }
+    return context.getString(fallbackResId)
 }
 
 class GlobalActionsComposeDialog(
@@ -461,7 +481,7 @@ fun GlobalActionsScreen(
             when {
                 className.contains("Power") || className.contains("ShutDown") -> {
                     confirmationTitle = getActionLabel(tile.action, context)
-                    confirmationMessage = "Slide to power off"
+                    confirmationMessage = context.getString(R.string.global_actions_slide_to_power_off)
                     confirmationIconBitmap = tile.action.getIcon(context)?.toBitmap(96, 96)?.asImageBitmap()
                     confirmationColor = errorColor
                     confirmationReturnsToGrid = true
@@ -474,7 +494,7 @@ fun GlobalActionsScreen(
                         currentView = GlobalActionsView.RESTART_CHOICE
                     } else {
                         confirmationTitle = getActionLabel(tile.action, context)
-                        confirmationMessage = "Slide to restart"
+                        confirmationMessage = context.getString(R.string.global_actions_slide_to_restart)
                         confirmationIconBitmap = tile.action.getIcon(context)?.toBitmap(96, 96)?.asImageBitmap()
                         confirmationColor = errorColor
                         confirmationReturnsToGrid = true
@@ -497,7 +517,7 @@ fun GlobalActionsScreen(
 
     val handleRestartOptionClick: (GlobalActionsDialogLite.Action) -> Unit = { action ->
         confirmationTitle = getActionLabel(action, context)
-        confirmationMessage = "Slide to restart"
+        confirmationMessage = context.getString(R.string.global_actions_slide_to_restart)
         confirmationIconBitmap = action.getIcon(context)?.toBitmap(96, 96)?.asImageBitmap()
         confirmationColor = errorColor
         confirmationReturnsToGrid = false
@@ -650,7 +670,7 @@ private fun RestartChoiceMenu(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Restart",
+                text = stringResource(com.android.internal.R.string.global_action_restart),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -680,7 +700,7 @@ private fun RestartChoiceMenu(
             Spacer(modifier = Modifier.height(16.dp))
             
             TextButton(onClick = onBack) {
-                Text("Cancel")
+                Text(stringResource(R.string.cancel))
             }
         }
     }
@@ -826,7 +846,7 @@ private fun PowerMenuContainer(
                             exit = fadeOut() + shrinkVertically()
                         ) {
                             Text(
-                                text = "Add Actions",
+                                text = stringResource(R.string.global_actions_add_actions),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -879,7 +899,7 @@ private fun PowerMenuContainer(
                         Spacer(modifier = Modifier.height(16.dp))
                         
                         Text(
-                            text = "Add Actions",
+                            text = stringResource(R.string.global_actions_add_actions),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -913,7 +933,10 @@ private fun MenuHeader(isEditMode: Boolean, onToggleEdit: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = if (isEditMode) "Arrange Tiles" else "Power Menu",
+            text = stringResource(
+                if (isEditMode) R.string.global_actions_arrange_tiles
+                else R.string.accessibility_quick_settings_power_menu
+            ),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
@@ -928,7 +951,7 @@ private fun MenuHeader(isEditMode: Boolean, onToggleEdit: () -> Unit) {
         ) {
             Icon(
                 imageVector = if (isEditMode) Icons.Rounded.Check else Icons.Rounded.Edit,
-                contentDescription = "Edit",
+                contentDescription = stringResource(R.string.qs_edit_edit_tab),
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -1278,7 +1301,7 @@ private fun TileItem(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Close,
-                    contentDescription = "Remove",
+                    contentDescription = stringResource(R.string.remove),
                     modifier = Modifier.padding(6.dp),
                     tint = MaterialTheme.colorScheme.onError
                 )
@@ -1377,7 +1400,7 @@ private fun ResizeHandle(
     ) {
         Icon(
             imageVector = Icons.Rounded.DragHandle,
-            contentDescription = "Resize",
+            contentDescription = stringResource(R.string.accessibility_resize),
             modifier = Modifier
                 .padding(8.dp)
                 .rotate(45f)
@@ -1580,7 +1603,7 @@ private fun ConfirmationSliderView(
             }
         ) {
             Text(
-                text = "Cancel",
+                text = stringResource(R.string.cancel),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.labelLarge
             )
