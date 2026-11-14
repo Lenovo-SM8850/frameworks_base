@@ -1512,6 +1512,33 @@ public final class InputManager {
     }
 
     /**
+     * Keep a system gesture monitor's pointer streams when another window pilfers them.
+     * Only callers running as the system UID may request this flag.
+     * @hide
+     */
+    public static final int MONITOR_FLAG_DO_NOT_PILFER = 1;
+
+    /** @hide */
+    @IntDef(flag = true, value = {MONITOR_FLAG_DO_NOT_PILFER})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface MonitorFlags {}
+
+    /**
+     * Monitor input with optional system gesture monitor flags.
+     *
+     * @param name The input channel name.
+     * @param displayId The display to monitor.
+     * @param flags Zero or {@link #MONITOR_FLAG_DO_NOT_PILFER}.
+     * @hide
+     */
+    @RequiresPermission(Manifest.permission.MONITOR_INPUT)
+    @NonNull
+    public InputMonitor monitorGestureInput(@NonNull String name, int displayId,
+            @MonitorFlags int flags) {
+        return mGlobal.monitorGestureInput(name, displayId, flags);
+    }
+
+    /**
      * Add a runtime association between the input port and the display port. This overrides any
      * static associations.
      * @param inputPort the port of the input device
