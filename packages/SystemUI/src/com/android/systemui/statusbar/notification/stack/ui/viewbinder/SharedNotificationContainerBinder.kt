@@ -21,6 +21,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.android.compose.animation.scene.Scale
+import com.android.keyguard.BouncerPanelExpansionCalculator
+import com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor
 import com.android.systemui.Flags
 import com.android.systemui.common.ui.view.onLayoutChanged
 import com.android.systemui.communal.domain.interactor.CommunalSettingsInteractor
@@ -30,6 +32,7 @@ import com.android.systemui.dagger.qualifiers.Main
 import com.android.systemui.keyguard.domain.interactor.KeyguardInteractor
 import com.android.systemui.keyguard.ui.viewmodel.ViewStateAccessor
 import com.android.systemui.lifecycle.repeatWhenAttached
+import com.android.systemui.shade.domain.interactor.ShadeInteractor
 import com.android.systemui.scene.shared.flag.SceneContainerFlag
 import com.android.systemui.shared.Flags.extendedWallpaperEffects
 import com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayoutController
@@ -58,6 +61,8 @@ constructor(
     @AndroidUi private val androidUiDispatcher: CoroutineContext,
     @Main private val mainImmediateDispatcher: CoroutineDispatcher,
     val keyguardInteractor: KeyguardInteractor,
+    private val primaryBouncerInteractor: PrimaryBouncerInteractor,
+    private val shadeInteractor: ShadeInteractor,
 ) {
 
     private val calculateMaxNotifications: (Float, Boolean) -> Int = { space, extraShelfSpace ->
@@ -187,6 +192,24 @@ constructor(
                     }
 
                     if (!SceneContainerFlag.isEnabled) {
+                        launch {
+                            try {
+                                combine(
+                                    primaryBouncerInteractor.bouncerExpansion,
+                                    shadeInteractor.isAnyFullyExpanded,
+                                ) { expansion, shadeExpanded ->
+                                    // Use the same curve as KeyguardSecurityContainerController.
+                                    // This cap also handles flings that skip fade animation steps;
+                                    // reversing the gesture reverses the cap without a new timer.
+                                    if (shadeExpanded) 1f
+                                    else BouncerPanelExpansionCalculator.showBouncerProgress(
+                                        1f - expansion
+                                    )
+                                }.collect { controller.setMaxAlphaForPrimaryBouncer(it) }
+                            } finally {
+                                controller.setMaxAlphaForPrimaryBouncer(1f)
+                            }
+                        }
                         launch {
                             // For when the entire view should fade, such as with the brightness
                             // slider

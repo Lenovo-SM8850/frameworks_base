@@ -344,6 +344,7 @@ public class NotificationStackScrollLayoutController implements Dumpable {
     private float mMaxAlphaForUnhide = 1.0f;
     private float mMaxAlphaForRebind = 1.0f;
     private float mMaxAlphaFromView = 1.0f;
+    private float mMaxAlphaForPrimaryBouncer = 1.0f;
 
     /**
      * Maximum alpha when to and from or sitting idle on the glanceable hub. Will be 1.0f when the
@@ -1521,6 +1522,12 @@ public class NotificationStackScrollLayoutController implements Dumpable {
         }
     }
 
+    /** Caps the legacy transition fade by the PIN view's actual expansion-driven reveal. */
+    public void setMaxAlphaForPrimaryBouncer(float alpha) {
+        mMaxAlphaForPrimaryBouncer = alpha;
+        updateAlpha();
+    }
+
     private void updateAlpha() {
         if (mView != null) {
             float newAlpha = mMaxAlphaFromView;
@@ -1528,6 +1535,7 @@ public class NotificationStackScrollLayoutController implements Dumpable {
             newAlpha = Math.min(newAlpha, mMaxAlphaForRebind);
             newAlpha = Math.min(newAlpha, mMaxAlphaForGlanceableHub);
             newAlpha = Math.min(newAlpha, mMaxAlphaForKeyguard);
+            newAlpha = Math.min(newAlpha, mMaxAlphaForPrimaryBouncer);
             mView.setAlpha(newAlpha);
         }
     }
@@ -1983,6 +1991,7 @@ public class NotificationStackScrollLayoutController implements Dumpable {
     @Override
     public void dump(@NonNull PrintWriter pw, @NonNull String[] args) {
         pw.println("mMaxAlphaFromView=" + mMaxAlphaFromView);
+        pw.println("mMaxAlphaForPrimaryBouncer=" + mMaxAlphaForPrimaryBouncer);
         pw.println("mMaxAlphaForUnhide=" + mMaxAlphaForUnhide);
         pw.println("mMaxAlphaForRebind=" + mMaxAlphaForRebind);
         pw.println("mMaxAlphaForGlanceableHub=" + mMaxAlphaForGlanceableHub);
