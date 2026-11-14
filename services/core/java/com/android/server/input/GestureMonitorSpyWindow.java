@@ -43,7 +43,7 @@ class GestureMonitorSpyWindow {
     final SurfaceControl mInputSurface;
 
     GestureMonitorSpyWindow(IBinder token, String name, int displayId, int pid, int uid,
-            SurfaceControl sc, IBinder inputChannelToken) {
+            SurfaceControl sc, IBinder inputChannelToken, boolean doNotPilfer) {
         mMonitorToken = token;
         mInputSurface = sc;
 
@@ -60,6 +60,9 @@ class GestureMonitorSpyWindow {
         mWindowHandle.scaleFactor = 1.0f;
         mWindowHandle.replaceTouchableRegionWithCrop(null /* use this surface's bounds */);
         mWindowHandle.inputConfig = InputConfig.NOT_FOCUSABLE | InputConfig.SPY;
+        if (doNotPilfer) {
+            mWindowHandle.inputConfig |= InputConfig.DO_NOT_PILFER;
+        }
 
         final SurfaceControl.Transaction t = new SurfaceControl.Transaction();
         mWindowHandle.setTrustedOverlay(t, mInputSurface, true);

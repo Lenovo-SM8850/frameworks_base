@@ -1827,6 +1827,21 @@ public final class InputManagerGlobal {
     }
 
     /**
+     * @see InputManager#monitorGestureInput(String, int, int)
+     */
+    public InputMonitor monitorGestureInput(String name, int displayId,
+            @InputManager.MonitorFlags int flags) {
+        if (flags == 0) {
+            return monitorGestureInput(name, displayId);
+        }
+        try {
+            return mIm.monitorGestureInputWithFlags(new Binder(), name, displayId, flags);
+        } catch (RemoteException ex) {
+            throw ex.rethrowFromSystemServer();
+        }
+    }
+
+    /**
      * @see InputManager#addUniqueIdAssociationByPort(String, String)
      */
     public void addUniqueIdAssociationByPort(@NonNull String inputPort,

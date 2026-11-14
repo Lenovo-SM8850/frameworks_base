@@ -874,7 +874,7 @@ public class InputManagerService extends IInputManager.Stub
 
     @NonNull
     private InputChannel createSpyWindowGestureMonitor(IBinder monitorToken, String name,
-            SurfaceControl sc, int displayId, int pid, int uid) {
+            SurfaceControl sc, int displayId, int pid, int uid, boolean doNotPilfer) {
         final InputChannel channel = createInputChannel(name);
 
         try {
@@ -886,7 +886,7 @@ public class InputManagerService extends IInputManager.Stub
         synchronized (mInputMonitors) {
             mInputMonitors.put(channel.getToken(),
                     new GestureMonitorSpyWindow(monitorToken, name, displayId, pid, uid, sc,
-                            channel.getToken()));
+                            channel.getToken(), doNotPilfer));
         }
         return channel;
     }
@@ -920,6 +920,28 @@ public class InputManagerService extends IInputManager.Stub
                 "monitorGestureInput()")) {
             throw new SecurityException("Requires MONITOR_INPUT permission");
         }
+        return createGestureInputMonitor(monitorToken, requestedName, displayId, false);
+    }
+
+    @Override // Binder call
+    public InputMonitor monitorGestureInputWithFlags(@NonNull IBinder monitorToken,
+            @NonNull String requestedName, int displayId, int flags) {
+        if ((flags & ~InputManager.MONITOR_FLAG_DO_NOT_PILFER) != 0) {
+            throw new IllegalArgumentException("Unknown gesture monitor flags: " + flags);
+        }
+        if (flags == 0) {
+            return monitorGestureInput(monitorToken, requestedName, displayId);
+        }
+        if (Binder.getCallingUid() != Process.SYSTEM_UID) {
+            throw new SecurityException("Gesture monitor flags require the system UID");
+        }
+        mContext.enforceCallingPermission(Manifest.permission.MONITOR_INPUT,
+                "monitorGestureInputWithFlags()");
+        return createGestureInputMonitor(monitorToken, requestedName, displayId, true);
+    }
+
+    private InputMonitor createGestureInputMonitor(@NonNull IBinder monitorToken,
+            @NonNull String requestedName, int displayId, boolean doNotPilfer) {
         Objects.requireNonNull(requestedName, "name must not be null.");
         Objects.requireNonNull(monitorToken, "token must not be null.");
 
@@ -940,7 +962,7 @@ public class InputManagerService extends IInputManager.Stub
             }
 
             final InputChannel inputChannel = createSpyWindowGestureMonitor(
-                    monitorToken, name, sc, displayId, pid, uid);
+                    monitorToken, name, sc, displayId, pid, uid, doNotPilfer);
             return new InputMonitor(inputChannel,
                 new InputMonitorHost(inputChannel.getToken()),
                 new SurfaceControl(sc, "IMS.monitorGestureInput"));

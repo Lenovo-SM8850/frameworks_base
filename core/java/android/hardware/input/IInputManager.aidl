@@ -390,4 +390,7 @@ interface IInputManager {
     PointF getCursorPositionInPhysicalDisplay(int displayId);
 
     PointF getCursorPositionInLogicalDisplay(int displayId);
+
+    // Appended to preserve existing Binder transaction IDs. Permission checked in the service.
+    InputMonitor monitorGestureInputWithFlags(IBinder token, String name, int displayId, int flags);
 }
