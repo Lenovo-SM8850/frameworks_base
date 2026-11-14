@@ -1540,6 +1540,11 @@ public class NotificationStackScrollLayoutController implements Dumpable {
         }
     }
 
+    /** Alpha of notification compositor glass during the QS activity/editor handoff. */
+    public void setColorOSGlassAlpha(float alpha) {
+        mView.setColorOSGlassAlpha(alpha);
+    }
+
     public float getAlpha() {
         return mView.getAlpha();
     }

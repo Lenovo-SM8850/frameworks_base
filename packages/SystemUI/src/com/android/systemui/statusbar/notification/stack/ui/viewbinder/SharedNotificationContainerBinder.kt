@@ -32,6 +32,9 @@ import com.android.systemui.dagger.qualifiers.Main
 import com.android.systemui.keyguard.domain.interactor.KeyguardInteractor
 import com.android.systemui.keyguard.ui.viewmodel.ViewStateAccessor
 import com.android.systemui.lifecycle.repeatWhenAttached
+import com.android.systemui.qs.composefragment.colorOSLaunchGlassFade
+import com.android.systemui.qs.panels.ui.viewmodel.EditModeViewModel
+import com.android.systemui.shade.domain.interactor.ShadeAnimationInteractor
 import com.android.systemui.shade.domain.interactor.ShadeInteractor
 import com.android.systemui.scene.shared.flag.SceneContainerFlag
 import com.android.systemui.shared.Flags.extendedWallpaperEffects
@@ -61,6 +64,8 @@ constructor(
     @AndroidUi private val androidUiDispatcher: CoroutineContext,
     @Main private val mainImmediateDispatcher: CoroutineDispatcher,
     val keyguardInteractor: KeyguardInteractor,
+    private val shadeAnimationInteractor: ShadeAnimationInteractor,
+    private val editModeViewModel: EditModeViewModel,
     private val primaryBouncerInteractor: PrimaryBouncerInteractor,
     private val shadeInteractor: ShadeInteractor,
 ) {
@@ -181,6 +186,15 @@ constructor(
                                     }
                             }
                         }
+                    }
+
+                    launch {
+                        combine(
+                            shadeAnimationInteractor.launchProgress,
+                            editModeViewModel.isEditing,
+                        ) { progress, editing ->
+                            if (editing) 0f else colorOSLaunchGlassFade(progress)
+                        }.collect { controller.setColorOSGlassAlpha(it) }
                     }
 
                     launch { viewModel.translationX.collect { x -> controller.translationX = x } }

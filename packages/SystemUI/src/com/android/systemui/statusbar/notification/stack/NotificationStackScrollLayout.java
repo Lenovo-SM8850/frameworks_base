@@ -1738,6 +1738,25 @@ public class NotificationStackScrollLayout
         }
     }
 
+    // Negative outside the ColorOS style: other notification materials keep their behaviour.
+    private float mColorOSGlassAlpha = -1f;
+
+    public float getColorOSGlassAlpha() {
+        return mColorOSGlassAlpha;
+    }
+
+    public void setColorOSGlassAlpha(float alpha) {
+        final boolean colorOS = android.provider.Settings.System.getIntForUser(
+                mContext.getContentResolver(), android.provider.Settings.System.QS_PANEL_STYLE,
+                0, android.os.UserHandle.USER_CURRENT) == 2;
+        final float glassAlpha = colorOS ? Math.max(0f, Math.min(1f, alpha)) : -1f;
+        if (mColorOSGlassAlpha != glassAlpha) {
+            mColorOSGlassAlpha = glassAlpha;
+            // Flush removed regions while the shade still has a frame to submit.
+            postInvalidateOnAnimation();
+        }
+    }
+
     @Override
     public void setAlpha(float alpha) {
         super.setAlpha(alpha);

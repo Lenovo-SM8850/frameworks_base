@@ -55,6 +55,7 @@ import com.android.systemui.scene.shared.flag.SceneContainerFlag;
 import com.android.systemui.shade.ui.ShadeColors;
 import com.android.systemui.statusbar.notification.ColorUpdateLogger;
 import com.android.systemui.statusbar.notification.row.FooterViewButton;
+import com.android.systemui.statusbar.notification.row.NotificationBackgroundView;
 import com.android.systemui.statusbar.notification.row.StackScrollerDecorView;
 import com.android.systemui.statusbar.notification.stack.AnimationProperties;
 import com.android.systemui.statusbar.notification.stack.ExpandableViewState;
@@ -146,7 +147,9 @@ public class FooterView extends StackScrollerDecorView {
             return;
         }
         final float contentAlpha = mContent.getVisibility() == VISIBLE ? mContent.getAlpha() : 0f;
-        final float alpha = visible ? contentAlpha : 0f;
+        // The ancestor helper already includes content alpha when the glass fade is active.
+        final float alpha = visible
+                ? Math.min(contentAlpha, NotificationBackgroundView.getColorOSBlurAlpha(button)) : 0f;
         blur.setAlpha((int) (255 * alpha));
         if (blur.setVisible(alpha > 0f, false)) postInvalidateOnAnimation();
     }
