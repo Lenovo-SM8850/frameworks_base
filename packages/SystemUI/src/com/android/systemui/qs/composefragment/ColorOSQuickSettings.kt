@@ -39,7 +39,6 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -63,13 +62,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -82,7 +79,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -112,7 +108,6 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridHeadroo
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridRows
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSMinGridRows
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSSliderFill
-import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSGlassTileMaterial
@@ -137,13 +132,14 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import android.content.Context
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.os.UserHandle
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.State
+import io.github.miner7222.systemui.qs.ColorOSBrightnessAuto
+import io.github.miner7222.systemui.qs.ColorOSTabletGap
+import io.github.miner7222.systemui.qs.ColorOSTabletLabelRowGap
+import io.github.miner7222.systemui.qs.ColorOSTabletLayout
+import io.github.miner7222.systemui.qs.colorOSFitScale
+import io.github.miner7222.systemui.qs.colorOSTabletFit
+import io.github.miner7222.systemui.qs.rememberColorOSAutoBrightness
+import io.github.miner7222.systemui.qs.setColorOSAutoBrightness
 
 /** Tile specs that ColorOS pins to the fixed wide slots, in order of preference. */
 private val COLOROS_WIFI_SPECS = listOf("internet", "wifi")
@@ -213,44 +209,10 @@ private const val ColorOSRingerIconRatio = 0.28f
  * Extra space between the ringer row and the round tiles, ColorOS leaves a bit more there. The
  * pager adds [ColorOSGridHeadroom] on top of this, inside its bounds, so the gap is 6dp in all.
  */
-private val ColorOSGridTopPadding = 2.dp
+internal val ColorOSGridTopPadding = 2.dp
 
 /** Smallest round tile the panel shrinks to before it gives up and scrolls instead. */
 private val ColorOSMinTileSize = 56.dp
-
-/**
- * Sizes of the panel on a large screen, the same collapsed and expanded and in both orientations:
- * the round tile (also the height of the pills and the width of the sliders), the gap between
- * tiles, rows and cards, and the gap between rows of labelled round tiles. ColorOS tablets use a
- * 56dp pill and a 15dp gap.
- */
-internal val ColorOSTabletTileSize = 56.dp
-internal val ColorOSTabletGap = 15.dp
-private val ColorOSTabletLabelRowGap = 12.dp
-
-/** Width of the large screen panel: its four tile columns and their gaps. */
-internal val ColorOSTabletPanelWidth = ColorOSTabletTileSize * 4 + ColorOSTabletGap * 3
-
-/** Most rows of round tiles a page of the large screen panel shows. */
-private const val ColorOSTabletMaxGridRows = 5
-
-/**
- * Rows of round tiles per page of the large screen panel, whose tiles keep their size: as many as
- * fit [availableHeight] under the cards, at least [ColorOSMinGridRows].
- */
-internal fun colorOSTabletFit(availableHeight: Dp, labelHeight: Dp, rowGap: Dp): ColorOSFit {
-    val t = ColorOSTabletTileSize
-    if (availableHeight == Dp.Unspecified || availableHeight <= 0.dp) {
-        return ColorOSFit(t, ColorOSGridRows, fits = true)
-    }
-    for (rows in ColorOSTabletMaxGridRows downTo ColorOSMinGridRows) {
-        val needed =
-            t * 4 + ColorOSTabletGap * 4 + ColorOSGridTopPadding + ColorOSGridHeadroom +
-                (t + labelHeight) * rows + rowGap * (rows - 1) + ColorOSGridFooterHeight
-        if (needed <= availableHeight) return ColorOSFit(t, rows, fits = true)
-    }
-    return ColorOSFit(t, ColorOSMinGridRows, fits = false)
-}
 
 /**
  * How the ColorOS panel is sized: the diameter of the round tiles (which is also the height of the
@@ -623,32 +585,6 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
         }
     }
 }
-
-/**
- * Lays the content out [baseHeight] tall, with the width that keeps its proportions, and scales it
- * down to the height it is given when that is less, instead of squeezing its parts.
- */
-internal fun Modifier.colorOSFitScale(baseHeight: Dp): Modifier =
-    layout { measurable, constraints ->
-        val base = baseHeight.roundToPx()
-        val height = constraints.maxHeight
-        if (!constraints.hasBoundedHeight || !constraints.hasBoundedWidth || height >= base ||
-            height <= 0
-        ) {
-            val placeable = measurable.measure(constraints)
-            return@layout layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-        }
-        val scale = height.toFloat() / base
-        val width = constraints.maxWidth
-        val placeable = measurable.measure(Constraints.fixed((width / scale).roundToInt(), base))
-        layout(width, height) {
-            placeable.placeWithLayer(0, 0) {
-                scaleX = scale
-                scaleY = scale
-                transformOrigin = TransformOrigin(0f, 0f)
-            }
-        }
-    }
 
 /** Colours shared by the ColorOS glass cards, matching the tile glass in Tile.kt. */
 internal data class ColorOSGlass(
@@ -1241,19 +1177,13 @@ private fun ColorOSRingerButton(
 }
 
 /** Diameter of the two round buttons of the ColorOS header. */
-private val ColorOSHeaderButtonSize = 40.dp
+internal val ColorOSHeaderButtonSize = 40.dp
 
 /** How far the two buttons sit in from the sides of the panel, ColorOS keeps them off its edge. */
 private val ColorOSHeaderButtonInset = 6.dp
 
 /** How far the row of the buttons is moved up, ColorOS puts it higher above the status row. */
 private val ColorOSHeaderButtonRaise = 5.5.dp
-
-/**
- * Height a large screen panel keeps at its top for the edit and settings buttons, the buttons and
- * the gap under them. Its own header stays as it is.
- */
-internal val ColorOSTabletHeaderHeight = ColorOSHeaderButtonSize + ColorOSTabletGap
 
 /**
  * The glyphs of the two header buttons are drawn at different sizes, as the ColorOS gear is larger
@@ -1324,54 +1254,8 @@ internal fun ColorOSHeaderButtons(
     }
 }
 
-/** The glass of the header buttons, for buttons drawn by another component. */
 @Composable
-internal fun Modifier.colorOSHeaderGlass(shape: Shape): Modifier =
-    glassSurface(colorOSGlass(blurred = LocalColorOSGlassBlur.current != null), shape)
-
-/** Size of the round buttons in the top row of the large screen panel. */
-internal val ColorOSTabletHeaderButtonSize = ColorOSHeaderButtonSize
-
-/**
- * Size of the footer buttons of the large screen panel: smaller than the header buttons of a phone,
- * as the edit and settings buttons of the ColorOS tablet panel.
- */
-internal val ColorOSTabletFooterButtonSize = 34.dp
-
-/**
- * The edit button at the start of the top row of the large screen panel, with the glyph as large as
- * the footer buttons beside it. The footer setting that hides it leaves its place empty.
- */
-@Composable
-internal fun ColorOSTabletEditButton(
-    size: Dp = ColorOSTabletFooterButtonSize,
-    modifier: Modifier = Modifier,
-    onEdit: (Expandable) -> Unit,
-) {
-    val showEdit by rememberSystemSettingEnabled(Settings.System.QS_FOOTER_SHOW_EDIT)
-    if (!showEdit) {
-        Spacer(modifier.size(size))
-        return
-    }
-    Box(modifier) { ColorOSHeaderButton(
-        iconRes = R.drawable.ic_edit,
-        iconSize = ColorOSTabletHeaderIconSize,
-        region = QsHeaderImageTint.Region.EDIT,
-        description = stringResource(R.string.accessibility_quick_settings_edit),
-        glass = colorOSGlass(blurred = LocalColorOSGlassBlur.current != null),
-        onClick = onEdit,
-        size = size,
-    ) }
-}
-
-/** Size of the stock footer buttons, which the large screen panel keeps. */
-internal val ColorOSTabletStockButtonSize = 40.dp
-
-/** Glyph size of the footer buttons of the large screen panel. */
-private val ColorOSTabletHeaderIconSize = 18.dp
-
-@Composable
-private fun ColorOSHeaderButton(
+internal fun ColorOSHeaderButton(
     iconRes: Int,
     iconSize: Dp,
     region: QsHeaderImageTint.Region,
@@ -1420,159 +1304,4 @@ private fun ColorOSHeaderButton(
             )
         }
     }
-}
-
-/**
- * The large screen ColorOS panel: every tile, the media card, the sliders, the ringer switch and My
- * Devices on one four column grid, in the order and sizes of the editor, in pages.
- */
-@Composable
-private fun ContentScope.ColorOSTabletLayout(
-    tiles: List<TileViewModel>,
-    largeTiles: Set<String>,
-    infiniteGridLayout: InfiniteGridLayout,
-    brightnessViewModel: BrightnessSliderViewModel,
-    audioVolumeInteractor: AudioVolumeInteractor,
-    showMedia: Boolean,
-    media: @Composable (Modifier, Dp) -> Unit,
-    listening: () -> Boolean,
-    glass: ColorOSGlass,
-    glassBlur: ColorOSGlassBlur?,
-    labelHeight: Dp,
-    labelsHidden: Boolean,
-    availableHeight: Dp,
-    fullWidth: Dp,
-    onOpenDevices: () -> Unit,
-    reveal: @Composable (Modifier) -> Modifier,
-) {
-    val metrics = rememberColorOSTabletMetrics()
-    val saved by rememberColorOSTabletLayout()
-    val bySpec = remember(tiles) { tiles.associateBy { it.spec.spec } }
-    val entries =
-        remember(saved, tiles) { colorOSTabletEntries(saved, tiles.map { it.spec.spec }) }
-    val spans = remember(entries, largeTiles) { entries.map { colorOSTabletSpan(it, largeTiles) } }
-    CompositionLocalProvider(
-        LocalColorOSTileSize provides metrics.tile,
-        LocalColorOSGap provides metrics.gap,
-        LocalColorOSTablet provides true,
-        LocalColorOSGlassBlur provides glassBlur,
-    ) {
-        ColorOSTabletGrid(
-            entries = entries,
-            spans = spans,
-            metrics = metrics,
-            label = labelHeight,
-            availableHeight = availableHeight,
-            fullWidth = fullWidth,
-            item = { entry, span, itemModifier ->
-                val cell = reveal(itemModifier.fillMaxSize())
-                val top: @Composable (@Composable (Modifier) -> Unit) -> Unit = { content ->
-                    Box(cell, contentAlignment = Alignment.TopCenter) {
-                        content(Modifier.fillMaxWidth().height(metrics.tile))
-                    }
-                }
-                when (entry.key) {
-                    ColorOSTabletItem.MEDIA ->
-                        Box(cell.glassSurface(glass, ColorOSMediaShape)) {
-                            val content = Modifier.fillMaxSize().colorOSFitScale(ColorOSMediaBaseHeight)
-                            if (showMedia) media(content, 0.dp) else ColorOSIdleMediaCard(content)
-                        }
-                    ColorOSTabletItem.BRIGHTNESS ->
-                        ColorOSBrightnessSlider(brightnessViewModel, glass, cell)
-                    ColorOSTabletItem.VOLUME -> ColorOSVolumeSlider(audioVolumeInteractor, glass, cell)
-                    ColorOSTabletItem.RINGER ->
-                        if (span.colSpan > 1) {
-                            top { ColorOSRingerSwitch(audioVolumeInteractor, glass, metrics.tile, it) }
-                        } else {
-                            ColorOSRingerToggle(
-                                audioVolumeInteractor,
-                                glass,
-                                metrics.tile,
-                                labelsHidden,
-                                cell,
-                            )
-                        }
-                    ColorOSTabletItem.MY_DEVICES ->
-                        if (span.colSpan > 1) {
-                            top { ColorOSMyDevices(glass, metrics.tile, onOpenDevices, it) }
-                        } else {
-                            ColorOSMyDevicesToggle(glass, metrics.tile, labelsHidden, onOpenDevices, cell)
-                        }
-                    else ->
-                        bySpec[entry.key]?.let { tile ->
-                            if (span.colSpan > 1) {
-                                top {
-                                    with(infiniteGridLayout) {
-                                        ColorOSWideTile(
-                                            tile,
-                                            listening,
-                                            it,
-                                            iconOnly = false,
-                                            shared = false,
-                                        )
-                                    }
-                                }
-                            } else {
-                                Box(cell, contentAlignment = Alignment.TopCenter) {
-                                    with(infiniteGridLayout) {
-                                        ColorOSWideTile(
-                                            tile,
-                                            listening,
-                                            Modifier.fillMaxWidth()
-                                                .wrapContentHeight(Alignment.Top, unbounded = true),
-                                            iconOnly = true,
-                                            shared = false,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                }
-            },
-        )
-    }
-}
-
-/** Yellow of the automatic brightness icon on the slider. */
-private val ColorOSBrightnessAuto = Color(0xFFFFC107)
-
-/** Whether automatic brightness is on, kept up to date while the setting changes. */
-@Composable
-private fun rememberColorOSAutoBrightness(): State<Boolean> {
-    val context = LocalContext.current
-    fun read() =
-        Settings.System.getIntForUser(
-            context.contentResolver,
-            Settings.System.SCREEN_BRIGHTNESS_MODE,
-            Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
-            UserHandle.USER_CURRENT,
-        ) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
-    val state = remember(context) { mutableStateOf(read()) }
-    DisposableEffect(context) {
-        val observer =
-            object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) {
-                    state.value = read()
-                }
-            }
-        context.contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS_MODE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-        state.value = read()
-        onDispose { context.contentResolver.unregisterContentObserver(observer) }
-    }
-    return state
-}
-
-private fun setColorOSAutoBrightness(context: Context, automatic: Boolean) {
-    Settings.System.putIntForUser(
-        context.contentResolver,
-        Settings.System.SCREEN_BRIGHTNESS_MODE,
-        if (automatic) Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
-        else Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
-        UserHandle.USER_CURRENT,
-    )
 }

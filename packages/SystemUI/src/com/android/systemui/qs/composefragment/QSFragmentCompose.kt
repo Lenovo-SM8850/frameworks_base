@@ -220,6 +220,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import lineageos.providers.LineageSettings
+import io.github.miner7222.systemui.qs.ColorOSTabletEditButton
+import io.github.miner7222.systemui.qs.ColorOSTabletFooterButtonSize
+import io.github.miner7222.systemui.qs.ColorOSTabletStockButtonSize
+import io.github.miner7222.systemui.qs.colorOSHeaderGlass
 
 @SuppressLint("ValidFragment")
 class QSFragmentCompose
