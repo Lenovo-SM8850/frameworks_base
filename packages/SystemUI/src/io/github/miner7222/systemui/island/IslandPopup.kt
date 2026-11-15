@@ -147,10 +147,8 @@ import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPo
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupCameraClearance
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
-import com.android.systemui.statusbar.quickactions.ui.compose.PageDots
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.SystemEventPopup
-import com.android.systemui.statusbar.quickactions.ui.compose.islandBoundsInScreen
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberDynamicIslandSizeScale
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupColorMode
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberPopupLaunchAction

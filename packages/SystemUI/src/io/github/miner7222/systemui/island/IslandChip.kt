@@ -93,13 +93,10 @@ import com.android.systemui.statusbar.quickactions.shared.model.PopupContentMode
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.shared.model.chipText
 import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandAnchor
-import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandCutoutFillMargin
 import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandCutoutSpec
-import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandDefaultCenterY
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalDynamicIslandWidth
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandContentProgress
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandContentSpatialMotion
-import com.android.systemui.statusbar.quickactions.ui.compose.PageDots
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -115,8 +112,6 @@ import com.android.systemui.statusbar.quickactions.ui.compose.collapsedIslandTex
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberDynamicIslandSizeScale
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberElapsedDurationText
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberRemainingDurationText
-import com.android.systemui.statusbar.quickactions.ui.compose.islandBoundsInScreen
-import com.android.systemui.statusbar.quickactions.ui.compose.DynamicIslandOutlineWidth
 import com.android.systemui.statusbar.quickactions.ui.compose.AlarmCountdownTickMs
 import com.android.systemui.statusbar.quickactions.ui.compose.CameraSplitSpacing
 

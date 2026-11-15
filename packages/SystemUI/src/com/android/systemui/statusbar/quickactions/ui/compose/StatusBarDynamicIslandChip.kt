@@ -23,18 +23,12 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.indication
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
@@ -42,7 +36,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -65,33 +58,22 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.Placeable
-import androidx.compose.ui.layout.findRootCoordinates
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.constrainHeight
-import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
-import com.android.compose.ui.graphics.painter.rememberDrawablePainter
 import com.android.systemui.common.shared.model.Icon as IconModel
 import com.android.systemui.common.ui.compose.Icon
-import com.android.systemui.common.ui.compose.load
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import com.android.systemui.statusbar.quickactions.popups.shared.model.SystemEventKind
@@ -103,6 +85,10 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import io.github.miner7222.systemui.island.IslandChip
+import io.github.miner7222.systemui.island.DynamicIslandBaseHeight
+import io.github.miner7222.systemui.island.DynamicIslandDefaultCenterY
+import io.github.miner7222.systemui.island.cutoutMinimumHeight
+import io.github.miner7222.systemui.island.cutoutMinimumWidth
 
 // Only icon/text layers animate. Surface measurement remains the popup's stable morph anchor.
 internal val LocalIslandContentProgress = staticCompositionLocalOf<() -> Float> { { 1f } }
@@ -113,7 +99,7 @@ internal const val AlarmCountdownTickMs = 30_000L
 private val DynamicIslandEmbeddedGapFallbackWidth = 38.dp
 private val DynamicIslandEmbeddedGapMinWidth = 34.dp
 private val DynamicIslandEmbeddedGapMaxWidth = 88.dp
-private val DynamicIslandEmbeddedGapSidePadding = 10.dp
+internal val DynamicIslandEmbeddedGapSidePadding = 10.dp
 enum class DynamicIslandAnchor {
     CENTER,
     START,
@@ -138,19 +124,6 @@ data class DynamicIslandCutoutSpec(
     val holeHeight: Dp = 20.dp,
     val holeCenterY: Dp? = null,
 )
-internal val DynamicIslandCutoutFillMargin = 1.5.dp
-internal val DynamicIslandOutlineWidth = 1.dp
-/** Collapsed height at a height scale of one, with or without a camera to cover. */
-internal val DynamicIslandBaseHeight = 35.dp
-
-/** Vertical centre of the island without a camera, where it sits on a camera that has one. */
-internal val DynamicIslandDefaultCenterY = 24.5.dp
-
-private fun cutoutMinimumHeight(crossAxisSize: Dp): Dp =
-    crossAxisSize + (DynamicIslandCutoutFillMargin + DynamicIslandOutlineWidth) * 2
-
-private fun cutoutMinimumWidth(mainAxisSize: Dp, minimumHeight: Dp): Dp =
-    mainAxisSize + minimumHeight + (DynamicIslandCutoutFillMargin + DynamicIslandOutlineWidth) * 2
 
 private val DynamicIslandHoleSidePadding = 4.dp
 private val DynamicIslandScreenEdgeMargin = 4.dp
@@ -381,113 +354,10 @@ internal fun rememberDynamicIslandSizeScale(): Pair<Float, Float> {
     return widthScale to heightScale
 }
 
-internal fun LayoutCoordinates.islandBoundsInScreen(view: android.view.View): Rect {
-    val location = IntArray(2)
-    view.getLocationOnScreen(location)
-    return findRootCoordinates().localBoundingBoxOf(this, clipBounds = false)
-        .translate(Offset(location[0].toFloat(), location[1].toFloat()))
-}
-
-internal fun LayoutCoordinates.islandBoundsInWindow(): Rect {
-    val root = findRootCoordinates()
-    return root.localBoundingBoxOf(this, clipBounds = false).translate(root.positionInWindow())
-}
-
-@Composable
-internal fun rememberDynamicIslandWidth(cutoutSpec: DynamicIslandCutoutSpec): Dp {
-    val style = MaterialTheme.typography.labelLarge
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val context = LocalContext.current
-    val full = context.getString(R.string.dynamic_island_charging_full)
-    val flashlight = context.getString(R.string.dynamic_island_flashlight_short)
-    val sideBudget = remember(style, measurer, density, full, flashlight) {
-        fun textWidth(text: String): Dp =
-            (measurer.measure(
-                text = text,
-                style = style,
-                density = density,
-                softWrap = false,
-                maxLines = 1,
-            ).multiParagraph.maxIntrinsicWidth / density.density).dp
-        val startText = listOf("+99:59", "999.99W", flashlight).maxOf { textWidth(it) }
-        val endText = listOf("+99:59", "99:59", "100%", full).maxOf { textWidth(it) }
-        maxOf(16.dp + 6.dp + startText, endText)
-    }
-    return remember(sideBudget, cutoutSpec.cutoutWidth) {
-        val clearance = DynamicIslandEmbeddedGapSidePadding * 2
-        val width = (sideBudget + 10.dp) * 2 + cutoutSpec.cutoutWidth + clearance
-        // A fixed 184dp ceiling clips the utility labels at larger font scales.
-        (ceil(width.value / 4f) * 4f).dp.coerceAtLeast(120.dp)
-    }
-}
-
-/**
- * The page indicator of the normal style popup: a pill of dots beside the card. The touch target is
- * at least [PageDotsTouchSize] square and the pill sits at the edge of it that faces the card, so
- * the popup's gap to the card is the visible one. [cardOnLeft] is true when the card is to the left
- * of the dots. [onClickLabel] names what a tap does for accessibility services.
- */
-@Composable
-internal fun PageDots(
-    count: Int,
-    index: Int,
-    color: Color,
-    onClick: () -> Unit,
-    cardOnLeft: Boolean = true,
-    onClickLabel: String? = null,
-) {
-    val visible = minOf(count, MaxPageDots)
-    val first = (index - visible / 2).coerceIn(0, count - visible)
-    val interactionSource = remember { MutableInteractionSource() }
-    Box(
-        modifier =
-            Modifier.defaultMinSize(minWidth = PageDotsTouchSize, minHeight = PageDotsTouchSize)
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    role = Role.Button,
-                    onClickLabel = onClickLabel,
-                    onClick = onClick,
-                ),
-        contentAlignment = if (cardOnLeft) Alignment.CenterStart else Alignment.CenterEnd,
-    ) {
-        Column(
-            modifier =
-                Modifier.clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f))
-                    // The press shows on the pill, not on the whole touch target.
-                    .indication(interactionSource, LocalIndication.current)
-                    .padding(horizontal = PageDotsTapPadding, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(PageDotSpacing),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            repeat(visible) { slot ->
-                val isCurrent = first + slot == index
-                val height by
-                    animateDpAsState(
-                        targetValue = if (isCurrent) PageDotActiveHeight else PageDotSize,
-                        label = "pageDotHeight",
-                    )
-                Box(
-                    modifier =
-                        Modifier.size(width = PageDotSize, height = height)
-                            .background(
-                                color = color.copy(alpha = if (isCurrent) 0.9f else 0.45f),
-                                shape = CircleShape,
-                            )
-                )
-            }
-        }
-    }
-}
-
-private const val MaxPageDots = 5
-private val PageDotSize = 4.dp
-private val PageDotActiveHeight = 10.dp
-private val PageDotSpacing = 3.dp
-private val PageDotsTapPadding = 4.dp
-private val PageDotsTouchSize = 48.dp
+internal const val MaxPageDots = 5
+internal val PageDotSize = 4.dp
+internal val PageDotSpacing = 3.dp
+internal val PageDotsTapPadding = 4.dp
 
 /** Single centered status bar capsule styled like a compact dynamic island. */
 @OptIn(ExperimentalFoundationApi::class)

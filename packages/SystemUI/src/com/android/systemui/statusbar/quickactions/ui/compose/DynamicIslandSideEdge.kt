@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings
 import kotlin.math.roundToInt
 import com.android.internal.R as InternalR
+import io.github.miner7222.systemui.island.DynamicIslandDefaultCenterY
 
 /** Display edge that holds the camera cutout the Dynamic Island is docked to. */
 enum class DynamicIslandEdge {
