@@ -41,6 +41,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import androidx.annotation.MainThread;
 
@@ -441,8 +442,32 @@ public class NotificationContentView extends FrameLayout implements Notification
         mContractedChild = child;
         mContractedWrapper = NotificationViewWrapper.wrap(getContext(), child,
                 mContainingNotification);
+        if (child.getId() == com.android.internal.R.id.status_bar_latest_event_content) {
+            keepCollapsedTopLineAtFontHeight(child);
+        }
         // The contracted wrapper has changed. If this is the shown wrapper, we need to update it.
         updateShownWrapper(mVisibleType);
+    }
+
+    /**
+     * The collapsed height of the platform templates fits the top line and the text line at the
+     * line height of the default font. The fallback fonts of some scripts are taller, and the top
+     * line took their line spacing, which left the text line less than its own height and clipped
+     * it. Their glyphs fit in the default line height, so the top line keeps it and the text line
+     * gets its room back.
+     */
+    private static void keepCollapsedTopLineAtFontHeight(View contracted) {
+        if (contracted.findViewById(com.android.internal.R.id.notification_top_line)
+                instanceof ViewGroup topLine) {
+            for (int i = 0; i < topLine.getChildCount(); i++) {
+                if (topLine.getChildAt(i) instanceof TextView line) {
+                    line.setFallbackLineSpacing(false);
+                }
+            }
+        }
+        if (contracted.findViewById(com.android.internal.R.id.title) instanceof TextView title) {
+            title.setFallbackLineSpacing(false);
+        }
     }
 
     private NotificationViewWrapper getWrapperForView(View child) {
