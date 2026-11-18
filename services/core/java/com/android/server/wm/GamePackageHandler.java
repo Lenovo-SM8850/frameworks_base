@@ -15,17 +15,24 @@
  */
 package com.android.server.wm;
 
+import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.database.ContentObserver;
 import android.os.Handler;
 import android.os.UserHandle;
 import android.provider.Settings;
 
+import java.util.List;
+
 class GamePackageHandler {
+    private static final String AUTO_DETECT_KEY = "gamespace_auto_game_detect";
+
     private final Context mContext;
     private final PackageManager mPackageManager;
     private final GameListManager mGameListManager;
@@ -40,7 +47,7 @@ class GamePackageHandler {
 
     private boolean isAutoDetectEnabled() {
         return Settings.System.getIntForUser(mContext.getContentResolver(),
-                "gamespace_auto_game_detect", 1,
+                AUTO_DETECT_KEY, 1,
                 UserHandle.USER_CURRENT) != 0;
     }
 
@@ -50,18 +57,47 @@ class GamePackageHandler {
         filter.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
         filter.addDataScheme("package");
         mContext.registerReceiver(new PackageReceiver(), filter, Context.RECEIVER_NOT_EXPORTED);
+
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(AUTO_DETECT_KEY),
+                false,
+                new ContentObserver(mHandler) {
+                    @Override
+                    public void onChange(boolean selfChange) {
+                        // Listed games are skipped, so a repeated scan changes nothing.
+                        if (isAutoDetectEnabled()) {
+                            scanInstalledGames();
+                        }
+                    }
+                },
+                UserHandle.USER_ALL);
     }
 
     private void handlePackageChanged(String action, String packageName) {
         if (Intent.ACTION_PACKAGE_ADDED.equals(action)) {
             if (!isAutoDetectEnabled()) return;
-            if (mGameListManager.isDenied(packageName)) return;
-            if (mGameListManager.isGame(packageName)) return;
-            if (isGame(packageName)) {
-                mGameListManager.addGame(packageName);
-            }
+            addIfGame(packageName);
         } else if (Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(action)) {
             mGameListManager.removeGame(packageName);
+        }
+    }
+
+    private void addIfGame(String packageName) {
+        if (mGameListManager.isDenied(packageName)) return;
+        if (mGameListManager.isGame(packageName)) return;
+        if (isGame(packageName)) {
+            mGameListManager.addGame(packageName);
+        }
+    }
+
+    // Adds the launchable games that were installed while detection was off.
+    private void scanInstalledGames() {
+        final Intent launcher = new Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER);
+        final List<ResolveInfo> apps = mPackageManager.queryIntentActivitiesAsUser(launcher,
+                PackageManager.ResolveInfoFlags.of(0), ActivityManager.getCurrentUser());
+        for (ResolveInfo app : apps) {
+            addIfGame(app.activityInfo.packageName);
         }
     }
 
