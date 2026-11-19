@@ -222,6 +222,7 @@ final class ComposeTabBar {
         }
         if (r.bottom < view.getHeight() - 120 * density) return false;
         int selected = 0;
+        int firstLeft = Integer.MIN_VALUE;
         int lastRight = Integer.MIN_VALUE / 2;
         for (int i = 0; i < node.getChildCount(); i++) {
             int id = AccessibilityNodeInfo.getVirtualDescendantId(node.getChildId(i));
@@ -233,11 +234,14 @@ final class ComposeTabBar {
                 continue;
             }
             if (c.left < lastRight - 2) return false;
+            if (firstLeft == Integer.MIN_VALUE) firstLeft = c.left;
             lastRight = c.right;
             tabs.add(id);
             if (child.isSelected()) selected++;
         }
-        return tabs.size() >= 2 && tabs.size() <= 6 && selected == 1;
+        if (tabs.size() < 2 || tabs.size() > 6 || selected != 1) return false;
+        // Tabs that span only part of the bar sit in the app's own floating pill.
+        return lastRight - firstLeft >= r.width() * 0.8f;
     }
 
     private static final int[] sLocation = new int[2];
