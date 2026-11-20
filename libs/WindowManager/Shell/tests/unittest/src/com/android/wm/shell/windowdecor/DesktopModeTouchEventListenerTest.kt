@@ -388,12 +388,12 @@ class DesktopModeTouchEventListenerTest : ShellTestCase() {
     }
 
     @Test
-    fun floatingCaptionFling_finishesDragBeforeMiniRelayout() {
+    fun floatingCaptionMiniDrop_finishesDragBeforeMiniRelayout() {
         verifyFloatingHandleGesture(com.android.wm.shell.R.id.caption_handle,
-            drag = true, fling = true)
+            drag = true, miniDrop = true)
     }
 
-    private fun verifyFloatingHandleGesture(handleId: Int, drag: Boolean, fling: Boolean = false) {
+    private fun verifyFloatingHandleGesture(handleId: Int, drag: Boolean, miniDrop: Boolean = false) {
         val task = createAppHeaderTask(TASK_BOUNDS).apply {
             isFloatingWindow = true
             displayId = DEFAULT_DISPLAY
@@ -413,9 +413,9 @@ class DesktopModeTouchEventListenerTest : ShellTestCase() {
             .thenReturn(settled)
         whenever(positioner.onDragPositioningEnd(any(), any(), any()))
             .thenReturn(if (drag) settled else Rect(TASK_BOUNDS))
-        if (fling) {
+        if (miniDrop) {
             org.mockito.kotlin.doAnswer {
-                val travel = it.getArgument<android.graphics.PointF>(7)
+                val travel = it.getArgument<android.graphics.PointF>(4)
                 assertThat(travel.x).isEqualTo(250f)
                 assertThat(travel.y).isEqualTo(150f)
                 val order = org.mockito.kotlin.inOrder(positioner, decor)
@@ -423,7 +423,7 @@ class DesktopModeTouchEventListenerTest : ShellTestCase() {
                 order.verify(decor).setIsDragging(false)
                 true
             }.whenever(mockPinnedLayerController).onCaptionDragEnded(
-                any(), eq(task), any(), any(), any(), any(), any(), any())
+                any(), eq(task), any(), any(), any())
         }
         val repository = mock<com.android.wm.shell.desktopmode.data.DesktopRepository>()
         val repositories = mock<DesktopUserRepositories>()
@@ -466,7 +466,7 @@ class DesktopModeTouchEventListenerTest : ShellTestCase() {
         }
         dispatch(MotionEvent.ACTION_UP, 500, if (drag) 650f else 400f,
             if (drag) 350f else 200f)
-        verify(mockPinnedLayerController, org.mockito.kotlin.times(if (fling) 0 else 1))
+        verify(mockPinnedLayerController, org.mockito.kotlin.times(if (miniDrop) 0 else 1))
             .onDragEnded(any(), eq(task), eq(TASK_BOUNDS),
                 eq(if (drag) settled else TASK_BOUNDS), eq(DEFAULT_DISPLAY))
         org.mockito.kotlin.verify(actions, org.mockito.kotlin.times(if (drag) 0 else 1))
