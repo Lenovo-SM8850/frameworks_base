@@ -135,6 +135,8 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
     protected boolean mIsBlurSupported;
     protected boolean mIsLockscreenBlurSupported;
     protected boolean mUseTransparent;
+    /** Whether the device is dozing; the card is then drawn opaque, without glass or blur. */
+    protected boolean mDozing;
 
     public ActivatableNotificationView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -392,7 +394,7 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
     }
 
     protected boolean usesTransparentBackground() {
-        return mIsBlurSupported
+        return !mDozing && mIsBlurSupported
                 && (!mOnKeyguard || lockscreenBlurForNotifications());
     }
 
@@ -899,6 +901,17 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
             updateBackgroundTint();
             mBackgroundNormal.setBlurBackgroundEnabled(usesBlurredBackground());
         }
+    }
+
+    /** Draws the card opaque while the device is dozing, and with glass or blur otherwise. */
+    public void setDozing(boolean dozing) {
+        if (mDozing == dozing) {
+            return;
+        }
+        mDozing = dozing;
+        mBackgroundNormal.setDozing(dozing);
+        updateIfNeeded();
+        updateBackgroundTint();
     }
 
     @Override

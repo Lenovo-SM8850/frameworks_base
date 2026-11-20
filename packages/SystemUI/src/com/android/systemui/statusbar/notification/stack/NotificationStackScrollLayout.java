@@ -3563,6 +3563,7 @@ public class NotificationStackScrollLayout
                 row.setBlurRegionSuppressed(true);
             }
             row.setBlurRegionFade(mBlurRegionFade);
+            row.setDozing(mAmbientState.isDozing());
         }
         generateAddAnimation(child, false /* fromMoreCard */);
         updateAnimationState(child);
@@ -5469,6 +5470,11 @@ public class NotificationStackScrollLayout
             return;
         }
         mAmbientState.setDozing(dozing);
+        for (int i = 0; i < getChildCount(); i++) {
+            if (getChildAt(i) instanceof ExpandableNotificationRow row) {
+                row.setDozing(dozing);
+            }
+        }
         requestChildrenUpdate();
         notifyHeightChangeListener(mShelf);
     }

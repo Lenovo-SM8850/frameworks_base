@@ -145,6 +145,9 @@ public class NotificationBackgroundView extends View implements Dumpable,
     private boolean mDrawDismissButtonCutout = false;
     private boolean mOnKeyguard = true;
 
+    // While dozing the card keeps its plain color, without the glass fill or rim.
+    private boolean mDozing;
+
     private boolean mIsBlurSupported = false;
 
     public NotificationBackgroundView(Context context, AttributeSet attrs) {
@@ -260,7 +263,7 @@ public class NotificationBackgroundView extends View implements Dumpable,
     /** Strokes the Liquid Glass rim around a card. Not drawn on a card with a ColorOS material. */
     private void drawGlassRim(Canvas canvas, @Nullable Rect bounds) {
         if (bounds == null || bounds.isEmpty() || !LiquidGlass.isOnShade(getContext())
-                || (mCosMaterial != 0 && mBackgroundBlurDrawable != null)) {
+                || (mCosMaterial != 0 && mBackgroundBlurDrawable != null) || mDozing) {
             return;
         }
         mGlassBounds.set(bounds);
@@ -274,7 +277,9 @@ public class NotificationBackgroundView extends View implements Dumpable,
      * shade colors are never touched, those stay with ShadeColors and shade_color_style.
      */
     private int surfaceFor(int tintColor) {
-        if (tintColor != mNormalColor || !LiquidGlass.isOnShade(getContext())) return tintColor;
+        if (mDozing || tintColor != mNormalColor || !LiquidGlass.isOnShade(getContext())) {
+            return tintColor;
+        }
         // The ColorOS material frosts the card itself, so the fill stays clear. The light card
         // material is too bright for the dark text, it gets a light frost under it.
         if (mCosMaterial != 0) {
@@ -460,6 +465,11 @@ public class NotificationBackgroundView extends View implements Dumpable,
         // TODO: (b/445495701) - Determine why this value is opposite of expected, then use in #draw
         // to restrict the blurred background to the keyguard only.
         mOnKeyguard = onKeyguard;
+    }
+
+    /** Sets whether the device is dozing. The caller re-applies the tint. */
+    public void setDozing(boolean dozing) {
+        mDozing = dozing;
     }
 
     /**

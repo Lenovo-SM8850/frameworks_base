@@ -1145,6 +1145,7 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
         mChildrenContainer.addNotification(row, childIndex);
         onAttachedChildrenCountChanged();
         row.setIsChildInGroup(true, this);
+        row.setDozing(mDozing);
     }
 
     public void removeChildNotification(ExpandableNotificationRow row) {
@@ -3185,6 +3186,16 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
     }
 
     @Override
+    public void setDozing(boolean dozing) {
+        super.setDozing(dozing);
+        if (mIsSummaryWithChildren) {
+            for (ExpandableNotificationRow child : mChildrenContainer.getAttachedChildren()) {
+                child.setDozing(dozing);
+            }
+        }
+    }
+
+    @Override
     public void setBlurRegionFade(float fade) {
         super.setBlurRegionFade(fade);
         if (mIsSummaryWithChildren) {
@@ -4796,6 +4807,7 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
         // Row background should be opaque when it's displayed as a heads-up notification or
         // displayed on keyguard.
         // Also, for an unpinned HUN on the unlocked shade, the row bg should be transparent.
+        if (mDozing) return false;
         if (mOnKeyguard) return mIsLockscreenBlurSupported;
         return super.usesTransparentBackground()
                 && !mustStayOnScreen()
