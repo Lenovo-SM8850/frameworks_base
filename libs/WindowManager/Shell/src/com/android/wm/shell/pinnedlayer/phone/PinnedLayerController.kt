@@ -159,8 +159,11 @@ class PinnedLayerController(
     fun moveMini(task: TaskInfo, bounds: Rect) { miniInteractions?.move(task, bounds) }
     fun getMiniStashTarget(task: TaskInfo, bounds: Rect): FloatingMiniState.Edge =
         miniInteractions?.getStashTarget(task, bounds) ?: FloatingMiniState.Edge.NONE
-    fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect) {
-        miniInteractions?.onDragEnded(task, start, end)
+    /** Ends a mini drag; the release velocity is in px/s. */
+    @JvmOverloads
+    fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect, velocityX: Float = 0f,
+        velocityY: Float = 0f) {
+        miniInteractions?.onDragEnded(task, start, end, null, velocityX, velocityY)
     }
     fun enterMiniAfterResize(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,
         bounds: Rect, scale: Float) {

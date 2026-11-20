@@ -742,6 +742,70 @@ class FloatingMiniControllerTest : ShellTestCase() {
         assertThat(target.scale).isEqualTo(.45f)
     }
 
+    private fun release(end: Rect, velocityX: Float, velocityY: Float = 0f): Harness {
+        val h = Harness()
+        h.controller.onDragEnded(h.task, Rect(300, 500, 660, 1040), end, null, velocityX, velocityY)
+        return h
+    }
+
+    @Test fun fastRelease_endsAtProjectedPositionWithDecelerationAndScaledDuration() {
+        // 1890 / (3 * 4.2) = 150 px
+        val h = release(Rect(300, 500, 660, 1040), 1890f)
+        verify(h.animator).setDuration(350)
+        verify(h.animator).setInterpolator(
+            com.android.wm.shell.shared.animation.Interpolators.LINEAR_OUT_SLOW_IN)
+        h.interrupt()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        assertThat(entry.bounds).isEqualTo(Rect(450, 500, 810, 1040))
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+    }
+
+    @Test fun fastRelease_projectionStaysInsideTheReleaseClampArea() {
+        val h = release(Rect(300, 500, 660, 1040), 12600f)
+        verify(h.animator).setDuration(400)
+        h.interrupt()
+        // The margin is 8 and the stable area is 0,100,1200,1900.
+        assertThat(requireNotNull(h.state.get(h.task.userId, h.task.taskId)).bounds)
+            .isEqualTo(Rect(832, 500, 1192, 1040))
+    }
+
+    @Test fun slowRelease_endsAtReleasedPositionWithTheDefaultAnimation() {
+        val h = release(Rect(300, 500, 660, 1040), 100f, 100f)
+        verify(h.animator).setDuration(300)
+        verify(h.animator).setInterpolator(
+            com.android.wm.shell.shared.animation.Interpolators.FAST_OUT_SLOW_IN)
+        h.interrupt()
+        assertThat(requireNotNull(h.state.get(h.task.userId, h.task.taskId)).bounds)
+            .isEqualTo(Rect(300, 500, 660, 1040))
+    }
+
+    @Test fun fastRelease_pastTheStashEdgeStillStashesOnTheReleasedRect() {
+        val h = release(Rect(-217, 200, 143, 740), -3000f)
+        verify(h.animator).setDuration(300)
+        h.interrupt()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        assertThat(entry.bounds).isEqualTo(Rect(-332, 200, 28, 740))
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.LEFT)
+    }
+
+    @Test fun fastRelease_towardASideFromInsideFollowsTheStashRuleOnTheProjectedRect() {
+        val h = release(Rect(100, 500, 460, 1040), -12600f)
+        verify(h.animator).setDuration(292)
+        h.interrupt()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        // The projected rect stops at the margin, short of the stash threshold.
+        assertThat(entry.edge).isEqualTo(FloatingMiniState.Edge.NONE)
+        assertThat(entry.bounds).isEqualTo(Rect(8, 500, 368, 1040))
+    }
+
+    @Test fun fastRelease_atACornerKeepsTheCornerDropAnimation() {
+        val h = release(Rect(0, 100, 360, 640), 3000f)
+        verify(h.animator).setDuration(300)
+        h.interrupt()
+        assertThat(requireNotNull(h.state.get(h.task.userId, h.task.taskId)).bounds)
+            .isEqualTo(Rect(8, 108, 368, 648))
+    }
+
     @Test fun placement_filtersDisplaysHiddenTasksAndStashedStrips() {
         val h = Harness()
         val bounds = Rect(8, 108, 368, 648)

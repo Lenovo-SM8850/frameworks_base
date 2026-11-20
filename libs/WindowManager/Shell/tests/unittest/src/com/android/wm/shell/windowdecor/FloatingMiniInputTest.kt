@@ -143,7 +143,8 @@ class FloatingMiniInputTest : ShellTestCase() {
             }
         verify(controller).moveMini(org.mockito.kotlin.eq(task), org.mockito.kotlin.any())
         verify(controller).endMiniDrag(org.mockito.kotlin.eq(task),
-            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            org.mockito.kotlin.any())
         verify(controller, never()).restoreMini(task)
     }
 
@@ -155,7 +156,8 @@ class FloatingMiniInputTest : ShellTestCase() {
             input.close()
             null
         }.whenever(controller).endMiniDrag(org.mockito.kotlin.eq(task),
-            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            org.mockito.kotlin.any())
         for (index in 0..4) {
             val action = when (index) {
                 0 -> MotionEvent.ACTION_DOWN
@@ -172,7 +174,31 @@ class FloatingMiniInputTest : ShellTestCase() {
         }
         verify(controller, never()).endMiniTap(task)
         verify(controller).endMiniDrag(org.mockito.kotlin.eq(task),
-            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            org.mockito.kotlin.any())
+    }
+
+    @Test fun dragRelease_passesScreenVelocityInPxPerSecond() {
+        val view = view()
+        val time = SystemClock.uptimeMillis()
+        for (index in 0..4) {
+            val action = when (index) {
+                0 -> MotionEvent.ACTION_DOWN
+                4 -> MotionEvent.ACTION_UP
+                else -> MotionEvent.ACTION_MOVE
+            }
+            // 50 px every 10 ms to the upper left is 5000 px/s per axis before the fling cap.
+            MotionEvent.obtain(time, time + index * 10, action,
+                500f - index * 50, 700f - index * 50, 0).also {
+                it.setLocation(20f, 20f)
+                view.dispatchTouchEvent(it)
+                it.recycle()
+            }
+        }
+        verify(controller).endMiniDrag(org.mockito.kotlin.eq(task),
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            org.mockito.ArgumentMatchers.floatThat { it < -1000f },
+            org.mockito.ArgumentMatchers.floatThat { it < -1000f })
     }
 
     @Test fun cancelledDrag_endsDragWithoutMoving() {
@@ -187,7 +213,8 @@ class FloatingMiniInputTest : ShellTestCase() {
                 }
             }
         verify(controller).endMiniDrag(org.mockito.kotlin.eq(task),
-            org.mockito.kotlin.any(), org.mockito.kotlin.any())
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.eq(0f),
+            org.mockito.kotlin.eq(0f))
     }
 
     @Test fun stashFeedback_rearmsAndResetsOnTransitionCancelAndClose() {
