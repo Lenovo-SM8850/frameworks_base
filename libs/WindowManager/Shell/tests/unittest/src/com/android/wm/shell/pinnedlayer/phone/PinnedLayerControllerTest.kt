@@ -16,6 +16,8 @@
 
 package com.android.wm.shell.pinnedlayer.phone
 
+import android.animation.Animator
+import android.animation.ValueAnimator
 import android.app.ActivityManager.RunningTaskInfo
 import android.app.WindowConfiguration
 import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
@@ -1652,4 +1654,165 @@ class PinnedLayerControllerTest : ShellTestCase() {
         assertTrue(wct.hierarchyOps.any { !it.toTop })
     }
 
+    private inner class FadeHarness {
+        val events = mutableListOf<String>()
+        val animator = mock<ValueAnimator>()
+        val surface = mock<SurfaceControl>()
+        val shellController = mock<ShellController>()
+        val recents = mock<RecentsTransitionHandler>()
+        val task = setupTask(taskId = 201)
+        var animators = 0
+        lateinit var updateListener: ValueAnimator.AnimatorUpdateListener
+        lateinit var animatorListener: Animator.AnimatorListener
+        val overview: OverviewVisibilityChangeListener
+        val keyguard: KeyguardChangeListener
+
+        init {
+            whenever(surface.isValid).thenReturn(true)
+            org.mockito.kotlin.doAnswer { updateListener = it.getArgument(0); null }
+                .whenever(animator).addUpdateListener(any())
+            org.mockito.kotlin.doAnswer { animatorListener = it.getArgument(0); null }
+                .whenever(animator).addListener(any())
+            org.mockito.kotlin.doAnswer { events += "wct"; null }
+                .whenever(shellTaskOrganizer).applyTransaction(any())
+            org.mockito.kotlin.doAnswer { events += "show"; emptyList<SurfaceControl>() }
+                .whenever(recents).setFloatingTasksHidden(eq(DEFAULT_DISPLAY), eq(false), any())
+            val fade = FloatingVisibilityFade(
+                animators = { animators++; animator },
+                transactions = {
+                    mock<SurfaceControl.Transaction>().also { t ->
+                        org.mockito.kotlin.doAnswer { events += "alpha:" + it.getArgument<Float>(1); t }
+                            .whenever(t).setAlpha(any(), any())
+                    }
+                },
+                vsyncId = { 0L })
+            pinnedLayerController = PinnedLayerController(shellInit, transitions,
+                shellDesktopState, rootTaskDisplayAreaOrganizer, shellTaskOrganizer,
+                presentationController, windowDragTransitionHandler,
+                pinnedWindowRepositionAnimationHandler, windowRepositionAnimator,
+                transactionPool, multiDisplayDragMoveIndicatorController, fade,
+                { mock<SurfaceControl.Transaction>() })
+            pinTask(task)
+            whenever(shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY))
+                .thenReturn(arrayListOf(task))
+            @Suppress("UNCHECKED_CAST")
+            (PinnedLayerController::class.java.getDeclaredField("taskLeashes").apply {
+                isAccessible = true
+            }.get(pinnedLayerController) as MutableMap<Int, SurfaceControl>)[task.taskId] = surface
+            pinnedLayerController.configureVisibility(shellController, recents)
+            val overviewCaptor = argumentCaptor<OverviewVisibilityChangeListener>()
+            val keyguardCaptor = argumentCaptor<KeyguardChangeListener>()
+            verify(shellController).addOverviewVisibilityChangeListener(overviewCaptor.capture())
+            verify(shellController).addKeyguardChangeListener(keyguardCaptor.capture())
+            overview = overviewCaptor.firstValue
+            keyguard = keyguardCaptor.firstValue
+            org.mockito.Mockito.clearInvocations(shellTaskOrganizer, recents)
+            events.clear()
+        }
+
+        fun frame(fraction: Float) {
+            whenever(animator.animatedValue).thenReturn(fraction)
+            updateListener.onAnimationUpdate(animator)
+        }
+
+        fun end() = animatorListener.onAnimationEnd(animator)
+
+        fun hiddenFlags(): List<Boolean> {
+            val wcts = argumentCaptor<WindowContainerTransaction>()
+            verify(shellTaskOrganizer, org.mockito.kotlin.atLeast(0)).applyTransaction(wcts.capture())
+            return wcts.allValues.map { it.changes[task.token.asBinder()]!!.hidden }
+        }
+    }
+
+    @Test
+    fun overviewShown_fadeOutDefersHideUntilAnimatorEnds() {
+        val h = FadeHarness()
+
+        h.overview.onOverviewShown(DEFAULT_DISPLAY)
+
+        assertEquals(1, h.animators)
+        verify(h.animator).setDuration(150L)
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
+        verify(h.recents, never()).setFloatingTasksHidden(DEFAULT_DISPLAY, true)
+        h.frame(.5f)
+        verify(shellTaskOrganizer, never()).applyTransaction(any())
+        // A repeated call must not restart the running fade.
+        h.overview.onOverviewShown(DEFAULT_DISPLAY)
+        assertEquals(1, h.animators)
+
+        h.end()
+
+        assertEquals(listOf(true), h.hiddenFlags())
+        verify(h.recents).setFloatingTasksHidden(DEFAULT_DISPLAY, true)
+        assertEquals(listOf("alpha:0.5", "alpha:0.0", "wct", "alpha:1.0"), h.events)
+    }
+
+    @Test
+    fun keyguardShown_hidesImmediatelyWithoutAnimator() {
+        val h = FadeHarness()
+
+        h.keyguard.onKeyguardVisibilityChanged(true, false, false)
+
+        assertEquals(0, h.animators)
+        assertEquals(listOf(true), h.hiddenFlags())
+        verify(h.recents).setFloatingTasksHidden(DEFAULT_DISPLAY, true)
+        assertEquals(listOf("wct"), h.events)
+    }
+
+    @Test
+    fun keyguardShown_duringFadeOut_cancelsFadeAndHidesBeforeAlphaReset() {
+        val h = FadeHarness()
+        h.overview.onOverviewShown(DEFAULT_DISPLAY)
+        h.frame(.5f)
+
+        h.keyguard.onKeyguardVisibilityChanged(true, false, false)
+
+        verify(h.animator).cancel()
+        assertEquals(listOf(true), h.hiddenFlags())
+        assertEquals(listOf("alpha:0.5", "wct", "alpha:1.0"), h.events)
+        // The cancelled animator must not run the deferred hide a second time.
+        h.end()
+        assertEquals(listOf(true), h.hiddenFlags())
+    }
+
+    @Test
+    fun overviewHidden_revealsAtAlphaZeroThenFadesIn() {
+        val h = FadeHarness()
+        h.overview.onOverviewShown(DEFAULT_DISPLAY)
+        h.end()
+        org.mockito.Mockito.clearInvocations(shellTaskOrganizer, h.recents)
+        h.events.clear()
+
+        h.overview.onOverviewHidden(DEFAULT_DISPLAY)
+
+        assertEquals(listOf("alpha:0.0", "wct", "show"), h.events)
+        verify(h.recents).setFloatingTasksHidden(DEFAULT_DISPLAY, false, 0f)
+        assertEquals(listOf(false), h.hiddenFlags())
+        assertEquals(2, h.animators)
+        verify(h.animator).setDuration(200L)
+        h.frame(.5f)
+        h.end()
+        assertEquals("alpha:1.0", h.events.last())
+    }
+
+    @Test
+    fun overviewHidden_duringFadeOut_reversesWithoutHiding() {
+        val h = FadeHarness()
+        h.overview.onOverviewShown(DEFAULT_DISPLAY)
+        h.frame(.4f)
+
+        h.overview.onOverviewHidden(DEFAULT_DISPLAY)
+
+        verify(h.animator).cancel()
+        assertEquals(2, h.animators)
+        // The remaining distance is 0.4 of the 200 ms fade-in.
+        verify(h.animator).setDuration(80L)
+        verify(h.recents, never()).setFloatingTasksHidden(DEFAULT_DISPLAY, true)
+        verify(h.recents, never()).setFloatingTasksHidden(eq(DEFAULT_DISPLAY), eq(false), any())
+        assertFalse(h.hiddenFlags().any { it })
+        h.frame(1f)
+        h.end()
+        assertEquals("alpha:1.0", h.events.last())
+        assertFalse(h.hiddenFlags().any { it })
+    }
 }
