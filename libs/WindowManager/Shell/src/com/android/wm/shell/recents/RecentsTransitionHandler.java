@@ -184,6 +184,17 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
      * owns them. The caller also updates WM's hidden state with its visibility WCT.
      */
     public void setFloatingTasksHidden(int displayId, boolean hidden) {
+        setFloatingTasksHidden(displayId, hidden, 1.f);
+    }
+
+    /**
+     * Same as {@link #setFloatingTasksHidden(int, boolean)}, but organizer task surfaces are shown
+     * at {@code showAlpha} so the caller can fade them in. Returns the organizer surfaces it
+     * shown, or an empty list when hiding, so the caller can restore their alpha.
+     */
+    public List<SurfaceControl> setFloatingTasksHidden(int displayId, boolean hidden,
+            float showAlpha) {
+        final List<SurfaceControl> shown = new ArrayList<>();
         mFloatingTasksHidden.put(displayId, hidden);
         final ArrayMap<Integer, Pair<ActivityManager.RunningTaskInfo, SurfaceControl>> tasks =
                 new ArrayMap<>();
@@ -204,7 +215,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 }
             }
         }
-        if (tasks.isEmpty()) return;
+        if (tasks.isEmpty()) return shown;
         try (SurfaceControl.Transaction t = newSurfaceTransaction()) {
             for (int i = 0; i < tasks.size(); ++i) {
                 final SurfaceControl surface = tasks.valueAt(i).second;
@@ -212,7 +223,8 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                 if (hidden) t.hide(surface);
                 else {
                     t.show(surface);
-                    t.setAlpha(surface, 1.f);
+                    t.setAlpha(surface, showAlpha);
+                    shown.add(surface);
                 }
             }
             // A merged transition may also have hidden a temporary handler leash.
@@ -234,6 +246,7 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
             }
             t.apply();
         }
+        return shown;
     }
 
     private SurfaceControl.Transaction newSurfaceTransaction() {

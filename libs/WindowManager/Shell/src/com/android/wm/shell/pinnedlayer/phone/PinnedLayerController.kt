@@ -88,6 +88,8 @@ class PinnedLayerController(
     private val windowRepositionAnimator: PinnedWindowRepositionAnimator,
     private val transactionPool: TransactionPool,
     private val multiDisplayDragMoveIndicatorController: MultiDisplayDragMoveIndicatorController,
+    private val visibilityFade: FloatingVisibilityFade = FloatingVisibilityFade(),
+    private val surfaceTransactions: () -> SurfaceControl.Transaction = { SurfaceControl.Transaction() },
 ) : Transitions.TransitionObserver {
 
     // Stores ids of pinned TaskInfo.
@@ -564,7 +566,7 @@ class PinnedLayerController(
             .sortedByDescending { visibleTaskOrder.indexOf(it.taskId).let { i ->
                 if (i < 0) Int.MAX_VALUE else i } }
         if (tasks.isEmpty()) return
-        SurfaceControl.Transaction().use { t ->
+        surfaceTransactions().use { t ->
             tasks.forEachIndexed { i, task ->
                 taskLeashes[task.taskId]?.takeIf { it.isValid }?.let {
                     t.setLayer(it, RAISED_FLOATING_LAYER + i)
@@ -574,25 +576,77 @@ class PinnedLayerController(
         }
     }
 
-    private fun updateVisibility() {
-        // A Home gesture runs Recents before Overview is actually shown.
-        val hidden = keyguardShowing || overviewShowing
-        if (hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, true)
-        minimizeHandles?.setVisible(!hidden)
+    private fun fadeSurfaces(): List<SurfaceControl> =
+        getPinnedTasks().filter { it.taskId !in minimizedTasks }
+            .mapNotNull { taskLeashes[it.taskId]?.takeIf { leash -> leash.isValid } }
+
+    // Hides at once. Alpha returns to 1 only after the hide, so no frame shows the surface opaque.
+    private fun hideFloatingTasks() {
+        recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, true)
         val wct = WindowContainerTransaction()
-        if (!hidden && !recentsRunning) minimizeOverflow(MultitaskingWindowLimit.splitLeaves(
-            shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)), wct)
         getPinnedTasks().filter { it.taskId !in minimizedTasks }.forEach {
-            wct.setHidden(it.token, hidden)
+            wct.setHidden(it.token, true)
         }
         if (!wct.isEmpty) {
             shellTaskOrganizer.applyTransaction(wct)
         }
-        if (!hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, false)
+        visibilityFade.reset()
+        floatingTasksHidden = true
+    }
+
+    private fun updateVisibility() {
+        // A Home gesture runs Recents before Overview is actually shown.
+        val hidden = keyguardShowing || overviewShowing
+        minimizeHandles?.setVisible(!hidden)
+        if (hidden) {
+            // Keyguard never fades; Overview fades only windows that are currently visible.
+            if (!keyguardShowing && !floatingTasksHidden) {
+                if (visibilityFade.isRunning && visibilityFade.target == 0f) return
+                val surfaces = fadeSurfaces()
+                if (surfaces.isNotEmpty()) {
+                    visibilityFade.fadeOut(surfaces) { hideFloatingTasks() }
+                    return
+                }
+            }
+            hideFloatingTasks()
+            return
+        }
+        val wct = WindowContainerTransaction()
+        if (visibilityFade.isRunning) {
+            // Repeated calls keep a fade-in going; a fade-out that did not hide yet reverses.
+            if (visibilityFade.target == 0f) {
+                if (!recentsRunning) minimizeOverflow(MultitaskingWindowLimit.splitLeaves(
+                    shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)), wct)
+                if (!wct.isEmpty) shellTaskOrganizer.applyTransaction(wct)
+                visibilityFade.fadeIn(fadeSurfaces())
+            }
+            return
+        }
+        val wasHidden = floatingTasksHidden
+        // Show the surfaces at alpha 0 so the reveal does not flash them opaque.
+        val faded = if (wasHidden) fadeSurfaces() else emptyList()
+        if (faded.isNotEmpty()) visibilityFade.snap(faded, 0f)
+        if (!recentsRunning) minimizeOverflow(MultitaskingWindowLimit.splitLeaves(
+            shellTaskOrganizer.getRunningTasks(DEFAULT_DISPLAY)), wct)
+        getPinnedTasks().filter { it.taskId !in minimizedTasks }.forEach {
+            wct.setHidden(it.token, false)
+        }
+        if (!wct.isEmpty) {
+            shellTaskOrganizer.applyTransaction(wct)
+        }
+        var shown = faded
+        if (faded.isEmpty()) {
+            recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, false)
+        } else {
+            val extra = recentsVisibilityHandler
+                ?.setFloatingTasksHidden(DEFAULT_DISPLAY, false, 0f).orEmpty()
+            shown = faded + extra.filter { s -> faded.none { it === s } }
+        }
         // Overview can close after Recents committed its final layers, for example when Back
         // resumes the previous app. Raise the revealed floating tasks above that app again.
-        if (floatingTasksHidden && !hidden) raiseAfterRecents()
-        floatingTasksHidden = hidden
+        if (wasHidden) raiseAfterRecents()
+        floatingTasksHidden = false
+        if (shown.isNotEmpty()) visibilityFade.fadeIn(shown)
     }
 
     fun canResolveSidebarSplit(): Boolean = !keyguardShowing && !recentsRunning && !overviewShowing
