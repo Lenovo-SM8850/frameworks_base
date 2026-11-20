@@ -5,6 +5,7 @@ import android.app.ActivityManager.RunningTaskInfo
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.PointF
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
@@ -13,11 +14,13 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.SurfaceControl
 import android.view.SurfaceControlViewHost
+import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.WindowlessWindowManager
 import com.android.internal.annotations.VisibleForTesting
+import com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia
 import com.android.wm.shell.pinnedlayer.phone.PinnedLayerController
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -38,6 +41,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
     private var moved = Rect()
     private var downX = 0f
     private var downY = 0f
+    private var velocityTracker: VelocityTracker? = null
     private var dragging = false
     private var blockedGesture = false
     private var touchGesture = false
@@ -183,6 +187,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                                 cancelTargetFeedback()
                                 gestureActive = false
                                 dragging = false
+                                recycleVelocity()
                                 controller.endMiniTap(current)
                                 pinching = controller.beginMiniPinch(current, change.span, change.x, change.y)
                             }
@@ -205,6 +210,9 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                     if (event.actionMasked == MotionEvent.ACTION_DOWN) taps.onTouchEvent(event)
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
+                            velocityTracker?.recycle()
+                            velocityTracker = VelocityTracker.obtain()
+                            trackVelocity(event)
                             gestureActive = true
                             start = controller.beginMiniDrag(current)
                             stashFeedback.update(controller.getMiniStashTarget(current, start).takeUnless {
@@ -224,12 +232,14 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                                 }, {
                                     gestureActive = false
                                     dragging = false
+                                    recycleVelocity()
                                     controller.dismissMini(current)
                                 })
                             }
                         }
                         MotionEvent.ACTION_MOVE -> {
                             if (!gestureActive) return@setOnTouchListener true
+                            trackVelocity(event)
                             val dx = event.rawX - downX
                             val dy = event.rawY - downY
                             val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -262,16 +272,19 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             touchGesture = false
                             if (!gestureActive) return@setOnTouchListener true
                             if (dragging && dismissTarget?.onMotionEvent(event, moved) == true) {
+                                recycleVelocity()
                                 dragging = false
                                 return@setOnTouchListener true
                             }
                             dismissTarget?.cancel()
+                            trackVelocity(event)
+                            val velocity = releaseVelocity(context, event)
                             // Finish input ownership before docking can synchronously relayout.
                             gestureActive = false
                             val wasDragging = dragging
                             dragging = false
                             if (wasDragging) {
-                                controller.endMiniDrag(current, start, moved)
+                                controller.endMiniDrag(current, start, moved, velocity.x, velocity.y)
                             } else {
                                 controller.endMiniTap(current)
                                 taps.onTouchEvent(event)
@@ -282,6 +295,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                             if (!gestureActive) return@setOnTouchListener true
                             gestureActive = false
                             dragging = false
+                            recycleVelocity()
                             taps.onTouchEvent(event)
                             controller.endMiniDrag(current, start, start)
                         }
@@ -289,6 +303,31 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
                     true
                 }
             }
+    }
+
+    private fun trackVelocity(event: MotionEvent) {
+        val tracker = velocityTracker ?: return
+        val raw = MotionEvent.obtain(event)
+        raw.offsetLocation(event.rawX - event.x, event.rawY - event.y)
+        tracker.addMovement(raw)
+        raw.recycle()
+    }
+
+    private fun recycleVelocity() {
+        velocityTracker?.recycle()
+        velocityTracker = null
+    }
+
+    /** Release velocity in screen px/s; zero when nothing was tracked. */
+    private fun releaseVelocity(context: Context, event: MotionEvent): PointF {
+        val velocity = PointF()
+        velocityTracker?.let {
+            val pointerId = event.getPointerId(0)
+            FloatingReleaseInertia.velocityOf(it, pointerId,
+                ViewConfiguration.get(context).scaledMaximumFlingVelocity.toFloat(), velocity)
+        }
+        recycleVelocity()
+        return velocity
     }
 
     override fun close() {
@@ -300,6 +339,7 @@ class FloatingMiniInput(private val contextProvider: () -> Context?,
         }
         dismissTarget?.close()
         dismissTarget = null
+        recycleVelocity()
         dragging = false
         val oldHost = host
         val oldSurface = surface

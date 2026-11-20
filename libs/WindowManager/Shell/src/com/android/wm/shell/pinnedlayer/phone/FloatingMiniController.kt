@@ -4,6 +4,7 @@ package com.android.wm.shell.pinnedlayer.phone
 import android.animation.AnimationHandler
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
+import android.animation.TimeInterpolator
 import android.animation.ValueAnimator
 import android.app.TaskInfo
 import android.graphics.Point
@@ -159,6 +160,11 @@ class FloatingMiniController(
         changed(updatedTask(task, entry.bounds, entry.scale, null))
     }
 
+    private companion object {
+        const val INERTIA_MIN_MS = 200L
+        const val INERTIA_MAX_MS = 400L
+    }
+
     private fun density(task: TaskInfo) = displays.getDisplayContext(task.displayId)
         ?.resources?.displayMetrics?.density ?: 1f
     private fun stable(task: TaskInfo) = Rect().also {
@@ -259,7 +265,8 @@ class FloatingMiniController(
 
     @JvmOverloads
     fun onDragEnded(task: TaskInfo, start: Rect, end: Rect,
-        captionTravel: android.graphics.PointF? = null): Boolean {
+        captionTravel: android.graphics.PointF? = null, velocityX: Float = 0f,
+        velocityY: Float = 0f): Boolean {
         clearDrag(task)
         if (task.taskId !in leashes) return false
         val stable = stable(task)
@@ -275,24 +282,63 @@ class FloatingMiniController(
                 task.configuration.windowConfiguration.bounds, task.floatingWindowScale,
                 end, task.floatingWindowScale, target.bounds, target.scale)
         } else {
-            val crossed = FloatingMiniState.stashEdge(end, stable)
+            // A fast release that is neither an edge stash nor a corner drop keeps drifting inside
+            // the area the release clamp uses; stash, overlap and clamp then run on that position.
+            val projected = projectRelease(task, entry.edge, end, stable, margin, corner,
+                velocityX, velocityY)
+            val landed = projected ?: end
+            val landedCorner = if (projected == null) corner else FloatingMiniState.corner(
+                landed, stable, (48 * density(task)).toInt())
+            val crossed = FloatingMiniState.stashEdge(landed, stable)
             val edge = if (crossed != FloatingMiniState.Edge.NONE) crossed else
-                if (FloatingMiniState.canUnstash(end, stable, entry.edge))
+                if (FloatingMiniState.canUnstash(landed, stable, entry.edge))
                     FloatingMiniState.Edge.NONE else entry.edge
             val target = if (edge == FloatingMiniState.Edge.NONE)
-                getDragTarget(task, start, end) else null
+                getDragTarget(task, start, landed) else null
             entry.edge = edge
             val desired = if (edge != FloatingMiniState.Edge.NONE)
-                FloatingMiniState.stash(end, stable, edge, (28 * density(task)).toInt()) else
-                target?.bounds ?: corner?.let { FloatingMiniState.snap(end, stable, it, margin) }
-                    ?: FloatingMiniState.clamp(end, stable, margin)
+                FloatingMiniState.stash(landed, stable, edge, (28 * density(task)).toInt()) else
+                target?.bounds ?: landedCorner?.let { FloatingMiniState.snap(landed, stable, it, margin) }
+                    ?: FloatingMiniState.clamp(landed, stable, margin)
             val destination = if (edge == FloatingMiniState.Edge.NONE)
                 avoidMiniOverlap(task, desired, stable, margin) else desired
             if (target != null) entry.bounds.set(destination)
-            animate(task, end, entry.scale, destination, entry.scale)
+            if (projected != null && edge == FloatingMiniState.Edge.NONE && target == null) {
+                val travel = Math.hypot((destination.left - end.left).toDouble(),
+                    (destination.top - end.top).toDouble()) / density(task)
+                animate(task, end, entry.scale, destination, entry.scale,
+                    duration = (INERTIA_MIN_MS + travel).toLong().coerceIn(INERTIA_MIN_MS, INERTIA_MAX_MS),
+                    interpolator = Interpolators.LINEAR_OUT_SLOW_IN)
+            } else {
+                animate(task, end, entry.scale, destination, entry.scale)
+            }
             changed(task)
         }
         return true
+    }
+
+    /**
+     * Where a fast release of an unstashed mini window drifts to, or null when the release is slow,
+     * already an edge stash or corner drop, or the window is stashed. The top-left moves within the
+     * clamp area of the release; the window never leaves the margin inside the stable area.
+     */
+    private fun projectRelease(task: TaskInfo, edge: FloatingMiniState.Edge, end: Rect,
+        stable: Rect, margin: Int, corner: FloatingMiniState.Corner?, velocityX: Float,
+        velocityY: Float): Rect? {
+        if (!FloatingReleaseInertia.isFast(velocityX, velocityY,
+                FloatingReleaseInertia.minVelocityPx(density(task)))) return null
+        if (corner != null || FloatingMiniState.stashEdge(end, stable) != FloatingMiniState.Edge.NONE ||
+            !FloatingMiniState.canUnstash(end, stable, edge)) return null
+        val minLeft = stable.left + margin
+        val minTop = stable.top + margin
+        val maxLeft = maxOf(minLeft, stable.right - margin - end.width())
+        val maxTop = maxOf(minTop, stable.bottom - margin - end.height())
+        return Rect(end).apply {
+            offsetTo(FloatingReleaseInertia.estimateEnd(end.left.toFloat(), velocityX,
+                minLeft.toFloat(), maxLeft.toFloat()).roundToInt(),
+                FloatingReleaseInertia.estimateEnd(end.top.toFloat(), velocityY,
+                    minTop.toFloat(), maxTop.toFloat()).roundToInt())
+        }
     }
 
     fun tidy(tasks: List<TaskInfo>) {
@@ -772,7 +818,8 @@ class FloatingMiniController(
     }
 
     private fun animate(task: TaskInfo, from: Rect, fromScale: Float, to: Rect, toScale: Float,
-        logical: Rect? = null, finish: () -> Unit = {}) {
+        logical: Rect? = null, duration: Long = 300,
+        interpolator: TimeInterpolator = Interpolators.FAST_OUT_SLOW_IN, finish: () -> Unit = {}) {
         cancel(task)
         clearDrag(task)
         val animation = animators()
@@ -782,8 +829,8 @@ class FloatingMiniController(
         SurfaceFrameRate.setInteracting(operation, true)
         organizer.applyTransaction(WindowContainerTransaction().setDragResizing(task.token, true))
         var cancelled = false
-        animation.duration = 300
-        animation.interpolator = Interpolators.FAST_OUT_SLOW_IN
+        animation.duration = duration
+        animation.interpolator = interpolator
         animation.addUpdateListener {
             if (animations[key(task)] !== operation) return@addUpdateListener
             val p = it.animatedValue as Float
