@@ -20,6 +20,7 @@ import io.github.miner7222.windowdecor.FloatingDismissTarget
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.graphics.PointF
+import com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia
 import com.android.wm.shell.pinnedlayer.phone.FloatingWindowGeometry
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -143,6 +144,14 @@ class MultiDisplayVeiledResizeTaskPositioner(
     private var lastFloatingY = Float.NaN
     private var floatingMovePending = false
     private var floatingEdgeMove = false
+    private var floatingReleaseVelocity: PointF? = null
+    private var floatingInertiaActive = false
+    private var floatingInertia: FloatingReleaseInertia.Run? = null
+    @VisibleForTesting
+    var floatingInertiaStarter: (
+        FloatingReleaseInertia.Position, Float, Float, Float, FloatingReleaseInertia.Limits,
+        (FloatingReleaseInertia.Position) -> Unit, (FloatingReleaseInertia.Position) -> Unit,
+    ) -> FloatingReleaseInertia.Run? = FloatingReleaseInertia::start
     private val miniPreview = FloatingMiniPreview(desktopTasksController::createFloatingMiniPreview)
     private var miniPreviewCancelled = false
     private val resizeFeedback = FloatingTargetFeedback()
@@ -203,6 +212,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
         y: Float,
         inputMethodType: Int,
     ): Rect {
+        // A new touch ends the release inertia where the window is now; the drag starts there.
+        val inertiaBounds = if (floatingInertiaActive) Rect(repositionTaskBounds) else null
+        finishFloatingInertia()
+        floatingReleaseVelocity = null
         if (floatingPinchTilted && floatingDragActive) cancelFloatingDragForTransition()
         floatingDismissTarget?.cancel()
         floatingPinchRotation.cancel()
@@ -253,6 +266,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
         floatingAppliedScale = Float.NaN
         floatingAppliedAngle = Float.NaN
         taskBoundsAtDragStart.set(task.presentationBounds)
+        inertiaBounds?.let {
+            floatingBaseBounds.offset(it.left - taskBoundsAtDragStart.left,
+                it.top - taskBoundsAtDragStart.top)
+            taskBoundsAtDragStart.set(it)
+        }
         if (task.isFloatingWindow) {
             if (!floatingObserverRegistered) {
                 transitions.registerObserver(this)
@@ -620,27 +638,8 @@ class MultiDisplayVeiledResizeTaskPositioner(
             cancelFloatingFrame()
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
-            // Restore the surface scale before handing the full-size bounds back to drag.
-            floatingMovePending = true
-            flushFloatingMove()
-            val task = windowDecoration.taskInfo
-            taskOrganizer.applyTransaction(WindowContainerTransaction()
-                .setFloatingWindowPresentation(task.token,
-                    android.graphics.Point(repositionTaskBounds.left, repositionTaskBounds.top),
-                    floatingStartScale)
-                .setDragResizing(task.token, false))
-            val edgeMove = floatingEdgeMove
-            val startBounds = Rect(taskBoundsAtDragStart)
-            floatingEdgeMove = false
-            taskBoundsAtDragStart.setEmpty()
-            ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
-            stopFloatingObserver()
-            resetVeilIfVisible()
-            interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
-            if (edgeMove) {
-                windowDecoration.pinnedLayerController?.onDragEnded(windowDecoration.taskSurface,
-                    windowDecoration.taskInfo, startBounds, repositionTaskBounds, displayId)
-            }
+            if (startFloatingInertia(x, y)) return Rect(repositionTaskBounds)
+            commitFloatingMove(displayId, false)
             return Rect(repositionTaskBounds)
         }
         val delta = DragPositioningCallbackUtility.calculateDelta(x, y, repositionStartPoint)
@@ -767,7 +766,125 @@ class MultiDisplayVeiledResizeTaskPositioner(
         return Rect(repositionTaskBounds)
     }
 
+    override fun setReleaseVelocity(velocityX: Float, velocityY: Float) {
+        floatingReleaseVelocity = PointF(velocityX, velocityY)
+    }
+
+    override fun isReleaseDeferred() = floatingInertiaActive
+
+    /** Restores the surface scale, then commits the move once and ends the drag state. */
+    private fun commitFloatingMove(displayId: Int, afterInertia: Boolean) {
+        floatingMovePending = true
+        flushFloatingMove()
+        val task = windowDecoration.taskInfo
+        taskOrganizer.applyTransaction(WindowContainerTransaction()
+            .setFloatingWindowPresentation(task.token,
+                android.graphics.Point(repositionTaskBounds.left, repositionTaskBounds.top),
+                floatingStartScale)
+            .setDragResizing(task.token, false))
+        val edgeMove = floatingEdgeMove
+        val startBounds = Rect(taskBoundsAtDragStart)
+        floatingEdgeMove = false
+        taskBoundsAtDragStart.setEmpty()
+        ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+        stopFloatingObserver()
+        resetVeilIfVisible()
+        interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
+        if (edgeMove) {
+            windowDecoration.pinnedLayerController?.onDragEnded(windowDecoration.taskSurface,
+                windowDecoration.taskInfo, startBounds, repositionTaskBounds, displayId)
+        } else if (afterInertia) {
+            windowDecoration.pinnedLayerController?.onCaptionInertiaEnded(
+                windowDecoration.taskSurface, windowDecoration.taskInfo, startBounds,
+                Rect(repositionTaskBounds))
+        }
+    }
+
+    /**
+     * Keeps the released window moving with its release velocity inside the stable area, so the
+     * visual rect stays where the final commit clamps it. The commit runs when it settles.
+     */
+    private fun startFloatingInertia(x: Float, y: Float): Boolean {
+        val velocity = floatingReleaseVelocity
+        floatingReleaseVelocity = null
+        val task = windowDecoration.taskInfo
+        if (velocity == null || floatingEdgeMove || !task.isFloatingWindow ||
+            stableBounds.isEmpty || !windowDecoration.taskSurface.isValid) return false
+        val controller = windowDecoration.pinnedLayerController
+        if (controller?.isMini(task) == true) return false
+        val travel = PointF(x - repositionStartPoint.x, y - repositionStartPoint.y)
+        if (controller?.isCaptionDropToMini(task, taskBoundsAtDragStart, repositionTaskBounds,
+                travel) == true) return false
+        val density = windowDecoration.decorWindowContext.resources.displayMetrics.density
+        // Visual and committed positions differ by the IME displacement, as in the final clamp.
+        val offsetX = taskBoundsAtDragStart.left - floatingBaseBounds.left
+        val offsetY = taskBoundsAtDragStart.top - floatingBaseBounds.top
+        val minLeft = (stableBounds.left + offsetX).toFloat()
+        val minTop = (stableBounds.top + offsetY).toFloat()
+        val limits = FloatingReleaseInertia.Limits(minLeft, minTop,
+            max(minLeft, (stableBounds.right - repositionTaskBounds.width() + offsetX).toFloat()),
+            max(minTop, (stableBounds.bottom - repositionTaskBounds.height() + offsetY).toFloat()))
+        floatingInertiaActive = true
+        val run = floatingInertiaStarter(
+            FloatingReleaseInertia.Position(repositionTaskBounds.left.toFloat(),
+                repositionTaskBounds.top.toFloat()),
+            velocity.x, velocity.y, FloatingReleaseInertia.minVelocityPx(density), limits,
+            ::onFloatingInertiaFrame, ::onFloatingInertiaEnd)
+        if (run == null) {
+            floatingInertiaActive = false
+            return false
+        }
+        if (floatingInertiaActive) floatingInertia = run else run.cancel()
+        return true
+    }
+
+    private fun onFloatingInertiaFrame(position: FloatingReleaseInertia.Position) {
+        if (!floatingInertiaActive) return
+        if (closing || !windowDecoration.taskSurface.isValid ||
+            !windowDecoration.taskInfo.isFloatingWindow) {
+            abortFloatingInertia()
+            return
+        }
+        repositionTaskBounds.offsetTo(position.left.roundToInt(), position.top.roundToInt())
+        floatingMovePending = true
+        flushFloatingMove()
+    }
+
+    private fun onFloatingInertiaEnd(position: FloatingReleaseInertia.Position) {
+        if (!floatingInertiaActive) return
+        repositionTaskBounds.offsetTo(position.left.roundToInt(), position.top.roundToInt())
+        finishFloatingInertia()
+    }
+
+    /** Stops the inertia and commits the window where it is, as if it was released there. */
+    private fun finishFloatingInertia() {
+        if (!floatingInertiaActive) return
+        val task = windowDecoration.taskInfo
+        if (closing || !task.isFloatingWindow || !windowDecoration.taskSurface.isValid) {
+            abortFloatingInertia()
+            return
+        }
+        floatingInertiaActive = false
+        floatingInertia?.cancel()
+        floatingInertia = null
+        commitFloatingMove(startDisplayId, true)
+    }
+
+    /** Ends the inertia without a commit, for a task that vanished or is no longer floating. */
+    private fun abortFloatingInertia() {
+        floatingInertiaActive = false
+        floatingInertia?.cancel()
+        floatingInertia = null
+        floatingEdgeMove = false
+        taskBoundsAtDragStart.setEmpty()
+        ctrlType = DragPositioningCallback.CTRL_TYPE_UNDEFINED
+        stopFloatingObserver()
+        resetVeilIfVisible()
+        interactionJankMonitor.end(Cuj.CUJ_DESKTOP_MODE_DRAG_WINDOW)
+    }
+
     override fun close() {
+        finishFloatingInertia()
         floatingDismissTarget?.close()
         floatingDismissTarget = null
         allowFloatingFeedback = false
@@ -983,6 +1100,10 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     private fun cancelFloatingDragForTransition() {
+        if (floatingInertiaActive) {
+            finishFloatingInertia()
+            return
+        }
         floatingPinchRotation.cancel()
         floatingDismissTarget?.cancel()
         floatingDismissPending = false
@@ -1306,6 +1427,7 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun isResizingOrAnimating() = isResizingOrAnimatingResize || floatingPreviewActive ||
+        floatingInertiaActive ||
         floatingFramePending || pendingFloatingTransition != null
 
     override fun addDragEventListener(

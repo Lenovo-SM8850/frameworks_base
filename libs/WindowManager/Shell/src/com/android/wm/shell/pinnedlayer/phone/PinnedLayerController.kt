@@ -1110,6 +1110,18 @@ class PinnedLayerController(
         return true
     }
 
+    /** Whether a caption release here would make the expanded floating window a mini window. */
+    fun isCaptionDropToMini(task: TaskInfo, dragStartBounds: Rect, dragEndBounds: Rect,
+        pointerTravel: android.graphics.PointF?): Boolean =
+        miniInteractions?.acceptsCaptionDrop(task, dragStartBounds, dragEndBounds, pointerTravel) == true
+
+    /** Commits an expanded floating move after its release inertia settled; never enters mini. */
+    fun onCaptionInertiaEnded(leash: SurfaceControl, taskInfo: TaskInfo,
+        dragStartBounds: Rect, dragEndBounds: Rect): Boolean {
+        if (!taskInfo.isFloatingWindow || isMini(taskInfo)) return false
+        return finishFloatingMove(leash, taskInfo, dragStartBounds, dragEndBounds)
+    }
+
     /** Handles expanded floating captions; other releases use the ordinary drag handler. */
     @JvmOverloads
     fun onCaptionDragEnded(leash: SurfaceControl, taskInfo: TaskInfo,
