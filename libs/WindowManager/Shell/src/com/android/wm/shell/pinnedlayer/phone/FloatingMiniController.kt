@@ -241,6 +241,22 @@ class FloatingMiniController(
             min(stable.width(), stable.height()) / 4f
     }
 
+    private fun captionDropTarget(task: TaskInfo, start: Rect, end: Rect,
+        captionTravel: android.graphics.PointF?, stable: Rect): DragTarget? {
+        val target = getDragTarget(task, start, end, captionTravel != null) ?: return null
+        if (captionTravel != null && !hasCornerTravel(
+                captionTravel.x, captionTravel.y, stable, target.corner)) return null
+        return target
+    }
+
+    /** Whether releasing an expanded window's caption here would turn it into a mini window. */
+    fun acceptsCaptionDrop(task: TaskInfo, start: Rect, end: Rect,
+        captionTravel: android.graphics.PointF?): Boolean {
+        if (task.taskId !in leashes || state.get(task.userId, task.taskId) != null) return false
+        val stable = stable(task)
+        return !stable.isEmpty && captionDropTarget(task, start, end, captionTravel, stable) != null
+    }
+
     @JvmOverloads
     fun onDragEnded(task: TaskInfo, start: Rect, end: Rect,
         captionTravel: android.graphics.PointF? = null): Boolean {
@@ -252,9 +268,7 @@ class FloatingMiniController(
         val margin = (8 * density(task)).toInt()
         val corner = FloatingMiniState.corner(end, stable, (48 * density(task)).toInt())
         if (entry == null) {
-            val target = getDragTarget(task, start, end, captionTravel != null) ?: return false
-            if (captionTravel != null && !hasCornerTravel(
-                    captionTravel.x, captionTravel.y, stable, target.corner)) return false
+            val target = captionDropTarget(task, start, end, captionTravel, stable) ?: return false
             val restore = FloatingWindowGeometry.movedBaseBounds(
                 task.floatingWindowRestoreBounds, start, end) ?: task.floatingWindowRestoreBounds
             enter(task, FloatingMiniState.clamp(restore, stable),

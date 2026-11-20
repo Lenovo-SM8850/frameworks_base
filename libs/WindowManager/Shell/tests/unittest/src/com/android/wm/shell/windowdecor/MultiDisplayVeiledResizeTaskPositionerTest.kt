@@ -1488,6 +1488,106 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 1000f, 30f)
     }
 
+    private class InertiaCapture {
+        var starts = 0
+        var limits: com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia.Limits? = null
+        lateinit var frame: (com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia.Position) -> Unit
+        lateinit var end: (com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia.Position) -> Unit
+    }
+
+    private fun stubFloatingCornerRadius() {
+        whenever(mockTransaction.setWindowCrop(any(), any(), any())).thenReturn(mockTransaction)
+        whenever(mockTransaction.setCornerRadius(any(), any())).thenReturn(mockTransaction)
+    }
+
+    private fun captureInertia(): InertiaCapture {
+        val capture = InertiaCapture()
+        taskPositioner.floatingInertiaStarter = { position, _, _, _, limits, onFrame, onEnd ->
+            capture.starts++
+            capture.limits = limits
+            capture.frame = onFrame
+            capture.end = onEnd
+            com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia.Run(position)
+        }
+        return capture
+    }
+
+    @Test
+    fun floatingRelease_fastDefersCommitUntilInertiaEnds() = runOnUiThread {
+        whenever(mockSurfaceControl.isValid).thenReturn(true)
+        stubFloatingCornerRadius()
+        beginFloatingMove()
+        val capture = captureInertia()
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+
+        taskPositioner.setReleaseVelocity(3000f, 0f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1000f, 30f)
+
+        Assert.assertEquals(1, capture.starts)
+        Assert.assertTrue(taskPositioner.isReleaseDeferred())
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+        capture.frame(com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia.Position(300f, 200f))
+        verify(mockTransaction).setPosition(mockSurfaceControl, 300f, 200f)
+        verify(mockShellTaskOrganizer, never()).applyTransaction(any())
+
+        capture.end(com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia.Position(320f, 200f))
+        Assert.assertFalse(taskPositioner.isReleaseDeferred())
+        verify(mockShellTaskOrganizer, times(1)).applyTransaction(any())
+    }
+
+    @Test
+    fun floatingRelease_slowCommitsImmediately() = runOnUiThread {
+        whenever(mockSurfaceControl.isValid).thenReturn(true)
+        stubFloatingCornerRadius()
+        beginFloatingMove()
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+
+        taskPositioner.setReleaseVelocity(40f, -40f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1000f, 30f)
+
+        Assert.assertFalse(taskPositioner.isReleaseDeferred())
+        verify(mockShellTaskOrganizer, times(1)).applyTransaction(any())
+    }
+
+    @Test
+    fun floatingRelease_overDismissTargetNeverAnimates() = runOnUiThread {
+        whenever(mockSurfaceControl.isValid).thenReturn(true)
+        val target = mock<com.android.wm.shell.windowdecor.FloatingDismissTarget>()
+        val field = taskPositioner.javaClass.getDeclaredField("floatingDismissTarget")
+        field.isAccessible = true
+        field.set(taskPositioner, target)
+        whenever(target.onMotionEvent(any(), any())).thenReturn(true)
+        beginFloatingMove()
+        val capture = captureInertia()
+
+        taskPositioner.setReleaseVelocity(3000f, 3000f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1000f, 30f)
+
+        Assert.assertEquals(0, capture.starts)
+        Assert.assertFalse(taskPositioner.isReleaseDeferred())
+    }
+
+    @Test
+    fun floatingRelease_newTouchCommitsAndStartsFromVisualPosition() = runOnUiThread {
+        whenever(mockSurfaceControl.isValid).thenReturn(true)
+        stubFloatingCornerRadius()
+        beginFloatingMove()
+        val capture = captureInertia()
+        taskPositioner.setReleaseVelocity(3000f, 0f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 1000f, 30f)
+        capture.frame(com.android.wm.shell.pinnedlayer.phone.FloatingReleaseInertia.Position(300f, 200f))
+        org.mockito.Mockito.clearInvocations(mockShellTaskOrganizer)
+
+        val restarted = taskPositioner.onDragPositioningStart(CTRL_TYPE_UNDEFINED, DISPLAY_ID_0,
+            500f, 300f, INPUT_METHOD_TYPE_UNKNOWN)
+
+        Assert.assertFalse(taskPositioner.isReleaseDeferred())
+        Assert.assertEquals(300, restarted.left)
+        Assert.assertEquals(200, restarted.top)
+        // The inertia commit, then the new drag state.
+        verify(mockShellTaskOrganizer, times(2)).applyTransaction(any())
+    }
+
     @Test
     fun floatingMove_magneticPreviewScalesRestoresAndClosesWithoutLogicalResize() = runOnUiThread {
         val target = mock<com.android.wm.shell.windowdecor.FloatingDismissTarget>()

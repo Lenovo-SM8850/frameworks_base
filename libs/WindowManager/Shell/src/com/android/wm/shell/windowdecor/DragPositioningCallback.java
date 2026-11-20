@@ -92,4 +92,13 @@ public interface DragPositioningCallback {
     /** Whether the active drag was cancelled before release. */
     default boolean isDragPositioningCancelled() { return false; }
 
+    /** Sets the pointer velocity in px/s of the next {@link #onDragPositioningEnd} release. */
+    default void setReleaseVelocity(float velocityX, float velocityY) {}
+
+    /**
+     * Whether the last release keeps moving the window; the callback then commits it itself and
+     * the caller must not.
+     */
+    default boolean isReleaseDeferred() { return false; }
+
 }
