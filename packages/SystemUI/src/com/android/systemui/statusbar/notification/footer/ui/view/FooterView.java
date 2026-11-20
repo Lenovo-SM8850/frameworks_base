@@ -403,11 +403,13 @@ public class FooterView extends StackScrollerDecorView {
             shape.setColor(Color.TRANSPARENT);
         }
         // The blur stays the first layer, where syncButtonGlass() looks for it.
-        return blur != null
+        final LayerDrawable glass = blur != null
                 ? new LayerDrawable(new Drawable[] {new InsetDrawable(blur, 0, inset, 0, inset),
                         new InsetDrawable(fill, 0, inset, 0, inset), own})
                 : new LayerDrawable(
                         new Drawable[] {new InsetDrawable(fill, 0, inset, 0, inset), own});
+        glass.setPaddingMode(LayerDrawable.PADDING_MODE_STACK);
+        return glass;
     }
 
     @Override
