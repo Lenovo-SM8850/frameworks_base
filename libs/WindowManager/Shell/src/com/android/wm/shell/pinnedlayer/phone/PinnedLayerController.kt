@@ -351,6 +351,7 @@ class PinnedLayerController(
     private var keyguardShowing = false
     private var recentsRunning = false
     private var overviewShowing = false
+    private var floatingTasksHidden = false
     private var recentsVisibilityHandler: RecentsTransitionHandler? = null
 
     private val pinnedTasksListeners = mutableSetOf<PinnedTasksListener>()
@@ -588,6 +589,10 @@ class PinnedLayerController(
             shellTaskOrganizer.applyTransaction(wct)
         }
         if (!hidden) recentsVisibilityHandler?.setFloatingTasksHidden(DEFAULT_DISPLAY, false)
+        // Overview can close after Recents committed its final layers, for example when Back
+        // resumes the previous app. Raise the revealed floating tasks above that app again.
+        if (floatingTasksHidden && !hidden) raiseAfterRecents()
+        floatingTasksHidden = hidden
     }
 
     fun canResolveSidebarSplit(): Boolean = !keyguardShowing && !recentsRunning && !overviewShowing
