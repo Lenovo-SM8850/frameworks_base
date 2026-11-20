@@ -162,13 +162,6 @@ class PinnedLayerController(
     fun endMiniDrag(task: TaskInfo, start: Rect, end: Rect) {
         miniInteractions?.onDragEnded(task, start, end)
     }
-    fun flingMiniToCorner(task: TaskInfo, start: Rect, end: Rect, displayId: Int,
-        release: android.graphics.PointF, velocity: android.graphics.PointF): Boolean =
-        !keyguardShowing && !recentsRunning && !overviewShowing &&
-            displayId == task.displayId && isMini(task) &&
-            miniInteractions?.flingToCorner(task, start, end,
-                release.x, release.y, velocity.x, velocity.y) == true
-
     fun enterMiniAfterResize(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,
         bounds: Rect, scale: Float) {
         miniInteractions?.enterAfterResize(task, restore, logical, restoreScale, bounds, scale)
@@ -1120,14 +1113,9 @@ class PinnedLayerController(
     /** Handles expanded floating captions; other releases use the ordinary drag handler. */
     @JvmOverloads
     fun onCaptionDragEnded(leash: SurfaceControl, taskInfo: TaskInfo,
-        dragStartBounds: Rect, dragEndBounds: Rect, displayId: Int,
-        release: android.graphics.PointF, velocity: android.graphics.PointF,
+        dragStartBounds: Rect, dragEndBounds: Rect,
         pointerTravel: android.graphics.PointF? = null): Boolean {
         if (!taskInfo.isFloatingWindow || isMini(taskInfo)) return false
-        if (!keyguardShowing && !recentsRunning && !overviewShowing &&
-            displayId == taskInfo.displayId &&
-            miniInteractions?.flingToCorner(taskInfo, dragStartBounds, dragEndBounds,
-                release.x, release.y, velocity.x, velocity.y) == true) return true
         val travel = pointerTravel ?: android.graphics.PointF(
             (dragEndBounds.left - dragStartBounds.left).toFloat(),
             (dragEndBounds.top - dragStartBounds.top).toFloat())

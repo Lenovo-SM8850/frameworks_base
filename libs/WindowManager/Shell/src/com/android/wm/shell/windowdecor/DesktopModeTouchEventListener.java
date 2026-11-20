@@ -40,7 +40,6 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
 import android.view.SurfaceControl;
-import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
@@ -115,7 +114,6 @@ public class DesktopModeTouchEventListener
     private boolean mDragInterrupted;
     private boolean mLongClickDisabled;
     private int mDragPointerId = -1;
-    private @Nullable VelocityTracker mFloatingVelocityTracker;
     private @Nullable View mFloatingDragView;
     private final PointF mFloatingCaptionDragStart = new PointF();
     private DesktopModeEventLogger.Companion.InputMethod mInputMethod =
@@ -444,8 +442,6 @@ public class DesktopModeTouchEventListener
 
     public void closeFloatingGestures() {
         mFloatingDragView = null;
-        if (mFloatingVelocityTracker != null) mFloatingVelocityTracker.recycle();
-        mFloatingVelocityTracker = null;
         endFloatingHandlePinch(true);
     }
 
@@ -618,41 +614,13 @@ public class DesktopModeTouchEventListener
         decor.setIsDragging(isDragging);
     }
 
-    private void trackFloatingCaptionVelocity(MotionEvent event, boolean floating) {
-        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            if (mFloatingVelocityTracker != null) mFloatingVelocityTracker.recycle();
-            mFloatingVelocityTracker = floating ? VelocityTracker.obtain() : null;
-            if (floating) mFloatingCaptionDragStart.set(event.getRawX(0), event.getRawY(0));
-        }
-        if (mFloatingVelocityTracker == null) return;
-        final MotionEvent raw = MotionEvent.obtain(event);
-        raw.offsetLocation(event.getRawX() - event.getX(), event.getRawY() - event.getY());
-        mFloatingVelocityTracker.addMovement(raw);
-        raw.recycle();
-    }
-
-    private PointF finishFloatingCaptionVelocity(MotionEvent event) {
-        final PointF velocity = new PointF();
-        if (mFloatingVelocityTracker != null) {
-            if (event.getActionMasked() == ACTION_UP) {
-                final int pointerId = event.findPointerIndex(mDragPointerId) < 0
-                        ? event.getPointerId(0) : mDragPointerId;
-                mFloatingVelocityTracker.computeCurrentVelocity(1000,
-                        ViewConfiguration.get(mContext).getScaledMaximumFlingVelocity());
-                velocity.set(mFloatingVelocityTracker.getXVelocity(pointerId),
-                        mFloatingVelocityTracker.getYVelocity(pointerId));
-            }
-            mFloatingVelocityTracker.recycle();
-            mFloatingVelocityTracker = null;
-        }
-        return velocity;
-    }
-
     private boolean handleFreeformMotionEvent(WindowDecorationWrapper decoration,
             ActivityManager.RunningTaskInfo taskInfo, View v, MotionEvent e) {
         final String viewName = getResourceName(v);
         WdLog.motionEventLogD(TAG, mTaskId, "handleFreeformMotionEvent(%s)", viewName);
-        trackFloatingCaptionVelocity(e, taskInfo.isFloatingWindow);
+        if (taskInfo.isFloatingWindow && e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            mFloatingCaptionDragStart.set(e.getRawX(0), e.getRawY(0));
+        }
         updateTouchStatus(e);
         final int id = v.getId();
         if (!taskInfo.isFloatingWindow && mGestureDetector.onTouchEvent(e)) {
@@ -772,7 +740,6 @@ public class DesktopModeTouchEventListener
             }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
-                final PointF releaseVelocity = finishFloatingCaptionVelocity(e);
                 mFloatingDragView = null;
                 if (taskInfo.isFloatingWindow
                         && (!dragAllowed || e.getActionMasked() == ACTION_CANCEL)) {
@@ -823,14 +790,10 @@ public class DesktopModeTouchEventListener
                 final boolean needDragIndicatorCleanup;
                 if (mPinnedLayerController != null
                         && (taskInfo.isFloatingWindow || isPinned(taskInfo))) {
-                    if (!wasDragging) releaseVelocity.set(0f, 0f);
                     if (taskInfo.isFloatingWindow
                             && mPinnedLayerController.onCaptionDragEnded(
                                     decoration.getTaskSurface(), taskInfo,
                                     new Rect(mOnDragStartInitialBounds), newTaskBounds,
-                                    e.getDisplayId(),
-                                    new PointF(e.getRawX(dragPointerIdx), e.getRawY(dragPointerIdx)),
-                                    releaseVelocity,
                                     new PointF(e.getRawX(dragPointerIdx) - mFloatingCaptionDragStart.x,
                                             e.getRawY(dragPointerIdx) - mFloatingCaptionDragStart.y))) {
                         needDragIndicatorCleanup = true;
