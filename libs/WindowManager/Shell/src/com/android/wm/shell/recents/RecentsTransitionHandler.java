@@ -1322,7 +1322,14 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
                         return;
                     }
                     rememberFloatingTask(change);
-                    startT.hide(change.getLeash());
+                    // A focus or reorder change merged during a Home gesture must not hide
+                    // floating windows that stay above Home; only policy or closing hides them.
+                    if (mFloatingTasksHidden.get(mDisplayId)
+                            || TransitionUtil.isClosingType(change.getMode())) {
+                        startT.hide(change.getLeash());
+                    } else {
+                        startT.show(change.getLeash());
+                    }
                     continue;
                 }
                 if (taskInfo != null && mBubbleHelper.isBubbleTask(taskInfo)) {
