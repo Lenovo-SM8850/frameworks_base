@@ -605,6 +605,41 @@ class MediaTimeoutListenerTest : SysuiTestCase() {
         assertThat(mainExecutor.numPending()).isEqualTo(1)
     }
 
+    @Test
+    fun testSessionDestroyed_dozedPastTimeout_notInvokedOnWakeup() {
+        // GIVEN paused media whose session was destroyed
+        testOnSessionDestroyed_active_clearsTimeout()
+        verify(statusBarStateController).addCallback(capture(dozingCallbackCaptor))
+
+        // WHEN the device dozes past the cancelled timeout and wakes up
+        clock.setElapsedRealtime(clock.elapsedRealtime() + PAUSED_MEDIA_TIMEOUT)
+        dozingCallbackCaptor.value.onDozingChanged(false)
+
+        // THEN the destroyed listener does not time out the media
+        verify(timeoutCallback, never()).invoke(eq(KEY), eq(true))
+        verify(logger, never()).logTimeout(eq(KEY))
+    }
+
+    @Test
+    fun testOnMediaDataLoaded_newSessionToken_registersAndReportsPlaying() {
+        // GIVEN media loaded without a session
+        loadMediaData(KEY, null, mediaData.copy(token = null))
+        verify(mediaController, never()).registerCallback(anyObject())
+
+        // WHEN an update arrives with the new session of the app, which is playing
+        val playingState = mock(android.media.session.PlaybackState::class.java)
+        whenever(playingState.state).thenReturn(PlaybackState.STATE_PLAYING)
+        whenever(mediaController.playbackState).thenReturn(playingState)
+        loadMediaData(KEY, null, mediaData.copy(isPlaying = true))
+        mainExecutor.runAllReady()
+
+        // THEN the listener follows the new session and reports the media as active
+        verify(mediaController).registerCallback(capture(mediaCallbackCaptor))
+        verify(logger).logReuseListener(eq(KEY))
+        verify(timeoutCallback).invoke(eq(KEY), eq(false))
+        assertThat(mediaTimeoutListener.isTimedOut(KEY)).isFalse()
+    }
+
     private fun loadMediaDataWithPlaybackState(state: PlaybackState) {
         whenever(mediaController.playbackState).thenReturn(state)
         loadMediaData(data = mediaData)

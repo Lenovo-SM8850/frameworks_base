@@ -119,11 +119,12 @@ constructor(
 
         // First check if we already have a listener
         mediaListeners.get(key)?.let {
-            if (!it.destroyed) {
+            if (!it.destroyed && it.sessionToken == data.token) {
                 return
             }
 
-            // If listener was destroyed previously, we'll need to re-register it
+            // If listener was destroyed previously, or the app has replaced its session, we'll
+            // need to re-register it with the session of this update
             logger.logReuseListener(key)
             reusedListener = it
         }
@@ -137,12 +138,16 @@ constructor(
         }
 
         reusedListener?.let {
+            it.sessionToken = data.token
+            it.destroyed = false
+            mediaListeners[key] = it
             bgExecutor.execute {
+                // The listener was removed or replaced before this ran, so leave it unregistered
+                if (mediaListeners[key] !== it) return@execute
                 val wasPlaying = it.isPlaying()
                 logger.logUpdateListener(key, wasPlaying)
                 it.setMediaData(data)
                 it.key = key
-                mediaListeners[key] = it
                 if (wasPlaying != it.isPlaying()) {
                     // If a player becomes active because of a migration, we'll need to broadcast
                     // its state. Doing it now would lead to reentrant callbacks, so let's wait
@@ -177,7 +182,8 @@ constructor(
         var resumption: Boolean? = null
         var destroyed = false
         var expiration = Long.MAX_VALUE
-        var sessionToken: MediaSession.Token? = null
+        // Set before the background registration, so a quick second update sees the session
+        var sessionToken: MediaSession.Token? = data.token
 
         // Resume controls may have null token
         private var mediaController: MediaController? = null
@@ -195,6 +201,9 @@ constructor(
         fun destroy() {
             bgExecutor.execute { mediaController?.unregisterCallback(this) }
             cancellation?.run()
+            // A destroyed listener must not time out its media when the device stops dozing
+            cancellation = null
+            expiration = Long.MAX_VALUE
             destroyed = true
         }
 
