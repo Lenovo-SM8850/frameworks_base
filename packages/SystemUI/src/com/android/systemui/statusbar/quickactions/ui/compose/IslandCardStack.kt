@@ -129,6 +129,8 @@ import com.android.axion.blur.AxBlurSurface
 import com.android.axion.blur.CornerRadii
 import com.android.axion.blur.rememberAxBlurRegion
 import com.android.compose.theme.PlatformTheme
+import com.android.internal.graphics.drawable.BackgroundBlurDrawable
+import com.android.systemui.qs.shared.style.liquidGlassCosStyle
 import com.android.systemui.qs.shared.style.liquidGlassEnabled
 import com.android.systemui.qs.shared.style.liquidGlassRim
 import com.android.systemui.res.R
@@ -1105,6 +1107,13 @@ private fun CosListCard(
     val liquid = liquidGlassEnabled() && colorMode != POPUP_COLOR_MODE_SOLID_BLACK
     val blurred = liquid || colorMode == POPUP_COLOR_MODE_BLUR
     val currentBlurred = rememberUpdatedState(blurred)
+    // The COS glass draws a rounded region of material 0 as tile glass, so the cards ask for the
+    // island material there; other styles keep their own glass.
+    val currentMaterial =
+        rememberUpdatedState(
+            if (liquid && liquidGlassCosStyle()) BackgroundBlurDrawable.MATERIAL_ISLAND
+            else BackgroundBlurDrawable.MATERIAL_NONE
+        )
     val region = rememberAxBlurRegion { size ->
         val motion =
             Motion(
@@ -1174,6 +1183,7 @@ private fun CosListCard(
             ),
             // The region follows the card's geometry and fades with the card and its veil.
             if (currentBlurred.value) motion.alpha * (1f - motion.veil) else 0f,
+            currentMaterial.value,
         )
     }
     val colors = MaterialTheme.colorScheme
@@ -1284,6 +1294,8 @@ private fun CosListCard(
                     else colors.surfaceContainerHigh.copy(alpha = 0.9f),
                 tintColor =
                     when {
+                        // The island material mixes the gray into the blur itself.
+                        liquid && liquidGlassCosStyle() -> Color.Transparent
                         liquid -> Color(liquidGlassIslandTint(colorMode))
                         colors.surface.luminance() < 0.5f -> Color.White.copy(alpha = 0.10f)
                         else -> Color.White.copy(alpha = 0.55f)
