@@ -387,7 +387,7 @@ fun MediaControlPopup(
 }
 
 @Composable
-private fun rememberMarqueeMotionEnabled(): Boolean {
+internal fun rememberMarqueeMotionEnabled(): Boolean {
     val context = LocalContext.current
     fun readEnabled() =
         Settings.Global.getFloat(

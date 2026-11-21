@@ -51,6 +51,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.palette.graphics.Palette
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
+import com.airbnb.lottie.compose.rememberLottieComposition
+import com.android.systemui.res.R
+import com.android.systemui.statusbar.quickactions.media.ui.compose.rememberMarqueeMotionEnabled
 import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
@@ -61,7 +68,7 @@ private const val BAR_COUNT = 4
 private val CenteredBarPositions = floatArrayOf(9.831f, 20.008f, 30.435f, 40.737f, 51.633f, 62.018f)
 private const val CenteredCanvasSize = 72f
 private const val CenteredBarWidth = 6f
-private const val CenteredBarMaxHeight = 43f
+private val CenteredIndicatorSize = 20.dp
 
 private const val MinimumBarLevel = 0.08f
 private val PausedRestLevels = FloatArray(BAR_COUNT) { MinimumBarLevel }
@@ -100,6 +107,14 @@ fun AudioReactiveBars(
     startPadding: Dp = 0.dp,
     centered: Boolean = false,
 ) {
+    if (centered) {
+        CenteredVoicePrint(
+            isPlaying = isPlaying,
+            modifier = modifier.padding(start = startPadding).size(CenteredIndicatorSize),
+        )
+        return
+    }
+
     var rawAccentColor by remember { mutableStateOf<Color?>(null) }
     var lastAudioCaptureMs by remember { mutableStateOf(0L) }
 
@@ -240,44 +255,16 @@ fun AudioReactiveBars(
         modifier =
             modifier
                 .padding(start = startPadding)
-                .size(
-                    width = if (centered) 20.dp else totalWidth,
-                    height = if (centered) 20.dp else maxBarHeight,
-                ),
+                .size(width = totalWidth, height = maxBarHeight),
     ) {
-        val barPx = if (centered) size.width * CenteredBarWidth / CenteredCanvasSize
-            else barWidth.toPx()
+        val barPx = barWidth.toPx()
         val spacingPx = spacing.toPx()
         val maxH = size.height
         val radius = CornerRadius(barPx / 2f, barPx / 2f)
 
-        val count = if (centered) CenteredBarPositions.size else BAR_COUNT
-        for (index in 0 until count) {
-            val sample = index.toFloat() * (BAR_COUNT - 1) / (count - 1)
-            val low = sample.toInt()
-            val high = (low + 1).coerceAtMost(BAR_COUNT - 1)
-            val level =
-                (displayedLevels[low].value * (1f - (sample - low)) +
-                    displayedLevels[high].value * (sample - low))
-                    .coerceIn(MinimumBarLevel, 1f)
-
-            val left = if (centered) {
-                size.width * (CenteredBarPositions[index] - CenteredBarWidth / 2f) /
-                    CenteredCanvasSize
-            } else index * (barPx + spacingPx)
-            if (centered) {
-                // Plain bars that move up and down from the middle; at rest they are round dots.
-                val barH =
-                    (maxH * CenteredBarMaxHeight / CenteredCanvasSize * level)
-                        .coerceAtLeast(barPx)
-                drawRoundRect(
-                    color = CenteredBarColor,
-                    topLeft = Offset(left, (maxH - barH) / 2f),
-                    size = Size(barPx, barH),
-                    cornerRadius = radius,
-                )
-                continue
-            }
+        for (index in 0 until BAR_COUNT) {
+            val level = displayedLevels[index].value.coerceIn(MinimumBarLevel, 1f)
+            val left = index * (barPx + spacingPx)
 
             val barH = maxH * level
             val top = maxH - barH
@@ -302,6 +289,42 @@ fun AudioReactiveBars(
                 size = Size(barPx, barH),
                 cornerRadius = radius,
             )
+        }
+    }
+}
+
+/**
+ * The centred six-bar voiceprint, played from the bundled animation at its own frame rate. It rests
+ * on six round dots while paused, loading, or with animations turned off.
+ */
+@Composable
+private fun CenteredVoicePrint(isPlaying: Boolean, modifier: Modifier) {
+    val motionEnabled = rememberMarqueeMotionEnabled()
+    val composition by
+        rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.cos_media_voiceprint_dark))
+    if (isPlaying && motionEnabled && composition != null) {
+        val progress by
+            animateLottieCompositionAsState(
+                composition,
+                iterations = LottieConstants.IterateForever,
+                useCompositionFrameRate = true,
+            )
+        LottieAnimation(composition, progress = { progress }, modifier = modifier)
+    } else {
+        Canvas(modifier) {
+            val barPx = size.width * CenteredBarWidth / CenteredCanvasSize
+            for (barCenter in CenteredBarPositions) {
+                drawRoundRect(
+                    color = CenteredBarColor,
+                    topLeft =
+                        Offset(
+                            size.width * (barCenter - CenteredBarWidth / 2f) / CenteredCanvasSize,
+                            (size.height - barPx) / 2f,
+                        ),
+                    size = Size(barPx, barPx),
+                    cornerRadius = CornerRadius(barPx / 2f, barPx / 2f),
+                )
+            }
         }
     }
 }
