@@ -27,8 +27,11 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,6 +80,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -227,14 +239,15 @@ private fun CosMediaCardContent(
     }
 }
 
+/** Spins the artwork in when [artwork] changes to a new cover. */
 @Composable
-private fun CosCardArtwork(model: MediaControlChipModel) {
+internal fun Modifier.cosArtworkSpin(artwork: Any?): Modifier {
     val angle = remember { Animatable(0f) }
-    var shown by remember { mutableStateOf(model.artworkIcon) }
+    var shown by remember { mutableStateOf(artwork) }
     // A new cover spins in: a spring released from a fast turn, as ColorOS does.
-    LaunchedEffect(model.artworkIcon) {
-        if (shown == model.artworkIcon) return@LaunchedEffect
-        shown = model.artworkIcon
+    LaunchedEffect(artwork) {
+        if (shown == artwork) return@LaunchedEffect
+        shown = artwork
         angle.snapTo(0f)
         angle.animateTo(
             0f,
@@ -242,10 +255,15 @@ private fun CosCardArtwork(model: MediaControlChipModel) {
             initialVelocity = -3140f,
         )
     }
+    return graphicsLayer { rotationZ = angle.value }
+}
+
+@Composable
+private fun CosCardArtwork(model: MediaControlChipModel) {
     val artwork = model.artworkIcon ?: model.appIcon
     Box(
         Modifier.size(CosMediaCard.ArtSize)
-            .graphicsLayer { rotationZ = angle.value }
+            .cosArtworkSpin(model.artworkIcon)
             .clip(RoundedCornerShape(CosMediaCard.ArtCorner))
             .background(Color.White.copy(alpha = 0.08f))
     ) {
@@ -394,44 +412,69 @@ private fun CosTime(ms: Long) {
 @Composable
 private fun Modifier.cosPress(enabled: Boolean, onClick: () -> Unit): Modifier {
     val scale = remember { Animatable(1f) }
-    val scope = rememberCoroutineScope()
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    LaunchedEffect(pressed) {
+        if (pressed) {
+            scale.animateTo(0.92f, tween(200, easing = CosMediaCard.PressDown))
+        } else {
+            scale.animateTo(1f, tween(340, easing = CosMediaCard.PressUp))
+        }
+    }
     return this.graphicsLayer {
             scaleX = scale.value
             scaleY = scale.value
         }
-        .pointerInput(enabled) {
-            if (!enabled) return@pointerInput
-            detectTapGestures(
-                onPress = {
-                    scope.launch {
-                        scale.animateTo(0.92f, tween(200, easing = CosMediaCard.PressDown))
-                    }
-                    tryAwaitRelease()
-                    scope.launch { scale.animateTo(1f, tween(340, easing = CosMediaCard.PressUp)) }
-                },
-                onTap = { onClick() },
-            )
-        }
+        .clickable(
+            interactionSource = source,
+            indication = null,
+            enabled = enabled,
+            role = Role.Button,
+            onClick = onClick,
+        )
 }
 
+/**
+ * Description of a transport button, inside the [cosPress] node that clicks it. Its glyph is part
+ * of the button, so the glyph adds no node of its own.
+ */
+private fun Modifier.cosButtonSemantics(action: MediaAction?): Modifier =
+    clearAndSetSemantics {
+        action?.contentDescription?.let { contentDescription = it.toString() }
+    }
+
+/**
+ * A transport button that plays its Lottie on every press. [fallback] stands in until the Lottie
+ * has loaded, or if it cannot be.
+ */
 @Composable
-private fun CosLottieButton(action: MediaAction?, rawRes: Int) {
+internal fun CosLottieButton(
+    action: MediaAction?,
+    rawRes: Int,
+    modifier: Modifier = Modifier,
+    fallback: @Composable () -> Unit = {},
+) {
     val composition = rememberCosLottie(rawRes)
     val progress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val enabled = action?.action != null
+    val click = {
+        action?.action?.run()
+        composition?.let { playing ->
+            scope.launch {
+                progress.snapTo(0f)
+                progress.animateTo(1f, tween(playing.duration.toInt(), easing = LinearEasing))
+                progress.snapTo(0f)
+            }
+        }
+        Unit
+    }
     Box(
-        Modifier.size(CosMediaCard.ButtonArea)
+        modifier
+            .size(CosMediaCard.ButtonArea)
             .graphicsLayer { alpha = if (enabled) 1f else 0.3f }
-            .cosPress(enabled) {
-                action?.action?.run()
-                val playing = composition ?: return@cosPress
-                scope.launch {
-                    progress.snapTo(0f)
-                    progress.animateTo(1f, tween(playing.duration.toInt(), easing = LinearEasing))
-                    progress.snapTo(0f)
-                }
-            },
+            .cosPress(enabled, click)
+            .cosButtonSemantics(action),
         contentAlignment = Alignment.Center,
     ) {
         if (composition != null) {
@@ -440,12 +483,23 @@ private fun CosLottieButton(action: MediaAction?, rawRes: Int) {
                 progress = { progress.value },
                 modifier = Modifier.size(CosMediaCard.ButtonSize),
             )
+        } else {
+            fallback()
         }
     }
 }
 
+/**
+ * Play/pause that turns its glyph with a Lottie when the playback state changes. With [disc], the
+ * glyph is cut out of a white disc of that size. [fallback] stands in until the Lottie has loaded.
+ */
 @Composable
-private fun CosPlayPause(model: MediaControlChipModel) {
+internal fun CosPlayPause(
+    model: MediaControlChipModel,
+    modifier: Modifier = Modifier,
+    disc: Dp? = null,
+    fallback: @Composable () -> Unit = {},
+) {
     val toPlay = rememberCosLottie(R.raw.cos_media_play_transition_dark)
     val toPause = rememberCosLottie(R.raw.cos_media_pause_transition_dark)
     val progress = remember { Animatable(1f) }
@@ -460,18 +514,54 @@ private fun CosPlayPause(model: MediaControlChipModel) {
     val composition = if (shownPlaying) toPause else toPlay
     // The action decides between pause and play when it runs, so it is safe to call as is.
     val action = model.playOrPause
+    val enabled = action?.action != null
+    val click = { action?.action?.run(); Unit }
     Box(
-        Modifier.size(CosMediaCard.ButtonArea).cosPress(action?.action != null) {
-            action?.action?.run()
-        },
+        modifier
+            .size(disc ?: CosMediaCard.ButtonArea)
+            .cosPress(enabled, click)
+            .cosButtonSemantics(action)
+            .then(
+                if (disc != null) {
+                    Modifier.clip(CircleShape)
+                        .graphicsLayer {
+                            alpha = if (enabled) 1f else 0.38f
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        // The fallback brings its own disc.
+                        .drawBehind { if (composition != null) drawCircle(Color.White) }
+                } else {
+                    Modifier
+                }
+            ),
         contentAlignment = Alignment.Center,
     ) {
         if (composition != null) {
             LottieAnimation(
                 composition,
                 progress = { progress.value },
-                modifier = Modifier.size(CosMediaCard.ButtonSize),
+                modifier =
+                    Modifier.size(CosMediaCard.ButtonSize)
+                        .then(
+                            if (disc != null) {
+                                // Punches the glyph out of the disc, so the card shows through it.
+                                Modifier.drawWithContent {
+                                    drawIntoCanvas { canvas ->
+                                        canvas.saveLayer(
+                                            Rect(Offset.Zero, size),
+                                            Paint().apply { blendMode = BlendMode.DstOut },
+                                        )
+                                        drawContent()
+                                        canvas.restore()
+                                    }
+                                }
+                            } else {
+                                Modifier
+                            }
+                        ),
             )
+        } else {
+            fallback()
         }
     }
 }

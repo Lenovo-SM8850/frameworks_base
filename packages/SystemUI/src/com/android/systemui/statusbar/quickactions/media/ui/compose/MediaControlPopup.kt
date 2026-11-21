@@ -228,11 +228,18 @@ fun MediaControlPopup(
                 Box(
                     modifier = Modifier.clickable(enabled = openApp != null) { openApp?.invoke() }
                 ) {
-                    MediaArtFlip(
-                        track = model.songName?.toString() to model.packageName,
-                        artwork = model.artworkIcon,
-                    ) { artworkIcon ->
-                        MediaArtwork(model = model, artworkIcon = artworkIcon, cos = cos)
+                    if (cos) {
+                        // The ColorOS card spins a new cover in instead of flipping it.
+                        Box(Modifier.cosArtworkSpin(model.artworkIcon)) {
+                            MediaArtwork(model = model, artworkIcon = model.artworkIcon, cos = true)
+                        }
+                    } else {
+                        MediaArtFlip(
+                            track = model.songName?.toString() to model.packageName,
+                            artwork = model.artworkIcon,
+                        ) { artworkIcon ->
+                            MediaArtwork(model = model, artworkIcon = artworkIcon, cos = cos)
+                        }
                     }
                 }
                 Column(
@@ -852,12 +859,9 @@ private fun CosMediaControls(
     onOutputClick: (() -> Unit)?,
 ) {
     val foreground = LocalContentColor.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MediaOutputIconButton(model = model, onClick = onOutputClick)
+    // The transport Lottie glyphs are white, so they animate on a dark card only.
+    val dark = LocalPopupDarkSurface.current
+    val previous: @Composable () -> Unit = {
         MediaActionButton(
             action = model.previousAction,
             iconOverrideId = R.drawable.ic_skip_previous_filled,
@@ -865,8 +869,31 @@ private fun CosMediaControls(
             iconTint = foreground,
             buttonSize = 40.dp,
         )
-        if (LocalPopupDarkSurface.current) {
-            CutOutPlayPause(action = model.playOrPause, buttonSize = 50.dp, iconSize = 26.dp)
+    }
+    val next: @Composable () -> Unit = {
+        MediaActionButton(
+            action = model.nextAction,
+            iconOverrideId = R.drawable.ic_skip_next_filled,
+            containerColor = Color.Transparent,
+            iconTint = foreground,
+            buttonSize = 40.dp,
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MediaOutputIconButton(model = model, onClick = onOutputClick)
+        if (dark) {
+            CosLottieButton(model.previousAction, R.raw.cos_media_previous, fallback = previous)
+        } else {
+            previous()
+        }
+        if (dark) {
+            CosPlayPause(model = model, disc = 50.dp) {
+                CutOutPlayPause(action = model.playOrPause, buttonSize = 50.dp, iconSize = 26.dp)
+            }
         } else {
             MediaActionButton(
                 action = model.playOrPause,
@@ -877,13 +904,11 @@ private fun CosMediaControls(
                 emphasized = true,
             )
         }
-        MediaActionButton(
-            action = model.nextAction,
-            iconOverrideId = R.drawable.ic_skip_next_filled,
-            containerColor = Color.Transparent,
-            iconTint = foreground,
-            buttonSize = 40.dp,
-        )
+        if (dark) {
+            CosLottieButton(model.nextAction, R.raw.cos_media_next, fallback = next)
+        } else {
+            next()
+        }
         if (appAction != null) {
             // The app's own glyph, so each app shows its own heart, thumb or plus.
             MediaActionButton(
