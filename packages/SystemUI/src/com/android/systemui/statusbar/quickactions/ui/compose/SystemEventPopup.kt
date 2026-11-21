@@ -69,7 +69,7 @@ private val EventPopupShape = RoundedCornerShape(32.dp)
 @Composable
 fun SystemEventPopup(model: PopupContentModel.SystemEvent, modifier: Modifier = Modifier) {
     model.call
-        ?.takeIf { model.kind == SystemEventKind.Call && islandGlassCards() }
+        ?.takeIf { model.kind == SystemEventKind.Call && islandCosCards() }
         ?.let {
             CallIslandCard(model, it, modifier)
             return
