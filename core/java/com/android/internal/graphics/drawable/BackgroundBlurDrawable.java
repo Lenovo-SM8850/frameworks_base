@@ -77,6 +77,8 @@ public final class BackgroundBlurDrawable extends Drawable {
     public static final int MATERIAL_HEADS_UP_LIGHT = 10;
     /** Neutral glass of a dock. */
     public static final int MATERIAL_DOCK = 11;
+    /** Glass of an island card: the blur alone, without a tint, rim or lens. */
+    public static final int MATERIAL_ISLAND = 12;
 
     private final Aggregator mAggregator;
     private final RenderNode mRenderNode;
