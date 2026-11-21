@@ -123,6 +123,7 @@ import com.android.systemui.statusbar.quickactions.ui.compose.MediaArtFlip
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalLaunchAfterPopupHidden
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupMarqueeEnabled
 import com.android.systemui.statusbar.quickactions.ui.compose.LocalPopupContainer
+import com.android.systemui.statusbar.quickactions.ui.compose.LocalIslandCosStyle
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.islandCosCards
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberAlbumArtAccent
@@ -314,6 +315,7 @@ fun MediaControlPopup(
                     accent = accent,
                     useWaveform = useWaveform,
                     plain = cos,
+                    artColor = if (hasArtwork) accent else null,
                 )
             }
 
@@ -566,6 +568,7 @@ private fun MediaProgressSection(
     accent: Color,
     useWaveform: Boolean = false,
     plain: Boolean = false,
+    artColor: Color? = null,
 ) {
     var isScrubbing by remember { mutableStateOf(false) }
     var displayedPositionMs by remember { mutableStateOf(positionMs.coerceIn(0L, durationMs)) }
@@ -671,7 +674,22 @@ private fun MediaProgressSection(
                         )
                     }
 
-            if (plain) {
+            if (plain && LocalIslandCosStyle.current) {
+                CosMediaSeekTrack(
+                    fraction = displayedPositionMs.toFloat() / durationMs.coerceAtLeast(1L),
+                    playing = isPlaying,
+                    scrubbing = isScrubbing,
+                    artColor = artColor,
+                    onSeek =
+                        if (canBeScrubbed && onSeekTo != null) {
+                            { fraction ->
+                                applyFraction(fraction)
+                                currentSeekAction?.invoke(displayedPositionMs)
+                            }
+                        } else null,
+                    modifier = Modifier.fillMaxWidth().height(24.dp).then(gestureModifier),
+                )
+            } else if (plain) {
                 val playedColor = LocalContentColor.current
                 val trackColor = playedColor.copy(alpha = 0.25f)
                 val playedFraction =

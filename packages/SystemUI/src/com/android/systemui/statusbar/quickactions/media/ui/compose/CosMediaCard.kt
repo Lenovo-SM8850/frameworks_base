@@ -22,6 +22,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -40,8 +41,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,17 +56,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.LottieComposition
@@ -78,7 +93,11 @@ import com.android.systemui.statusbar.quickactions.media.shared.model.MediaContr
 import com.android.systemui.statusbar.quickactions.ui.compose.PopupSurface
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberAlbumArtAccent
 import com.android.systemui.statusbar.quickactions.ui.compose.rememberCosArtTint
+import com.google.ux.material.libmonet.hct.Hct
+import com.google.ux.material.libmonet.scheme.SchemeContent
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.PI
+import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -456,3 +475,146 @@ private fun CosPlayPause(model: MediaControlChipModel) {
         }
     }
 }
+
+/** Share of the track the white end of the played part covers while playing. */
+private const val HIGHLIGHT_PLAYING = 0.20f
+
+/** Share of the track the white end covers while a paused track is scrubbed. */
+private const val HIGHLIGHT_SCRUBBING = 0.10f
+
+/** Response of the fade of the white end, in seconds. */
+private const val HIGHLIGHT_RESPONSE = 0.5f
+
+// Largest extent of the light behind the end of the played part, in the pixels its shader works
+// in: the reach of the playing shape and the half width of its widest cone there. The cone falls
+// off as exp(-(y / halfWidth)^2), which is below 1e-5 past 3.5 half widths. The light shortens over
+// the first fifth of the track.
+private const val LIGHT_REACH_PX = 300f
+private const val LIGHT_CONE = 0.2f
+private const val LIGHT_HEAD_PX = 7f
+private const val LIGHT_SPREAD = 3.5f
+private const val LIGHT_MAX_HALF_HEIGHT_PX = 225f
+private const val LIGHT_GROW_UNTIL = 0.2f
+
+private const val ART_TONE_ON_DARK = 80
+private const val ART_TONE_ON_LIGHT = 40
+
+private val TrackThickness = 3.dp
+
+/** Remembers the share of the white end while it fades out. */
+private class HighlightShare(var share: Float)
+
+/**
+ * Seek track of the media card of the ColorOS style island. The played part takes a light tone
+ * of [artColor], or the content color without album art, and brightens to white towards its end
+ * while playing or scrubbing. While playing, a light trails the end; it narrows while scrubbing.
+ * The track runs from the left in every layout direction, as the taps and drags that move it do.
+ * [onSeek] receives the fraction an accessibility service sets, or is null when the session
+ * cannot seek.
+ */
+@Composable
+internal fun CosMediaSeekTrack(
+    fraction: Float,
+    playing: Boolean,
+    scrubbing: Boolean,
+    artColor: Color?,
+    onSeek: ((Float) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val content = LocalContentColor.current
+    val onDark = content.luminance() > 0.5f
+    val played =
+        remember(artColor, onDark, content) {
+            artColor?.let { toneOf(it, if (onDark) ART_TONE_ON_DARK else ART_TONE_ON_LIGHT) }
+                ?: content
+        }
+    val track = content.copy(alpha = 0.25f)
+    val progress = fraction.coerceIn(0f, 1f)
+
+    val last = remember { HighlightShare(HIGHLIGHT_PLAYING) }
+    when {
+        playing -> last.share = HIGHLIGHT_PLAYING
+        scrubbing -> last.share = HIGHLIGHT_SCRUBBING
+    }
+    val share = last.share
+    val highlight by
+        animateFloatAsState(
+            if (playing || scrubbing) 1f else 0f,
+            spring(dampingRatio = 1f, stiffness = stiffnessOf(HIGHLIGHT_RESPONSE)),
+            label = "seekHighlight",
+        )
+
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(
+            modifier
+                .semantics {
+                    progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f)
+                    if (onSeek != null) {
+                        setProgress { value ->
+                            onSeek(value.coerceIn(0f, 1f))
+                            true
+                        }
+                    }
+                }
+                .drawBehind {
+                    val thickness = TrackThickness.toPx()
+                    val top = (size.height - thickness) / 2f
+                    val radius = CornerRadius(thickness / 2f)
+                    drawRoundRect(track, Offset(0f, top), Size(size.width, thickness), radius)
+                    if (progress <= 0f) return@drawBehind
+                    val end = size.width * progress
+                    drawRoundRect(played, Offset(0f, top), Size(end, thickness), radius)
+                    if (highlight * 255f < 1f) return@drawBehind
+                    val length = min(end, size.width * share)
+                    drawRoundRect(
+                        brush =
+                            Brush.horizontalGradient(
+                                listOf(Color.White.copy(alpha = 0f), Color.White),
+                                startX = end - length,
+                                endX = end,
+                            ),
+                        topLeft = Offset(end - length, top),
+                        size = Size(length, thickness),
+                        cornerRadius = radius,
+                        alpha = highlight,
+                    )
+                }
+                .lightBounds(progress)
+                .cosSeekGlow(
+                    progress = progress,
+                    playing = playing,
+                    dragging = playing && scrubbing,
+                    color = if (artColor != null) played.toArgb() else 0,
+                )
+        )
+    }
+}
+
+/**
+ * Clips the light to the area it can reach behind the end of the played part, so the shader only
+ * runs there, and leaves it out on a canvas that cannot run shaders.
+ */
+private fun Modifier.lightBounds(progress: Float): Modifier = drawWithContent {
+    if (progress <= 0f || !drawContext.canvas.nativeCanvas.isHardwareAccelerated) {
+        return@drawWithContent
+    }
+    val grown =
+        if (progress <= LIGHT_GROW_UNTIL) {
+            (progress / (LIGHT_GROW_UNTIL + 0.01f)).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+    val reach = LIGHT_REACH_PX * grown
+    val halfHeight =
+        min(LIGHT_MAX_HALF_HEIGHT_PX, LIGHT_SPREAD * (LIGHT_CONE * reach + LIGHT_HEAD_PX))
+    val end = size.width * progress
+    val center = size.height / 2f
+    clipRect(end - reach - 1f, center - halfHeight, end + 1f, center + halfHeight) {
+        this@drawWithContent.drawContent()
+    }
+}
+
+private fun toneOf(color: Color, tone: Int): Color =
+    Color(SchemeContent(Hct.fromInt(color.toArgb()), false, 0.0).primaryPalette.tone(tone))
+
+private fun stiffnessOf(response: Float): Float = (2 * PI / response).let { it * it }.toFloat()
