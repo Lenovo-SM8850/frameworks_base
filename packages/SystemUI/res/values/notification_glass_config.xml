@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <!-- Weight of notification titles and app names with Liquid Glass. -->
+    <integer name="notification_glass_emphasis_weight">600</integer>
+    <!-- 'wght' axis value set on the same text for variable fonts. -->
+    <integer name="notification_glass_emphasis_axis_weight">650</integer>
+</resources>

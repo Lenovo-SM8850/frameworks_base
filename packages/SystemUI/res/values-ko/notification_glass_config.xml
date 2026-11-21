@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <!-- CJK glyphs get heavy fast: keep the title-small weight. -->
+    <integer name="notification_glass_emphasis_weight">500</integer>
+    <integer name="notification_glass_emphasis_axis_weight">500</integer>
+</resources>

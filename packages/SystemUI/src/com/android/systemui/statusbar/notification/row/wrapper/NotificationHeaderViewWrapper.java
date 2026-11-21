@@ -24,6 +24,7 @@ import static com.android.systemui.statusbar.notification.TransformState.TRANSFO
 import android.app.Notification;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.graphics.Typeface;
 import android.util.ArraySet;
 import android.view.NotificationHeaderView;
@@ -161,18 +162,20 @@ public class NotificationHeaderViewWrapper extends NotificationViewWrapper imple
      */
     protected void emphasizeForGlass(@Nullable TextView text) {
         if (text == null || !LiquidGlass.isEnabled(mView.getContext())) return;
+        // Locales whose glyphs turn heavy fast, such as CJK, use a lighter emphasis. The row,
+        // unlike the inflated template, resolves our own resources.
+        Resources res = mRow.getResources();
+        int weight = res.getInteger(R.integer.notification_glass_emphasis_weight);
         Typeface typeface = text.getTypeface();
-        if (typeface == null || typeface.getWeight() < GLASS_EMPHASIS_WEIGHT) {
-            text.setTypeface(Typeface.create(typeface, GLASS_EMPHASIS_WEIGHT,
+        if (typeface == null || typeface.getWeight() < weight) {
+            text.setTypeface(Typeface.create(typeface, weight,
                     typeface != null && typeface.isItalic()));
         }
         // A variable font, such as Urbanist, sets the weight on its axis, between semibold and
         // bold, which matches how much heavier than the body iOS draws the title.
-        text.setFontVariationSettings(GLASS_EMPHASIS_AXIS);
+        text.setFontVariationSettings("'wght' "
+                + res.getInteger(R.integer.notification_glass_emphasis_axis_weight));
     }
-
-    private static final int GLASS_EMPHASIS_WEIGHT = 600;
-    private static final String GLASS_EMPHASIS_AXIS = "'wght' 650";
 
     protected void resolveHeaderViews() {
         mIcon = mView.findViewById(com.android.internal.R.id.icon);
