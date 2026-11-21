@@ -645,7 +645,7 @@ private fun IslandListCard(
                         glassFollowsAlpha = true,
                     )
             ) {
-                PopupBody(chip)
+                IslandPopupContent(chip, openMediaOnTap = true)
             }
         }
     }
@@ -1336,7 +1336,7 @@ private fun CosListCard(
                             LocalContentColor provides
                                 if (darkSurface) Color.White else colors.onSurface,
                         ) {
-                            PopupBody(chip)
+                            IslandPopupContent(chip, openMediaOnTap = true)
                         }
                     }
                     // A dark card keeps light content in the light theme too, including the

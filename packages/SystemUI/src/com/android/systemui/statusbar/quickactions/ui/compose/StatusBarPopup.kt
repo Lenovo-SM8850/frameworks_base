@@ -1239,7 +1239,7 @@ fun StatusBarPopup(
                                 LocalPopupCameraClearance provides cameraClearance,
                                 LocalPopupMarqueeEnabled provides false,
                             ) {
-                                PopupBody(revealedChip)
+                                IslandPopupContent(revealedChip, openMediaOnTap = true)
                             }
                         }
                     }
@@ -1501,7 +1501,7 @@ private fun PopupPages(
         content = {
             pages.forEach { page ->
                 key(page.chipId) {
-                    Box { PopupBody(page) }
+                    Box { IslandPopupContent(page, openMediaOnTap = true) }
                 }
             }
         }
@@ -1558,64 +1558,6 @@ private fun PopupPages(
     }
 }
 
-
-@Composable
-internal fun PopupBody(viewModel: QuickActionChipModel.PopupChip) {
-    when (val popupContent = viewModel.popupContent) {
-        is PopupContentModel.Media -> {
-            val model = popupContent.model
-            val useWaveform = popupContent.useWaveform
-            val hasLyrics =
-                !model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank()
-            // A tap anywhere on the card that a control did not consume opens the media app.
-            val openApp = rememberPopupLaunchAction(model.openApp)
-            val mediaClickModifier =
-                Modifier.clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    enabled = openApp != null,
-                ) {
-                    openApp?.invoke()
-                }
-            if (hasLyrics) {
-                // One surface holds both cards in a container, so the cards touch and the card keeps
-                // an inset below. Without one they are separate surfaces with a gap between.
-                val sharedSurface = LocalPopupContainer.current
-                Column(
-                    modifier =
-                        if (sharedSurface) mediaClickModifier.padding(bottom = 12.dp)
-                        else mediaClickModifier,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement =
-                        if (sharedSurface) Arrangement.Top else Arrangement.spacedBy(8.dp),
-                ) {
-                    MediaControlPopup(model = model, useWaveform = useWaveform)
-                    CompositionLocalProvider(LocalPopupCameraClearance provides 0.dp) {
-                        LyricsCard(model = model)
-                    }
-                }
-            } else {
-                Box(modifier = mediaClickModifier) {
-                    MediaControlPopup(model = model, useWaveform = useWaveform)
-                }
-            }
-        }
-        is PopupContentModel.ScreenRecord -> ScreenRecordPopup(model = popupContent.model)
-        is PopupContentModel.LiveScore -> LiveScorePopup(model = popupContent.model)
-        is PopupContentModel.Flashlight ->
-            FlashlightPopup(
-                model = popupContent.model,
-                hapticsViewModelFactory = popupContent.hapticsViewModelFactory,
-            )
-        is PopupContentModel.Stopwatch -> StopwatchPopup(model = popupContent.model)
-        is PopupContentModel.Timer -> TimerPopup(model = popupContent.model)
-        is PopupContentModel.Alarm -> AlarmPopup(model = popupContent.model)
-        is PopupContentModel.Charging -> ChargingPopup(model = popupContent.model)
-        is PopupContentModel.SystemEvent -> SystemEventPopup(model = popupContent)
-        PopupContentModel.None -> Unit
-    }
-}
-
 /** Scale the ColorOS card opens from and closes to, in the middle of the island. */
 private const val CosCardStartScale = 0.4f
 
@@ -1657,6 +1599,7 @@ private fun LayoutCoordinates.boundsInScreen(view: android.view.View): Rect {
 internal fun IslandPopupContent(
     viewModel: QuickActionChipModel.PopupChip,
     fillWidth: Boolean = false,
+    openMediaOnTap: Boolean = false,
 ) {
     val cardModifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier
     when (val popupContent = viewModel.popupContent) {
@@ -1664,10 +1607,31 @@ internal fun IslandPopupContent(
             val model = popupContent.model
             val useWaveform = popupContent.useWaveform
             val hasLyrics = !model.lyrics.isNullOrBlank() || !model.syncedLyrics.isNullOrBlank()
+            // A tap anywhere on the card that a control did not consume opens the media app.
+            val openApp = rememberPopupLaunchAction(model.openApp)
+            val mediaClickModifier =
+                if (openMediaOnTap) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        enabled = openApp != null,
+                    ) {
+                        openApp?.invoke()
+                    }
+                } else {
+                    Modifier
+                }
             if (hasLyrics) {
+                // One surface holds both cards in a container, so the cards touch and the card keeps
+                // an inset below. Without one they are separate surfaces with a gap between.
+                val sharedSurface = openMediaOnTap && LocalPopupContainer.current
                 Column(
+                    modifier =
+                        if (sharedSurface) mediaClickModifier.padding(bottom = 12.dp)
+                        else mediaClickModifier,
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement =
+                        if (sharedSurface) Arrangement.Top else Arrangement.spacedBy(8.dp),
                 ) {
                     MediaControlPopup(
                         model = model,
@@ -1677,6 +1641,10 @@ internal fun IslandPopupContent(
                     CompositionLocalProvider(LocalPopupCameraClearance provides 0.dp) {
                         LyricsCard(model = model, modifier = cardModifier)
                     }
+                }
+            } else if (openMediaOnTap) {
+                Box(modifier = mediaClickModifier) {
+                    MediaControlPopup(model = model, useWaveform = useWaveform)
                 }
             } else {
                 MediaControlPopup(model = model, useWaveform = useWaveform)
