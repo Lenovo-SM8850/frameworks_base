@@ -154,7 +154,6 @@ internal object CosIsland {
     val ContentBlur = 9.dp
 
     val Move = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
-    val SwitchGrow = CubicBezierEasing(0.17f, 0.23f, 0.83f, 0.95f)
     /** The capsule coming out of the camera, past its middle width. */
     val Offset = CubicBezierEasing(0.3f, 0f, 0.83f, 0.88f)
     /** The capsule overshooting its width as its content comes in. */
@@ -163,7 +162,6 @@ internal object CosIsland {
     val MiddleWidth = 80.dp
     val ExtraHeight = 3.dp
     val ReduceHeight = 1.dp
-    val SwitchSettle = CubicBezierEasing(0.17f, 0.56f, 0.1f, 1f)
     private val PressDown = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
     private val PressUp = CubicBezierEasing(0f, 0f, 0.2f, 1f)
 
@@ -337,12 +335,14 @@ internal fun CosIslandShell(
         shownKey = newKey
         val target = nextNatural().width.toFloat()
         scale.snapTo((switchPx / target).coerceAtMost(1f))
-        launch { alpha.animateTo(1f, tween(200, easing = CosIsland.SwitchGrow)) }
-        launch { blur.animateTo(0f, tween(200, easing = CosIsland.SwitchGrow)) }
-        launch { scale.animateTo(1.1f, tween(200, easing = CosIsland.SwitchGrow)) }
-        width.animateTo(target + extraPx, tween(200, easing = CosIsland.SwitchGrow))
-        launch { scale.animateTo(1f, tween(500, easing = CosIsland.SwitchSettle)) }
-        width.animateTo(target, tween(500, easing = CosIsland.SwitchSettle))
+        val grow = tween<Float>(200, easing = CosIsland.Move)
+        launch { alpha.animateTo(1f, grow) }
+        launch { blur.animateTo(0f, grow) }
+        launch { scale.animateTo((target + extraPx) / target, grow) }
+        width.animateTo(target + extraPx, grow)
+        val settle = tween<Float>(500, easing = CosIsland.Move)
+        launch { scale.animateTo(1f, settle) }
+        width.animateTo(target, settle)
     }
 
     val animateShell by rememberUpdatedState<suspend (Boolean, Any) -> Unit> { shown, newKey ->
