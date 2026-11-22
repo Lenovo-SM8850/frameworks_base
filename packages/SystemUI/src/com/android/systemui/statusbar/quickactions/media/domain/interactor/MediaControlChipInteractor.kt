@@ -439,6 +439,7 @@ constructor(
                         !artist.isNullOrBlank()
                     ) {
                         LyricsRequest(
+                            session = state.token,
                             artist = cleanArtistName(artist),
                             song = cleanSongTitle(song),
                             durationSec = (durationMs / 1000L).takeIf { it > 0L },
@@ -487,14 +488,6 @@ constructor(
         val splitRegex = Regex("(?i)\\s*[,/;]\\s*|\\s+\\b(feat\\.?|featuring|ft\\.?|and|&)\\b\\s+")
         return artist.split(splitRegex)[0].trim()
     }
-
-    private data class LyricsRequest(
-        val artist: String,
-        val song: String,
-        val durationSec: Long?,
-        /** The system language, which the lyrics are looked up again for when it changes. */
-        val language: String,
-    )
 
     private class LyricsResult(val item: org.json.JSONObject?, val conclusive: Boolean)
 
@@ -637,8 +630,10 @@ constructor(
         val synced = item.lyric("syncedLyrics")
         val parsed = LyricTiming.parse(synced)
         if (parsed.lines.isEmpty()) return
+        // The lyrics are timed only while the session they were looked up for still plays.
         val state = mediaControlState.first()
-        val uid = state.token?.uid ?: return
+        if (state.token != request.session) return
+        val uid = request.session?.uid ?: return
         val key =
             LyricTrackKey(
                 UserHandle.getUserId(uid),
@@ -1367,6 +1362,8 @@ private fun lyricTimeline(
         delay(nextMs)
     }
 }
+
+private typealias LyricsRequest = LyricLookupKey<MediaSession.Token>
 
 private data class MediaControlState(
     val model: MediaControlChipModel?,

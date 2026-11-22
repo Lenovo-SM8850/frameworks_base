@@ -104,6 +104,19 @@ object LyricTiming {
     }
 }
 
+/**
+ * One lyric lookup: a track of one media session, looked up for the system language. The same
+ * track in another session is another lookup, whose lyrics and timing start over.
+ */
+data class LyricLookupKey<out S>(
+    val session: S?,
+    val artist: String,
+    val song: String,
+    val durationSec: Long?,
+    /** The system language, which the lyrics are looked up again for when it changes. */
+    val language: String,
+)
+
 data class LyricTrackKey(
     val userId: Int,
     val playerPackage: String,

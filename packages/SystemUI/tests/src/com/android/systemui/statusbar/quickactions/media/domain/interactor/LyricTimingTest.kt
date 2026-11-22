@@ -182,4 +182,16 @@ class LyricTimingTest {
         assertNull(LyricCalibrationRules.windowStart(lines, 0, 14_000))
         assertNull(LyricCalibrationRules.windowStart(lines, 0, 0, 9000))
     }
+
+    @Test
+    fun lookupKeyTellsSessionsWithSameTrackApart() {
+        val first = Any()
+        val second = Any()
+        fun key(session: Any?) = LyricLookupKey(session, "artist", "song", 200L, "en")
+        assertEquals(key(first), key(first))
+        assertEquals(key(first).hashCode(), key(first).hashCode())
+        assertNotEquals(key(first), key(second))
+        assertNotEquals(key(first), key(null))
+        assertNotEquals(key(first), LyricLookupKey(first, "artist", "song", 200L, "ko"))
+    }
 }
