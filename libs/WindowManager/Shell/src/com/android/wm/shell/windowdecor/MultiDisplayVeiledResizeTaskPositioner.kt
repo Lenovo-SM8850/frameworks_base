@@ -153,6 +153,11 @@ class MultiDisplayVeiledResizeTaskPositioner(
     ) -> FloatingReleaseInertia.Run? = FloatingReleaseInertia::start
     private val miniPreview = FloatingMiniPreview(desktopTasksController::createFloatingMiniPreview)
     private var miniPreviewCancelled = false
+    // Zone under the pointer of a caption drag without a mini target; drawn by miniPreview.
+    private var floatingDropZone: DesktopTasksController.FloatingDropZone? = null
+    private var floatingZoneDropped = false
+    // Set once a caption move changes the bounds; a tap never picks a zone.
+    private var floatingDragMoved = false
     private val resizeFeedback = FloatingTargetFeedback()
     private var allowFloatingFeedback = false
     private val floatingFrameCallback = Choreographer.FrameCallback {
@@ -226,6 +231,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
         floatingDismissPending = false
         miniPreview.close()
         miniPreviewCancelled = false
+        floatingDropZone = null
+        floatingZoneDropped = false
+        floatingDragMoved = false
         resizeFeedback.reset()
         allowFloatingFeedback = true
         windowDecoration.floatingMiniPreviewCancellation = ::onDragPositioningCancel
@@ -427,17 +435,22 @@ class MultiDisplayVeiledResizeTaskPositioner(
             if (consumeFloatingDismiss(MotionEvent.ACTION_MOVE, x, y)) {
                 miniPreview.close()
                 miniPreviewCancelled = true
+                floatingDropZone = null
                 return Rect(repositionTaskBounds)
             }
             miniPreviewCancelled = false
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
+            if (repositionTaskBounds != taskBoundsAtDragStart) floatingDragMoved = true
             if (!miniPreviewCancelled) {
-                miniPreview.updateFeedback(windowDecoration.taskInfo,
-                    windowDecoration.pinnedLayerController?.getMiniDragTarget(windowDecoration.taskInfo,
-                        taskBoundsAtDragStart, repositionTaskBounds),
+                val miniTarget = windowDecoration.pinnedLayerController?.getMiniDragTarget(
+                    windowDecoration.taskInfo, taskBoundsAtDragStart, repositionTaskBounds)
+                miniPreview.updateFeedback(windowDecoration.taskInfo, miniTarget,
                     allowFloatingFeedback && inputMethod == InputMethod.TOUCH,
                     windowDecoration::performFloatingTargetHapticFeedback)
+                floatingDropZone = if (miniTarget == null && floatingDragMoved) {
+                    getFloatingDropZone(displayId, x, y)
+                } else null
             }
             scheduleFloatingMove()
             return Rect(repositionTaskBounds)
@@ -637,6 +650,20 @@ class MultiDisplayVeiledResizeTaskPositioner(
             cancelFloatingFrame()
             DragPositioningCallbackUtility.updateTaskBounds(repositionTaskBounds,
                 taskBoundsAtDragStart, repositionStartPoint, x, y)
+            floatingDropZone = null
+            val zone = if (floatingDragMoved &&
+                windowDecoration.pinnedLayerController?.getMiniDragTarget(
+                    windowDecoration.taskInfo, taskBoundsAtDragStart, repositionTaskBounds) == null)
+                getFloatingDropZone(displayId, x, y) else null
+            if (zone != null) {
+                // Skip the release inertia and the caption mini drop; commit the clamped drop
+                // position so the zone transition starts where the window is.
+                floatingReleaseVelocity = null
+                floatingZoneDropped = true
+                commitFloatingMove(displayId, true)
+                desktopTasksController.dropFloatingTaskInZone(windowDecoration.taskInfo)
+                return Rect(repositionTaskBounds)
+            }
             if (startFloatingInertia(x, y)) return Rect(repositionTaskBounds)
             commitFloatingMove(displayId, false)
             return Rect(repositionTaskBounds)
@@ -770,6 +797,14 @@ class MultiDisplayVeiledResizeTaskPositioner(
     }
 
     override fun isReleaseDeferred() = floatingInertiaActive
+
+    /** Zones apply to caption drags on the task's display; edge moves keep their own release. */
+    private fun getFloatingDropZone(displayId: Int, x: Float, y: Float):
+        DesktopTasksController.FloatingDropZone? {
+        val task = windowDecoration.taskInfo
+        if (floatingEdgeMove || displayId != task.displayId) return null
+        return desktopTasksController.getFloatingDropZone(task, x, y)
+    }
 
     /** Restores the surface scale, then commits the move once and ends the drag state. */
     private fun commitFloatingMove(displayId: Int, afterInertia: Boolean) {
@@ -1037,9 +1072,15 @@ class MultiDisplayVeiledResizeTaskPositioner(
         if (!floatingDragActive || floatingDragCancelled || closing ||
             !windowDecoration.taskSurface.isValid) return
         if (allowFloatingFeedback && !miniPreviewCancelled) {
-            miniPreview.update(windowDecoration.taskInfo, windowDecoration.taskSurface,
-                windowDecoration.pinnedLayerController?.getMiniDragTarget(windowDecoration.taskInfo,
-                    taskBoundsAtDragStart, repositionTaskBounds))
+            val target = windowDecoration.pinnedLayerController?.getMiniDragTarget(
+                windowDecoration.taskInfo, taskBoundsAtDragStart, repositionTaskBounds)
+            val zone = floatingDropZone
+            if (target == null && zone != null) {
+                miniPreview.updateZone(windowDecoration.taskInfo, windowDecoration.taskSurface,
+                    zone.bounds, zone.radius)
+            } else {
+                miniPreview.update(windowDecoration.taskInfo, windowDecoration.taskSurface, target)
+            }
         }
         val t = floatingPreviewTransaction ?: transactionSupplier().also { floatingPreviewTransaction = it }
         val scale = floatingStartScale * repositionTaskBounds.width() /
@@ -1069,7 +1110,9 @@ class MultiDisplayVeiledResizeTaskPositioner(
         }
     }
 
-    override fun isDragPositioningCancelled() = floatingDragCancelled || floatingDismissPending
+    // A zone drop has already handled the release.
+    override fun isDragPositioningCancelled() =
+        floatingDragCancelled || floatingDismissPending || floatingZoneDropped
 
     override fun onDragPositioningCancel() {
         // The pinch monitor owns cancellation now; the old edge receiver is only draining.

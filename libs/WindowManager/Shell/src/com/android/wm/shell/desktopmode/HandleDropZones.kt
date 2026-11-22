@@ -40,4 +40,19 @@ object HandleDropZones {
         if (y < top && (!allowMini || (!left && !right))) return Target(Zone.FULLSCREEN)
         return Target(Zone.FLOATING)
     }
+
+    /** Drop zones of an expanded floating window drag; [NONE] keeps the window floating. */
+    enum class FloatingZone { NONE, FULLSCREEN }
+
+    /**
+     * Zones of an expanded floating window drag by pointer position, used only without a mini
+     * target. The middle half of the top band is fullscreen.
+     */
+    @JvmStatic
+    fun pickFloating(x: Float, y: Float, width: Int, top: Int): FloatingZone {
+        val left = x < width * .25f
+        val right = x > width * .75f
+        if (y < top && !left && !right) return FloatingZone.FULLSCREEN
+        return FloatingZone.NONE
+    }
 }

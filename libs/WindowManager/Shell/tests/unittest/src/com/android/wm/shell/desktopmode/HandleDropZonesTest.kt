@@ -3,6 +3,7 @@ package com.android.wm.shell.desktopmode
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SmallTest
+import com.android.wm.shell.desktopmode.HandleDropZones.FloatingZone
 import com.android.wm.shell.desktopmode.HandleDropZones.Target
 import com.android.wm.shell.desktopmode.HandleDropZones.Zone
 import com.android.wm.shell.pinnedlayer.phone.FloatingMiniState.Corner
@@ -92,6 +93,31 @@ class HandleDropZonesTest {
     fun withoutSplitOrMini_topBandSpansDisplay() {
         assertEquals(Zone.FULLSCREEN, pick(10f, 10f, allowSplit = false, allowMini = false).zone)
         assertEquals(Zone.FLOATING, pick(10f, 800f, allowSplit = false, allowMini = false).zone)
+    }
+
+    private fun pickFloating(x: Float, y: Float) =
+        HandleDropZones.pickFloating(x, y, WIDTH, TOP)
+
+    @Test
+    fun floating_middleHalfOfTopBand_picksFullscreen() {
+        assertEquals(FloatingZone.FULLSCREEN, pickFloating(1280f, 0f))
+        assertEquals(FloatingZone.FULLSCREEN, pickFloating(640f, 99f))
+        assertEquals(FloatingZone.FULLSCREEN, pickFloating(1920f, 99f))
+        assertEquals(FloatingZone.NONE, pickFloating(1280f, 100f))
+    }
+
+    @Test
+    fun floating_outerQuartersOfTopBand_stayFloating() {
+        assertEquals(FloatingZone.NONE, pickFloating(10f, 10f))
+        assertEquals(FloatingZone.NONE, pickFloating(639f, 10f))
+        assertEquals(FloatingZone.NONE, pickFloating(1921f, 10f))
+        assertEquals(FloatingZone.NONE, pickFloating(2550f, 200f))
+    }
+
+    @Test
+    fun floating_belowZones_staysFloating() {
+        assertEquals(FloatingZone.NONE, pickFloating(1280f, 800f))
+        assertEquals(FloatingZone.NONE, pickFloating(10f, 800f))
     }
 
     private companion object {

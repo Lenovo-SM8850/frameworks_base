@@ -25,12 +25,19 @@ class FloatingMiniPreview(
     private var bounds: Rect? = null
     private var radius = 0f
 
-    fun update(task: RunningTaskInfo, leash: SurfaceControl, target: DragTarget?) {
-        if (bounds == target?.bounds && (target == null || radius == target.radius)) return
+    fun update(task: RunningTaskInfo, leash: SurfaceControl, target: DragTarget?) =
+        show(task, leash, target?.bounds, target?.radius ?: 0f)
+
+    /** Outlines a drop zone instead; the same outline moves between zones and minis. */
+    fun updateZone(task: RunningTaskInfo, leash: SurfaceControl, zone: Rect, radius: Float) =
+        show(task, leash, zone, radius)
+
+    private fun show(task: RunningTaskInfo, leash: SurfaceControl, target: Rect?, targetRadius: Float) {
+        if (bounds == target && (target == null || radius == targetRadius)) return
         if (target != null && indicator == null) indicator = create(task, leash)
         if (target != null && indicator == null) return
-        bounds = target?.bounds?.let(::Rect)
-        radius = target?.radius ?: 0f
+        bounds = target?.let(::Rect)
+        radius = if (target != null) targetRadius else 0f
         indicator?.updateMiniPreview(bounds, radius)
     }
 

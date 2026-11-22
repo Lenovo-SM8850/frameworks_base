@@ -1135,6 +1135,45 @@ class MultiDisplayVeiledResizeTaskPositionerTest : ShellTestCase() {
         }
     }
 
+    private fun beginFloatingCaptionDragOverZone() {
+        val task = mockWindowDecoration.taskInfo
+        task.isFloatingWindow = true
+        task.floatingWindowScale = .75f
+        task.positionInParent = Point(100, 100)
+        task.floatingWindowPosition.set(100, 100)
+        task.configuration.windowConfiguration.setBounds(Rect(100, 100, 900, 1300))
+        whenever(mockDesktopTasksController.getFloatingDropZone(any(), any(), any())).thenReturn(
+            DesktopTasksController.FloatingDropZone(Rect(0, 0, 100, 100), 0f))
+        taskPositioner.onDragPositioningStart(CTRL_TYPE_UNDEFINED, DISPLAY_ID_0,
+            400f, 120f, INPUT_METHOD_TYPE_UNKNOWN)
+    }
+
+    @Test
+    fun floatingCaptionTap_picksNoZone() = runOnUiThread {
+        beginFloatingCaptionDragOverZone()
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 400f, 120f)
+        verify(mockDesktopTasksController, never()).getFloatingDropZone(any(), any(), any())
+        verify(mockDesktopTasksController, never()).dropFloatingTaskInZone(any())
+    }
+
+    @Test
+    fun floatingCaptionDrag_dropsInZoneUnderPointer() = runOnUiThread {
+        beginFloatingCaptionDragOverZone()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 550f, 220f)
+        taskPositioner.onDragPositioningEnd(DISPLAY_ID_0, 550f, 220f)
+        verify(mockDesktopTasksController)
+            .dropFloatingTaskInZone(eq(mockWindowDecoration.taskInfo))
+        Assert.assertTrue(taskPositioner.isDragPositioningCancelled())
+    }
+
+    @Test
+    fun floatingCaptionDragCancel_dropsNothing() = runOnUiThread {
+        beginFloatingCaptionDragOverZone()
+        taskPositioner.onDragPositioningMove(DISPLAY_ID_0, 550f, 220f)
+        taskPositioner.onDragPositioningCancel()
+        verify(mockDesktopTasksController, never()).dropFloatingTaskInZone(any())
+    }
+
     private fun beginFloatingCorner() {
         val task = mockWindowDecoration.taskInfo
         task.isFloatingWindow = true

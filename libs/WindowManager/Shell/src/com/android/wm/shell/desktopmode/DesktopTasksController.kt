@@ -4209,6 +4209,29 @@ class DesktopTasksController(
         }
     }
 
+    /** Drop zone of an expanded floating window drag and the outline that previews it. */
+    data class FloatingDropZone(val bounds: Rect, val radius: Float)
+
+    /** Zone under the pointer of an expanded floating window caption drag, or null. */
+    fun getFloatingDropZone(task: RunningTaskInfo, x: Float, y: Float): FloatingDropZone? {
+        val controller = pinnedLayerController ?: return null
+        if (!task.isFloatingWindow || task.displayId != DEFAULT_DISPLAY || controller.isMini(task) ||
+            !controller.isPinned(task.taskId)) return null
+        val layout = displayController.getDisplayLayout(task.displayId) ?: return null
+        val resources = displayController.getDisplayContext(task.displayId)?.resources ?: return null
+        if (HandleDropZones.pickFloating(x, y, layout.width(), 2 * layout.stableInsets().top) !=
+            HandleDropZones.FloatingZone.FULLSCREEN) return null
+        val bounds = VisualIndicatorViewContainer.VisualIndicatorAnimator.getIndicatorBounds(
+            layout, IndicatorType.TO_FULLSCREEN_INDICATOR, null, task.displayId, snapController)
+        return FloatingDropZone(bounds,
+            resources.getDimension(SharedR.dimen.desktop_windowing_freeform_rounded_corner_radius))
+    }
+
+    /** Maximizes an expanded floating window released in the fullscreen zone. */
+    fun dropFloatingTaskInZone(task: RunningTaskInfo) {
+        pinnedLayerController?.maximizeTask(task)
+    }
+
     fun releaseVisualIndicator() {
         visualIndicator?.releaseVisualIndicator()
         visualIndicator = null

@@ -699,7 +699,7 @@ constructor(
             }
 
             /** Calculates the bounds the indicator should have when fully faded in. */
-            private fun getIndicatorBounds(
+            fun getIndicatorBounds(
                 layout: DisplayLayout,
                 type: IndicatorType,
                 bubbleBoundsProvider: BubbleDropTargetBoundsProvider?,
