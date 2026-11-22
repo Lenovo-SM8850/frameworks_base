@@ -592,6 +592,40 @@ class FloatingMiniControllerTest : ShellTestCase() {
         verify(h.transaction).setPosition(h.leash, 50f, 950f)
     }
 
+    @Test fun enterAtCorner_entersMiniAtRequestedCornerWithNormalEntryAnimation() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.isVisible = true
+        h.task.floatingWindowScale = .75f
+        h.task.floatingWindowPosition.set(50, 950)
+        h.task.positionInParent = Point(50, 950)
+        assertThat(h.controller.enterAtCorner(h.task, FloatingMiniState.Corner.TOP_RIGHT)).isTrue()
+        val entry = requireNotNull(h.state.get(h.task.userId, h.task.taskId))
+        assertThat(entry.bounds).isEqualTo(Rect(832, 108, 1192, 648))
+        assertThat(entry.restore.bounds).isEqualTo(Rect(50, 950, 650, 1850))
+        assertThat(entry.restore.scale).isEqualTo(.75f)
+        verify(h.animator).setDuration(300)
+    }
+
+    @Test fun enterAtCorner_existingMiniIsUntouched() {
+        val h = Harness()
+        val before = Rect(requireNotNull(h.state.get(h.task.userId, h.task.taskId)).bounds)
+        assertThat(h.controller.enterAtCorner(h.task, FloatingMiniState.Corner.BOTTOM_LEFT)).isFalse()
+        assertThat(h.state.get(h.task.userId, h.task.taskId)!!.bounds).isEqualTo(before)
+    }
+
+    @Test fun entryTarget_usesFloatingEntryGeometryBeforeTheTaskFloats() {
+        val h = Harness()
+        h.state.remove(h.task.userId, h.task.taskId)
+        h.task.isFloatingWindow = false
+        val target = requireNotNull(h.controller.getEntryTarget(h.task, Rect(300, 400, 900, 1300),
+            .75f, FloatingMiniState.Corner.BOTTOM_LEFT))
+        assertThat(target.bounds).isEqualTo(Rect(8, 1352, 368, 1892))
+        assertThat(target.scale).isEqualTo(.45f)
+        assertThat(target.corner).isEqualTo(FloatingMiniState.Corner.BOTTOM_LEFT)
+        assertThat(h.state.get(h.task.userId, h.task.taskId)).isNull()
+    }
+
     @Test fun tidy_threeExpandedWindowsAreMiniWithoutOverlap() {
         val h = Harness()
         h.state.remove(h.task.userId, h.task.taskId)

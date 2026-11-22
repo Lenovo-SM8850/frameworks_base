@@ -6775,7 +6775,19 @@ class DesktopTasksController(
                     snapController,
                     displayId,
                 )
-        if (visualIndicator == null) visualIndicator = indicator
+        if (visualIndicator == null) {
+            visualIndicator = indicator
+            val controller = pinnedLayerController
+            if (
+                controller != null &&
+                    (dragStartState == DragStartState.FROM_FULLSCREEN ||
+                        dragStartState == DragStartState.FROM_SPLIT)
+            ) {
+                indicator.setMiniTargetProvider { corner ->
+                    controller.getMiniEntryTarget(taskInfo, corner)
+                }
+            }
+        }
         return indicator
     }
 
@@ -6860,6 +6872,7 @@ class DesktopTasksController(
                 )
             }
             IndicatorType.NO_INDICATOR,
+            IndicatorType.TO_MINI_INDICATOR,
             IndicatorType.TO_BUBBLE_LEFT_INDICATOR,
             IndicatorType.TO_BUBBLE_RIGHT_INDICATOR -> {
                 // TODO(b/391928049): add support fof dragging desktop apps to a bubble
@@ -7027,7 +7040,8 @@ class DesktopTasksController(
         val indicator = getVisualIndicator() ?: return IndicatorType.NO_INDICATOR
         val indicatorType = indicator.updateIndicatorType(displayId, inputCoordinates)
         when (indicatorType) {
-            IndicatorType.TO_DESKTOP_INDICATOR -> {
+            IndicatorType.TO_DESKTOP_INDICATOR,
+            IndicatorType.TO_MINI_INDICATOR -> {
                 latencyTracker.onActionStart(
                     LatencyTracker.ACTION_DESKTOP_MODE_ENTER_APP_HANDLE_DRAG
                 )
@@ -7059,7 +7073,11 @@ class DesktopTasksController(
                     taskInfo,
                     DesktopUiEventEnum.DESKTOP_WINDOW_APP_HANDLE_DRAG_TO_DESKTOP_MODE,
                 )
+                val miniCorner = indicator.miniCorner
                 finalizeDragToDesktop(taskInfo)
+                if (indicatorType == IndicatorType.TO_MINI_INDICATOR && miniCorner != null) {
+                    pinnedLayerController?.enterMiniAtCorner(taskInfo.taskId, miniCorner)
+                }
             }
             IndicatorType.NO_INDICATOR,
             IndicatorType.TO_FULLSCREEN_INDICATOR -> {

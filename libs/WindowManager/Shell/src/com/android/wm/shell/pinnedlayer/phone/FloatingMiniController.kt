@@ -239,6 +239,31 @@ class FloatingMiniController(
         return DragTarget(bounds, scale, radius, corner)
     }
 
+    /** Mini destination at [corner] for a window shown at [visible] with [scale]. */
+    fun getEntryTarget(task: TaskInfo, visible: Rect, scale: Float,
+        corner: FloatingMiniState.Corner): DragTarget? {
+        val stable = stable(task)
+        if (stable.isEmpty || visible.isEmpty || scale <= 0f) return null
+        return entryTarget(task, FloatingWindowGeometry.logicalBounds(visible, stable, scale),
+            scale, corner, stable)
+    }
+
+    private fun entryTarget(task: TaskInfo, logical: Rect, scale: Float,
+        corner: FloatingMiniState.Corner, stable: Rect): DragTarget? {
+        val layout = displays.getDisplayLayout(task.displayId) ?: return null
+        if (logical.isEmpty) return null
+        val margin = (8 * density(task)).toInt()
+        val miniScale = min(scale, FloatingMiniState.scale(logical, stable,
+            min(layout.width(), layout.height()), margin))
+        val sized = FloatingMiniState.sized(logical, miniScale, 0, 0)
+        val fallback = FloatingMiniState.snap(sized, stable, corner, margin)
+        val bounds = FloatingMiniState.tidyBounds(fallback, sized, stable, margin,
+            occupiedMiniBounds(task), nearest = true) ?: fallback
+        val radius = displays.getDisplayContext(task.displayId)?.resources?.getDimension(
+            com.android.wm.shell.shared.R.dimen.desktop_windowing_freeform_rounded_corner_radius) ?: 0f
+        return DragTarget(bounds, miniScale, radius, corner)
+    }
+
     private fun hasCornerTravel(dx: Float, dy: Float, stable: Rect,
         corner: FloatingMiniState.Corner?): Boolean {
         if (!dx.isFinite() || !dy.isFinite()) return false
@@ -364,6 +389,19 @@ class FloatingMiniController(
             enter(task, task.floatingWindowRestoreBounds, logical, task.floatingWindowScale,
                 from, task.floatingWindowScale, destination, scale)
         }
+    }
+
+    /** Turns an expanded floating window into a mini window at [corner]. */
+    fun enterAtCorner(task: TaskInfo, corner: FloatingMiniState.Corner): Boolean {
+        if (!task.isFloatingWindow || task.taskId !in leashes ||
+            state.get(task.userId, task.taskId) != null) return false
+        val stable = stable(task)
+        if (stable.isEmpty) return false
+        val logical = task.configuration.windowConfiguration.bounds
+        val target = entryTarget(task, logical, minimum(task, stable), corner, stable) ?: return false
+        enter(task, task.floatingWindowRestoreBounds, logical, task.floatingWindowScale,
+            task.presentationBounds, task.floatingWindowScale, target.bounds, target.scale)
+        return true
     }
 
     private fun enter(task: TaskInfo, restore: Rect, logical: Rect, restoreScale: Float,

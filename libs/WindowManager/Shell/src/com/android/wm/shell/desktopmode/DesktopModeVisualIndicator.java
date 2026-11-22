@@ -26,6 +26,7 @@ import static com.android.wm.shell.desktopmode.DesktopModeVisualIndicator.Indica
 import static com.android.wm.shell.desktopmode.DesktopModeVisualIndicator.IndicatorType.TO_BUBBLE_RIGHT_INDICATOR;
 import static com.android.wm.shell.desktopmode.DesktopModeVisualIndicator.IndicatorType.TO_DESKTOP_INDICATOR;
 import static com.android.wm.shell.desktopmode.DesktopModeVisualIndicator.IndicatorType.TO_FULLSCREEN_INDICATOR;
+import static com.android.wm.shell.desktopmode.DesktopModeVisualIndicator.IndicatorType.TO_MINI_INDICATOR;
 import static com.android.wm.shell.desktopmode.DesktopModeVisualIndicator.IndicatorType.TO_SPLIT_LEFT_INDICATOR;
 import static com.android.wm.shell.desktopmode.DesktopModeVisualIndicator.IndicatorType.TO_SPLIT_RIGHT_INDICATOR;
 import static com.android.wm.shell.shared.ShellSharedConstants.SMALL_TABLET_MAX_EDGE_DP;
@@ -52,6 +53,8 @@ import com.android.wm.shell.common.DisplayLayout;
 import com.android.wm.shell.common.ShellExecutor;
 import com.android.wm.shell.common.SyncTransactionQueue;
 import com.android.wm.shell.common.split.SplitScreenUtils;
+import com.android.wm.shell.pinnedlayer.phone.FloatingMiniController;
+import com.android.wm.shell.pinnedlayer.phone.FloatingMiniState;
 import com.android.wm.shell.shared.annotations.ShellDesktopThread;
 import com.android.wm.shell.shared.annotations.ShellMainThread;
 import com.android.wm.shell.shared.bubbles.BubbleDropTargetBoundsProvider;
@@ -61,7 +64,9 @@ import com.android.wm.shell.windowdecor.tiling.SnapEventHandler;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Animated visual indicator for Desktop Mode windowing transitions.
@@ -81,7 +86,9 @@ public class DesktopModeVisualIndicator {
         /** Indicates impending transition into bubble on the left side */
         TO_BUBBLE_LEFT_INDICATOR,
         /** Indicates impending transition into bubble on the right side */
-        TO_BUBBLE_RIGHT_INDICATOR
+        TO_BUBBLE_RIGHT_INDICATOR,
+        /** Indicates impending transition into a mini window at {@link #getMiniCorner()} */
+        TO_MINI_INDICATOR
     }
 
     /**
@@ -140,6 +147,16 @@ public class DesktopModeVisualIndicator {
      * Empty rect matches all.
      */
     private final List<Pair<Rect, IndicatorType>> mSortedRegions;
+
+    @Nullable
+    private Function<FloatingMiniState.Corner, FloatingMiniController.DragTarget> mMiniTargets;
+    // Mini destinations do not change during one drag; null values mark unavailable corners.
+    private final EnumMap<FloatingMiniState.Corner, FloatingMiniController.DragTarget>
+            mMiniTargetCache = new EnumMap<>(FloatingMiniState.Corner.class);
+    @Nullable
+    private FloatingMiniController.DragTarget mMiniCandidate;
+    @Nullable
+    private FloatingMiniState.Corner mMiniCorner;
 
     public DesktopModeVisualIndicator(@ShellDesktopThread ShellExecutor desktopExecutor,
             @ShellMainThread ShellExecutor mainExecutor,
@@ -227,6 +244,19 @@ public class DesktopModeVisualIndicator {
                 /* isLargeScreen= */ true, landscape, displayId);
     }
 
+    /** Enables mini corner zones for app handle drags; the provider returns null to skip one. */
+    void setMiniTargetProvider(@Nullable Function<FloatingMiniState.Corner,
+            FloatingMiniController.DragTarget> provider) {
+        mMiniTargets = provider;
+        mMiniTargetCache.clear();
+    }
+
+    /** The corner of the shown {@link IndicatorType#TO_MINI_INDICATOR}, or null. */
+    @Nullable
+    FloatingMiniState.Corner getMiniCorner() {
+        return mCurrentType == TO_MINI_INDICATOR ? mMiniCorner : null;
+    }
+
     /** Start the fade out animation, running the callback on the main thread once it is done. */
     public void fadeOutIndicator(
             @NonNull Runnable callback) {
@@ -292,6 +322,13 @@ public class DesktopModeVisualIndicator {
     @NonNull
     void updateIndicatorWithType(int displayId, IndicatorType type) {
         if (!mIsReleased && mDragStartState != DragStartState.DRAGGED_INTENT) {
+            if (type == TO_MINI_INDICATOR) {
+                final FloatingMiniController.DragTarget target = mMiniCandidate;
+                mMiniCorner = target != null ? target.getCorner() : null;
+                mVisualIndicatorViewContainer.setMiniTarget(
+                        target != null ? target.getBounds() : null,
+                        target != null ? target.getRadius() : 0f);
+            }
             mVisualIndicatorViewContainer.transitionIndicator(
                     displayId, mDisplayController, mCurrentType, type
             );
@@ -303,6 +340,9 @@ public class DesktopModeVisualIndicator {
     private IndicatorType getIndicatorLargeTablet(int displayId, PointF inputCoordinates) {
         // TODO(b/401596837): cache the regions to avoid recalculating on each motion event
         final DisplayLayout layout = mDisplayController.getDisplayLayout(displayId);
+        if (DragStartState.isDragToDesktopStartState(mDragStartState)) {
+            return getHandleDropIndicator(displayId, layout, inputCoordinates);
+        }
         // If we are in freeform, we don't want a visible indicator in the "freeform" drag zone.
         // In drags not originating on a freeform caption, we should default to a TO_DESKTOP
         // indicator.
@@ -355,6 +395,56 @@ public class DesktopModeVisualIndicator {
             }
         }
         return result;
+    }
+
+    /** Zones of an app handle dragged out of a fullscreen or split task, by pointer position. */
+    @NonNull
+    private IndicatorType getHandleDropIndicator(int displayId, DisplayLayout layout,
+            PointF inputCoordinates) {
+        final HandleDropZones.Sizes sizes = new HandleDropZones.Sizes(
+                mContext.getResources().getDimensionPixelSize(R.dimen.handle_zone_corner),
+                mContext.getResources().getDimensionPixelSize(R.dimen.handle_zone_split_edge));
+        final boolean split = isSplitAllowedOnDisplay(displayId);
+        final int top = 2 * layout.stableInsets().top;
+        HandleDropZones.Target target = HandleDropZones.pick(inputCoordinates.x,
+                inputCoordinates.y, layout.width(), layout.height(), top, sizes, split,
+                mMiniTargets != null);
+        mMiniCandidate = null;
+        if (target.getZone() == HandleDropZones.Zone.MINI) {
+            mMiniCandidate = getMiniTarget(target.getCorner());
+            if (mMiniCandidate == null) {
+                target = HandleDropZones.pick(inputCoordinates.x, inputCoordinates.y,
+                        layout.width(), layout.height(), top, sizes, split, false);
+            }
+        }
+        // MINI here always has a mini destination; it wins over the bubble regions.
+        if (target.getZone() == HandleDropZones.Zone.MINI) return TO_MINI_INDICATOR;
+        if (BubbleFlagHelper.enableBubbleToFullscreen()
+                && mDragStartState == DragStartState.FROM_FULLSCREEN) {
+            final int x = (int) inputCoordinates.x;
+            final int y = (int) inputCoordinates.y;
+            if (calculateBubbleLeftRegion(layout).contains(x, y)) {
+                return TO_BUBBLE_LEFT_INDICATOR;
+            } else if (calculateBubbleRightRegion(layout).contains(x, y)) {
+                return TO_BUBBLE_RIGHT_INDICATOR;
+            }
+        }
+        return switch (target.getZone()) {
+            case MINI -> TO_MINI_INDICATOR;
+            case FULLSCREEN -> TO_FULLSCREEN_INDICATOR;
+            case SPLIT_LEFT -> TO_SPLIT_LEFT_INDICATOR;
+            case SPLIT_RIGHT -> TO_SPLIT_RIGHT_INDICATOR;
+            case FLOATING -> TO_DESKTOP_INDICATOR;
+        };
+    }
+
+    @Nullable
+    private FloatingMiniController.DragTarget getMiniTarget(FloatingMiniState.Corner corner) {
+        if (mMiniTargets == null || corner == null) return null;
+        if (!mMiniTargetCache.containsKey(corner)) {
+            mMiniTargetCache.put(corner, mMiniTargets.apply(corner));
+        }
+        return mMiniTargetCache.get(corner);
     }
 
     @NonNull

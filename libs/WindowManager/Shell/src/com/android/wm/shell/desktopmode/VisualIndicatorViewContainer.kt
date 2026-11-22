@@ -23,8 +23,12 @@ import android.animation.RectEvaluator
 import android.animation.ValueAnimator
 import android.app.ActivityManager
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.ColorFilter
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.view.Display
 import android.view.SurfaceControl
@@ -81,6 +85,10 @@ constructor(
     @Volatile private var isReleased = false
     private var miniPreview = false
     private var miniOutline: WindowPreviewOutline? = null
+    // TO_MINI_INDICATOR destination, drawn as a stroke-only foreground over the regular indicator.
+    private val miniTarget = Rect()
+    private var miniRadius = 0f
+    private var dropOutline: DropOutline? = null
 
     /** Create a fullscreen indicator with no animation */
     @ShellMainThread
@@ -201,7 +209,17 @@ constructor(
                 )
                 return@execute
             }
-            if (currentType == IndicatorType.NO_INDICATOR) {
+            if (newType == IndicatorType.TO_MINI_INDICATOR) {
+                if (currentType != IndicatorType.NO_INDICATOR) {
+                    fadeOutIndicator(layout, currentType, null, displayId, snapEventHandler)
+                }
+                updateDropOutline(true)
+            } else if (currentType == IndicatorType.TO_MINI_INDICATOR) {
+                updateDropOutline(false)
+                if (newType != IndicatorType.NO_INDICATOR) {
+                    fadeInIndicatorInternal(layout, newType, displayId, snapEventHandler)
+                }
+            } else if (currentType == IndicatorType.NO_INDICATOR) {
                 fadeInIndicatorInternal(layout, newType, displayId, snapEventHandler)
             } else if (newType == IndicatorType.NO_INDICATOR) {
                 fadeOutIndicator(
@@ -265,7 +283,11 @@ constructor(
     fun fadeInIndicator(layout: DisplayLayout, type: IndicatorType, displayId: Int) {
         if (isReleased) return
         desktopExecutor.execute {
-            fadeInIndicatorInternal(layout, type, displayId, snapEventHandler)
+            if (type == IndicatorType.TO_MINI_INDICATOR) {
+                updateDropOutline(true)
+            } else {
+                fadeInIndicatorInternal(layout, type, displayId, snapEventHandler)
+            }
         }
     }
 
@@ -316,6 +338,12 @@ constructor(
             finishCallback?.run()
             return
         }
+        if (currentType == IndicatorType.TO_MINI_INDICATOR) {
+            desktopExecutor.execute {
+                updateDropOutline(false, finishCallback?.let { { mainExecutor.execute(it) } })
+            }
+            return
+        }
         desktopExecutor.execute {
             indicatorView?.let {
                 val animStartType = IndicatorType.valueOf(currentType.name)
@@ -364,6 +392,79 @@ constructor(
         }
     }
 
+    /** Sets the [IndicatorType.TO_MINI_INDICATOR] destination, moving a shown outline to it. */
+    @ShellMainThread
+    fun setMiniTarget(bounds: Rect?, radius: Float) {
+        if (isReleased) return
+        val target = bounds?.let(::Rect)
+        desktopExecutor.execute {
+            // The same destination must not restart the outline fade on every move
+            if (miniRadius == radius &&
+                (if (target != null) miniTarget == target else miniTarget.isEmpty)) {
+                return@execute
+            }
+            if (target != null) miniTarget.set(target) else miniTarget.setEmpty()
+            miniRadius = radius
+            if (dropOutline?.shown == true) updateDropOutline(true)
+        }
+    }
+
+    @ShellDesktopThread
+    private fun updateDropOutline(show: Boolean, end: (() -> Unit)? = null) {
+        val view = indicatorView
+        if (view == null) {
+            end?.invoke()
+            return
+        }
+        val outline = dropOutline ?: DropOutline(view).also { dropOutline = it }
+        outline.update(if (show && !miniTarget.isEmpty) miniTarget else null, miniRadius, end)
+    }
+
+    /** Stroke-only outline in the view foreground, leaving the regular indicator untouched. */
+    private class DropOutline(private val view: View) {
+        private val target = Rect()
+        private val drawable = (view.context.getDrawable(
+            R.drawable.desktop_windowing_transition_background)!!.mutate() as LayerDrawable).apply {
+            findDrawableByLayerId(R.id.indicator_solid).alpha = 0
+        }
+        private val stroke = drawable.findDrawableByLayerId(R.id.indicator_stroke).apply { alpha = 0 }
+        private var animator: ValueAnimator? = null
+        var shown = false
+            private set
+
+        init {
+            view.foreground = object : Drawable() {
+                override fun draw(canvas: Canvas) {
+                    drawable.bounds = target
+                    drawable.draw(canvas)
+                }
+                override fun setAlpha(alpha: Int) {}
+                override fun setColorFilter(filter: ColorFilter?) { drawable.colorFilter = filter }
+                override fun getOpacity() = PixelFormat.TRANSLUCENT
+            }
+        }
+
+        fun update(bounds: Rect?, radius: Float, end: (() -> Unit)?) {
+            animator?.cancel()
+            shown = bounds != null
+            if (bounds != null) {
+                target.set(bounds)
+                (stroke as? GradientDrawable)?.cornerRadius = radius
+            }
+            animator = ValueAnimator.ofInt(stroke.alpha, if (bounds != null) 255 else 0).apply {
+                duration = 120
+                addUpdateListener {
+                    stroke.alpha = it.animatedValue as Int
+                    view.invalidate()
+                }
+                if (end != null) doOnEnd { end() }
+                start()
+            }
+        }
+
+        fun cancel() { animator?.cancel() }
+    }
+
     /** Release the indicator and its components when it is no longer needed. */
     @ShellMainThread
     fun releaseVisualIndicator() {
@@ -377,6 +478,8 @@ constructor(
     private fun releaseIndicator(leash: SurfaceControl?) {
         desktopExecutor.execute {
             indicatorView?.animate()?.cancel()
+            dropOutline?.cancel()
+            dropOutline = null
             val host = indicatorViewHost
             indicatorViewHost = null
             indicatorView = null

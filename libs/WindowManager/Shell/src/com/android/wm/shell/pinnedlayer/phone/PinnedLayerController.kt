@@ -187,6 +187,28 @@ class PinnedLayerController(
     fun getMiniDragTarget(task: TaskInfo, start: Rect, end: Rect) =
         miniInteractions?.getDragTarget(task, start, end)
 
+    /** Mini destination at [corner] for [task] entering the floating layer, or null. */
+    fun getMiniEntryTarget(task: TaskInfo, corner: FloatingMiniState.Corner):
+        FloatingMiniController.DragTarget? {
+        if (keyguardShowing || task.displayId != DEFAULT_DISPLAY || isMini(task) ||
+            !isPinningSupported(task)) return null
+        val visible = presentationController.getPinEntryDestinationBounds(task) ?: return null
+        return miniInteractions?.getEntryTarget(task, visible,
+            presentationController.entryScale(task), corner)
+    }
+
+    /** Makes [taskId] a mini window at [corner] once the pending floating entry has finished. */
+    fun enterMiniAtCorner(taskId: Int, corner: FloatingMiniState.Corner) {
+        // The entry transition is already queued, so this runs after it finishes.
+        transitions.runOnIdle {
+            if (keyguardShowing || recentsRunning || overviewShowing) return@runOnIdle
+            val task = shellTaskOrganizer.getRunningTaskInfo(taskId) ?: return@runOnIdle
+            if (!task.isFloatingWindow || !task.isVisible || task.displayId != DEFAULT_DISPLAY ||
+                taskId !in visiblePinnedTasks || taskId in minimizedTasks) return@runOnIdle
+            miniInteractions?.enterAtCorner(task, corner)
+        }
+    }
+
     /** Returns expanded geometry without mini scale, stashing, or IME displacement. */
     fun getExpandedFloatingBounds(task: TaskInfo): Rect {
         val mini = presentationController.miniState.get(task.userId, task.taskId)

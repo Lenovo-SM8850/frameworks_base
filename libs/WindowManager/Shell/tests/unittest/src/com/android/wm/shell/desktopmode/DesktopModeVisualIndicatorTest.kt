@@ -36,6 +36,7 @@ import com.android.wm.shell.TestShellExecutor
 import com.android.wm.shell.common.DisplayController
 import com.android.wm.shell.common.DisplayLayout
 import com.android.wm.shell.common.SyncTransactionQueue
+import com.android.wm.shell.pinnedlayer.phone.FloatingMiniController
 import com.android.wm.shell.shared.R as sharedR
 import com.android.wm.shell.shared.ShellSharedConstants.SMALL_TABLET_MAX_EDGE_DP
 import com.android.wm.shell.shared.bubbles.BubbleDropTargetBoundsProvider
@@ -282,6 +283,35 @@ class DesktopModeVisualIndicatorTest : ShellTestCase() {
         createVisualIndicator(DesktopModeVisualIndicator.DragStartState.FROM_FREEFORM)
         result = visualIndicator.updateIndicatorType(DEFAULT_DISPLAY, PointF(500f, 10000f))
         assertThat(result).isEqualTo(DesktopModeVisualIndicator.IndicatorType.NO_INDICATOR)
+    }
+
+    @Test
+    @EnableFlags(
+        com.android.wm.shell.Flags.FLAG_ENABLE_BUBBLE_TO_FULLSCREEN,
+        com.android.wm.shell.Flags.FLAG_ENABLE_CREATE_ANY_BUBBLE,
+    )
+    fun testHandleDrop_miniCornerWinsOverBubble() {
+        createVisualIndicator(DesktopModeVisualIndicator.DragStartState.FROM_FULLSCREEN)
+        visualIndicator.setMiniTargetProvider { corner ->
+            FloatingMiniController.DragTarget(Rect(0, 1400, 200, 1600), .5f, 0f, corner)
+        }
+        val result = visualIndicator.updateIndicatorType(DEFAULT_DISPLAY,
+            PointF(10f, TABLET_DISPLAY_BOUNDS.height() - 10f))
+        assertThat(result).isEqualTo(DesktopModeVisualIndicator.IndicatorType.TO_MINI_INDICATOR)
+    }
+
+    @Test
+    @EnableFlags(
+        com.android.wm.shell.Flags.FLAG_ENABLE_BUBBLE_TO_FULLSCREEN,
+        com.android.wm.shell.Flags.FLAG_ENABLE_CREATE_ANY_BUBBLE,
+    )
+    fun testHandleDrop_cornerWithoutMiniTargetShowsBubble() {
+        createVisualIndicator(DesktopModeVisualIndicator.DragStartState.FROM_FULLSCREEN)
+        visualIndicator.setMiniTargetProvider { null }
+        val result = visualIndicator.updateIndicatorType(DEFAULT_DISPLAY,
+            PointF(10f, TABLET_DISPLAY_BOUNDS.height() - 10f))
+        assertThat(result)
+            .isEqualTo(DesktopModeVisualIndicator.IndicatorType.TO_BUBBLE_LEFT_INDICATOR)
     }
 
     @Test
