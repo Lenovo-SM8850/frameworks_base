@@ -797,4 +797,5 @@
     <!-- App handle drop zones. -->
     <dimen name="handle_zone_corner">88dp</dimen>
     <dimen name="handle_zone_split_edge">64dp</dimen>
+    <dimen name="handle_zone_mini_edge">28dp</dimen>
 </resources>

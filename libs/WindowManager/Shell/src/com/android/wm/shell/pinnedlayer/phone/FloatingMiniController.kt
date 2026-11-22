@@ -167,6 +167,11 @@ class FloatingMiniController(
 
     private fun density(task: TaskInfo) = displays.getDisplayContext(task.displayId)
         ?.resources?.displayMetrics?.density ?: 1f
+
+    /** Distance from a stable corner within which a dragged window or mini takes that corner. */
+    private fun cornerThreshold(task: TaskInfo) = displays.getDisplayContext(task.displayId)
+        ?.resources?.getDimensionPixelSize(com.android.wm.shell.R.dimen.handle_zone_mini_edge)
+        ?: (28 * density(task)).toInt()
     private fun stable(task: TaskInfo) = Rect().also {
         displays.getDisplayLayout(task.displayId)?.getStableBounds(it)
     }
@@ -217,7 +222,7 @@ class FloatingMiniController(
         val stable = stable(task)
         if (stable.isEmpty) return null
         val margin = (8 * density(task)).toInt()
-        val threshold = (48 * density(task)).toInt()
+        val threshold = cornerThreshold(task)
         val travelX = (end.left - start.left).toFloat()
         val travelY = (end.top - start.top).toFloat()
         val corner = if (entry == null) {
@@ -298,7 +303,7 @@ class FloatingMiniController(
         if (stable.isEmpty) return false
         val entry = state.get(task.userId, task.taskId)
         val margin = (8 * density(task)).toInt()
-        val corner = FloatingMiniState.corner(end, stable, (48 * density(task)).toInt())
+        val corner = FloatingMiniState.corner(end, stable, cornerThreshold(task))
         if (entry == null) {
             val target = captionDropTarget(task, start, end, captionTravel, stable) ?: return false
             val restore = FloatingWindowGeometry.movedBaseBounds(
@@ -313,7 +318,7 @@ class FloatingMiniController(
                 velocityX, velocityY)
             val landed = projected ?: end
             val landedCorner = if (projected == null) corner else FloatingMiniState.corner(
-                landed, stable, (48 * density(task)).toInt())
+                landed, stable, cornerThreshold(task))
             val crossed = FloatingMiniState.stashEdge(landed, stable)
             val edge = if (crossed != FloatingMiniState.Edge.NONE) crossed else
                 if (FloatingMiniState.canUnstash(landed, stable, entry.edge))
@@ -762,7 +767,7 @@ class FloatingMiniController(
         val layout = displays.getDisplayLayout(task.displayId) ?: return
         if (stable.isEmpty) return
         val margin = (8 * density(task)).toInt()
-        val corner = FloatingMiniState.corner(entry.bounds, stable, (48 * density(task)).toInt())
+        val corner = FloatingMiniState.corner(entry.bounds, stable, cornerThreshold(task))
         val scale = min(entry.restore.scale, FloatingMiniState.scale(logical, stable,
             min(layout.width(), layout.height()), margin))
         val sized = FloatingMiniState.sized(logical, scale, entry.bounds.left, entry.bounds.top)
@@ -810,7 +815,7 @@ class FloatingMiniController(
         if (stable.isEmpty) return true
         val scale = FloatingMiniState.scale(task.configuration.windowConfiguration.bounds,
             stable, min(next.width(), next.height()), (8 * density(task)).toInt())
-        val corner = FloatingMiniState.corner(entry.bounds, oldStable, (48 * density(task)).toInt())
+        val corner = FloatingMiniState.corner(entry.bounds, oldStable, cornerThreshold(task))
         val refitted = FloatingMiniState.refit(entry.bounds, oldStable, stable)
         val sized = FloatingMiniState.sized(task.configuration.windowConfiguration.bounds, scale,
             refitted.left, refitted.top)

@@ -71,6 +71,8 @@ class FloatingMiniControllerTest : ShellTestCase() {
             val resources = mock<android.content.res.Resources>()
             whenever(displayContext.resources).thenReturn(resources)
             whenever(resources.displayMetrics).thenReturn(android.util.DisplayMetrics().apply { density = 1f })
+            whenever(resources.getDimensionPixelSize(com.android.wm.shell.R.dimen.handle_zone_mini_edge))
+                .thenReturn(28)
             whenever(displays.getDisplayContext(0)).thenReturn(displayContext)
             whenever(layout.width()).thenReturn(1200)
             whenever(layout.height()).thenReturn(1920)
@@ -425,10 +427,10 @@ class FloatingMiniControllerTest : ShellTestCase() {
     @Test fun previewAndRelease_shareExactCornerTargets() {
         val corners = listOf(Rect(-20, 70, 340, 610), Rect(880, 70, 1240, 610),
             Rect(-20, 1400, 340, 1940), Rect(880, 1400, 1240, 1940))
-        val outside = listOf(Rect(49, 149, 409, 689), Rect(791, 149, 1151, 689),
-            Rect(49, 1311, 409, 1851), Rect(791, 1311, 1151, 1851))
-        val boundary = listOf(Rect(48, 148, 408, 688), Rect(792, 148, 1152, 688),
-            Rect(48, 1312, 408, 1852), Rect(792, 1312, 1152, 1852))
+        val outside = listOf(Rect(29, 129, 389, 669), Rect(811, 129, 1171, 669),
+            Rect(29, 1331, 389, 1871), Rect(811, 1331, 1171, 1871))
+        val boundary = listOf(Rect(28, 128, 388, 668), Rect(812, 128, 1172, 668),
+            Rect(28, 1332, 388, 1872), Rect(812, 1332, 1172, 1872))
         corners.forEachIndexed { index, end ->
             val h = Harness()
             val start = Rect(300, 500, 660, 1040)
