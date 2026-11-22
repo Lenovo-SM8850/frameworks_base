@@ -225,6 +225,7 @@ fun ClassicTileContent(
     onChevronClick: (() -> Unit)? = null,
     pressSource: InteractionSource? = null,
     lottieSpec: String? = null,
+    lottieEnabled: Boolean = true,
     active: Boolean = false,
 ) {
     val isNoBackground = iconShapeKey in QSTileIconShapes.NO_BACKGROUND_KEYS
@@ -344,6 +345,7 @@ fun ClassicTileContent(
                         onColor = colors.icon,
                         size = iconSize,
                         modifier = Modifier.align(Alignment.Center),
+                        enabled = lottieEnabled,
                     )
             if (!animated) {
                 SmallTileContent(
@@ -434,6 +436,7 @@ fun LargeTileContent(
     toggleClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     lottieSpec: String? = null,
+    lottieEnabled: Boolean = true,
     active: Boolean = false,
     labelMaxLines: Int = 1,
     // Remix QS styles: the clip and size of the icon target, the icon's size and label styles.
@@ -551,6 +554,7 @@ fun LargeTileContent(
                     onColor = colors.icon,
                     size = bubbleIconSize,
                     modifier = Modifier.align(Alignment.Center),
+                    enabled = lottieEnabled,
                 )
             if (!animated) {
                 SmallTileContent(

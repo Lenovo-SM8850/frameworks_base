@@ -46,6 +46,9 @@ private class ColorOSTileClip(
     val fadesFromOn: Boolean = true,
 )
 
+/** The moon of the do not disturb tiles, which keeps the off color while it turns off. */
+private val ColorOSDndClip = ColorOSTileClip(R.raw.coloros_tile_dnd, fadesFromOn = false)
+
 private val ColorOSTileClips =
     mapOf(
         "wifi" to ColorOSTileClip(R.raw.coloros_tile_wifi),
@@ -54,7 +57,8 @@ private val ColorOSTileClips =
         "bt" to ColorOSTileClip(R.raw.coloros_tile_bluetooth, scale = 1.17f),
         "cell" to ColorOSTileClip(R.raw.coloros_tile_cellular),
         "airplane" to ColorOSTileClip(R.raw.coloros_tile_airplane),
-        "dnd" to ColorOSTileClip(R.raw.coloros_tile_dnd, fadesFromOn = false),
+        "dnd" to ColorOSDndClip,
+        "modes_dnd" to ColorOSDndClip,
         "location" to ColorOSTileClip(R.raw.coloros_tile_location),
         "rotation" to ColorOSTileClip(R.raw.coloros_tile_rotation, R.raw.coloros_tile_rotation_inactive),
         "flashlight" to ColorOSTileClip(R.raw.coloros_tile_flashlight),
@@ -84,7 +88,9 @@ private class OnColor(var color: Color)
  * Draws the ColorOS animation of the tile [spec] in a box of [size], and returns whether it did, so
  * the caller draws the regular icon when it did not. The animation plays when [active] changes and
  * rests on its first frame while the tile is off and on its last while it is on. [offColor] is the
- * color of the icon of a tile that is off and [onColor] the one of a tile that is on.
+ * color of the icon of a tile that is off and [onColor] the one of a tile that is on. While
+ * [enabled] is false nothing is drawn and false is returned, and the clip is reset to off, so it
+ * plays the turn on when it is enabled again while [active].
  */
 @Composable
 internal fun colorOSTileLottie(
@@ -94,18 +100,25 @@ internal fun colorOSTileLottie(
     onColor: Color,
     size: Dp,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ): Boolean {
     val clip = spec?.let { ColorOSTileClips[it] } ?: return false
     val context = LocalContext.current
     var shown by remember(spec) { mutableStateOf<LottieComposition?>(null) }
-    var from by remember(spec) { mutableStateOf(active) }
+    var from by remember(spec) { mutableStateOf(active && enabled) }
     var playing by remember(spec) { mutableStateOf(false) }
     // The clip could not be loaded, so the regular icon is the only one there is.
     var failed by remember(spec) { mutableStateOf(false) }
     val progress = remember(spec) { Animatable(1f) }
     val lastOn = remember(spec) { OnColor(onColor) }
-    if (active) lastOn.color = onColor
-    LaunchedEffect(spec, active) {
+    if (active && enabled) lastOn.color = onColor
+    LaunchedEffect(spec, active, enabled) {
+        if (!enabled) {
+            // A turn cut off while it played is over.
+            playing = false
+            from = false
+            return@LaunchedEffect
+        }
         val forward = ColorOSTileLottie.load(context, clip.on) ?: run {
             shown = null
             failed = true
@@ -124,6 +137,7 @@ internal fun colorOSTileLottie(
         shown = forward
         progress.snapTo(if (active) 1f else 0f)
     }
+    if (!enabled) return false
     // While the clip loads nothing is drawn, so the regular icon does not flash before it.
     val composition = shown ?: return !failed
     val on = if (active) onColor else lastOn.color

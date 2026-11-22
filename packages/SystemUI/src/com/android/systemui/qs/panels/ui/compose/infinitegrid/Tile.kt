@@ -184,8 +184,34 @@ private const val ColorOSUnavailableContentAlpha = 0.55f
 /** Tiles whose icon is dark ink on the white active bubble, instead of blue. */
 private val COLOROS_INK_TILES = setOf("dark", "night")
 
-/** Do not disturb tiles, the modes tile included, whose icon is purple while active. */
-private val COLOROS_DND_TILES = setOf("dnd", "modes_dnd")
+/** Do not disturb tiles, whose icon is purple while active. */
+private val COLOROS_DND_TILES = setOf("modes_dnd")
+
+/** The modes tile, which only looks like a do not disturb tile while it shows that mode. */
+private const val COLOROS_MODES_TILE = "dnd"
+
+/** The icon of the do not disturb mode. */
+private val ZenDndModeIcon = com.android.internal.R.drawable.ic_zen_mode_type_special_dnd
+
+/**
+ * Whether the tile [spec] with the icon resource [iconResId] gets the do not disturb animation
+ * and purple. The modes tile only does while its icon is the one of the do not disturb mode; for
+ * the other modes it keeps their icon and the blue of the other tiles.
+ */
+internal fun colorOSDndStyle(spec: String, iconResId: Int?): Boolean =
+    spec in COLOROS_DND_TILES || (spec == COLOROS_MODES_TILE && iconResId == ZenDndModeIcon)
+
+/** Whether the ColorOS animation of the tile [spec] is drawn, given its [colorOSDndStyle]. */
+internal fun colorOSLottieEnabled(spec: String, dndStyle: Boolean): Boolean =
+    spec != COLOROS_MODES_TILE || dndStyle
+
+/** The drawable resource the icon is drawn from, or null when it has none. */
+private fun IconProvider.iconResId(): Int? =
+    when (val tileIcon = icon) {
+        is QSTileImpl.DrawableIconWithRes -> tileIcon.resourceId
+        is QSTileImpl.ResourceIcon -> tileIcon.resId
+        else -> null
+    }
 
 /** Tiles that ColorOS marks with a small down chevron after the label, as they open more. */
 private val COLOROS_DROPDOWN_TILES =
@@ -287,11 +313,19 @@ fun ContentScope.Tile(
         val nothingStyle = LocalNothingQsStyle.current
         val isQuadTile = nothingStyle && LocalQSQuadTiles.current.contains(tile.spec)
         val tileGradient = rememberQSTileGradient()
+        // Only the modes tile reads its icon for this, so the other tiles do not depend on it.
+        val colorOSDnd =
+            colorOSStyle &&
+                colorOSDndStyle(
+                    tile.spec.spec,
+                    if (tile.spec.spec == COLOROS_MODES_TILE) icon.iconResId() else null,
+                )
+        val colorOSLottie = colorOSLottieEnabled(tile.spec.spec, colorOSDnd)
         val colors =
             if (nothingStyle) {
                 TileDefaults.nothingColorsForState(uiState, isQuadTile)
             } else if (colorOSStyle) {
-                TileDefaults.colorOSColorsForState(uiState, iconOnly, tile.spec.spec)
+                TileDefaults.colorOSColorsForState(uiState, iconOnly, tile.spec.spec, colorOSDnd)
             } else {
                 TileDefaults.getColorForState(uiState, iconOnly, tileGradient)
             }
@@ -627,6 +661,7 @@ fun ContentScope.Tile(
                                             }.takeIf { isClickable },
                                         pressSource = interactionSource.takeIf { colorOSStyle },
                                         lottieSpec = tile.spec.spec.takeIf { colorOSStyle },
+                                        lottieEnabled = colorOSLottie,
                                         active = uiState.visualState == STATE_ACTIVE,
                                         modifier =
                                             Modifier.align(Alignment.TopCenter)
@@ -728,6 +763,7 @@ fun ContentScope.Tile(
                                 toggleClick = secondaryClick,
                                 onLongClick = longClick,
                                 lottieSpec = tile.spec.spec.takeIf { colorOSStyle },
+                                lottieEnabled = colorOSLottie,
                                 active = uiState.visualState == STATE_ACTIVE,
                                 accessibilityUiState = uiState.accessibilityUiState,
                                 squishiness = squishiness,
@@ -1315,12 +1351,17 @@ private object TileDefaults {
     /**
      * ColorOS style: translucent "glass" tiles that let the shade blur show through. An active
      * tile shows a white bubble with a coloured icon on a dark and on a light panel. Mobile data
-     * uses green, auto rotate red, airplane mode orange, do not disturb purple, dark mode and
-     * night light dark ink, and everything else blue.
+     * uses green, auto rotate red, airplane mode orange, do not disturb ([dnd]) purple, dark mode
+     * and night light dark ink, and everything else blue.
      */
     @Composable
     @ReadOnlyComposable
-    fun colorOSColorsForState(uiState: TileUiState, iconOnly: Boolean, spec: String): TileColors {
+    fun colorOSColorsForState(
+        uiState: TileUiState,
+        iconOnly: Boolean,
+        spec: String,
+        dnd: Boolean = spec in COLOROS_DND_TILES,
+    ): TileColors {
         val onSurface = MaterialTheme.colorScheme.onSurface
         val darkPanel = MaterialTheme.colorScheme.surface.luminance() < 0.5f
         val accent =
@@ -1328,7 +1369,7 @@ private object TileDefaults {
                 spec in COLOROS_DATA_TILES -> ColorOSGreen
                 spec == "rotation" -> ColorOSRed
                 spec == "airplane" -> ColorOSOrange
-                spec in COLOROS_DND_TILES -> ColorOSDndPurple
+                dnd -> ColorOSDndPurple
                 spec in COLOROS_INK_TILES -> ColorOSInk
                 else -> ColorOSBlue
             }
