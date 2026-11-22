@@ -793,4 +793,8 @@
     <dimen name="floating_handle_touch_height">24dp</dimen>
     <dimen name="floating_handle_pill_width">32dp</dimen>
     <dimen name="floating_handle_pill_height">4dp</dimen>
+
+    <!-- App handle drop zones. -->
+    <dimen name="handle_zone_corner">88dp</dimen>
+    <dimen name="handle_zone_split_edge">64dp</dimen>
 </resources>
