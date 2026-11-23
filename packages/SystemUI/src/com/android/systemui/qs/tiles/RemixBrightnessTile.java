@@ -110,7 +110,7 @@ public class RemixBrightnessTile extends QSTileImpl<BooleanState> {
 
     @Override
     public CharSequence getTileLabel() {
-        return mContext.getString(R.string.qs_brightness_tile_label);
+        return mContext.getString(R.string.qs_brightness_tile_auto_label);
     }
 
     @Override

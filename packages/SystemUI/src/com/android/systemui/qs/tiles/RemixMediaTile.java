@@ -77,7 +77,7 @@ public class RemixMediaTile extends QSTileImpl<State> {
 
     @Override
     public CharSequence getTileLabel() {
-        return mContext.getString(R.string.qs_media_tile_label);
+        return mContext.getString(R.string.qs_media_tile_play_pause_label);
     }
 
     @Override

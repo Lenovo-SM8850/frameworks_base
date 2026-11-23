@@ -583,7 +583,7 @@ interface LineageModule {
                 uiConfig =
                     QSTileUIConfig.Resource(
                         iconRes = R.drawable.ic_now_playing_note,
-                        labelRes = R.string.qs_media_tile_label
+                        labelRes = R.string.qs_media_tile_play_pause_label
                     ),
                 instanceId = uiEventLogger.getNewInstanceId(),
                 category = TileCategory.UTILITIES,
@@ -598,7 +598,7 @@ interface LineageModule {
                 uiConfig =
                     QSTileUIConfig.Resource(
                         iconRes = R.drawable.ic_volume_media,
-                        labelRes = R.string.qs_volume_tile_label
+                        labelRes = R.string.qs_volume_tile_mute_label
                     ),
                 instanceId = uiEventLogger.getNewInstanceId(),
                 category = TileCategory.UTILITIES,
@@ -613,7 +613,7 @@ interface LineageModule {
                 uiConfig =
                     QSTileUIConfig.Resource(
                         iconRes = R.drawable.ic_brightness_full,
-                        labelRes = R.string.qs_brightness_tile_label
+                        labelRes = R.string.qs_brightness_tile_auto_label
                     ),
                 instanceId = uiEventLogger.getNewInstanceId(),
                 category = TileCategory.DISPLAY,

@@ -405,14 +405,20 @@
     <string name="charging_style_watts"><xliff:g id="state" example="Fast charging">%1$s</xliff:g> \u00b7 <xliff:g id="watts" example="33">%2$d</xliff:g> W</string>
     <!-- Label of the Media tile in Quick Settings, which plays and pauses the music. [CHAR LIMIT=20] -->
     <string name="qs_media_tile_label">Media</string>
+    <!-- Label of the Media tile as a plain tile, which plays and pauses the music. [CHAR LIMIT=20] -->
+    <string name="qs_media_tile_play_pause_label">Play media</string>
     <!-- Shown on the Media tile in the Remix panel style when nothing is playing. [CHAR LIMIT=30] -->
     <string name="qs_media_tile_idle">Nothing playing</string>
     <!-- Label of the Volume tile in Quick Settings, which sets the media volume. [CHAR LIMIT=20] -->
     <string name="qs_volume_tile_label">Volume</string>
+    <!-- Label of the Volume tile as a plain tile, which mutes and unmutes the media volume. [CHAR LIMIT=20] -->
+    <string name="qs_volume_tile_mute_label">Mute media</string>
     <!-- Shown on the Volume tile while the media volume is muted. [CHAR LIMIT=20] -->
     <string name="qs_volume_tile_muted">Muted</string>
     <!-- Label of the Brightness tile in Quick Settings, which slides the screen brightness. [CHAR LIMIT=20] -->
     <string name="qs_brightness_tile_label">Brightness</string>
+    <!-- Label of the Brightness tile as a plain tile, which turns auto brightness on and off. [CHAR LIMIT=20] -->
+    <string name="qs_brightness_tile_auto_label">Auto brightness</string>
     <!-- Shown on the Brightness tile while auto brightness is on. [CHAR LIMIT=20] -->
     <string name="qs_brightness_tile_auto">Auto</string>
     <!-- Shown on the Brightness tile while auto brightness is off. [CHAR LIMIT=20] -->

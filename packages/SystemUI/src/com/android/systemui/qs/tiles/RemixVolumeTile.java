@@ -113,7 +113,7 @@ public class RemixVolumeTile extends QSTileImpl<BooleanState> {
 
     @Override
     public CharSequence getTileLabel() {
-        return mContext.getString(R.string.qs_volume_tile_label);
+        return mContext.getString(R.string.qs_volume_tile_mute_label);
     }
 
     @Override
