@@ -322,7 +322,12 @@ public final class DisplayRefreshRateController {
 
     private void updateRefreshRateLocked(String packageName) {
         if (mExtremeMode) {
-            logD("Skip update refresh rate due to in extreme mode");
+            final int maxRefreshRate = getMaxAllowedRefreshRate();
+            if (mRequestedRefreshRate != maxRefreshRate) {
+                mRequestedRefreshRate = maxRefreshRate;
+                notifyRefreshRateChanged();
+                logD("Requested highest refresh rate in extreme mode");
+            }
         } else if (mAppRefreshRateConfigMap.containsKey(packageName)) {
             mRequestedRefreshRate = mAppRefreshRateConfigMap.get(packageName);
             notifyRefreshRateChanged();
