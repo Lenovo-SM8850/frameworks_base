@@ -157,6 +157,7 @@ public class AxSpoofManager implements IAxSpoofManager {
     // left alone. Set once by enableSpoofing() and persisted in ACTIVATED_KEY.
     private volatile boolean mActivated;
     private volatile boolean mTrickyStoreOn = true;
+    private volatile boolean mPifOn = true;
     private TaskStackListener mTaskListener;
     private final Runnable mRefreshAfterClear = this::refreshNow;
     private final Runnable mTensorSpoofExpiry = this::enforceTensorSpoofExpiry;
@@ -202,6 +203,10 @@ public class AxSpoofManager implements IAxSpoofManager {
                     scheduleTensorSpoofExpiry();
                     return;
                 }
+                if (PIF_ENABLED_KEY.equals(last)) {
+                    onPifSwitchChanged();
+                    return;
+                }
                 if (TRICKYSTORE_ENABLED_KEY.equals(last)) {
                     mTrickyStoreOn = readTrickyStoreOn();
                     mDuckRkp.onSettingsChanged(true);
@@ -225,6 +230,13 @@ public class AxSpoofManager implements IAxSpoofManager {
         mResolver.registerContentObserver(Settings.System.getUriFor(TRICKYSTORE_ENABLED_KEY),
                 false, mObserver, UserHandle.USER_SYSTEM);
         mTrickyStoreOn = readTrickyStoreOn();
+        // Observe first, then read under the lock: a change in between is notified, and both
+        // reads of the switch are serialized by the lock.
+        mResolver.registerContentObserver(Settings.System.getUriFor(PIF_ENABLED_KEY),
+                false, mObserver, UserHandle.USER_SYSTEM);
+        synchronized (this) {
+            mPifOn = readPifOn();
+        }
         mResolver.registerContentObserver(Settings.Secure.getUriFor(TENSOR_SPOOF_KEY),
                 false, mObserver, UserHandle.USER_ALL);
         mResolver.registerContentObserver(Settings.Secure.getUriFor(TENSOR_SPOOF_EXPIRES_KEY),
@@ -381,11 +393,35 @@ public class AxSpoofManager implements IAxSpoofManager {
     }
 
     /**
+     * The PIF switch turns the stored config off without deleting it: the staged
+     * props are emptied and the config getter returns nothing, and turning it back
+     * on stages the stored config again. The GMS family is stopped either way so it
+     * picks up the change.
+     */
+    private void onPifSwitchChanged() {
+        final boolean on;
+        synchronized (this) {
+            on = readPifOn();
+            if (on == mPifOn) return;
+            mPifOn = on;
+            if (!mActivated) return;
+            stagePifPropOverrides(getCached(Settings.Secure.SPOOF_PIF_CONFIG));
+        }
+        killGmsFamily();
+        Log.i(TAG, "PIF switched " + (on ? "on" : "off"));
+    }
+
+    private boolean readPifOn() {
+        return Settings.System.getIntForUser(
+                mResolver, PIF_ENABLED_KEY, 1, UserHandle.USER_SYSTEM) != 0;
+    }
+
+    /**
      * Empties the staged PIF props. A property can't be deleted once set,
      * but bionic's custom_rom_hide_get_prop_override() only applies a staging
      * prop when it is non-empty, so an empty value restores the real identity.
      */
-    private void clearPifPropOverrides() {
+    private synchronized void clearPifPropOverrides() {
         for (String name : PIF_PRODUCT_PROP_NAMES) {
             setStagedProp(PIF_PRODUCT_PROP_PREFIX + name, null);
         }
@@ -842,7 +878,11 @@ public class AxSpoofManager implements IAxSpoofManager {
      * is staged, so bionic serves the real values. bionic can't read the config
      * itself, so this is where the switch has to be honored.
      */
-    private void stagePifPropOverrides(String config) {
+    private synchronized void stagePifPropOverrides(String config) {
+        if (!mPifOn) {
+            clearPifPropOverrides();
+            return;
+        }
         final Map<String, String> fields = parsePifConfig(config);
         if (!isSpoofPropsEnabled(fields)) {
             clearPifPropOverrides();
@@ -1056,7 +1096,7 @@ public class AxSpoofManager implements IAxSpoofManager {
 
     @Override
     public String getPifConfig() {
-        if (!mActivated) return null;
+        if (!mActivated || !mPifOn) return null;
         return getCached(Settings.Secure.SPOOF_PIF_CONFIG);
     }
 
