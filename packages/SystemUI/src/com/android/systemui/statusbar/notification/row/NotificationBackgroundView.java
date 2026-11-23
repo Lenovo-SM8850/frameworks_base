@@ -157,12 +157,7 @@ public class NotificationBackgroundView extends View implements Dumpable,
                 R.color.notification_state_color_light);
         mDarkColoredStatefulColors = getResources().getColorStateList(
                 R.color.notification_state_color_dark);
-        if (mIsBlurSupported) {
-            mNormalColor = SurfaceEffectColors.surfaceEffect1(getContext());
-        } else {
-            mNormalColor = mContext.getColor(
-                    com.android.internal.R.color.materialColorSurfaceContainerHigh);
-        }
+        updateNormalColor();
         mFocusOverlayStroke = getResources().getDimension(R.dimen.notification_focus_stroke_width);
     }
 
@@ -170,8 +165,20 @@ public class NotificationBackgroundView extends View implements Dumpable,
     public void setIsBlurSupported(boolean isBlurSupported) {
         if (mIsBlurSupported != isBlurSupported) {
             mIsBlurSupported = isBlurSupported;
+            // The row tints a plain card with the color for its translucency, which has to match
+            // for surfaceFor() to tell a plain card from a tinted one.
+            updateNormalColor();
             setStatefulColors();
             invalidate();
+        }
+    }
+
+    private void updateNormalColor() {
+        if (mIsBlurSupported) {
+            mNormalColor = SurfaceEffectColors.surfaceEffect1(getContext());
+        } else {
+            mNormalColor = mContext.getColor(
+                    com.android.internal.R.color.materialColorSurfaceContainerHigh);
         }
     }
 
