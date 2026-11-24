@@ -140,16 +140,19 @@ object ShadeColors {
         val panel = shadePanel(context, blurSupported, true)
         if (blurSupported && glassDualTone(context)) {
             // Dual tone on glass: a faint tint behind notifications instead of a card color.
-            val alpha = (LIQUID_GLASS_DUAL_TONE.coerceIn(0f, 1f) * 255).roundToInt()
-            val tone =
-                ColorUtils.setAlphaComponent(context.getColor(R.color.notification_scrim_base), alpha)
-            return ColorUtils.compositeColors(tone, panel)
+            return ColorUtils.compositeColors(glassDualToneScrim(context), panel)
         }
         return ColorUtils.compositeColors(card, panel)
     }
 
-    /** Dual tone for Liquid Glass, off under the ColorOS panel, which has its own card glass. */
     private fun glassDualTone(context: Context): Boolean = LiquidGlass.isDualToneShade(context)
+
+    /** The faint accent tint behind notifications of the Liquid Glass dual tone shade. */
+    @JvmStatic
+    fun glassDualToneScrim(context: Context): Int {
+        val alpha = (LIQUID_GLASS_DUAL_TONE.coerceIn(0f, 1f) * 255).roundToInt()
+        return ColorUtils.setAlphaComponent(context.getColor(R.color.notification_scrim_base), alpha)
+    }
 
     @JvmStatic
     fun glassEdge(context: Context): Int {

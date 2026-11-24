@@ -79,6 +79,7 @@ import com.android.systemui.keyguard.ui.viewmodel.AlternateBouncerToGoneTransiti
 import com.android.systemui.keyguard.ui.viewmodel.LockscreenToDreamingTransitionViewModel;
 import com.android.systemui.keyguard.ui.viewmodel.PrimaryBouncerToDreamingTransitionViewModel;
 import com.android.systemui.keyguard.ui.viewmodel.PrimaryBouncerToGoneTransitionViewModel;
+import com.android.systemui.qs.shared.style.LiquidGlass;
 import com.android.systemui.res.R;
 import com.android.systemui.scene.shared.flag.SceneContainerFlag;
 import com.android.systemui.scene.shared.model.Scenes;
@@ -1796,6 +1797,21 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
     }
 
     private int getNotificationsScrimColor() {
+        final boolean glass = isBlurCurrentlySupported() && LiquidGlass.isOnShade(mContext);
+        // The setting is read here, as its observer may run before the cached Liquid Glass state
+        // has seen the change.
+        final boolean dualTone = glass
+                && Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                        "liquid_glass_dual_tone", 0, UserHandle.USER_CURRENT) == 1;
+        // The dual tone tint is drawn as it is, not blended into the wallpaper colour, which
+        // would leave almost nothing of it at its low alpha.
+        if (mNotificationsScrim != null) {
+            mNotificationsScrim.setBlendWithMainColor(!dualTone);
+        }
+        if (dualTone) {
+            // The dual tone shade sets the notifications apart with a faint tint behind them.
+            return ShadeColors.glassDualToneScrim(mContext);
+        }
         return ShadeColors.notificationScrim(mContext, isBlurCurrentlySupported());
     }
 

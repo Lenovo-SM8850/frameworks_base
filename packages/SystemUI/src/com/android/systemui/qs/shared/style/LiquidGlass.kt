@@ -233,10 +233,10 @@ object LiquidGlass {
     fun isCosStyle(context: Context): Boolean =
         isOnShade(context) && (cosStyle(context).value || colorOsPanel(context).value)
 
-    /** Dual tone shade: Liquid Glass on the shade, the switch on, off under the ColorOS panel. */
+    /** Dual tone shade: Liquid Glass on the shade and the switch on, in every QS panel style. */
     @JvmStatic
     fun isDualToneShade(context: Context): Boolean =
-        isOnShade(context) && dualTone(context).value && !colorOsPanel(context).value
+        isOnShade(context) && dualTone(context).value
 
     /** Needs [isOnShade] to have been called once with a context, which starts the observers. */
     @JvmStatic
