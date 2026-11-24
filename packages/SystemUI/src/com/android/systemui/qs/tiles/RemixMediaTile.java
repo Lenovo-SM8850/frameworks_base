@@ -9,11 +9,15 @@ import static com.android.internal.logging.MetricsLogger.VIEW_UNKNOWN;
 
 import android.content.Intent;
 import android.media.AudioManager;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.service.quicksettings.Tile;
 import android.view.KeyEvent;
+import android.widget.Switch;
 
 import androidx.annotation.Nullable;
 
@@ -23,7 +27,7 @@ import com.android.systemui.dagger.qualifiers.Background;
 import com.android.systemui.dagger.qualifiers.Main;
 import com.android.systemui.plugins.ActivityStarter;
 import com.android.systemui.plugins.FalsingManager;
-import com.android.systemui.plugins.qs.QSTile.State;
+import com.android.systemui.plugins.qs.QSTile.BooleanState;
 import com.android.systemui.plugins.statusbar.StatusBarStateController;
 import com.android.systemui.qs.QSHost;
 import com.android.systemui.qs.QsEventLogger;
@@ -31,13 +35,36 @@ import com.android.systemui.qs.logging.QSLogger;
 import com.android.systemui.qs.tileimpl.QSTileImpl;
 import com.android.systemui.res.R;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import javax.inject.Inject;
 
-public class RemixMediaTile extends QSTileImpl<State> {
+public class RemixMediaTile extends QSTileImpl<BooleanState> {
 
     public static final String TILE_SPEC = "remixmedia";
 
+    private final MediaSessionManager mSessionManager;
+    private final List<MediaController> mControllers = new ArrayList<>();
+    private boolean mListening;
+    private volatile boolean mPlaying;
+
     private Icon mIcon = null;
+
+    private final MediaSessionManager.OnActiveSessionsChangedListener mSessionsListener =
+            this::updateControllers;
+
+    private final MediaController.Callback mControllerCallback = new MediaController.Callback() {
+        @Override
+        public void onPlaybackStateChanged(@Nullable PlaybackState state) {
+            updatePlaying();
+        }
+
+        @Override
+        public void onSessionDestroyed() {
+            updatePlaying();
+        }
+    };
 
     @Inject
     public RemixMediaTile(
@@ -49,15 +76,65 @@ public class RemixMediaTile extends QSTileImpl<State> {
             MetricsLogger metricsLogger,
             StatusBarStateController statusBarStateController,
             ActivityStarter activityStarter,
-            QSLogger qsLogger
+            QSLogger qsLogger,
+            MediaSessionManager sessionManager
     ) {
         super(host, uiEventLogger, backgroundLooper, mainHandler, falsingManager, metricsLogger,
                 statusBarStateController, activityStarter, qsLogger);
+        mSessionManager = sessionManager;
     }
 
     @Override
-    public State newTileState() {
-        return new State();
+    public BooleanState newTileState() {
+        return new BooleanState();
+    }
+
+    @Override
+    public void handleSetListening(boolean listening) {
+        super.handleSetListening(listening);
+        if (mListening == listening) return;
+        mListening = listening;
+        if (listening) {
+            mSessionManager.addOnActiveSessionsChangedListener(mSessionsListener, null, mHandler);
+            updateControllers(mSessionManager.getActiveSessions(null));
+        } else {
+            mSessionManager.removeOnActiveSessionsChangedListener(mSessionsListener);
+            clearControllers();
+            mPlaying = false;
+        }
+    }
+
+    private void updateControllers(@Nullable List<MediaController> controllers) {
+        clearControllers();
+        if (controllers != null) {
+            for (MediaController controller : controllers) {
+                controller.registerCallback(mControllerCallback, mHandler);
+                mControllers.add(controller);
+            }
+        }
+        updatePlaying();
+    }
+
+    private void clearControllers() {
+        for (MediaController controller : mControllers) {
+            controller.unregisterCallback(mControllerCallback);
+        }
+        mControllers.clear();
+    }
+
+    private void updatePlaying() {
+        boolean playing = false;
+        for (MediaController controller : mControllers) {
+            PlaybackState state = controller.getPlaybackState();
+            if (state != null && state.getState() == PlaybackState.STATE_PLAYING) {
+                playing = true;
+                break;
+            }
+        }
+        if (playing != mPlaying) {
+            mPlaying = playing;
+            refreshState();
+        }
     }
 
     @Override
@@ -86,13 +163,15 @@ public class RemixMediaTile extends QSTileImpl<State> {
     }
 
     @Override
-    protected void handleUpdateState(State state, Object arg) {
+    protected void handleUpdateState(BooleanState state, Object arg) {
         if (mIcon == null) {
             mIcon = maybeLoadResourceIcon(R.drawable.ic_now_playing_note);
         }
         state.icon = mIcon;
         state.label = getTileLabel();
         state.contentDescription = state.label;
-        state.state = Tile.STATE_INACTIVE;
+        state.value = mPlaying;
+        state.state = state.value ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE;
+        state.expandedAccessibilityClassName = Switch.class.getName();
     }
 }
