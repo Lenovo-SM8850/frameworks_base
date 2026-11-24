@@ -386,10 +386,15 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     val reveal: () -> Float = { colorOSExpansionReveal(expansion()) }
     // The glass is a blur region of the window, so it does not follow the alpha the scene
     // transition gives the content. The content fades in later than the panel is revealed, and
-    // without its alpha the glass would show up before the tiles do.
+    // without its alpha the glass would show up before the tiles do. The alpha is not known yet
+    // while the content has not been placed in the transition, the content is not drawn then, and
+    // neither is the glass. A panel that is not in a transition is fully there.
     val glassBlur =
         rememberColorOSGlassBlur {
-            glassAlpha() * (QuickSettings.Elements.QuickSettingsContent.currentAlpha() ?: 1f)
+            val sceneAlpha =
+                QuickSettings.Elements.QuickSettingsContent.currentAlpha()
+                    ?: if (layoutState.currentTransition == null) 1f else 0f
+            glassAlpha() * sceneAlpha
         }
     val glass = colorOSGlass(blurred = glassBlur != null)
 
@@ -423,24 +428,29 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
         val sliderSlot = columnSize
         val rowCard = pillTile
         if (capped) {
-            ColorOSTabletLayout(
-                tiles = tiles,
-                largeTiles = largeTiles,
-                infiniteGridLayout = infiniteGridLayout,
-                brightnessViewModel = brightnessViewModel,
-                audioVolumeInteractor = audioVolumeInteractor,
-                showMedia = showMedia,
-                media = media,
-                listening = listening,
-                glass = glass,
-                glassBlur = glassBlur,
-                labelHeight = labelHeight,
-                labelsHidden = labelsHidden,
-                availableHeight = availableHeight,
-                fullWidth = panelMaxWidth,
-                onOpenDevices = onOpenDevices,
-                reveal = { m -> m.colorOSModuleReveal(2, reveal) },
-            )
+            // The tablet grid is one module: its glass fades with the cells, like the others.
+            CompositionLocalProvider(LocalColorOSGlassBlur provides glassBlur) {
+                ColorOSModuleGlass(2, reveal) {
+                    ColorOSTabletLayout(
+                        tiles = tiles,
+                        largeTiles = largeTiles,
+                        infiniteGridLayout = infiniteGridLayout,
+                        brightnessViewModel = brightnessViewModel,
+                        audioVolumeInteractor = audioVolumeInteractor,
+                        showMedia = showMedia,
+                        media = media,
+                        listening = listening,
+                        glass = glass,
+                        glassBlur = LocalColorOSGlassBlur.current,
+                        labelHeight = labelHeight,
+                        labelsHidden = labelsHidden,
+                        availableHeight = availableHeight,
+                        fullWidth = panelMaxWidth,
+                        onOpenDevices = onOpenDevices,
+                        reveal = { m -> m.colorOSModuleReveal(2, reveal) },
+                    )
+                }
+            }
             SideEffect { onFitChanged(true) }
             return@BoxWithConstraints
         }
