@@ -55,6 +55,7 @@ import com.android.systemui.media.remedia.ui.viewmodel.MediaViewModel
 import com.android.systemui.plugins.statusbar.StatusBarStateController
 import com.android.systemui.qs.FooterActionsController
 import com.android.systemui.qs.QSEvent
+import com.android.systemui.qs.composefragment.ColorOSKeyguardCloseFadeStart
 import com.android.systemui.qs.composefragment.dagger.QSFragmentComposeLog
 import com.android.systemui.qs.composefragment.dagger.QSFragmentComposeModule
 import com.android.systemui.qs.footer.ui.viewmodel.FooterActionsViewModel
@@ -273,6 +274,39 @@ constructor(
     }
 
     val isQsFullyExpanded by derivedStateOf { expansionState.progress >= 1f && isQsExpanded }
+
+    /**
+     * Whether the quick settings held open on the lockscreen have been out as far as
+     * [ColorOSKeyguardCloseFadeStart] since they were held, so that going back under it is them
+     * closing and not them still opening.
+     */
+    private var isKeyguardCloseArmed by mutableStateOf(false)
+
+    /**
+     * How far out the quick settings held open on the lockscreen really are while they close.
+     * [expansionState] stays at 1 there until they are closed, while their height, and the
+     * notifications that clip them from below, follow this. 1 when they are not closing there.
+     */
+    val keyguardCloseExpansion by derivedStateOf {
+        if (forceQs && isKeyguardCloseArmed && qsExpansion >= 0f) qsExpansion else 1f
+    }
+
+    /**
+     * Whether the quick settings held open on the lockscreen have finished closing, while the shade
+     * is still shown. [forceQs] ends with them, and [keyguardCloseExpansion] is back at 1 there.
+     */
+    private var isKeyguardCloseDone by mutableStateOf(false)
+
+    /**
+     * [keyguardCloseExpansion] for the glass behind the shade. It stays at 0 once the quick
+     * settings are closed on the lockscreen, until the shade is gone or they are held open again,
+     * as going back to 1 there would bring the glass back at once, and it would fade out with the
+     * shade.
+     */
+    val keyguardCloseBackdropExpansion by derivedStateOf {
+        if (!forceQs && (isKeyguardCloseArmed || isKeyguardCloseDone)) 0f
+        else keyguardCloseExpansion
+    }
 
     /**
      * Accessibility action for collapsing/expanding QS. The provided runnable is responsible for
@@ -560,6 +594,7 @@ constructor(
         remixDefaultTilesInteractor.start()
         coroutineScope {
             launch { hydrateSquishinessInteractor() }
+            launch { hydrateKeyguardCloseArmed() }
             if (usingMedia && !MediaControlsInComposeFlag.isEnabled) {
                 launch { hydrateQqsMediaExpansion() }
                 launch { hydrateMediaSquishiness() }
@@ -591,6 +626,22 @@ constructor(
     private suspend fun hydrateSquishinessInteractor() {
         snapshotFlow { constrainedSquishinessFraction }
             .collect { squishinessInteractor.setSquishinessValue(it) }
+    }
+
+    private suspend fun hydrateKeyguardCloseArmed() {
+        snapshotFlow {
+                Pair(
+                    forceQs &&
+                        qsExpansion >= 0f &&
+                        (isKeyguardCloseArmed || qsExpansion >= ColorOSKeyguardCloseFadeStart),
+                    isQsVisibleAndAnyShadeExpanded,
+                )
+            }
+            .collect { (armed, shown) ->
+                if (isKeyguardCloseArmed && !armed && !forceQs) isKeyguardCloseDone = true
+                if (forceQs || !shown) isKeyguardCloseDone = false
+                isKeyguardCloseArmed = armed
+            }
     }
 
     private suspend fun hydrateQqsMediaExpansion() {

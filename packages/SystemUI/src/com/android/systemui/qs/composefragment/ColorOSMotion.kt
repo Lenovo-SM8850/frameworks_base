@@ -56,6 +56,38 @@ private const val ColorOSMediaStart = 0.50f
 /** The rows of tiles start to come in here, and the media card and the sliders are done. */
 private const val ColorOSRowsStart = 0.86f
 
+/**
+ * The quick settings held open on the lockscreen start to fade out at this point of how far out
+ * they really are, as they close. Their scene stays fully expanded there until they are closed, so
+ * the cascade does not see the close while the notifications come up over the modules from below.
+ */
+internal const val ColorOSKeyguardCloseFadeStart = ColorOSRowsStart
+
+/**
+ * They are gone at this point. The lockscreen panel closes to no height at all, so the
+ * notifications have come up over only the lowest part of the panel by then, and the modules above
+ * it are gone before their content is clipped and their glass is left without it.
+ */
+private const val ColorOSKeyguardCloseFadeEnd = 0.70f
+
+/**
+ * How much of the modules and of their glass is left as the quick settings held open on the
+ * lockscreen close, from 1 to 0. [expansion] is how far out they really are, 1 when they are not
+ * closing there.
+ */
+internal fun colorOSKeyguardCloseFade(expansion: Float): Float =
+    ((expansion - ColorOSKeyguardCloseFadeEnd) /
+            (ColorOSKeyguardCloseFadeStart - ColorOSKeyguardCloseFadeEnd))
+        .coerceIn(0f, 1f)
+
+/**
+ * How much of the glass behind the shade is left as the quick settings held open on the lockscreen
+ * close, from 1 to 0. The shade stays fully out there, so without this the glass would stay at full
+ * strength until they are closed and then go at once.
+ */
+internal fun colorOSKeyguardCloseBackdrop(expansion: Float): Float =
+    (expansion / ColorOSKeyguardCloseFadeStart).coerceIn(0f, 1f)
+
 /** Part of the panel by which each row of tiles starts after the one above it. */
 private const val ColorOSRowStep = 0.01f
 

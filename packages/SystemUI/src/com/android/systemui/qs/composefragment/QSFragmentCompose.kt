@@ -476,7 +476,10 @@ constructor(
                             alpha = {
                                 if (viewModel.isQsVisibleAndAnyShadeExpanded) {
                                     viewModel.panelExpansionFraction *
-                                        colorOSLaunchGlassFade(launchProgress)
+                                        colorOSLaunchGlassFade(launchProgress) *
+                                        colorOSKeyguardCloseBackdrop(
+                                            viewModel.keyguardCloseBackdropExpansion
+                                        )
                                 } else {
                                     0f
                                 }
@@ -1361,7 +1364,15 @@ constructor(
                                         listening = isListening,
                                         // ColorOS 17 uses ~39dp side margins; the stock QS
                                         // margin already gives ~16dp, so add the rest.
-                                        modifier = Modifier.padding(horizontal = 23.dp),
+                                        // Closing on the lockscreen, the modules fade out with
+                                        // their glass before the notifications clip them.
+                                        modifier =
+                                            Modifier.padding(horizontal = 23.dp).graphicsLayer {
+                                                alpha =
+                                                    colorOSKeyguardCloseFade(
+                                                        viewModel.keyguardCloseExpansion
+                                                    )
+                                            },
                                         availableHeight = colorOSAvailableHeight,
                                         maximumTileSize =
                                             if (colorOSHeader) Dp.Infinity
@@ -1404,7 +1415,10 @@ constructor(
                                                 !viewModel.isEditing
                                             ) {
                                                 viewModel.viewAlpha *
-                                                    colorOSLaunchGlassFade(launchProgress)
+                                                    colorOSLaunchGlassFade(launchProgress) *
+                                                    colorOSKeyguardCloseFade(
+                                                        viewModel.keyguardCloseExpansion
+                                                    )
                                             } else {
                                                 0f
                                             }
