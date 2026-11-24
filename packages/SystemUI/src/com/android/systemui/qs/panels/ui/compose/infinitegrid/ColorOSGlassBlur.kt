@@ -50,9 +50,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import com.android.internal.graphics.drawable.BackgroundBlurDrawable
+import com.android.systemui.qs.shared.style.LiquidGlassTune
+import com.android.systemui.qs.shared.style.liquidGlassOn
 import java.util.function.Consumer
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Blur regions for the glass of the expanded ColorOS panel. SurfaceFlinger blurs what is behind the
@@ -96,44 +99,86 @@ private val ColorOSGlassBlurRadius = 22.5.dp
 
 /**
  * Overrides the blur radius, in pixels, to match it by eye on a device:
- * `setprop debug.evolution.lg.cos_blur 80`. Unset or 0 keeps [ColorOSGlassBlurRadius]. It is
- * followed live, the regions take it the next time they are drawn.
+ * `setprop debug.evolution.lg.cos_blur 80`. Unset or 0 keeps [ColorOSGlassBlurRadius]. With Liquid
+ * Glass on, [ColorOSTileBlurPxName] and [ColorOSPanelBlurPxName] take precedence for their regions.
+ * It is read again when `debug.lg.gen` changes.
  */
 private const val ColorOSGlassBlurRadiusProperty = "debug.evolution.lg.cos_blur"
+
+/**
+ * The `debug.lg.` names of the radius overrides in pixels, one for the glass of the tiles, the
+ * pills and the sliders, one for the glass behind the shade. Finite and above 0, or ignored.
+ */
+private const val ColorOSTileBlurPxName = "cos_tile_blur_px"
+private const val ColorOSPanelBlurPxName = "cos_panel_blur_px"
 
 /** How close to the edge of the window counts as touching it, in pixels. */
 private const val ColorOSGlassEdgeSlop = 0.5f
 
 /**
  * Overrides the alpha, 0 to 255, of the white tint on the glass of the light panel, to match it by
- * eye on a device: `setprop debug.evolution.lg.cos_light_tile 120`. Unset or negative keeps
- * [ColorOSLightTileTint]. It is followed live like the blur radius.
+ * eye on a device: `setprop debug.evolution.lg.cos_light_tile 120`. Unset or negative keeps the
+ * default. It is read again when `debug.lg.gen` changes.
  */
 private const val ColorOSLightTileTintProperty = "debug.evolution.lg.cos_light_tile"
 
-/** The radius and tint overrides. Read once and again when a system property changes. */
+/**
+ * The `debug.lg.` name of the ARGB override of the light tile tint, hex like `0x26FFFFFF`. It takes
+ * precedence over [ColorOSLightTileTintProperty] while Liquid Glass is on.
+ */
+private const val ColorOSLightTileTintArgbName = "cos_light_tile_argb"
+
+/**
+ * The radius and tint overrides. The `debug.lg.` ones go through [LiquidGlassTune], which drops its
+ * cache when `debug.lg.gen` changes. The `debug.evolution.lg.` ones are read again on the same
+ * change. Every read here also reads [LiquidGlassTune.generation], so the draw or the composition
+ * that asks is redone then. A system property change callback does not fire for `setprop`.
+ */
 private object ColorOSGlassBlurTune {
+    @Volatile private var syncedGeneration = -1
+
     /** The radius override in pixels, 0 for none. */
-    @Volatile
-    var overridePx = readRadius()
-        private set
+    @Volatile private var legacyBlurPx = 0
 
     /** The alpha override of the light tile tint, negative for none. */
-    @Volatile
-    var lightTileAlpha = readLightTileAlpha()
-        private set
+    @Volatile private var legacyLightTileAlpha = -1
 
-    init {
-        SystemProperties.addChangeCallback {
-            overridePx = readRadius()
-            lightTileAlpha = readLightTileAlpha()
-        }
+    private fun sync() {
+        val generation = LiquidGlassTune.generation.value
+        if (generation == syncedGeneration) return
+        legacyBlurPx = SystemProperties.getInt(ColorOSGlassBlurRadiusProperty, 0)
+        legacyLightTileAlpha = SystemProperties.getInt(ColorOSLightTileTintProperty, -1)
+        syncedGeneration = generation
     }
 
-    private fun readRadius(): Int = SystemProperties.getInt(ColorOSGlassBlurRadiusProperty, 0)
+    /** The blur radius of the region of [material] in pixels. */
+    fun blurRadiusPx(material: Int, glassOn: Boolean, defaultPx: Int): Int {
+        sync()
+        if (glassOn) {
+            val panel =
+                material == BackgroundBlurDrawable.MATERIAL_PANEL_DARK ||
+                    material == BackgroundBlurDrawable.MATERIAL_PANEL_LIGHT
+            val name = if (panel) ColorOSPanelBlurPxName else ColorOSTileBlurPxName
+            val px = LiquidGlassTune.f(name, 0f)
+            if (px.isFinite() && px > 0f) return px.roundToInt()
+        }
+        return legacyBlurPx.takeIf { it > 0 } ?: defaultPx
+    }
 
-    private fun readLightTileAlpha(): Int =
-        SystemProperties.getInt(ColorOSLightTileTintProperty, -1)
+    /** The tint the region of [material] gets, as ARGB, 0 for none. */
+    fun tint(material: Int, glassOn: Boolean): Int {
+        sync()
+        if (material != BackgroundBlurDrawable.MATERIAL_TILE_LIGHT) return 0
+        if (glassOn) {
+            // The cache of LiquidGlassTune has no unset state: a prop that is set gives the same
+            // colour whatever the default is.
+            val argb = LiquidGlassTune.color(ColorOSLightTileTintArgbName, 0)
+            if (argb == LiquidGlassTune.color(ColorOSLightTileTintArgbName, -1)) return argb
+        }
+        val alpha = legacyLightTileAlpha
+        if (alpha >= 0) return (alpha.coerceAtMost(255) shl 24) or 0x00FFFFFF
+        return if (glassOn) ColorOSLightTileTintGlass else ColorOSLightTileTint.toArgb()
+    }
 }
 
 /** Below this alpha a region is not worth keeping in SurfaceFlinger. */
@@ -147,13 +192,8 @@ private const val ColorOSGlassMinAlpha = 0.01f
  */
 private val ColorOSLightTileTint = Color(0x66FFFFFF)
 
-/** The tint the region of [material] gets, as ARGB, 0 for none. */
-private fun colorOSGlassTint(material: Int): Int {
-    if (material != BackgroundBlurDrawable.MATERIAL_TILE_LIGHT) return 0
-    val override = ColorOSGlassBlurTune.lightTileAlpha
-    return if (override >= 0) (override.coerceAtMost(255) shl 24) or 0x00FFFFFF
-    else ColorOSLightTileTint.toArgb()
-}
+/** The tint, as ARGB, while Liquid Glass is on: the glass of the tiles stays see-through. */
+private const val ColorOSLightTileTintGlass = 0x26FFFFFF
 
 /**
  * Returns the glass of the panel while SurfaceFlinger can blur behind the shade, and null when it
@@ -258,6 +298,7 @@ internal fun Modifier.colorOSGlassBlur(
     val clipOut = LocalColorOSGlassClipOut.current
     val placement = remember { ColorOSGlassPlacement() }
     val defaultRadius = with(LocalDensity.current) { ColorOSGlassBlurRadius.roundToPx() }
+    val glassOn = liquidGlassOn
     // The part of the element that is in the window, in its own coordinates.
     var visible by remember { mutableStateOf<Rect?>(null) }
 
@@ -380,9 +421,9 @@ internal fun Modifier.colorOSGlassBlur(
                 }
             drawable.setVisible(true, false)
             drawable.setMaterial(material)
-            drawable.setColor(colorOSGlassTint(material))
+            drawable.setColor(ColorOSGlassBlurTune.tint(material, glassOn))
             drawable.setBlurRadius(
-                ColorOSGlassBlurTune.overridePx.takeIf { it > 0 } ?: defaultRadius
+                ColorOSGlassBlurTune.blurRadiusPx(material, glassOn, defaultRadius)
             )
             drawable.setCornerRadius(min(corner, (bottom - top) / 2f))
             drawable.alpha = (alpha * 255).toInt()
