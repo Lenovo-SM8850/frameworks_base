@@ -46,6 +46,7 @@ import com.android.internal.util.ContrastColorUtil;
 import com.android.systemui.Dumpable;
 import com.android.systemui.common.shared.colors.SurfaceEffectColors;
 import com.android.systemui.qs.shared.style.LiquidGlass;
+import com.android.systemui.qs.shared.style.LiquidGlassTune;
 import com.android.systemui.res.R;
 import com.android.systemui.statusbar.notification.shared.NotificationAddXOnHoverToDismiss;
 import com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout;
@@ -289,10 +290,10 @@ public class NotificationBackgroundView extends View implements Dumpable,
             return tintColor;
         }
         // The ColorOS material frosts the card itself, so the fill stays clear. The light card
-        // material is too bright for the dark text, it gets a light frost under it.
+        // material is too bright for the dark text, it gets a light veil under it.
         if (mCosMaterial != 0) {
             return mCosMaterial == BackgroundBlurDrawable.MATERIAL_CARD_LIGHT
-                    ? LiquidGlass.lightCardSurface() : Color.TRANSPARENT;
+                    ? LiquidGlass.lightCardVeil() : Color.TRANSPARENT;
         }
         // A pinned heads-up floats over the app, so it gets a lighter glass of its own.
         if (mHeadsUpGlass) return LiquidGlass.headsUpSurface();
@@ -321,9 +322,6 @@ public class NotificationBackgroundView extends View implements Dumpable,
     }
 
     private int mCosMaterial;
-
-    /** With Liquid Glass, a heavier frost than the stock card, as iOS blurs notifications. */
-    private static final float COS_CARD_BLUR_DP = 36f;
 
     /** A heads-up sits over the app, so its blur is lighter than that of a card in the shade. */
     private static final float COS_HEADS_UP_BLUR_DP = 14f;
@@ -364,7 +362,8 @@ public class NotificationBackgroundView extends View implements Dumpable,
         if (mCosMaterial != 0 && mHeadsUpGlass) {
             blurRadius = Math.round(COS_HEADS_UP_BLUR_DP * density);
         } else if (mCosMaterial != 0 && LiquidGlass.isOnShade(getContext())) {
-            blurRadius = Math.round(COS_CARD_BLUR_DP * density);
+            // With Liquid Glass, a heavier frost than the stock card. The footer buttons share it.
+            blurRadius = LiquidGlass.cardBlurRadiusPx(density);
         } else {
             blurRadius = getResources().getDimensionPixelSize(
                     R.dimen.notification_background_blur_radius);
@@ -571,14 +570,23 @@ public class NotificationBackgroundView extends View implements Dumpable,
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         getViewTreeObserver().addOnPreDrawListener(mGlassPreDrawListener);
+        LiquidGlassTune.addGenerationListener(mGlassTuneListener);
         if (mBlurBackgroundEnabled) {
             createBlurDrawable();
         }
     }
 
+    // Re-applies the material, radius and fill when a glass tunable changes while attached.
+    private final Runnable mGlassTuneListener = () -> {
+        if (mBackground != null) {
+            setTint(mTintColor != 0 ? mTintColor : mNormalColor);
+        }
+    };
+
     @Override
     protected void onDetachedFromWindow() {
         getViewTreeObserver().removeOnPreDrawListener(mGlassPreDrawListener);
+        LiquidGlassTune.removeGenerationListener(mGlassTuneListener);
         releaseBlurDrawable();
         super.onDetachedFromWindow();
     }

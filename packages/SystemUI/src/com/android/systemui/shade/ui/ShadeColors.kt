@@ -78,7 +78,9 @@ object ShadeColors {
         // Glass: near-neutral, low alpha, so the blurred wallpaper carries the color.
         Style.GLASS ->
             if (night) Spec(8f, 4f, 0.40f, 0.72f, 10f, 4f, 8f, 0.30f, false, false)
-            else Spec(98f, 2f, 0.55f, 0.80f, 95f, 3f, -5f, 0.45f, false, false)
+            else Spec(
+                98f, 2f, LiquidGlassTune.f("glass_light_panel_alpha", 0.55f).coerceIn(0f, 1f),
+                0.80f, 95f, 3f, -5f, 0.45f, false, false)
         // Tinted: deliberately chromatic accent surface with a stronger body.
         Style.TINTED ->
             if (night) Spec(16f, 26f, 0.58f, 0.85f, 13f, 16f, 7f, 0.40f, true, true)
@@ -117,6 +119,23 @@ object ShadeColors {
             // Opaque, and always a visible step away from the panel
             hct(context, s, chroma, tone, 1f)
         }
+    }
+
+    /**
+     * [scrim], the notifications scrim of the translucent shade, with its alpha scaled by the
+     * `light_notif_scrim` tunable in the light theme on Liquid Glass, so its weight under the
+     * light cards can be tried. The scrim is never hidden, the scale stays at 0.3 or more. The
+     * dark theme and the opaque Nothing panel are returned as they are. The caller decides for
+     * which scrim state this applies, and leaves out the dual tone and the opaque no-blur scrim.
+     */
+    @JvmStatic
+    fun lightGlassNotificationScrim(context: Context, scrim: Int): Int {
+        if (!LiquidGlass.isOnShade(context) || isNight(context) || isNothingFlatPanel(context)) {
+            return scrim
+        }
+        val scale = LiquidGlassTune.f("light_notif_scrim", 1.0f).coerceIn(0.3f, 1.0f)
+        if (scale == 1.0f) return scrim
+        return ColorUtils.setAlphaComponent(scrim, (Color.alpha(scrim) * scale).roundToInt())
     }
 
     @JvmStatic

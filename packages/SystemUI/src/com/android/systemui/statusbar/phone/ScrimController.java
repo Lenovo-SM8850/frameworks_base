@@ -80,6 +80,7 @@ import com.android.systemui.keyguard.ui.viewmodel.LockscreenToDreamingTransition
 import com.android.systemui.keyguard.ui.viewmodel.PrimaryBouncerToDreamingTransitionViewModel;
 import com.android.systemui.keyguard.ui.viewmodel.PrimaryBouncerToGoneTransitionViewModel;
 import com.android.systemui.qs.shared.style.LiquidGlass;
+import com.android.systemui.qs.shared.style.LiquidGlassTune;
 import com.android.systemui.res.R;
 import com.android.systemui.scene.shared.flag.SceneContainerFlag;
 import com.android.systemui.scene.shared.model.Scenes;
@@ -604,6 +605,8 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
                         panelStyleObserver,
                         UserHandle.USER_ALL);
             }
+            // The scrim and panel tunables follow debug.lg.gen live.
+            LiquidGlassTune.addGenerationListener(() -> mHandler.post(this::onThemeChanged));
         }
     }
 
@@ -629,7 +632,7 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
         }
         if (Flags.notificationShadeBlur()) {
             for (ScrimState state : ScrimState.values()) {
-                state.setNotificationScrimColor(getNotificationsScrimColor());
+                state.setNotificationScrimColor(getNotificationsScrimColor(state));
                 state.setShadePanelColor(getShadePanelColor());
             }
         }
@@ -1790,13 +1793,13 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
         for (ScrimState state : ScrimState.values()) {
             state.setBouncerSurfaceColor(surface);
             state.setShadePanelColor(getShadePanelColor());
-            state.setNotificationScrimColor(getNotificationsScrimColor());
+            state.setNotificationScrimColor(getNotificationsScrimColor(state));
         }
 
         mNeedsDrawableColorUpdate = true;
     }
 
-    private int getNotificationsScrimColor() {
+    private int getNotificationsScrimColor(ScrimState state) {
         final boolean glass = isBlurCurrentlySupported() && LiquidGlass.isOnShade(mContext);
         // The setting is read here, as its observer may run before the cached Liquid Glass state
         // has seen the change.
@@ -1812,7 +1815,13 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             // The dual tone shade sets the notifications apart with a faint tint behind them.
             return ShadeColors.glassDualToneScrim(mContext);
         }
-        return ShadeColors.notificationScrim(mContext, isBlurCurrentlySupported());
+        final int scrim = ShadeColors.notificationScrim(mContext, isBlurCurrentlySupported());
+        // Only the shade over an unlocked device (UNLOCKED) takes the lighter scrim of the light
+        // glass cards. The keyguard, the locked shade, dreaming and the bouncer keep their tint.
+        if (glass && state == ScrimState.UNLOCKED) {
+            return ShadeColors.lightGlassNotificationScrim(mContext, scrim);
+        }
+        return scrim;
     }
 
     private int getShadePanelColor() {
@@ -1823,7 +1832,8 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             boolean night = (mContext.getResources().getConfiguration().uiMode
                     & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
                     == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-            return night ? Color.TRANSPARENT : COLOROS_LIGHT_PANEL_TINT;
+            return night ? Color.TRANSPARENT
+                    : LiquidGlassTune.color("cos_light_panel_tint", COLOROS_LIGHT_PANEL_TINT);
         }
         return ShadeColors.shadePanel(mContext, isBlurCurrentlySupported(), true);
     }

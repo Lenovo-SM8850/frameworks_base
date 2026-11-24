@@ -256,6 +256,20 @@ object LiquidGlass {
     @JvmStatic
     fun lightCardSurface(): Int = LiquidGlassTune.color("light_card_surface", 0x66F5F5F7)
 
+    /**
+     * The fill over the light card material. The window blur already lifts and frosts the card, so
+     * this is only a light veil under the dark text. [lightCardSurface] stays for cards that have
+     * no blur material behind them.
+     */
+    @JvmStatic fun lightCardVeil(): Int = LiquidGlassTune.color("light_card_veil", 0x1AF5F5F7)
+
+    /** The blur radius of a notification card and of the footer buttons, rounded to whole pixels. */
+    @JvmStatic
+    fun cardBlurRadiusPx(density: Float): Int =
+        Math.round(LiquidGlassTune.f("card_blur_dp", CARD_BLUR_DP).coerceIn(0f, 200f) * density)
+
+    private const val CARD_BLUR_DP = 36f
+
     @JvmStatic
     fun lockscreenSurface(): Int = LiquidGlassTune.color("lockscreen_surface", 0x8C1C1C1E.toInt())
 
@@ -555,19 +569,44 @@ object LiquidGlassTune {
         object : Runnable {
             override fun run() {
                 val gen = SystemProperties.get("debug.lg.gen")
-                if (gen != lastGen) {
+                val changed = gen != lastGen
+                if (changed) {
                     lastGen = gen
                     values.clear()
                     colors.clear()
                     generation.value++
                 }
                 handler.postDelayed(this, 500)
+                // After rescheduling, so a failing listener cannot stop the poll.
+                if (changed) listeners.forEach { it.run() }
             }
         }
 
+    private var started = false
+
+    @Synchronized
     internal fun start() {
-        handler.removeCallbacks(poll)
+        if (started) return
+        started = true
         handler.post(poll)
+    }
+
+    private val listeners = java.util.concurrent.CopyOnWriteArraySet<Runnable>()
+
+    /**
+     * Calls [listener] on the main thread whenever `debug.lg.gen` changes, after the cached values
+     * were dropped, so a view re-reads its tunables there. A view registers while attached and
+     * removes it with [removeGenerationListener]. Compose reads [generation] instead.
+     */
+    @JvmStatic
+    fun addGenerationListener(listener: Runnable) {
+        listeners.add(listener)
+        start()
+    }
+
+    @JvmStatic
+    fun removeGenerationListener(listener: Runnable) {
+        listeners.remove(listener)
     }
 
     val tag: String
