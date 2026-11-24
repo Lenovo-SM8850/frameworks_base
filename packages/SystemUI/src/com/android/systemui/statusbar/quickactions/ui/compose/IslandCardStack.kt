@@ -130,6 +130,7 @@ import com.android.axion.blur.CornerRadii
 import com.android.axion.blur.rememberAxBlurRegion
 import com.android.compose.theme.PlatformTheme
 import com.android.internal.graphics.drawable.BackgroundBlurDrawable
+import com.android.systemui.common.shared.model.Icon as UiIcon
 import com.android.systemui.qs.shared.style.liquidGlassCosStyle
 import com.android.systemui.qs.shared.style.liquidGlassEnabled
 import com.android.systemui.qs.shared.style.liquidGlassRim
@@ -1106,6 +1107,20 @@ private fun CosListCard(
     val colorMode = rememberPopupColorMode()
     val liquid = liquidGlassEnabled() && colorMode != POPUP_COLOR_MODE_SOLID_BLACK
     val blurred = liquid || colorMode == POPUP_COLOR_MODE_BLUR
+    // The COS glass frames the card with light edges in the artwork colour of a media card, and
+    // with a neutral hairline for the others.
+    val cosGlass = liquid && liquidGlassCosStyle()
+    val frameArtwork =
+        if (cosGlass) {
+            val model = (chip.popupContent as? PopupContentModel.Media)?.model
+            // The app icon stands in when a track has no artwork, and counts as none here.
+            remember(model?.artworkIcon, model?.appIcon) {
+                (model?.artworkIcon?.takeIf { it !== model.appIcon } as? UiIcon.Loaded)?.drawable
+            }
+        } else {
+            null
+        }
+    val frame = rememberCosIslandFrame(frameArtwork)
     val currentBlurred = rememberUpdatedState(blurred)
     // The COS glass draws a rounded region of material 0 as tile glass, so the cards ask for the
     // island material there; other styles keep their own glass.
@@ -1282,7 +1297,13 @@ private fun CosListCard(
             AxBlurSurface(
                 modifier =
                     Modifier.fillMaxWidth()
-                        .then(if (liquid) Modifier.liquidGlassRim(CardShape) else Modifier),
+                        .then(
+                            when {
+                                cosGlass -> Modifier.cosIslandFrameStroke(frame, 28.dp)
+                                liquid -> Modifier.liquidGlassRim(CardShape)
+                                else -> Modifier
+                            }
+                        ),
                 shape = CardShape,
                 cornerRadius = 28.dp,
                 region = region,
@@ -1317,6 +1338,13 @@ private fun CosListCard(
                         Modifier.matchParentSize()
                             .graphicsLayer { alpha = 1f - frozen.veil }
                             .background(GlassShade, CardShape)
+                    )
+                }
+                if (cosGlass) {
+                    Box(
+                        Modifier.matchParentSize()
+                            .graphicsLayer { alpha = 1f - frozen.veil }
+                            .cosIslandFrameLight(frame, 28.dp)
                     )
                 }
                 Box(
