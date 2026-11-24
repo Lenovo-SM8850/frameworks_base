@@ -578,10 +578,11 @@ public class NotificationShelf extends ActivatableNotificationView {
 
         // TODO(b/172289889) transition last icon in shelf to notification icon and vice versa.
         setVisibility(isHidden ? View.INVISIBLE : View.VISIBLE);
-        // The lock screen pill is glass over the wallpaper, so its icons stay white there.
+        // The lock screen pill is glass over the wallpaper, so its icons stay white there. The
+        // light ColorOS card material makes the pill light, so there they keep the text color.
         mShelfIcons.setForcedOverrideIconColor(
                 mAmbientState.isOnKeyguard() && LiquidGlass.isOnShade(getContext())
-                        ? Color.WHITE : 0);
+                        && !isLightCosPill() ? Color.WHITE : 0);
         mShelfIcons.calculateIconXTranslations();
         mShelfIcons.applyIconStates();
         for (int i = 0; i < getHostLayoutChildCount(); i++) {
@@ -711,6 +712,13 @@ public class NotificationShelf extends ActivatableNotificationView {
 
     private int getHostLayoutTransientViewCount() {
         return mHostLayout.getTransientViewCount();
+    }
+
+    /** Whether the pill takes the light ColorOS card material, see NotificationBackgroundView. */
+    private boolean isLightCosPill() {
+        return LiquidGlass.isCosStyle(getContext())
+                && (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                        != Configuration.UI_MODE_NIGHT_YES;
     }
 
     private void updateIconClipAmount(ExpandableNotificationRow row) {
