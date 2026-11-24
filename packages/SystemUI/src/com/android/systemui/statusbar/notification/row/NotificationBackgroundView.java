@@ -292,11 +292,11 @@ public class NotificationBackgroundView extends View implements Dumpable,
         // material is too bright for the dark text, it gets a light frost under it.
         if (mCosMaterial != 0) {
             return mCosMaterial == BackgroundBlurDrawable.MATERIAL_CARD_LIGHT
-                    ? COS_LIGHT_CARD_FROST : Color.TRANSPARENT;
+                    ? LiquidGlass.lightCardSurface() : Color.TRANSPARENT;
         }
         // A pinned heads-up floats over the app, so it gets a lighter glass of its own.
         if (mHeadsUpGlass) return LiquidGlass.headsUpSurface();
-        return isNightMode() ? LiquidGlass.viewSurface() : COS_LIGHT_CARD_FROST;
+        return isNightMode() ? LiquidGlass.viewSurface() : LiquidGlass.lightCardSurface();
     }
 
     private boolean isNightMode() {
@@ -321,9 +321,6 @@ public class NotificationBackgroundView extends View implements Dumpable,
     }
 
     private int mCosMaterial;
-
-    /** The fill under the light ColorOS card material, FooterView draws its buttons the same. */
-    private static final int COS_LIGHT_CARD_FROST = 0xA6F2F2F2;
 
     /** With Liquid Glass, a heavier frost than the stock card, as iOS blurs notifications. */
     private static final float COS_CARD_BLUR_DP = 36f;

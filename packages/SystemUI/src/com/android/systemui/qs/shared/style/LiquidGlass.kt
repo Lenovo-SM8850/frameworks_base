@@ -252,6 +252,10 @@ object LiquidGlass {
     @JvmStatic
     fun headsUpSurface(): Int = LiquidGlassTune.color("headsup_surface", 0x33FFFFFF)
 
+    /** The fill over the blur under dark text: the light notification cards and footer buttons. */
+    @JvmStatic
+    fun lightCardSurface(): Int = LiquidGlassTune.color("light_card_surface", 0x66F5F5F7)
+
     @JvmStatic
     fun lockscreenSurface(): Int = LiquidGlassTune.color("lockscreen_surface", 0x8C1C1C1E.toInt())
 
@@ -554,6 +558,7 @@ object LiquidGlassTune {
                 if (gen != lastGen) {
                     lastGen = gen
                     values.clear()
+                    colors.clear()
                     generation.value++
                 }
                 handler.postDelayed(this, 500)
@@ -575,10 +580,14 @@ object LiquidGlassTune {
         values.getOrPut(name) { SystemProperties.get("debug.lg.$name").toFloatOrNull() ?: Float.NaN }
             .let { if (it.isNaN()) default else it }
 
+    private val colors = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     @JvmStatic
     fun color(name: String, default: Int): Int =
-        SystemProperties.get("debug.lg.$name").removePrefix("0x").removePrefix("#")
-            .toLongOrNull(16)?.toInt() ?: default
+        colors.getOrPut(name) {
+            SystemProperties.get("debug.lg.$name").removePrefix("0x").removePrefix("#")
+                .toLongOrNull(16) ?: Long.MIN_VALUE
+        }.let { if (it == Long.MIN_VALUE) default else it.toInt() }
 }
 
 val liquidGlassOn: Boolean

@@ -473,7 +473,7 @@ public class FooterView extends StackScrollerDecorView {
         if (LiquidGlass.isOnShade(mContext)) {
             // The buttons take the same faint frost as the cards. In the light ColorOS shade the
             // cards sit on a light frost under dark text, and the dark glass would hide the labels.
-            final int surface = isCosLightShade() ? COS_LIGHT_FOOTER_FROST
+            final int surface = isCosLightShade() ? LiquidGlass.lightCardSurface()
                     : LiquidGlass.viewSurface();
             final ColorFilter glass = new PorterDuffColorFilter(surface | 0xFF000000, SRC_ATOP);
             final int glassAlpha = Color.alpha(surface);
@@ -514,9 +514,6 @@ public class FooterView extends StackScrollerDecorView {
                 && (getResources().getConfiguration().uiMode
                         & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES;
     }
-
-    /** Matches the light ColorOS notification card frost in NotificationBackgroundView. */
-    private static final int COS_LIGHT_FOOTER_FROST = 0xA6F2F2F2;
 
     public void setIsBlurSupported(boolean isBlurSupported) {
         if (notificationShadeBlur()) {
