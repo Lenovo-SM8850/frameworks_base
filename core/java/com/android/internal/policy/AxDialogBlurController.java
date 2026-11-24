@@ -11,6 +11,7 @@ import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
+import android.content.res.TypedArray;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -52,6 +53,14 @@ public final class AxDialogBlurController {
     private static final int SURFACE_ALPHA = 0x8A;
     private static final int LIGHT_FILL = 0x94FAFAFA;
     private static final float LIGHT_DIM = 0.25f;
+    // The Liquid Glass switch of Evolver, a per-user secure setting. With it on a dialog takes the
+    // dialog glass, which carries its own veil, so the buffer adds little to it.
+    private static final String LIQUID_GLASS = "liquid_glass";
+    private static final int GLASS_LIGHT_FILL = 0x00FAFAFA;
+    private static final int GLASS_DARK_ALPHA = 0x33;
+    private static final float GLASS_LIGHT_DIM = 0.30f;
+    private static final float GLASS_BLUR_DP = 22f;
+    private static final float GLASS_MIN_BLUR_DP = 4f;
     private static final String TUNE = "debug.lg.";
     private static final String[] BLUR_EXCLUDED_PACKAGES = {
             "com.google.android.projection.gearhead",
@@ -97,6 +106,7 @@ public final class AxDialogBlurController {
     private int mLightFill = LIGHT_FILL;
     private int mDarkAlpha = SURFACE_ALPHA;
     private float mLightDim = LIGHT_DIM;
+    private boolean mLiquidGlass;
     private boolean mDimOverridden;
     private boolean mDimYielded;
     private float mDimOriginal;
@@ -182,6 +192,8 @@ public final class AxDialogBlurController {
                 mSettingsObserver);
         mResolver.registerContentObserver(Settings.Secure.getUriFor(BLUR_RADIUS), false,
                 mSettingsObserver);
+        mResolver.registerContentObserver(Settings.Secure.getUriFor(LIQUID_GLASS), false,
+                mSettingsObserver);
         mResolver.registerContentObserver(
                 Settings.System.getUriFor(Settings.System.DIALOG_BLUR_ENABLED), false,
                 mSettingsObserver);
@@ -248,12 +260,24 @@ public final class AxDialogBlurController {
         final float maxRadius = MAX_BLUR_RADIUS_DP
                 * mContext.getResources().getDisplayMetrics().density;
         final float radius = Settings.Secure.getFloat(mResolver, BLUR_RADIUS, maxRadius);
-        mRadius = enabled ? Math.round(Float.isFinite(radius)
-                ? Math.max(0f, Math.min(radius, maxRadius)) : maxRadius) : 0;
-        mLightFill = tuneColor("dialog_light_fill", LIGHT_FILL);
-        mDarkAlpha = Math.max(0, Math.min(255,
-                SystemProperties.getInt(TUNE + "dialog_dark_alpha", SURFACE_ALPHA)));
-        mLightDim = Math.max(0f, Math.min(1f, tuneFloat("dialog_light_dim", LIGHT_DIM)));
+        final float cappedRadius = Float.isFinite(radius)
+                ? Math.max(0f, Math.min(radius, maxRadius)) : maxRadius;
+        // Toasts keep the committed look; the dialog glass is for windows.
+        mLiquidGlass = mWindow != null && Settings.Secure.getIntForUser(mResolver, LIQUID_GLASS, 0,
+                mContext.getUserId()) != 0;
+        float targetRadius = cappedRadius;
+        if (mLiquidGlass) {
+            final float blurDp = Math.max(GLASS_MIN_BLUR_DP,
+                    Math.min(MAX_BLUR_RADIUS_DP, tuneFloat("dialog_blur_dp", GLASS_BLUR_DP)));
+            targetRadius = Math.min(cappedRadius,
+                    blurDp * mContext.getResources().getDisplayMetrics().density);
+        }
+        mRadius = enabled ? Math.round(targetRadius) : 0;
+        mLightFill = tuneColor("dialog_light_fill", mLiquidGlass ? GLASS_LIGHT_FILL : LIGHT_FILL);
+        mDarkAlpha = Math.max(0, Math.min(255, SystemProperties.getInt(TUNE + "dialog_dark_alpha",
+                mLiquidGlass ? GLASS_DARK_ALPHA : SURFACE_ALPHA)));
+        mLightDim = Math.max(0f, Math.min(1f, tuneFloat("dialog_light_dim",
+                mLiquidGlass ? GLASS_LIGHT_DIM : LIGHT_DIM)));
     }
 
     private static int tuneColor(String name, int def) {
@@ -313,8 +337,21 @@ public final class AxDialogBlurController {
         }
         if (light) {
             if (!mDimOverridden) {
+                // A dim that differs from the theme dim was set by the app before the window was
+                // shown, so the app keeps it.
+                if (mLiquidGlass && dimDiffersFromTheme(attrs.dimAmount)) {
+                    mDimYielded = true;
+                    return;
+                }
                 mDimOriginal = attrs.dimAmount;
                 mDimOverridden = true;
+            } else if (mLiquidGlass && dimDiffersFromTheme(mDimOriginal)) {
+                // Liquid Glass came on while the light dim held, and the app's own dim differs
+                // from the theme dim: the app gets its dim back and keeps it.
+                mDimOverridden = false;
+                mDimYielded = true;
+                mWindow.setDimAmount(mDimOriginal);
+                return;
             }
             // The light dim never makes a dialog that dims less than it darker.
             final float lightDim = Math.min(mLightDim, mDimOriginal);
@@ -325,6 +362,17 @@ public final class AxDialogBlurController {
         } else if (mDimOverridden) {
             mDimOverridden = false;
             mWindow.setDimAmount(mDimOriginal);
+        }
+    }
+
+    private boolean dimDiffersFromTheme(float dimAmount) {
+        // The default is the one the window takes when its theme names no dim.
+        final TypedArray a = mContext.obtainStyledAttributes(
+                new int[] {android.R.attr.backgroundDimAmount});
+        try {
+            return Math.abs(dimAmount - a.getFloat(0, 0.5f)) > 0.001f;
+        } finally {
+            a.recycle();
         }
     }
 
@@ -473,9 +521,15 @@ public final class AxDialogBlurController {
             mBlur.setBounds(surface.getBounds());
             mBlur.setBlurRadius(mRadius);
             final boolean dark = isDarkSurface(surface);
-            mBlur.setMaterial(dark
-                    ? BackgroundBlurDrawable.MATERIAL_CARD_DARK
-                    : BackgroundBlurDrawable.MATERIAL_CARD_LIGHT);
+            if (mLiquidGlass) {
+                mBlur.setMaterial(dark
+                        ? BackgroundBlurDrawable.MATERIAL_DIALOG_DARK
+                        : BackgroundBlurDrawable.MATERIAL_DIALOG_LIGHT);
+            } else {
+                mBlur.setMaterial(dark
+                        ? BackgroundBlurDrawable.MATERIAL_CARD_DARK
+                        : BackgroundBlurDrawable.MATERIAL_CARD_LIGHT);
+            }
             final float windowAlpha =
                     mWindow != null ? mWindow.getAttributes().alpha : mToastParams.alpha;
             final float viewAlpha = mView.getAlpha();
@@ -503,6 +557,10 @@ public final class AxDialogBlurController {
             // rounded corners stay as the app drew them. Any other keeps the app's own fill,
             // scaled down, as a layered one would lose the colours of its other layers.
             final boolean neutral = !dark && isPlainSurface(background, surface);
+            if (neutral && Color.alpha(mLightFill) == 0) {
+                // The glass is the whole surface; a fill of no alpha would only erase the layer.
+                return;
+            }
             final int save = neutral
                     ? canvas.saveLayer(bounds.left, bounds.top, bounds.right, bounds.bottom,
                             null)
