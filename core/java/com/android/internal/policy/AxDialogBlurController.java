@@ -9,10 +9,13 @@ import android.app.ActivityManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -45,6 +48,9 @@ public final class AxDialogBlurController {
     private static final String BLUR_RADIUS = "system_blur_radius";
     private static final float MAX_BLUR_RADIUS_DP = 34f;
     private static final int SURFACE_ALPHA = 0x8A;
+    private static final int LIGHT_FILL = 0x94FAFAFA;
+    private static final float LIGHT_DIM = 0.25f;
+    private static final String TUNE = "debug.lg.";
     private static final String[] BLUR_EXCLUDED_PACKAGES = {
             "com.google.android.projection.gearhead",
             "com.google.android.youtube",
@@ -85,6 +91,14 @@ public final class AxDialogBlurController {
     private boolean mCrossWindowBlurEnabled;
     private int mRadius;
     private int mGeneration;
+    // Live-tunable through debug.lg.*, read with the settings and not while drawing.
+    private int mLightFill = LIGHT_FILL;
+    private int mDarkAlpha = SURFACE_ALPHA;
+    private float mLightDim = LIGHT_DIM;
+    private boolean mDimOverridden;
+    private boolean mDimYielded;
+    private float mDimOriginal;
+    private float mDimApplied;
 
     public static AxDialogBlurController create(Window window, DecorView decor, boolean isDialog) {
         if ((!isDialog && !window.isFloating()
@@ -184,6 +198,16 @@ public final class AxDialogBlurController {
                 mRootView.getViewTreeObserver().removeOnPreDrawListener(mPreDrawListener);
             }
         }
+        // The window may be shown again, so it must not keep the dim of the blurred dialog. It is
+        // going away here, so the attributes are not dispatched.
+        if (mDimOverridden) {
+            mDimOverridden = false;
+            final WindowManager.LayoutParams attrs = mWindow.getAttributes();
+            if (attrs.dimAmount == mDimApplied) {
+                attrs.dimAmount = mDimOriginal;
+            }
+        }
+        mDimYielded = false;
         mRadius = 0;
         updateBackgrounds();
         for (int i = mActiveRenderers.size() - 1; i >= 0; i--) {
@@ -224,6 +248,82 @@ public final class AxDialogBlurController {
         final float radius = Settings.Secure.getFloat(mResolver, BLUR_RADIUS, maxRadius);
         mRadius = enabled ? Math.round(Float.isFinite(radius)
                 ? Math.max(0f, Math.min(radius, maxRadius)) : maxRadius) : 0;
+        mLightFill = tuneColor("dialog_light_fill", LIGHT_FILL);
+        mDarkAlpha = Math.max(0, Math.min(255,
+                SystemProperties.getInt(TUNE + "dialog_dark_alpha", SURFACE_ALPHA)));
+        mLightDim = Math.max(0f, Math.min(1f, tuneFloat("dialog_light_dim", LIGHT_DIM)));
+    }
+
+    private static int tuneColor(String name, int def) {
+        String value = SystemProperties.get(TUNE + name);
+        if (value.startsWith("0x")) value = value.substring(2);
+        else if (value.startsWith("#")) value = value.substring(1);
+        try {
+            return (int) Long.parseLong(value, 16);
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    private static float tuneFloat(String name, float def) {
+        try {
+            final float value = Float.parseFloat(SystemProperties.get(TUNE + name));
+            return Float.isFinite(value) ? value : def;
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    /**
+     * A blurred dialog with a light surface dims what is behind it less, as the dim shows through
+     * the light glass. The dim the dialog had is back when the blur or the light surface is gone.
+     */
+    private void updateDim() {
+        if (mWindow == null) return;
+        final WindowManager.LayoutParams attrs = mWindow.getAttributes();
+        if (mDimOverridden && attrs.dimAmount != mDimApplied) {
+            // The app set a dim of its own meanwhile; it keeps it while this window lives.
+            mDimOverridden = false;
+            mDimYielded = true;
+        }
+        // The dim is decided whether or not the window dims yet: the window manager ignores the
+        // amount until the dim flag is set, so the light amount is already in place when the flag
+        // arrives and the dim fades in once. A light surface with no alpha is hidden, for instance
+        // while the dialog launches from or returns to its view.
+        boolean light = false;
+        boolean lightHidden = false;
+        if (!mDimYielded && mRadius > 0) {
+            for (int i = mBackgrounds.size() - 1; i >= 0 && !light; i--) {
+                final BackgroundRenderer renderer = mBackgrounds.valueAt(i);
+                final Drawable surface = surfaceDrawable(renderer.mBackground);
+                if (surface == null || renderer.isDarkSurface(surface)) continue;
+                if (renderer.mBackground.getAlpha() == 0) {
+                    lightHidden = true;
+                } else {
+                    light = surface.getOpacity() != PixelFormat.TRANSPARENT;
+                }
+            }
+        }
+        if (lightHidden) {
+            // A hidden light surface takes or keeps the light dim, so the dim does not change
+            // while the surface is hidden and shown again.
+            light = true;
+        }
+        if (light) {
+            if (!mDimOverridden) {
+                mDimOriginal = attrs.dimAmount;
+                mDimOverridden = true;
+            }
+            // The light dim never makes a dialog that dims less than it darker.
+            final float lightDim = Math.min(mLightDim, mDimOriginal);
+            if (attrs.dimAmount != lightDim) {
+                mWindow.setDimAmount(lightDim);
+            }
+            mDimApplied = lightDim;
+        } else if (mDimOverridden) {
+            mDimOverridden = false;
+            mWindow.setDimAmount(mDimOriginal);
+        }
     }
 
     private void updateBackgrounds() {
@@ -247,6 +347,7 @@ public final class AxDialogBlurController {
         if (mWindow != null && hadBackgrounds != hasBlurBackgrounds()) {
             ((DecorView) mRootView).updateSystemDialogBlurOpacity();
         }
+        updateDim();
     }
 
     private void addBackgrounds(View view) {
@@ -281,6 +382,21 @@ public final class AxDialogBlurController {
                 }
             }
         }
+    }
+
+    /** Whether the background draws nothing but its surface, through state and wrapper drawables. */
+    private static boolean isPlainSurface(Drawable background, Drawable surface) {
+        Drawable drawable = background;
+        while (drawable != null && drawable != surface) {
+            if (drawable.getCurrent() != drawable) {
+                drawable = drawable.getCurrent();
+            } else if (drawable instanceof DrawableWrapper) {
+                drawable = ((DrawableWrapper) drawable).getDrawable();
+            } else {
+                return false;
+            }
+        }
+        return drawable == surface;
     }
 
     private static Drawable surfaceDrawable(Drawable drawable) {
@@ -354,6 +470,10 @@ public final class AxDialogBlurController {
             }
             mBlur.setBounds(surface.getBounds());
             mBlur.setBlurRadius(mRadius);
+            final boolean dark = isDarkSurface(surface);
+            mBlur.setMaterial(dark
+                    ? BackgroundBlurDrawable.MATERIAL_CARD_DARK
+                    : BackgroundBlurDrawable.MATERIAL_CARD_LIGHT);
             final float windowAlpha =
                     mWindow != null ? mWindow.getAttributes().alpha : mToastParams.alpha;
             final float viewAlpha = mView.getAlpha();
@@ -377,13 +497,48 @@ public final class AxDialogBlurController {
             }
             mBlur.draw(canvas);
             final Rect bounds = background.getBounds();
-            final int save = canvas.saveLayerAlpha(bounds.left, bounds.top,
-                    bounds.right, bounds.bottom, SURFACE_ALPHA);
+            // A plain light surface is replaced by a neutral fill in the same shape, so the
+            // rounded corners stay as the app drew them. Any other keeps the app's own fill,
+            // scaled down, as a layered one would lose the colours of its other layers.
+            final boolean neutral = !dark && isPlainSurface(background, surface);
+            final int save = neutral
+                    ? canvas.saveLayer(bounds.left, bounds.top, bounds.right, bounds.bottom,
+                            null)
+                    : canvas.saveLayerAlpha(bounds.left, bounds.top, bounds.right, bounds.bottom,
+                            mDarkAlpha);
             try {
                 background.draw(canvas);
+                if (neutral) {
+                    canvas.drawColor(mLightFill, PorterDuff.Mode.SRC_IN);
+                }
             } finally {
                 canvas.restoreToCount(save);
             }
+        }
+
+        /**
+         * Whether the surface drawn over the blur is dark, so the blur takes the dark card glass
+         * under it and the light one otherwise, instead of a glass that does not match it.
+         */
+        private boolean isDarkSurface(Drawable surface) {
+            int color = 0;
+            boolean known = false;
+            if (surface instanceof ColorDrawable) {
+                color = ((ColorDrawable) surface).getColor();
+                known = true;
+            } else if (surface instanceof GradientDrawable) {
+                final ColorStateList list = ((GradientDrawable) surface).getColor();
+                if (list != null) {
+                    color = list.getColorForState(mView.getDrawableState(),
+                            list.getDefaultColor());
+                    known = true;
+                }
+            }
+            if (known && Color.alpha(color) != 0) {
+                return Color.luminance(color) < 0.5f;
+            }
+            return (mView.getResources().getConfiguration().uiMode
+                    & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         }
 
         public void clear() {
