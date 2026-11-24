@@ -714,9 +714,12 @@ public class NotificationShelf extends ActivatableNotificationView {
         return mHostLayout.getTransientViewCount();
     }
 
-    /** Whether the pill takes the light ColorOS card material, see NotificationBackgroundView. */
+    /**
+     * Whether the pill uses the light card look: Liquid Glass on and the light theme.
+     * See NotificationBackgroundView.
+     */
     private boolean isLightCosPill() {
-        return LiquidGlass.isCosStyle(getContext())
+        return LiquidGlass.isOnShade(getContext())
                 && (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                         != Configuration.UI_MODE_NIGHT_YES;
     }

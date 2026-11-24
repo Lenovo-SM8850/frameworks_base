@@ -93,6 +93,8 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
 
     int mBgTint = NO_COLOR;
 
+    private boolean mCurrentBackgroundPlain;
+
     /**
      * Flag to indicate that the notification has been touched once and the second touch will
      * click it.
@@ -356,10 +358,19 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
     }
 
     protected void setBackgroundTintColor(int color) {
-        if (color != mCurrentBackgroundTint) {
+        // Only the plain translucent card color gets the glass fill.
+        final boolean plain = mBgTint == NO_COLOR && usesTransparentBackground()
+                && color == mNormalColor;
+        if (color != mCurrentBackgroundTint || plain != mCurrentBackgroundPlain) {
             mCurrentBackgroundTint = color;
-            mBackgroundNormal.setTint(color);
+            mCurrentBackgroundPlain = plain;
+            mBackgroundNormal.setTint(color, plain);
         }
+    }
+
+    /** Whether the window can blur, which the glass card needs behind it. */
+    public void setGlassBlurAvailable(boolean available) {
+        mBackgroundNormal.setGlassBlurAvailable(available);
     }
 
     protected void updateBackgroundClipping() {
@@ -897,10 +908,9 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
         }
         mOnKeyguard = onKeyguard;
         mBackgroundNormal.setOnKeyguard(mOnKeyguard);
-        if (mIsBlurSupported) {
-            updateBackgroundTint();
-            mBackgroundNormal.setBlurBackgroundEnabled(usesBlurredBackground());
-        }
+        updateIfNeeded();
+        updateBackgroundTint();
+        mBackgroundNormal.setBlurBackgroundEnabled(usesBlurredBackground());
     }
 
     /** Draws the card opaque while the device is dozing, and with glass or blur otherwise. */

@@ -508,8 +508,9 @@ public class FooterView extends StackScrollerDecorView {
         }
     }
 
+    /** Whether the light card look applies: Liquid Glass on and the light theme. */
     private boolean isCosLightShade() {
-        return LiquidGlass.isCosStyle(mContext)
+        return LiquidGlass.isOnShade(mContext)
                 && (getResources().getConfiguration().uiMode
                         & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES;
     }

@@ -284,7 +284,8 @@ public class NotificationBackgroundView extends View implements Dumpable,
      * shade colors are never touched, those stay with ShadeColors and shade_color_style.
      */
     private int surfaceFor(int tintColor) {
-        if (mDozing || tintColor != mNormalColor || !LiquidGlass.isOnShade(getContext())) {
+        if (mDozing || !mPlainCard || !mGlassBlurAvailable
+                || !LiquidGlass.isOnShade(getContext())) {
             return tintColor;
         }
         // The ColorOS material frosts the card itself, so the fill stays clear. The light card
@@ -295,10 +296,29 @@ public class NotificationBackgroundView extends View implements Dumpable,
         }
         // A pinned heads-up floats over the app, so it gets a lighter glass of its own.
         if (mHeadsUpGlass) return LiquidGlass.headsUpSurface();
-        return LiquidGlass.viewSurface();
+        return isNightMode() ? LiquidGlass.viewSurface() : COS_LIGHT_CARD_FROST;
+    }
+
+    private boolean isNightMode() {
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
     }
 
     private boolean mHeadsUpGlass;
+
+    // Set by the row for a plain translucent card, the only card that gets the glass fill.
+    private boolean mPlainCard;
+
+    private boolean mGlassBlurAvailable = true;
+
+    /** Without window blur the card keeps its own color, as there is no material behind it. */
+    public void setGlassBlurAvailable(boolean available) {
+        if (mGlassBlurAvailable == available) return;
+        mGlassBlurAvailable = available;
+        if (mBackground != null) {
+            setTint(mTintColor != 0 ? mTintColor : mNormalColor);
+        }
+    }
 
     private int mCosMaterial;
 
@@ -330,9 +350,9 @@ public class NotificationBackgroundView extends View implements Dumpable,
     private void updateCosMaterial() {
         mCosMaterial = 0;
         if (mBackgroundBlurDrawable == null) return;
-        if (LiquidGlass.isCosStyle(getContext())) {
-            final boolean dark = (getResources().getConfiguration().uiMode
-                    & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        // A colored card keeps its own opaque fill and the plain blur behind it.
+        if (mPlainCard && LiquidGlass.isOnShade(getContext()) && mGlassBlurAvailable) {
+            final boolean dark = isNightMode();
             if (mHeadsUpGlass) {
                 mCosMaterial = dark ? BackgroundBlurDrawable.MATERIAL_HEADS_UP_DARK
                         : BackgroundBlurDrawable.MATERIAL_HEADS_UP_LIGHT;
@@ -654,6 +674,12 @@ public class NotificationBackgroundView extends View implements Dumpable,
     }
 
     public void setTint(int tintColor) {
+        setTint(tintColor, mPlainCard);
+    }
+
+    /** @param plain whether this is the plain translucent card color, not a tinted or opaque one */
+    public void setTint(int tintColor, boolean plain) {
+        mPlainCard = plain;
         updateCosMaterial();
         Drawable baseLayer = getBaseBackgroundLayer();
         final int surface = surfaceFor(tintColor);
