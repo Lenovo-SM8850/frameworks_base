@@ -14,8 +14,10 @@ import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorFilter;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -521,7 +523,16 @@ public final class AxDialogBlurController {
          * under it and the light one otherwise, instead of a glass that does not match it.
          */
         private boolean isDarkSurface(Drawable surface) {
-            int color = 0;
+            // What is drawn is the colour of an opaque filter, not the solid under it: AppCompat
+            // dialogs hold a white solid and tint it to the theme background that way. A tint
+            // list has no getter on these drawables, so it cannot be read here.
+            int color = opaqueFilterColor(surface);
+            if (color == Color.TRANSPARENT) {
+                color = opaqueFilterColor(mBackground);
+            }
+            if (color != Color.TRANSPARENT) {
+                return Color.luminance(color) < 0.5f;
+            }
             boolean known = false;
             if (surface instanceof ColorDrawable) {
                 color = ((ColorDrawable) surface).getColor();
@@ -539,6 +550,19 @@ public final class AxDialogBlurController {
             }
             return (mView.getResources().getConfiguration().uiMode
                     & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        }
+
+        private int opaqueFilterColor(Drawable drawable) {
+            final ColorFilter filter = drawable != null ? drawable.getColorFilter() : null;
+            if (filter instanceof PorterDuffColorFilter) {
+                final PorterDuffColorFilter tint = (PorterDuffColorFilter) filter;
+                final PorterDuff.Mode mode = tint.getMode();
+                if ((mode == PorterDuff.Mode.SRC_IN || mode == PorterDuff.Mode.SRC)
+                        && Color.alpha(tint.getColor()) == 0xFF) {
+                    return tint.getColor();
+                }
+            }
+            return Color.TRANSPARENT;
         }
 
         public void clear() {
