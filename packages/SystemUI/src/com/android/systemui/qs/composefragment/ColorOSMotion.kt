@@ -18,21 +18,14 @@ import androidx.compose.ui.unit.dp
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassBlur
 
-/** The panel starts to show at this fraction of its expansion, glass and modules together. */
-private const val ColorOSExpandRevealStart = 0.25f
-
-/** The panel is fully shown at this fraction of its expansion. */
-private const val ColorOSExpandRevealEnd = 0.85f
-
 /**
- * How much of the panel is shown for the given [expansion], 0 when closed and 1 when open. The
+ * How much of the panel is out for the given [expansion], 0 when closed and 1 when open. The
  * modules cascade with it and their glass fades with them, so they follow the drag from the quick
  * settings to the panel and are never out of step: the glass is drawn by SurfaceFlinger and has no
- * other way to know how far the panel has come.
+ * other way to know how far the panel has come. Each module has its own window of it, see
+ * [colorOSCascadeProgress].
  */
-internal fun colorOSExpansionReveal(expansion: Float): Float =
-    ((expansion - ColorOSExpandRevealStart) / (ColorOSExpandRevealEnd - ColorOSExpandRevealStart))
-        .coerceIn(0f, 1f)
+internal fun colorOSExpansionReveal(expansion: Float): Float = expansion.coerceIn(0f, 1f)
 
 /** The launch of an activity from the shade has run this far before the glass starts to go out. */
 private const val ColorOSLaunchGlassFadeStart = 0.7f
@@ -54,44 +47,81 @@ internal fun colorOSLaunchGlassFade(progress: Float): Float =
                 (ColorOSLaunchGlassFadeEnd - ColorOSLaunchGlassFadeStart))
             .coerceIn(0f, 1f)
 
-/** Part of the reveal by which each module starts after the one above it. */
-private const val ColorOSCascadeStep = 0.07f
+/** The fixed row at the top of the panel starts to come in at this fraction of the panel. */
+private const val ColorOSFixedStart = 0.05f
 
-/** Modules the cascade is spread over; later ones start with the last. */
-private const val ColorOSCascadeModules = 6
+/** The media card and the sliders start to come in here, and the fixed row is done. */
+private const val ColorOSMediaStart = 0.50f
 
-/** The size a module has when it starts to drop in. */
-private const val ColorOSCascadeFrom = 0.9f
+/** The rows of tiles start to come in here, and the media card and the sliders are done. */
+private const val ColorOSRowsStart = 0.86f
 
-private val ColorOSCascadeDrop = 24.dp
-private val ColorOSCascadeDropStep = 8.dp
+/** Part of the panel by which each row of tiles starts after the one above it. */
+private const val ColorOSRowStep = 0.01f
 
+/** The size the fixed row, the first of the rows, starts at, and what each row after it loses. */
+private const val ColorOSRowScaleFrom = 0.80f
+private const val ColorOSRowScaleStep = 0.05f
+
+/** The size the media card and the sliders start at. */
+private const val ColorOSMediaScaleFrom = 0.72f
+
+/** How much faster than the module itself it fades in. */
+private const val ColorOSCascadeAlphaGain = 1.6f
+
+/** How far a module sits above its place when it starts, per row of tiles that is above it. */
+private val ColorOSCascadeDrop = 22.dp
+
+/** The module's row among the rows of tiles: the fixed row is the first, the media card is none. */
+private fun colorOSRowIndex(index: Int): Int = if (index <= 1) 0 else index - 2
+
+private fun colorOSCascadeStart(index: Int): Float =
+    when (index) {
+        1 -> ColorOSFixedStart
+        2 -> ColorOSMediaStart
+        else -> ColorOSRowsStart + ColorOSRowStep * (index - 3)
+    }
+
+private fun colorOSCascadeEnd(index: Int): Float =
+    when (index) {
+        1 -> ColorOSMediaStart
+        2 -> ColorOSRowsStart
+        else -> 1f
+    }
+
+private fun colorOSCascadeScaleFrom(index: Int): Float =
+    if (index == 2) ColorOSMediaScaleFrom
+    else (ColorOSRowScaleFrom - ColorOSRowScaleStep * colorOSRowIndex(index)).coerceAtLeast(0.5f)
+
+/** How far module [index] has come in, from 0 to 1, when [shown] of the panel is out. */
 private fun colorOSCascadeProgress(shown: Float, index: Int): Float {
-    val start = ColorOSCascadeStep * (index - 1).coerceIn(0, ColorOSCascadeModules - 1)
-    val span = 1f - ColorOSCascadeStep * (ColorOSCascadeModules - 1)
+    val start = colorOSCascadeStart(index)
+    val span = colorOSCascadeEnd(index) - start
     return ((shown - start) / span).coerceIn(0f, 1f)
 }
 
 private fun colorOSCascadeAlpha(shown: Float, index: Int): Float =
-    (colorOSCascadeProgress(shown, index) * 1.6f).coerceAtMost(1f)
+    (colorOSCascadeProgress(shown, index) * ColorOSCascadeAlphaGain).coerceAtMost(1f)
 
 /**
- * Like ColorOS, the panel unfolds as a cascade that follows the finger: each module drops in from
- * above, growing and fading in, a little after the one above it and from a little further, so the
- * panel pours down. Closing, the bottom modules lift away first. [reveal] is how much of the panel
- * is shown, from 0 to 1, and [index] counts from 1 at the top.
+ * Like ColorOS, the panel unfolds as a cascade that follows the finger: the fixed row first, then
+ * the media card and the sliders, and last the rows of tiles, each growing, dropping in and fading
+ * in from its own point of the pull. Closing, the bottom modules lift away first. [reveal] is how
+ * much of the panel is out, from 0 to 1, and [index] counts from 1 at the top.
  */
 @Composable
 internal fun Modifier.colorOSModuleReveal(index: Int, reveal: () -> Float): Modifier {
     val drop =
         with(LocalDensity.current) {
-            (ColorOSCascadeDrop + ColorOSCascadeDropStep * (index - 1)).toPx()
+            val rows = if (index == 2) 1 else colorOSRowIndex(index)
+            (ColorOSCascadeDrop * rows).toPx()
         }
+    val scaleFrom = colorOSCascadeScaleFrom(index)
     return graphicsLayer {
         val shown = reveal()
         val eased = LinearOutSlowInEasing.transform(colorOSCascadeProgress(shown, index))
         translationY = -drop * (1f - eased)
-        val scale = ColorOSCascadeFrom + (1f - ColorOSCascadeFrom) * eased
+        val scale = scaleFrom + (1f - scaleFrom) * eased
         scaleX = scale
         scaleY = scale
         alpha = colorOSCascadeAlpha(shown, index)
