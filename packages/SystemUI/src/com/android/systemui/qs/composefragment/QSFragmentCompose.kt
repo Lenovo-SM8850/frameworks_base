@@ -922,7 +922,11 @@ constructor(
         val colorOSStyle = LocalColorOSQsStyle.current
         // A large screen keeps its own header; its ColorOS panel has fixed sizes.
         val colorOSTablet = colorOSStyle && qqsPadding <= 0
-        val colorOSMetrics = rememberColorOSTabletMetrics()
+        val colorOSMetrics =
+            rememberColorOSTabletMetrics(
+                if (colorOSTablet) rememberColorOSTabletColumns(infiniteGridLayout)
+                else ColorOSTabletColumns
+            )
         // The items of the large screen panel that are not tiles, as the collapsed panel shows them.
         val colorOSItemContent: @Composable (ColorOSTabletEntry, Boolean, Modifier) -> Unit =
             { entry, wide, itemModifier ->
@@ -1032,7 +1036,7 @@ constructor(
                 val Tiles =
                     @Composable {
                         CompositionLocalProvider(LocalColorOSGlassBlur provides qqsGlassBlur) {
-                            // The large screen panel's tiles keep to its four columns, centred.
+                            // The large screen panel's tiles keep to its columns, centred.
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                                 QuickQuickSettings(
                                     viewModel = viewModel.quickQuickSettingsViewModel,
@@ -1319,13 +1323,22 @@ constructor(
                                         .collectAsStateWithLifecycle()
                                 Box {
                                     if (colorOSTabletHeader) {
-                                        // At the start of the four columns, as in the collapsed
+                                        // At the start of the columns, as in the collapsed
                                         // panel, so the panel opens straight down.
                                         Box(
                                             Modifier.fillMaxWidth(),
                                             contentAlignment = Alignment.TopCenter,
                                         ) {
-                                            Box(Modifier.width(rememberColorOSTabletMetrics().width)) {
+                                            Box(
+                                                Modifier.width(
+                                                    rememberColorOSTabletMetrics(
+                                                        rememberColorOSTabletColumns(
+                                                            infiniteGridLayout
+                                                        )
+                                                    )
+                                                        .width
+                                                )
+                                            ) {
                                                 GridAnchor()
                                             }
                                         }

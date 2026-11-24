@@ -74,11 +74,11 @@ import com.android.systemui.res.R
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTablet
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTileSize
 import androidx.compose.runtime.compositionLocalOf
-import com.android.systemui.qs.composefragment.ColorOSTabletColumns
 import com.android.systemui.qs.composefragment.ColorOSTabletEntry
 import com.android.systemui.qs.composefragment.ColorOSTabletItem
 import com.android.systemui.qs.composefragment.colorOSTabletEntries
 import com.android.systemui.qs.composefragment.colorOSTabletSpan
+import com.android.systemui.qs.composefragment.rememberColorOSTabletColumns
 import com.android.systemui.qs.composefragment.rememberColorOSTabletLayout
 import com.android.systemui.qs.composefragment.rememberColorOSTabletMetrics
 
@@ -317,7 +317,7 @@ private fun <T> List<SizedTile<T>>.widenLastIconTiles(
 
 /**
  * The collapsed panel of the large screen ColorOS style: the entries of the expanded panel that are
- * one row tall, in the same order and sizes on the same four columns, for its first rows. The items
+ * one row tall, in the same order and sizes on the same columns, for its first rows. The items
  * that are not tiles are drawn by [LocalColorOSTabletItemContent].
  */
 @Composable
@@ -326,7 +326,8 @@ private fun ContentScope.ColorOSTabletQuickQuickSettings(
     modifier: Modifier,
     listening: () -> Boolean,
 ) {
-    val metrics = rememberColorOSTabletMetrics()
+    val columns = rememberColorOSTabletColumns(viewModel.qsColumnsViewModelFactory)
+    val metrics = rememberColorOSTabletMetrics(columns)
     val all = viewModel.allTileViewModels
     val saved by rememberColorOSTabletLayout()
     val largeSpecs by viewModel.iconTilesViewModel.largeTiles.collectAsStateWithLifecycle()
@@ -334,18 +335,14 @@ private fun ContentScope.ColorOSTabletQuickQuickSettings(
     val bySpec = remember(all) { all.associateBy { it.tile.spec.spec } }
     val rowsShown = viewModel.tileRows
     val shown =
-        remember(all, saved, large, rowsShown) {
+        remember(all, saved, large, rowsShown, columns) {
             val entries =
                 colorOSTabletEntries(saved, all.map { it.tile.spec.spec })
                     .filter { ColorOSTabletItem.isItem(it.key) || it.key in bySpec }
                     .map { it to colorOSTabletSpan(it, large) }
                     .filter { (_, span) -> span.rowSpan == 1 }
             val placements =
-                calculate2DPlacements(
-                    entries.map { it.second },
-                    ColorOSTabletColumns,
-                    maxRows = rowsShown,
-                )
+                calculate2DPlacements(entries.map { it.second }, columns, maxRows = rowsShown)
             Triple(entries.map { it.first }, entries.map { it.second }, placements)
         }
     val (entries, spans, placements) = shown
@@ -359,7 +356,7 @@ private fun ContentScope.ColorOSTabletQuickQuickSettings(
             GridAnchor()
             val bounceables = remember(placements) { List(spans.size) { BounceableTileViewModel() } }
             TwoDimensionalSpannedGrid(
-                columns = ColorOSTabletColumns,
+                columns = columns,
                 columnSpacing = metrics.gap,
                 rowSpacing = metrics.gap,
                 spans = spans,

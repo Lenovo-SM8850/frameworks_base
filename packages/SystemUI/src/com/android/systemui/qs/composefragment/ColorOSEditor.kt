@@ -104,9 +104,9 @@ private const val QS_TILES_DEFAULT = "default"
 private val EditorBadge = 22.dp
 private val EditorHorizontalPadding = 8.dp
 
-/** Widest editor on a tablet: four tile columns with their gaps and the padding around them. */
-private val ColorOSEditorTabletMaxWidth =
-    (CommonTileDefaults.ColorOSTileHeight + ColorOSGap) * 4 + EditorHorizontalPadding * 2
+/** Widest editor on a tablet: the tile columns with their gaps and the padding around them. */
+private fun colorOSEditorTabletMaxWidth(columns: Int) =
+    (CommonTileDefaults.ColorOSTileHeight + ColorOSGap) * columns + EditorHorizontalPadding * 2
 private val EditorCellMin = 84.dp
 private val EditorBadgeFill = Color(0xFF5B5B60)
 private val EditorAccent = Color(0xFF0068FF) // ColorOS Accent Blue
@@ -283,17 +283,21 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
 
     val labelColor = MaterialTheme.colorScheme.onSurface
 
-    // A tablet keeps the editor to the width of its four tile columns, like the panel.
+    // A tablet keeps the editor to the width of the panel's tile columns.
     val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val tabletColumns =
+        if (tablet) rememberColorOSTabletColumns(editViewModel.columnsViewModelFactory)
+        else ColorOSTabletColumns
     BoxWithConstraints(
         modifier
             .pointerInput(Unit) { detectTapGestures {} }
             .fillMaxWidth()
             .thenIf(tablet) {
-            Modifier.wrapContentWidth().widthIn(max = ColorOSEditorTabletMaxWidth)
+            Modifier.wrapContentWidth().widthIn(max = colorOSEditorTabletMaxWidth(tabletColumns))
         }
     ) {
-        val columns = 4 // ColorOS standard phone grid is 4 columns
+        // 4 columns on a phone, those of the panel on a tablet.
+        val columns = tabletColumns
         // The grid lives inside the padded scroll column, so size cells from the inner width,
         // otherwise the last column overflows and gets clipped at the screen edge.
         val cellW = (maxWidth - EditorHorizontalPadding * 2) / columns

@@ -81,6 +81,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -117,7 +118,9 @@ import com.android.systemui.grid.ui.compose.GridSpan
 import com.android.systemui.grid.ui.compose.PlacedGridItem
 import com.android.systemui.grid.ui.compose.TwoDimensionalSpannedGrid
 import com.android.systemui.grid.ui.compose.calculate2DPlacements
+import com.android.systemui.lifecycle.rememberViewModel
 import com.android.systemui.qs.footer.ui.compose.rememberSystemSettingEnabled
+import com.android.systemui.qs.panels.ui.viewmodel.QSColumnsViewModel
 import com.android.systemui.shade.QsHeaderImageTint
 import com.android.systemui.qs.panels.ui.compose.GridLayout
 import com.android.systemui.qs.panels.ui.compose.TileListener
@@ -401,9 +404,9 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     BoxWithConstraints(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         // ColorOS is built on four equal columns with a 17dp gap. The round tiles, the pills, the
         // media card and sliders share the columns. The tile diameter is capped separately so
-        // extra room does not stretch it, and a capped panel keeps the width of its four columns
-        // and sits centered, instead of stretching the cards over the whole space. Short screens
-        // still shrink the tiles, see colorOSFit.
+        // extra room does not stretch it. A capped panel is the large screen one, see
+        // ColorOSTabletLayout, on 4 to 6 columns. Short screens still shrink the tiles, see
+        // colorOSFit.
         val panelMaxWidth = maxWidth
         val fullColumnSize = (panelMaxWidth - ColorOSGap * 3) / 4
         val tileColumnSize = minOf(fullColumnSize, maximumTileSize)
@@ -1385,7 +1388,8 @@ private fun ColorOSHeaderButton(
 
 /**
  * The large screen ColorOS panel: every tile, the media card, the sliders, the ringer switch and My
- * Devices on one four column grid, in the order and sizes of the editor, in pages.
+ * Devices on one grid of [rememberColorOSTabletColumns], in the order and sizes of the editor, in
+ * pages.
  */
 @Composable
 private fun ContentScope.ColorOSTabletLayout(
@@ -1406,7 +1410,8 @@ private fun ContentScope.ColorOSTabletLayout(
     onOpenDevices: () -> Unit,
     reveal: @Composable (Modifier) -> Modifier,
 ) {
-    val metrics = rememberColorOSTabletMetrics()
+    val columns = rememberColorOSTabletColumns(infiniteGridLayout)
+    val metrics = rememberColorOSTabletMetrics(columns)
     val saved by rememberColorOSTabletLayout()
     val bySpec = remember(tiles) { tiles.associateBy { it.spec.spec } }
     val entries =
@@ -1656,13 +1661,19 @@ internal fun colorOSTabletSpan(entry: ColorOSTabletEntry, large: Set<String>): G
         else -> GridSpan(colSpan = if (entry.key in large) 2 else 1, rowSpan = 1)
     }
 
-/** Sizes of the large screen panel: its tile (pill height, slider width) and its gap. */
-internal data class ColorOSTabletMetrics(val tile: Dp, val gap: Dp) {
+/** Sizes of the large screen panel: its tile (pill height, slider width), its gap and columns. */
+internal data class ColorOSTabletMetrics(
+    val tile: Dp,
+    val gap: Dp,
+    val columns: Int = ColorOSTabletColumns,
+) {
     val width: Dp
-        get() = tile * ColorOSTabletColumns + gap * (ColorOSTabletColumns - 1)
+        get() = tile * columns + gap * (columns - 1)
 }
 
+/** Fewest and most columns of the large screen panel. */
 internal const val ColorOSTabletColumns = 4
+internal const val ColorOSTabletMaxColumns = 6
 
 /** ColorOS tablets have a 15dp gap to a 56dp pill. */
 private const val ColorOSTabletGapRatio = 15f / 56f
@@ -1684,10 +1695,43 @@ internal fun colorOSTabletMetrics(shortSideDp: Int, labelHeight: Dp): ColorOSTab
     return ColorOSTabletMetrics(tile, tile * ColorOSTabletGapRatio)
 }
 
-/** The panel has the tile and the gap of its editor, the same everywhere. */
+/** The panel has the tile and the gap of its editor, the same everywhere, on [columns]. */
 @Composable
-internal fun rememberColorOSTabletMetrics(): ColorOSTabletMetrics =
-    ColorOSTabletMetrics(CommonTileDefaults.ColorOSTileHeight, ColorOSGap)
+internal fun rememberColorOSTabletMetrics(columns: Int): ColorOSTabletMetrics =
+    ColorOSTabletMetrics(CommonTileDefaults.ColorOSTileHeight, ColorOSGap, columns)
+
+/**
+ * Columns of the large screen panel: those of the grid of the other styles, so the column setting
+ * and the orientation change them the same way, from [ColorOSTabletColumns] to
+ * [ColorOSTabletMaxColumns].
+ */
+@Composable
+internal fun rememberColorOSTabletColumns(factory: QSColumnsViewModel.Factory): Int {
+    val columns =
+        rememberViewModel(traceName = "ColorOSTabletColumns", key = factory) {
+            factory.createWithoutMediaTracking()
+        }
+    // The tiles keep their size: a pane too narrow for the columns gets fewer of them. The pane is
+    // half the screen in split shade, less the margin on each side.
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val splitShade = booleanResource(R.bool.config_use_split_notification_shade)
+    val paneWidth =
+        (if (splitShade) screenWidth / 2 else screenWidth) -
+            dimensionResource(R.dimen.qs_horizontal_margin) * 2
+    val tile = CommonTileDefaults.ColorOSTileHeight
+    var fit = columns.columns.coerceIn(ColorOSTabletColumns, ColorOSTabletMaxColumns)
+    while (fit > ColorOSTabletColumns && tile * fit + ColorOSGap * (fit - 1) > paneWidth) fit--
+    return fit
+}
+
+/** [rememberColorOSTabletColumns] with the column factory of [infiniteGridLayout]. */
+@Composable
+internal fun rememberColorOSTabletColumns(infiniteGridLayout: InfiniteGridLayout): Int =
+    rememberColorOSTabletColumns(
+        remember(infiniteGridLayout) {
+            infiniteGridLayout.viewModelFactory.create().columnsWithMediaViewModelFactory
+        }
+    )
 
 /** Whether a round one cell entry has a label under it, which makes its row taller. */
 private fun GridSpan.isLabelled() = colSpan == 1 && rowSpan == 1
@@ -1718,7 +1762,7 @@ internal data class ColorOSTabletPage(val indices: List<Int>, val placements: Li
 
 /**
  * The pages of the panel: as many rows a page as fit [available], at least two, flowing [spans] in
- * order over the four columns. Each placement is reindexed to its page.
+ * order over the columns of [metrics]. Each placement is reindexed to its page.
  */
 internal fun colorOSTabletPages(
     spans: List<GridSpan>,
@@ -1727,7 +1771,7 @@ internal fun colorOSTabletPages(
     available: Dp,
 ): List<ColorOSTabletPage> {
     fun paged(rows: Int): List<ColorOSTabletPage> {
-        val placed = calculate2DPlacements(spans, ColorOSTabletColumns, maxRowsPerPage = rows)
+        val placed = calculate2DPlacements(spans, metrics.columns, maxRowsPerPage = rows)
         return placed
             .groupBy { it.row / rows }
             .toSortedMap()
@@ -1761,9 +1805,9 @@ private const val ColorOSTabletMaxRows = 10
 private val ColorOSTabletDotsHeight = 20.dp
 
 /**
- * The grid of the large screen panel: every tile and item on four columns, in pages. [item] draws
- * one entry in the cells it is given. The pager spans the width it is given so the next page slides
- * in whole, and each page keeps to the four columns in its middle.
+ * The grid of the large screen panel: every tile and item on the columns of [metrics], in pages.
+ * [item] draws one entry in the cells it is given. The pager spans the width it is given so the
+ * next page slides in whole, and each page keeps to the columns in its middle.
  */
 @Composable
 internal fun ColorOSTabletGrid(
@@ -1797,7 +1841,7 @@ internal fun ColorOSTabletGrid(
             val page = pages[pageIndex]
             val pageSpans = page.indices.map { spans[it] }
             TwoDimensionalSpannedGrid(
-                columns = ColorOSTabletColumns,
+                columns = metrics.columns,
                 columnSpacing = metrics.gap,
                 rowSpacing = colorOSTabletRowGap(metrics, label),
                 spans = pageSpans,

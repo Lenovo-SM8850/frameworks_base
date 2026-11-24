@@ -50,7 +50,7 @@ class QuickQuickSettingsViewModel
 @AssistedInject
 constructor(
     tilesInteractor: CurrentTilesInteractor,
-    qsColumnsViewModelFactory: QSColumnsViewModel.Factory,
+    val qsColumnsViewModelFactory: QSColumnsViewModel.Factory,
     quickQuickSettingsRowInteractor: QuickQuickSettingsRowInteractor,
     mediaInRowInLandscapeViewModelFactory: MediaInRowInLandscapeViewModel.Factory,
     val squishinessViewModel: TileSquishinessViewModel,
