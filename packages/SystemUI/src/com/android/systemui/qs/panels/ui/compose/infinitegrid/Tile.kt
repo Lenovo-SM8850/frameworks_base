@@ -56,6 +56,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
@@ -65,6 +66,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -97,6 +99,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.trace
 import com.android.app.tracing.coroutines.launchTraced as launch
 import com.android.compose.animation.Expandable
+import com.android.compose.animation.ExpandableController
 import com.android.compose.animation.bounceable
 import com.android.compose.animation.rememberExpandableController
 import com.android.compose.animation.scene.ContentScope
@@ -438,6 +441,12 @@ fun ContentScope.Tile(
             else { { animatedColor } }
         val focusBorderColor = MaterialTheme.colorScheme.secondary
 
+        // The controller is made here so that the glass of the wide tile, which is drawn outside
+        // of the expandable, is held back with the glass inside it.
+        val expandableController =
+            rememberExpandableController(color = outerColor, shape = outerShape)
+        val glassHeld = rememberColorOSGlassHold(expandableController)
+
         val expandable =
             if (dynamicTargetResolutionEnabled()) tile.expandable
             else remember { Expandable(mutableSetOf()) }
@@ -448,8 +457,9 @@ fun ContentScope.Tile(
         ) { modifier ->
             TileExpandable(
                 expandable = expandable,
-                color = outerColor,
+                controller = expandableController,
                 shape = outerShape,
+                glassHeld = glassHeld,
                 squishiness = if (nothingStyle && iconOnly) { { 1f } } else squishiness,
                 hapticsViewModel = hapticsViewModel,
                 classicStyle = classicStyle,
@@ -465,7 +475,12 @@ fun ContentScope.Tile(
                         .then(surfaceRevealModifier)
                         .then(
                             if (glassPill) {
-                                Modifier.colorOSGlassBlur(tileShape, colorOSGlassTileMaterial())
+                                // Drawn outside of the expandable, so it is held back here.
+                                if (glassHeld) {
+                                    Modifier
+                                } else {
+                                    Modifier.colorOSGlassBlur(tileShape, colorOSGlassTileMaterial())
+                                }
                             } else if (colorOSStyle && !classicStyle) {
                                 Modifier.border(
                                     width = 1.dp,
@@ -633,8 +648,11 @@ fun ContentScope.Tile(
                                         },
                                 )
                             } else {
+                                // Null while the glass is held back, see TileExpandable.
+                                val contentGlassBlur = LocalColorOSGlassBlur.current
                                 CompositionLocalProvider(
-                                    LocalColorOSGlassBlur provides tileGlassBlur
+                                    LocalColorOSGlassBlur provides
+                                        tileGlassBlur.takeIf { contentGlassBlur != null }
                                 ) {
                                     ClassicTileContent(
                                         label =
@@ -649,7 +667,7 @@ fun ContentScope.Tile(
                                         colors = colors,
                                         labelHide = labelHide,
                                         rim = if (colorOSStyle) colorOSTileRim() else null,
-                                        glass = colorOSStyle && glassBlur != null,
+                                        glass = colorOSStyle && contentGlassBlur != null,
                                         chevron =
                                             colorOSStyle &&
                                                 tile.spec.spec in COLOROS_DROPDOWN_TILES,
@@ -782,11 +800,37 @@ fun ContentScope.Tile(
     }
 }
 
+/** Frames the glass stays held back once the transition of a tile is over. */
+private const val ColorOSGlassHoldFrames = 2
+
+/**
+ * Whether the glass of the tile is to be held back: from the moment its transition starts, while
+ * its dialog is up, and for [ColorOSGlassHoldFrames] frames after the overlay is gone. The overlay
+ * replays what the tile recorded, and a blur region drawn in that replay is reported at the place
+ * of the replay. One that is drawn again in place the moment the transition ends can still be seen
+ * there for a few frames as a plate the size of the cell.
+ */
+@Composable
+private fun rememberColorOSGlassHold(controller: ExpandableController): Boolean {
+    val busy = controller.isAnimating || controller.isDialogShowing
+    var settled by remember { mutableStateOf(true) }
+    LaunchedEffect(busy) {
+        if (busy) {
+            settled = false
+        } else if (!settled) {
+            repeat(ColorOSGlassHoldFrames) { withFrameNanos {} }
+            settled = true
+        }
+    }
+    return busy || !settled
+}
+
 @Composable
 private fun TileExpandable(
     expandable: Expandable,
-    color: () -> Color,
+    controller: ExpandableController,
     shape: Shape,
+    glassHeld: Boolean,
     squishiness: () -> Float,
     hapticsViewModel: TileHapticsViewModel?,
     classicStyle: Boolean,
@@ -795,7 +839,7 @@ private fun TileExpandable(
 ) {
     Expandable(
         expandable = expandable,
-        controller = rememberExpandableController(color = color, shape = shape),
+        controller = controller,
         modifier =
             modifier
                 .motionTestValues { squishiness() exportAs TileMotionTestKeys.Squishness }
@@ -806,7 +850,14 @@ private fun TileExpandable(
                 },
         useModifierBasedImplementation = true,
     ) {
-        content(hapticsViewModel?.createStateAwareExpandable(it) ?: it)
+        // While the glass is held back the content falls back to the flat fill, like where there
+        // is no blur, so none of its blur regions is reported at the place the overlay draws it.
+        val glassBlur = LocalColorOSGlassBlur.current
+        CompositionLocalProvider(
+            LocalColorOSGlassBlur provides glassBlur.takeUnless { glassHeld }
+        ) {
+            content(hapticsViewModel?.createStateAwareExpandable(it) ?: it)
+        }
     }
 }
 
