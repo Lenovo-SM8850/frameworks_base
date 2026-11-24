@@ -109,6 +109,7 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
@@ -688,9 +689,18 @@ internal fun CosIslandPopup(
 ) {
     val density = LocalDensity.current
     val config = LocalConfiguration.current
+    // The cards open below the status bar and below a camera in the top edge, which can reach
+    // further down than the status bar.
+    val view = LocalView.current
+    val cameraBottom =
+        remember(view, config.windowConfiguration.rotation) {
+            view.rootWindowInsets?.displayCutout?.boundingRectTop?.takeUnless { it.isEmpty }?.bottom
+                ?: 0
+        }
     val status = maxOf(
         LocalContext.current.resources.getDimensionPixelSize(R.dimen.status_bar_height),
         appHandleBounds.maxOfOrNull { it.bottom } ?: 0,
+        cameraBottom,
     )
     val statusDp = with(density) { status.toDp() }
     val gapPx = with(density) { 8.dp.toPx() }
