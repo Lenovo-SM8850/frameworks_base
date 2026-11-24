@@ -6,6 +6,7 @@
 package com.android.systemui.qs.panels.ui.compose.infinitegrid
 
 import android.app.ActivityManager
+import android.graphics.RectF
 import android.os.SystemProperties
 import android.view.CrossWindowBlurListeners
 import android.view.View
@@ -24,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -37,6 +39,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -71,6 +74,19 @@ internal class ColorOSGlassBlur(
 
 /** The glass of the expanded ColorOS panel, null where the regions cannot be used. */
 internal val LocalColorOSGlassBlur = compositionLocalOf<ColorOSGlassBlur?> { null }
+
+/**
+ * The part of the window the panel is clipped out of, where the notifications are drawn over it,
+ * in window coordinates, or null when the panel is not clipped. The view that holds the panel
+ * clips its Compose layers, but not the regions, so each region leaves this part out itself. It
+ * reads snapshot state, so a draw that calls it is redrawn when the clip moves.
+ */
+internal val LocalColorOSGlassClipOut = staticCompositionLocalOf<() -> RectF?> { { null } }
+
+/** Where an element with a glass region was last placed, read again when it is drawn. */
+private class ColorOSGlassPlacement {
+    var coordinates: LayoutCoordinates? = null
+}
 
 /**
  * The blur radius. It is 62px on a 440dpi device, the one the glass was matched against ColorOS
@@ -239,6 +255,8 @@ internal fun Modifier.colorOSGlassBlur(
     val blur = LocalColorOSGlassBlur.current ?: return this
     val view = LocalView.current
     val region = remember(view) { ColorOSGlassRegion(view) }
+    val clipOut = LocalColorOSGlassClipOut.current
+    val placement = remember { ColorOSGlassPlacement() }
     val defaultRadius = with(LocalDensity.current) { ColorOSGlassBlurRadius.roundToPx() }
     // The part of the element that is in the window, in its own coordinates.
     var visible by remember { mutableStateOf<Rect?>(null) }
@@ -272,6 +290,7 @@ internal fun Modifier.colorOSGlassBlur(
         }
         .onGloballyPositioned { coordinates ->
             if (!coordinates.isAttached) return@onGloballyPositioned
+            placement.coordinates = coordinates
             if (wholeWindow) {
                 visible =
                     Rect(
@@ -319,7 +338,26 @@ internal fun Modifier.colorOSGlassBlur(
         .drawBehind {
             val alpha = blur.alpha().coerceIn(0f, 1f)
             val shown = visible ?: size.toRect()
-            if (alpha < ColorOSGlassMinAlpha || shown.width < 1f || shown.height < 1f) {
+            var top = shown.top
+            var bottom = shown.bottom
+            // Leave out the part the notifications clip off the panel, as its layers are. The
+            // clip spans the panel's width, so only the top and the bottom of the region move.
+            val cut = if (wholeWindow) null else clipOut()
+            val coordinates = placement.coordinates
+            if (cut != null && coordinates != null && coordinates.isAttached) {
+                val cutTop = coordinates.windowToLocal(Offset(cut.left, cut.top)).y
+                val cutBottom = coordinates.windowToLocal(Offset(cut.left, cut.bottom)).y
+                if (cutTop <= top && cutBottom >= bottom) {
+                    bottom = top
+                } else if (cutTop > top && cutTop < bottom) {
+                    bottom = cutTop
+                } else if (cutBottom > top && cutBottom < bottom) {
+                    top = cutBottom
+                }
+            }
+            if (
+                alpha < ColorOSGlassMinAlpha || shown.width < 1f || bottom - top < 1f
+            ) {
                 region.hide()
                 return@drawBehind
             }
@@ -346,13 +384,13 @@ internal fun Modifier.colorOSGlassBlur(
             drawable.setBlurRadius(
                 ColorOSGlassBlurTune.overridePx.takeIf { it > 0 } ?: defaultRadius
             )
-            drawable.setCornerRadius(min(corner, shown.height / 2f))
+            drawable.setCornerRadius(min(corner, (bottom - top) / 2f))
             drawable.alpha = (alpha * 255).toInt()
             drawable.setBounds(
                 shown.left.toInt(),
-                shown.top.toInt(),
+                top.toInt(),
                 shown.right.toInt(),
-                shown.bottom.toInt(),
+                bottom.toInt(),
             )
             // Drawing it is what reports its position to SurfaceFlinger.
             drawIntoCanvas { drawable.draw(it.nativeCanvas) }

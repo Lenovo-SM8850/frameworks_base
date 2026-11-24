@@ -26,6 +26,7 @@ import android.graphics.Canvas
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Bundle
 import android.os.Trace
 import android.os.UserHandle
@@ -194,6 +195,7 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSBackdrop
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassBlur
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassClipOut
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSQsStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalQsBrightness
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTablet
@@ -312,6 +314,9 @@ constructor(
             colorOSContentFits &&
             context?.resources?.configuration?.orientation != Configuration.ORIENTATION_LANDSCAPE
 
+    /** The part the notifications clip off the panel, for its glass regions. */
+    private val glassClipOut: () -> RectF? = { containerView?.clipOutInWindow() }
+
     private val containerView: FrameLayoutTouchPassthrough?
         get() = view as? FrameLayoutTouchPassthrough
 
@@ -380,6 +385,7 @@ constructor(
                                 LocalQsBrightness provides
                                     viewModel.containerViewModel.brightnessSliderViewModel,
                                 LocalNothingQsOsColors provides (nothingStyle && nothingOsColors),
+                                LocalColorOSGlassClipOut provides glassClipOut,
                             ) {
                                 val slidersInGrid =
                                     nothingStyle && rememberNothingLayout().sliders.isNotEmpty()
@@ -1855,6 +1861,31 @@ private class FrameLayoutTouchPassthrough(
 
     private val currentClippingPath = Path()
 
+    // The clip as snapshot state, for the glass regions of the panel, which are not clipped by
+    // this view and have to leave the clipped part out themselves.
+    private val clipState = mutableStateOf(false to NotificationScrimClipParams())
+    private val clipLocation = IntArray(2)
+    private val clipOutRect = RectF()
+
+    /**
+     * The part of the window this view clips out, in window coordinates, or null. The clip itself is
+     * in the coordinates of the parent, see [dispatchDraw]. The returned rect is reused.
+     */
+    fun clipOutInWindow(): RectF? {
+        val (enabled, params) = clipState.value
+        if (!enabled) return null
+        getLocationInWindow(clipLocation)
+        val left = clipLocation[0].toFloat()
+        val top = clipLocation[1] - translationY
+        clipOutRect.set(
+            left - params.leftInset,
+            top + params.top,
+            left + width + params.rightInset,
+            top + params.bottom,
+        )
+        return clipOutRect
+    }
+
     private val _clipData = MutableStateFlow(false to NotificationScrimClipParams())
 
     // [first] is enabled and [second] is the clipping params
@@ -1863,6 +1894,7 @@ private class FrameLayoutTouchPassthrough(
         set(value) {
             if (_clipData.value != value) {
                 _clipData.value = value
+                clipState.value = value
                 dirtyClipData = true
                 invalidate()
             }
