@@ -185,6 +185,12 @@ private object ColorOSGlassBlurTune {
 private const val ColorOSGlassMinAlpha = 0.01f
 
 /**
+ * How many frames the shade and its window blur have to be gone before the glass behind it goes, see
+ * [ColorOSGlassRegion.linger]. The blur of the shade window follows its content a frame or two late.
+ */
+private const val ColorOSBackdropLingerFrames = 3
+
+/**
  * The white laid over the blur behind the glass of the light panel's pills, tiles that are off,
  * sliders and media card. The material SurfaceFlinger draws for them is faint over the pale blur of
  * the light panel, so the glass reads as flat. ColorOS shows them as clearly lighter than the panel
@@ -262,7 +268,69 @@ internal fun colorOSGlassPanelMaterial(): Int =
 private class ColorOSGlassRegion(private val view: View) {
     var drawable: BackgroundBlurDrawable? = null
 
+    /** Whether the shade still needs the region, while it lingers. */
+    private var lingerWhile: (() -> Boolean)? = null
+    private var lingerFramesIn = 0
+    private val lingerFrame =
+        object : Runnable {
+            override fun run() {
+                val needed = lingerWhile ?: return
+                lingerFramesIn = if (needed()) 0 else lingerFramesIn + 1
+                if (lingerFramesIn >= ColorOSBackdropLingerFrames) hide()
+                else view.postOnAnimation(this)
+            }
+        }
+
+    /** The region that stands in for this one while it lingers, drawn by the window's root. */
+    private var standIn: BackgroundBlurDrawable? = null
+
+    /**
+     * For the glass behind the shade: puts a stand-in that cannot be seen, the lowest alpha at a
+     * 1px radius of the same material, in place of the region until a few frames after [needed]
+     * turns false. SurfaceFlinger draws a shade window blur without such a region as the dark
+     * panel glass. The window blur outlasts the panel when the shade is closed slowly, and it
+     * reaches SurfaceFlinger after the content that goes with it, so without the stand-in the
+     * screen dimmed at the end of a collapse. The stand-in is drawn by the root of the window, as
+     * the panel stops drawing the region once it fades out, which takes the region away.
+     */
+    fun linger(needed: () -> Boolean) {
+        val drawable = drawable ?: return
+        if (lingerWhile != null || !drawable.isVisible) return
+        val root = view.rootView
+        val stand =
+            standIn
+                ?: view.viewRootImpl?.createBackgroundBlurDrawable()?.also {
+                    it.setXfermode(null)
+                    standIn = it
+                }
+                ?: return
+        stand.setMaterial(drawable.material)
+        stand.setBlurRadius(1)
+        stand.setCornerRadius(0f)
+        stand.alpha = 1
+        stand.setBounds(0, 0, root.width, root.height)
+        stand.setVisible(true, false)
+        root.overlay.add(stand)
+        drawable.setVisible(false, false)
+        lingerWhile = needed
+        lingerFramesIn = 0
+        view.postOnAnimation(lingerFrame)
+    }
+
+    fun stopLingering() {
+        if (lingerWhile == null) return
+        lingerWhile = null
+        view.removeCallbacks(lingerFrame)
+        standIn?.let {
+            it.setVisible(false, false)
+            view.rootView.overlay.remove(it)
+        }
+    }
+
     fun hide() {
+        val lingered = lingerWhile != null
+        stopLingering()
+        if (lingered) view.rootView.postInvalidateOnAnimation()
         val hidden = drawable?.setVisible(false, false) ?: return
         // Hiding a region does not draw anything, and SurfaceFlinger only hears of it with the
         // next frame of the window. Without one, which is what happens when the panel is closing
@@ -284,13 +352,15 @@ private class ColorOSGlassRegion(private val view: View) {
  *
  * With [wholeWindow] the region is the whole window instead, whatever the size of the element and
  * whatever a parent clips, which is what the glass behind the shade needs. [shape] is then a
- * rectangle.
+ * rectangle, and the region stays as an unseen stand-in while [windowBlurred] says the window
+ * still has a blur.
  */
 @Composable
 internal fun Modifier.colorOSGlassBlur(
     shape: Shape,
     material: Int,
     wholeWindow: Boolean = false,
+    windowBlurred: () -> Boolean = { false },
 ): Modifier {
     val blur = LocalColorOSGlassBlur.current ?: return this
     val view = LocalView.current
@@ -301,6 +371,9 @@ internal fun Modifier.colorOSGlassBlur(
     val glassOn = liquidGlassOn
     // The part of the element that is in the window, in its own coordinates.
     var visible by remember { mutableStateOf<Rect?>(null) }
+    val goOut = {
+        if (wholeWindow) region.linger { blur.alpha() > 0f || windowBlurred() } else region.hide()
+    }
 
     DisposableEffect(region) { onDispose { region.hide() } }
     // The panel can be hidden without drawing the element again, and the region would stay.
@@ -309,7 +382,7 @@ internal fun Modifier.colorOSGlassBlur(
             .collect { alpha ->
                 val drawable = region.drawable ?: return@collect
                 if (alpha < ColorOSGlassMinAlpha) {
-                    region.hide()
+                    goOut()
                 } else {
                     drawable.alpha = (alpha * 255).toInt()
                 }
@@ -325,7 +398,7 @@ internal fun Modifier.colorOSGlassBlur(
     }
 
     return this.layout { measurable, constraints ->
-            if (hidden) region.hide()
+            if (hidden) goOut()
             val placeable = measurable.measure(constraints)
             layout(placeable.width, placeable.height) { placeable.place(0, 0) }
         }
@@ -399,7 +472,7 @@ internal fun Modifier.colorOSGlassBlur(
             if (
                 alpha < ColorOSGlassMinAlpha || shown.width < 1f || bottom - top < 1f
             ) {
-                region.hide()
+                goOut()
                 return@drawBehind
             }
             val root = view.viewRootImpl ?: return@drawBehind
@@ -419,11 +492,17 @@ internal fun Modifier.colorOSGlassBlur(
                         outline.path.getBounds().let { min(it.width, it.height) / 2f }
                     is Outline.Rectangle -> 0f
                 }
+            region.stopLingering()
             drawable.setVisible(true, false)
             drawable.setMaterial(material)
             drawable.setColor(ColorOSGlassBlurTune.tint(material, glassOn))
+            val radius = ColorOSGlassBlurTune.blurRadiusPx(material, glassOn, defaultRadius)
+            // The backdrop also fades by its radius, as the window blur does. A full radius at a
+            // low alpha leaves a blurred ghost that snaps away when the region goes.
+            // At least 1px, as SurfaceFlinger skips a region with no radius and would tint the
+            // window blur under it.
             drawable.setBlurRadius(
-                ColorOSGlassBlurTune.blurRadiusPx(material, glassOn, defaultRadius)
+                if (wholeWindow) (radius * alpha).roundToInt().coerceAtLeast(1) else radius
             )
             drawable.setCornerRadius(min(corner, (bottom - top) / 2f))
             drawable.alpha = (alpha * 255).toInt()
@@ -442,11 +521,16 @@ internal fun Modifier.colorOSGlassBlur(
  * The glass behind the whole shade, the notifications and the panel alike: a region of the panel
  * material over the full window, which the glass of the pills, the tiles and the sliders is drawn
  * over. The tint of the light panel is the scrim colour, see ScrimController. [alpha] is how much of
- * the shade is out, 0 hides it. Nothing is drawn where SurfaceFlinger cannot blur, and the scrim of
- * the shade keeps its own colour then.
+ * the shade is out, 0 hides it. [windowBlurred] is whether the shade window still has a blur, which
+ * can outlast the shade. Nothing is drawn where SurfaceFlinger cannot blur, and the scrim of the
+ * shade keeps its own colour then.
  */
 @Composable
-internal fun ColorOSBackdrop(alpha: () -> Float, modifier: Modifier = Modifier) {
+internal fun ColorOSBackdrop(
+    alpha: () -> Float,
+    windowBlurred: () -> Boolean,
+    modifier: Modifier = Modifier,
+) {
     val blur = rememberColorOSGlassBlur(alpha) ?: return
     CompositionLocalProvider(LocalColorOSGlassBlur provides blur) {
         Spacer(
@@ -454,6 +538,7 @@ internal fun ColorOSBackdrop(alpha: () -> Float, modifier: Modifier = Modifier) 
                 RectangleShape,
                 colorOSGlassPanelMaterial(),
                 wholeWindow = true,
+                windowBlurred = windowBlurred,
             )
         )
     }

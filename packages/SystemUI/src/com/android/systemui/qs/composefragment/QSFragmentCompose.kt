@@ -221,6 +221,7 @@ import com.android.systemui.qs.ui.composable.QuickSettingsTheme
 import com.android.systemui.res.R
 import com.android.systemui.shade.ShadeDisplayAware
 import com.android.systemui.shade.domain.interactor.ShadeAnimationInteractor
+import com.android.systemui.statusbar.NotificationShadeDepthController
 import com.android.systemui.statusbar.policy.ConfigurationController
 import com.android.systemui.statusbar.policy.ConfigurationController.ConfigurationListener
 import com.android.systemui.util.LifecycleFragment
@@ -262,6 +263,7 @@ constructor(
     private val mediaOutputDialogManager: MediaOutputDialogManager,
     private val shadeAnimationInteractor: ShadeAnimationInteractor,
     private val qsPanelStyleRepository: QsPanelStyleRepository,
+    private val depthController: dagger.Lazy<NotificationShadeDepthController>,
 ) : LifecycleFragment(), QS, Dumpable {
 
     private val scrollListener = MutableStateFlow<QS.ScrollListener?>(null)
@@ -436,6 +438,24 @@ constructor(
         return frame
     }
 
+    /** Whether the shade window has a blur, which a slow collapse keeps after the panel is gone. */
+    @Composable
+    private fun rememberShadeWindowBlurred(): () -> Boolean {
+        var radius by remember { mutableIntStateOf(0) }
+        DisposableEffect(Unit) {
+            val controller = depthController.get()
+            val listener =
+                object : NotificationShadeDepthController.DepthListener {
+                    override fun onBlurRadiusChanged(blurRadius: Int) {
+                        radius = blurRadius
+                    }
+                }
+            controller.addListener(listener)
+            onDispose { controller.removeListener(listener) }
+        }
+        return remember { { radius > 0 } }
+    }
+
     @Composable
     private fun Content(modifier: Modifier = Modifier) {
         val launchProgress by shadeAnimationInteractor.launchProgress.collectAsStateWithLifecycle()
@@ -472,6 +492,7 @@ constructor(
                     // color of the scrim (see ScrimController). It follows the shade, not the
                     // panel, so it is also there with only the notifications and QQS down.
                     if (LocalColorOSQsStyle.current && notificationShadeBlur()) {
+                        val windowBlurred = rememberShadeWindowBlurred()
                         ColorOSBackdrop(
                             alpha = {
                                 if (viewModel.isQsVisibleAndAnyShadeExpanded) {
@@ -484,6 +505,7 @@ constructor(
                                     0f
                                 }
                             },
+                            windowBlurred = windowBlurred,
                             modifier = Modifier.matchParentSize(),
                         )
                     }
