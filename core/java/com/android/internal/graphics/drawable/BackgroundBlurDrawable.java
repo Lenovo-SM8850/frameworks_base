@@ -39,6 +39,7 @@ import android.util.LongSparseArray;
 import android.view.ViewRootImpl;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 
 import com.android.internal.R;
 import com.android.internal.annotations.GuardedBy;
@@ -341,8 +342,12 @@ public final class BackgroundBlurDrawable extends Drawable {
      */
     public static final class Aggregator {
         private final Object mRtLock = new Object();
-        // Maintains a list of all *visible* blur drawables. Confined to  UI thread
-        private final ArraySet<BackgroundBlurDrawable> mDrawables = new ArraySet();
+        // Maintains a list of all *visible* blur drawables. Confined to  UI thread.
+        // Kept in insertion order: that is the order the regions are sent to the compositor, which
+        // draws a later region over an earlier one. A drawable that becomes visible later (e.g. a
+        // child added after its parent) therefore ends up on top of the ones registered before it.
+        // A drawable that is hidden and shown again is re-appended, i.e. moves to the top.
+        private final LinkedHashSet<BackgroundBlurDrawable> mDrawables = new LinkedHashSet<>();
         @GuardedBy("mRtLock")
         private final LongSparseArray<ArraySet<Runnable>> mFrameRtUpdates = new LongSparseArray();
         private long mLastFrameNumber = 0;
@@ -462,8 +467,9 @@ public final class BackgroundBlurDrawable extends Drawable {
         public BlurRegion[] getBlurRegionsCopyForRT() {
             if (mHasUiUpdates) {
                 mTmpBlurRegionsForFrame = new BlurRegion[mDrawables.size()];
-                for (int i = 0; i < mDrawables.size(); i++) {
-                    mTmpBlurRegionsForFrame[i] = new BlurRegion(mDrawables.valueAt(i));
+                int i = 0;
+                for (BackgroundBlurDrawable drawable : mDrawables) {
+                    mTmpBlurRegionsForFrame[i++] = new BlurRegion(drawable);
                 }
                 mHasUiUpdates = false;
             }
