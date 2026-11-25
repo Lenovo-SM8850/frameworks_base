@@ -1805,6 +1805,13 @@ private const val ColorOSTabletMaxRows = 10
 private val ColorOSTabletDotsHeight = 20.dp
 
 /**
+ * Room the pager of the large screen panel keeps beside its columns for the press bounce of the
+ * items, which scales a pill by up to about 3% above its size when it springs back, 2dp on each side
+ * of one that is two columns wide. The pager clips to its bounds.
+ */
+private val ColorOSTabletBounceHeadroom = 6.dp
+
+/**
  * The grid of the large screen panel: every tile and item on the columns of [metrics], in pages.
  * [item] draws one entry in the cells it is given. The pager spans the width it is given so the
  * next page slides in whole, and each page keeps to the columns in its middle.
@@ -1829,14 +1836,18 @@ internal fun ColorOSTabletGrid(
         }
     val pagerState = rememberPagerState { pages.size }
     val inset = ((fullWidth - metrics.width) / 2).coerceAtLeast(0.dp)
+    // The columns can reach the edge of the panel, as six of them do in landscape. The pager is
+    // made wider than the panel by what [inset] lacks of the headroom, and keeps its pages where
+    // they were, so the bounce of the items in the outer columns is not cut off by its bounds.
+    val extra = (ColorOSTabletBounceHeadroom - inset).coerceAtLeast(0.dp)
     Column(modifier.requiredWidth(fullWidth), horizontalAlignment = Alignment.CenterHorizontally) {
         HorizontalPager(
             state = pagerState,
-            contentPadding = PaddingValues(horizontal = inset),
-            pageSpacing = inset,
+            contentPadding = PaddingValues(horizontal = inset + extra),
+            pageSpacing = inset + extra,
             beyondViewportPageCount = 1,
             verticalAlignment = Alignment.Top,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.requiredWidth(fullWidth + extra * 2),
         ) { pageIndex ->
             val page = pages[pageIndex]
             val pageSpans = page.indices.map { spans[it] }
