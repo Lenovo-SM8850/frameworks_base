@@ -752,6 +752,9 @@ fun ContentScope.Tile(
                                         lottieSpec = tile.spec.spec.takeIf { colorOSStyle },
                                         lottieEnabled = colorOSLottie,
                                         active = uiState.visualState == STATE_ACTIVE,
+                                        // The coloured bubble of a special tile has no glass
+                                        // under it, see ClassicTileContent.
+                                        solidBubble = colors.iconBackground.alpha >= 1f,
                                         modifier =
                                             Modifier.align(Alignment.TopCenter)
                                                 .bounceScale {

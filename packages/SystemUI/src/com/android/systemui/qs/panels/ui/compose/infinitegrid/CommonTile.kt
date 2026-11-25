@@ -233,6 +233,7 @@ fun ClassicTileContent(
     lottieSpec: String? = null,
     lottieEnabled: Boolean = true,
     active: Boolean = false,
+    solidBubble: Boolean = false,
 ) {
     val isNoBackground = iconShapeKey in QSTileIconShapes.NO_BACKGROUND_KEYS
     // The circle is a blur region of ColorOS glass, instead of the flat fill and the rim.
@@ -263,6 +264,10 @@ fun ClassicTileContent(
     // replacing it, so the lit rim of the glass still shows around the edge.
     val glassBubbleAlpha by
         animateToggleFloat(if (onGlass && active) 1f else 0f, colorOS, "QSTileGlassBubble")
+    // The blur region does not scale with the press of the tile, so the glass of a tile that is on
+    // shows around a bubble that shrank. A solid coloured bubble has none under it once it has
+    // faded in, as the glass under it can only show as a white edge.
+    val dropGlass = solidBubble && active && glassBubbleAlpha >= 1f
     // The icon pops from 0.8 to 1 when the tile toggles. A Lottie clip animates itself instead.
     val pop = remember { ComposeAnimatable(1f) }
     var popActive by remember { mutableStateOf(active) }
@@ -290,10 +295,16 @@ fun ClassicTileContent(
                 .then(
                     if (onGlass) {
                         Modifier.clip(iconShape)
-                            .colorOSGlassBlur(
-                                iconShape,
-                                if (active) colorOSGlassActiveTileMaterial()
-                                else colorOSGlassTileMaterial(),
+                            .then(
+                                if (dropGlass) {
+                                    Modifier
+                                } else {
+                                    Modifier.colorOSGlassBlur(
+                                        iconShape,
+                                        if (active) colorOSGlassActiveTileMaterial()
+                                        else colorOSGlassTileMaterial(),
+                                    )
+                                }
                             )
                             .drawBehind {
                                 if (glassBubbleAlpha > 0f) {
@@ -473,19 +484,21 @@ fun LargeTileContent(
         val animatedBackgroundColor by
             animateColorAsState(colors.iconBackground, label = "QSTileDualTargetBackgroundColor")
         val focusBorderColor = MaterialTheme.colorScheme.secondary
-        // The icon circle of a ColorOS pill that is on is glass, like the round tiles: a blur region
-        // of its own that a white bubble fades in over, so the lit rim of the glass still shows
-        // around the bubble. While the pill is off (or unavailable) the circle is a flat, lighter
-        // disc with no rim and no blur region of its own, as in ColorOS. Without blur it is the flat
-        // fill with the glass rim.
+        // The icon circle of a ColorOS pill that is on is a solid white bubble over the glass of the
+        // pill. It has no blur region of its own: SurfaceFlinger draws overlapping regions in the
+        // order they are listed, which is not the order they are drawn in, so a region under the
+        // bubble could be covered by the glass of the pill and the bubble would be left grey. While
+        // the pill is off (or unavailable) the circle is a flat, lighter disc with no rim and no
+        // blur region of its own, as in ColorOS. Without blur it is the flat fill with the glass
+        // rim.
         val onGlass = colorOSStyle && LocalColorOSGlassBlur.current != null
-        val glassMaterial = colorOSGlassActiveTileMaterial()
         val glassBubbleAlpha by
             animateFloatAsState(if (onGlass && active) 1f else 0f, label = "QSTileGlassBubble")
-        // colorOSGlassBlur is @Composable, so it is built here and not inside the thenIf lambda.
-        val glassBlurModifier =
-            if (onGlass && active) Modifier.colorOSGlassBlur(iconShape, glassMaterial)
-            else Modifier
+        // The fill of a tile that is on is translucent while it is over a glass region of its own.
+        // Here there is none under it, so the bubble takes the solid fill. A coloured bubble is
+        // solid already.
+        val bubbleOnColor =
+            if (colors.iconBackground.alpha < 1f) ColorOSActiveFill else colors.iconBackground
         Box(
             modifier =
                 Modifier.size(toggleSize).thenIf(alwaysBacked && !isDualTarget) {
@@ -495,19 +508,15 @@ fun LargeTileContent(
                             Modifier.borderOnFocus(color = focusBorderColor, iconShape.topEnd)
                         }
                         .clip(iconClip)
-                        .then(glassBlurModifier)
                         .drawBehind {
                             if (onGlass) {
                                 // The flat disc of a pill that is off, it also stays under the
-                                // bubble that fades out while the pill turns off.
-                                if (!active) {
+                                // bubble that fades in or out while the pill toggles.
+                                if (!active || glassBubbleAlpha < 1f) {
                                     drawRect(animatedBackgroundColor)
                                 }
                                 if (glassBubbleAlpha > 0f) {
-                                    drawRect(
-                                        color = animatedBackgroundColor,
-                                        alpha = glassBubbleAlpha,
-                                    )
+                                    drawRect(color = bubbleOnColor, alpha = glassBubbleAlpha)
                                 }
                             } else {
                                 val brush: Brush? = colors.backgroundGradient
