@@ -529,9 +529,13 @@ public class NotificationShelf extends ActivatableNotificationView {
                 int ownColorUntinted = expandableRow.getBackgroundColorWithoutTint();
                 if (viewStart >= shelfStart && mNotGoneIndex == -1) {
                     mNotGoneIndex = notGoneIndex;
-                    setTintColor(previousColor);
-                    setOverrideTintColor(colorTwoBefore, transitionAmount);
-                    needsToResetOverrideTint = false;
+                    // The glass pill keeps the plain card color: a tint makes it a tinted card,
+                    // which does not get the card material.
+                    if (!usesKeyguardGlass()) {
+                        setTintColor(previousColor);
+                        setOverrideTintColor(colorTwoBefore, transitionAmount);
+                        needsToResetOverrideTint = false;
+                    }
 
                 } else if (mNotGoneIndex == -1) {
                     colorTwoBefore = previousColor;
@@ -1188,6 +1192,18 @@ public class NotificationShelf extends ActivatableNotificationView {
     protected boolean usesTransparentBackground() {
         return super.usesTransparentBackground()
                 && mAmbientState != null
-                && !mAmbientState.isOnKeyguard();
+                && (!mAmbientState.isOnKeyguard() || usesKeyguardGlass());
+    }
+
+    /**
+     * Whether the pill on the lock screen is glass like the cards: it needs the translucent card
+     * color for the card material, which the shelf otherwise does not use on the lock screen.
+     * It is glass only where the cards themselves can be transparent, so without window blur it
+     * keeps the tint of the row it covers.
+     */
+    private boolean usesKeyguardGlass() {
+        return mAmbientState != null && mAmbientState.isOnKeyguard()
+                && !mAmbientState.isDozing() && LiquidGlass.isOnShade(getContext())
+                && super.usesTransparentBackground();
     }
 }

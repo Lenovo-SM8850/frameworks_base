@@ -48,6 +48,7 @@ object NotificationShelfViewBinder {
             }
 
             launch { viewModel.isBlurSupported.collect(shelf::setIsBlurSupported) }
+            launch { viewModel.isGlassBlurAvailable.collect(shelf::setGlassBlurAvailable) }
 
             registerViewListenersWhileAttached(shelf, viewModel)
         }

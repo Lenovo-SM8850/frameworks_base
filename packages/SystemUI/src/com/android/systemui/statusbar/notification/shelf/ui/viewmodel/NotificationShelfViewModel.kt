@@ -55,6 +55,9 @@ constructor(
 
     val isBlurSupported: Flow<Boolean> = windowRootViewBlurInteractor.isTranslucentSupported
 
+    /** Can the window blur behind the glass pill? */
+    val isGlassBlurAvailable: Flow<Boolean> = windowRootViewBlurInteractor.isBlurCurrentlySupported
+
     /** Notifies that the user has clicked the shelf. */
     fun onShelfClicked() {
         interactor.goToLockedShadeFromShelf()
