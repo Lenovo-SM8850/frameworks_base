@@ -1830,8 +1830,8 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
             // panel material. The dark panel has no color of its own. The light one has a pale
             // tint, here so that it covers the whole window like the glass.
             boolean night = (mContext.getResources().getConfiguration().uiMode
-                    & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
-                    == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                    & Configuration.UI_MODE_NIGHT_MASK)
+                    == Configuration.UI_MODE_NIGHT_YES;
             return night ? Color.TRANSPARENT
                     : LiquidGlassTune.color("cos_light_panel_tint", COLOROS_LIGHT_PANEL_TINT);
         }
@@ -1844,13 +1844,8 @@ public class ScrimController implements ViewTreeObserver.OnPreDrawListener, Dump
      */
     private boolean isColorOSBackdrop() {
         return Flags.notificationShadeBlur() && isBlurCurrentlySupported()
-                && isColorOSPanelStyle();
-    }
-
-    /** Whether the ColorOS QS panel style is selected, with or without its glass. */
-    private boolean isColorOSPanelStyle() {
-        return Settings.System.getIntForUser(mContext.getContentResolver(),
-                Settings.System.QS_PANEL_STYLE, 0, UserHandle.USER_CURRENT)
+                && Settings.System.getIntForUser(mContext.getContentResolver(),
+                        Settings.System.QS_PANEL_STYLE, 0, UserHandle.USER_CURRENT)
                 == QS_PANEL_STYLE_COLOROS;
     }
 
