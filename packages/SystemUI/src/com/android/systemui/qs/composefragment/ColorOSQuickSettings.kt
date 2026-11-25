@@ -130,6 +130,8 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridFooterH
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridHeadroom
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGridRows
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSMinGridRows
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSRingerRed
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSRingerLightBubble
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSSliderFill
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGlassBlur
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGlassBlur
@@ -988,22 +990,6 @@ internal fun ColorOSVolumeSlider(
         },
     )
 }
-
-/**
- * ColorOS colours the selected sound mode red. Dark panel: white bubble with a red icon, the same
- * pairing the active QS tiles use.
- */
-private val ColorOSRingerRed = Color(0xFFF2453D)
-
-/** The ring mode has a blue bubble on the light panel, as it does in MiraCLO. */
-private val ColorOSRingerBlue = Color(0xFF1A7CFF)
-
-/**
- * The bubble of the selected mode on the light panel, which has a white icon on it: blue for ring,
- * red for vibrate and silent.
- */
-private fun colorOSRingerLightBubble(mode: Int): Color =
-    if (mode == AudioManager.RINGER_MODE_NORMAL) ColorOSRingerBlue else ColorOSRingerRed
 
 /** How far the end buttons are pulled towards the middle, in segments, by the selected bubble. */
 private const val ColorOSRingerNudge = 0.1f

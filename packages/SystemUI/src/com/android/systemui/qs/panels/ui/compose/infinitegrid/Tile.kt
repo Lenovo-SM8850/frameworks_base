@@ -21,6 +21,7 @@ package com.android.systemui.qs.panels.ui.compose.infinitegrid
 import android.content.Context
 import android.content.res.Resources
 import android.database.ContentObserver
+import android.media.AudioManager
 import android.os.Trace
 import android.os.UserHandle
 import android.provider.Settings
@@ -190,6 +191,30 @@ private val COLOROS_INK_TILES = setOf("dark", "night")
 /** Do not disturb tiles, whose icon is purple while active. */
 private val COLOROS_DND_TILES = setOf("modes_dnd")
 
+/** The sound mode tile, which ColorOS draws lit in every mode with a colour per mode. */
+private const val COLOROS_SOUND_TILE = "rrsound"
+
+/** Red of the sound mode that is not ring on a light panel, and of the glyph on a dark one. */
+internal val ColorOSRingerRed = Color(0xFFF2453D)
+
+/** The ring mode has a blue bubble on the light panel, as it does in MiraCLO. */
+private val ColorOSRingerBlue = Color(0xFF1A7CFF)
+
+/**
+ * The bubble of the selected sound mode on the light panel, which has a white icon on it: blue for
+ * ring, red for vibrate and silent.
+ */
+internal fun colorOSRingerLightBubble(mode: Int): Color =
+    if (mode == AudioManager.RINGER_MODE_NORMAL) ColorOSRingerBlue else ColorOSRingerRed
+
+/** The ringer mode a sound mode tile with the icon resource [iconResId] shows. */
+private fun colorOSRingerModeOf(iconResId: Int?): Int =
+    when (iconResId) {
+        R.drawable.ic_volume_ringer_vibrate -> AudioManager.RINGER_MODE_VIBRATE
+        R.drawable.ic_volume_ringer_mute -> AudioManager.RINGER_MODE_SILENT
+        else -> AudioManager.RINGER_MODE_NORMAL
+    }
+
 /** The modes tile, which only looks like a do not disturb tile while it shows that mode. */
 private const val COLOROS_MODES_TILE = "dnd"
 
@@ -301,11 +326,10 @@ fun ContentScope.Tile(
          * inheritance). This way, even if tile.state changes, uiState may not change and lead to
          * recomposition.
          */
-        val uiState by
+        val tileUiState by
             produceState(tile.currentState.toUiState(resources), tile, resources) {
                 tile.state.collect { value = it.toUiState(resources) }
             }
-        val isClickable = uiState.handlesMainClick
 
         val icon by
             produceState(tile.currentState.toIconProvider(), tile) {
@@ -313,6 +337,20 @@ fun ContentScope.Tile(
             }
 
         val colorOSStyle = LocalColorOSQsStyle.current
+        // The ColorOS sound mode tile is lit in every mode, the mode is in its icon and colours.
+        val colorOSSpecialMode =
+            if (colorOSStyle && tile.spec.spec == COLOROS_SOUND_TILE) {
+                colorOSRingerModeOf(icon.iconResId())
+            } else {
+                null
+            }
+        val uiState =
+            if (colorOSSpecialMode != null) {
+                tileUiState.copy(visualState = STATE_ACTIVE)
+            } else {
+                tileUiState
+            }
+        val isClickable = uiState.handlesMainClick
         val nothingStyle = LocalNothingQsStyle.current
         val isQuadTile = nothingStyle && LocalQSQuadTiles.current.contains(tile.spec)
         val tileGradient = rememberQSTileGradient()
@@ -328,7 +366,13 @@ fun ContentScope.Tile(
             if (nothingStyle) {
                 TileDefaults.nothingColorsForState(uiState, isQuadTile)
             } else if (colorOSStyle) {
-                TileDefaults.colorOSColorsForState(uiState, iconOnly, tile.spec.spec, colorOSDnd)
+                TileDefaults.colorOSColorsForState(
+                    uiState,
+                    iconOnly,
+                    tile.spec.spec,
+                    colorOSDnd,
+                    colorOSSpecialMode,
+                )
             } else {
                 TileDefaults.getColorForState(uiState, iconOnly, tileGradient)
             }
@@ -1403,7 +1447,9 @@ private object TileDefaults {
      * ColorOS style: translucent "glass" tiles that let the shade blur show through. An active
      * tile shows a white bubble with a coloured icon on a dark and on a light panel. Mobile data
      * uses green, auto rotate red, airplane mode orange, do not disturb ([dnd]) purple, dark mode
-     * and night light dark ink, and everything else blue.
+     * and night light dark ink, and everything else blue. The sound mode tile, with its
+     * [specialMode], is lit in the colours of that ringer mode: a red icon on a dark panel, a blue
+     * (ring) or red bubble with a white icon on a light one.
      */
     @Composable
     @ReadOnlyComposable
@@ -1412,11 +1458,13 @@ private object TileDefaults {
         iconOnly: Boolean,
         spec: String,
         dnd: Boolean = spec in COLOROS_DND_TILES,
+        specialMode: Int? = null,
     ): TileColors {
         val onSurface = MaterialTheme.colorScheme.onSurface
         val darkPanel = MaterialTheme.colorScheme.surface.luminance() < 0.5f
         val accent =
             when {
+                specialMode != null -> ColorOSRingerRed
                 spec in COLOROS_DATA_TILES -> ColorOSGreen
                 spec == "rotation" -> ColorOSRed
                 spec == "airplane" -> ColorOSOrange
@@ -1432,7 +1480,9 @@ private object TileDefaults {
             if (darkPanel) Color.White.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.06f)
         // An active tile is a white bubble with its colour in the icon, on a dark or a light panel.
         val bubbleOn = ColorOSActiveFill
-        val iconOn = accent
+        val ringerBubble =
+            if (specialMode != null && !darkPanel) colorOSRingerLightBubble(specialMode) else null
+        val iconOn = if (ringerBubble != null) Color.White else accent
         // The labels of a dark panel are softer than full white, like in ColorOS.
         val primary = if (darkPanel) onSurface.copy(alpha = 0.90f) else onSurface
         val secondary = onSurface.copy(alpha = if (darkPanel) 0.60f else 0.70f)
@@ -1450,8 +1500,8 @@ private object TileDefaults {
         return when (uiState.visualState) {
             STATE_ACTIVE ->
                 TileColors(
-                    background = if (iconOnly) bubbleOn else glass,
-                    iconBackground = bubbleOn,
+                    background = if (iconOnly) ringerBubble ?: bubbleOn else glass,
+                    iconBackground = ringerBubble ?: bubbleOn,
                     label = primary,
                     secondaryLabel = secondary,
                     icon = iconOn,
