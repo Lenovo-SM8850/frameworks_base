@@ -194,6 +194,9 @@ private val COLOROS_DND_TILES = setOf("modes_dnd")
 /** The sound mode tile, which ColorOS draws lit in every mode with a colour per mode. */
 private const val COLOROS_SOUND_TILE = "rrsound"
 
+/** The media volume tile, which ColorOS draws lit with the colours of silent while it is muted. */
+private const val COLOROS_MEDIA_VOLUME_TILE = "rrvolume"
+
 /** Red of the sound mode that is not ring on a light panel, and of the glyph on a dark one. */
 internal val ColorOSRingerRed = Color(0xFFF2453D)
 
@@ -213,6 +216,19 @@ private fun colorOSRingerModeOf(iconResId: Int?): Int =
         R.drawable.ic_volume_ringer_vibrate -> AudioManager.RINGER_MODE_VIBRATE
         R.drawable.ic_volume_ringer_mute -> AudioManager.RINGER_MODE_SILENT
         else -> AudioManager.RINGER_MODE_NORMAL
+    }
+
+/**
+ * The ringer mode whose colours the tile [spec] with the icon resource [iconResId] is lit in, or
+ * null when it has no special colours. The sound mode tile shows the mode of its icon in every
+ * state. The media volume tile shows silent while its icon is the muted one.
+ */
+private fun colorOSSpecialModeOf(spec: String, iconResId: Int?): Int? =
+    when (spec) {
+        COLOROS_SOUND_TILE -> colorOSRingerModeOf(iconResId)
+        COLOROS_MEDIA_VOLUME_TILE ->
+            AudioManager.RINGER_MODE_SILENT.takeIf { iconResId == R.drawable.ic_volume_media_mute }
+        else -> null
     }
 
 /** The modes tile, which only looks like a do not disturb tile while it shows that mode. */
@@ -338,15 +354,26 @@ fun ContentScope.Tile(
 
         val colorOSStyle = LocalColorOSQsStyle.current
         // The ColorOS sound mode tile is lit in every mode, the mode is in its icon and colours.
+        // The media volume tile is lit in the colours of silent while it is muted, and off while
+        // it is not.
         val colorOSSpecialMode =
-            if (colorOSStyle && tile.spec.spec == COLOROS_SOUND_TILE) {
-                colorOSRingerModeOf(icon.iconResId())
+            if (colorOSStyle &&
+                    (tile.spec.spec == COLOROS_SOUND_TILE ||
+                        tile.spec.spec == COLOROS_MEDIA_VOLUME_TILE)
+            ) {
+                colorOSSpecialModeOf(tile.spec.spec, icon.iconResId())
             } else {
                 null
             }
         val uiState =
             if (colorOSSpecialMode != null) {
                 tileUiState.copy(visualState = STATE_ACTIVE)
+            } else if (
+                colorOSStyle &&
+                    tile.spec.spec == COLOROS_MEDIA_VOLUME_TILE &&
+                    tileUiState.visualState == STATE_ACTIVE
+            ) {
+                tileUiState.copy(visualState = STATE_INACTIVE)
             } else {
                 tileUiState
             }
@@ -1447,9 +1474,9 @@ private object TileDefaults {
      * ColorOS style: translucent "glass" tiles that let the shade blur show through. An active
      * tile shows a white bubble with a coloured icon on a dark and on a light panel. Mobile data
      * uses green, auto rotate red, airplane mode orange, do not disturb ([dnd]) purple, dark mode
-     * and night light dark ink, and everything else blue. The sound mode tile, with its
-     * [specialMode], is lit in the colours of that ringer mode: a red icon on a dark panel, a blue
-     * (ring) or red bubble with a white icon on a light one.
+     * and night light dark ink, and everything else blue. A tile with a [specialMode], the sound mode
+     * tile and the muted media volume tile, is lit in the colours of that ringer mode: a red icon
+     * on a dark panel, a blue (ring) or red bubble with a white icon on a light one.
      */
     @Composable
     @ReadOnlyComposable
