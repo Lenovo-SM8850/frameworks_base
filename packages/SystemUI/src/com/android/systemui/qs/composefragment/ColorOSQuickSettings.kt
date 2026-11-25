@@ -85,6 +85,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.booleanResource
+import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -1608,9 +1610,12 @@ internal fun rememberColorOSTabletColumns(factory: QSColumnsViewModel.Factory): 
             factory.createWithoutMediaTracking()
         }
     // The tiles keep their size: a pane too narrow for the columns gets fewer of them. The pane is
-    // half the screen in split shade, less the margin on each side.
+    // half the screen in split shade, less the margin on each side. Six columns in landscape can
+    // reach into the side inset of the panel, see ColorOSTabletGrid.
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-    val splitShade = booleanResource(R.bool.config_use_split_notification_shade)
+    val splitShade =
+        booleanResource(R.bool.config_use_split_notification_shade) ||
+            booleanResource(R.bool.force_config_use_split_notification_shade)
     val paneWidth =
         (if (splitShade) screenWidth / 2 else screenWidth) -
             dimensionResource(R.dimen.qs_horizontal_margin) * 2
