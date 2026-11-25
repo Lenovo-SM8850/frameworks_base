@@ -1193,6 +1193,16 @@ constructor(
                     R.dimen.qs_panel_padding_top
                 }
             )
+        // The glass is drawn by SurfaceFlinger and does not follow the alpha of this layer, so it
+        // follows the same alpha and is hidden whenever the panel is.
+        val colorOSGlassAlpha: () -> Float = {
+            if (viewModel.isQsVisibleAndAnyShadeExpanded && !viewModel.isEditing) {
+                viewModel.viewAlpha * colorOSLaunchGlassFade(launchProgress) *
+                    colorOSKeyguardCloseFade(viewModel.keyguardCloseExpansion)
+            } else {
+                0f
+            }
+        }
         Column(
             modifier =
                 modifier.collapseExpandSemanticAction(
@@ -1442,22 +1452,7 @@ constructor(
                                             viewModel.expansionState.progress *
                                                 viewModel.panelExpansionFraction
                                         },
-                                        // The glass is drawn by SurfaceFlinger and does not
-                                        // follow the alpha of this layer, so it follows the same
-                                        // alpha and is hidden whenever the panel is.
-                                        glassAlpha = {
-                                            if (viewModel.isQsVisibleAndAnyShadeExpanded &&
-                                                !viewModel.isEditing
-                                            ) {
-                                                viewModel.viewAlpha *
-                                                    colorOSLaunchGlassFade(launchProgress) *
-                                                    colorOSKeyguardCloseFade(
-                                                        viewModel.keyguardCloseExpansion
-                                                    )
-                                            } else {
-                                                0f
-                                            }
-                                        },
+                                        glassAlpha = colorOSGlassAlpha,
                                     )
                                 }
                             } else {
@@ -1553,23 +1548,44 @@ constructor(
                                     val editButton = rememberViewModel("FooterEdit") {
                                         viewModel.editModeButtonViewModelFactory.create()
                                     }
-                                    ColorOSTabletEditButton(
-                                        size = ColorOSTabletStockButtonSize,
-                                        modifier =
-                                            Modifier.padding(
-                                                start =
-                                                    dimensionResource(
-                                                        R.dimen.qs_content_horizontal_padding
-                                                    ) + 4.dp
-                                            ),
+                                    // The footer is not part of the panel content, which provides
+                                    // the glass to the tiles, so it has its own: without it the
+                                    // buttons fall back to the flat fill. It fades with the
+                                    // footer element, which is later than the content.
+                                    val footerGlassBlur =
+                                        rememberColorOSGlassBlur {
+                                            val sceneAlpha =
+                                                Elements.FooterActions.currentAlpha()
+                                                    ?: if (layoutState.currentTransition == null) {
+                                                        1f
+                                                    } else {
+                                                        0f
+                                                    }
+                                            colorOSGlassAlpha() * sceneAlpha
+                                        }
+                                    CompositionLocalProvider(
+                                        LocalColorOSGlassBlur provides footerGlassBlur
                                     ) {
-                                        editButton.onButtonClick()
+                                        ColorOSTabletEditButton(
+                                            size = ColorOSTabletStockButtonSize,
+                                            modifier =
+                                                Modifier.padding(
+                                                    start =
+                                                        dimensionResource(
+                                                            R.dimen.qs_content_horizontal_padding
+                                                        ) + 4.dp
+                                                ),
+                                        ) {
+                                            editButton.onButtonClick()
+                                        }
+                                        FooterActions(
+                                            viewModel = viewModel.footerActionsViewModel,
+                                            modifier = Modifier.weight(1f),
+                                            buttonBackground = { shape ->
+                                                colorOSHeaderGlass(shape)
+                                            },
+                                        )
                                     }
-                                    FooterActions(
-                                        viewModel = viewModel.footerActionsViewModel,
-                                        modifier = Modifier.weight(1f),
-                                        buttonBackground = { shape -> colorOSHeaderGlass(shape) },
-                                    )
                                 } else if (LocalColorOSQsStyle.current) {
                                     val showEdit by rememberSystemSettingEnabled(
                                         android.provider.Settings.System.QS_FOOTER_SHOW_EDIT
