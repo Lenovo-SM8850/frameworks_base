@@ -815,7 +815,6 @@ private fun MediaDataModel.toMediaControlState(
                         keyguardStateController = keyguardStateController,
                     ),
                 seekTo = token.toSeekAction(context),
-                stop = token.toStopAction(context),
                 durationMs = durationMs,
                 positionMs = positionMs,
                 canBeScrubbed = canBeScrubbed,
@@ -892,7 +891,6 @@ private fun MediaData.toMediaControlState(
                     }.take(2),
                 openApp = openApp,
                 seekTo = token.toSeekAction(context),
-                stop = token.toStopAction(context),
                 durationMs = 0L,
                 positionMs = 0L,
                 canBeScrubbed = false,
@@ -977,24 +975,6 @@ private fun MediaSession.Token?.toSeekAction(context: Context): ((Long) -> Unit)
                 MediaController(context, token)
                     .transportControls
                     .seekTo(targetPositionMs.coerceAtLeast(0L))
-            }
-        }
-    }
-}
-
-private fun MediaSession.Token?.toStopAction(context: Context): (() -> Unit)? {
-    return this?.let { token ->
-        {
-            runCatching {
-                val controller = MediaController(context, token)
-                val supportsStop =
-                    controller.playbackState?.supportsPlaybackAction(PlaybackState.ACTION_STOP) ==
-                        true
-                if (supportsStop) {
-                    controller.transportControls.stop()
-                } else {
-                    controller.transportControls.pause()
-                }
             }
         }
     }

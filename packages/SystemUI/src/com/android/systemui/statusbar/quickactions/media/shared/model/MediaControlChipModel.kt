@@ -50,8 +50,6 @@ typealias MediaOutputSwitcherAction = (launchAfterHide: (() -> Unit) -> Unit) ->
         val positionUpdatedAtMs: Long = 0L,
         val lyricState: LyricState = LyricState(),
         val playbackSpeed: Float = 1f,
-        /** Ends the session, or pauses it when the session can't be stopped. */
-        val stop: (() -> Unit)? = null,
         val isAppVisible: Boolean = false,
         val customActions: List<MediaAction> = emptyList(),
         val sessionToken: MediaSession.Token? = null,
