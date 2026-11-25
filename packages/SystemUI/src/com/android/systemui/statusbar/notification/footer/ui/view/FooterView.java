@@ -49,6 +49,7 @@ import androidx.annotation.NonNull;
 import com.android.internal.graphics.ColorUtils;
 import com.android.internal.graphics.drawable.BackgroundBlurDrawable;
 import com.android.systemui.common.shared.colors.SurfaceEffectColors;
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.ColorOSGlassBlurKt;
 import com.android.systemui.qs.shared.style.LiquidGlass;
 import com.android.systemui.qs.shared.style.LiquidGlassTune;
 import com.android.systemui.res.R;
@@ -368,11 +369,11 @@ public class FooterView extends StackScrollerDecorView {
 
     /**
      * {@code background}, the button's own, with glass in place of its fill. With Liquid Glass the
-     * glass is that of the notification cards, so the buttons match them: SurfaceFlinger's card
-     * material and the card's blur radius where the shade can blur. Without Liquid Glass it is
-     * the glass of the ColorOS tiles. Where the shade cannot blur, the translucent fill and rim
-     * the tiles have stay in both cases. The shape, padding and ripple stay those of
-     * {@code background}.
+     * glass is that of the buttons of the QS footer row where the shade can blur: SurfaceFlinger's
+     * tile material with the tint and blur radius of the tiles, and no fill or rim of its own.
+     * Without Liquid Glass it is the glass of the ColorOS tiles. Where the shade cannot blur, the
+     * translucent fill and rim the tiles have stay in both cases. The shape, padding and ripple
+     * stay those of {@code background}.
      */
     private Drawable colorOSGlass(Drawable background) {
         final boolean dark = (getResources().getConfiguration().uiMode
@@ -387,11 +388,11 @@ public class FooterView extends StackScrollerDecorView {
         if (mIsBlurSupported && root != null) {
             blur = root.createBackgroundBlurDrawable();
             if (cardGlass) {
-                blur.setMaterial(dark ? BackgroundBlurDrawable.MATERIAL_CARD_DARK
-                        : BackgroundBlurDrawable.MATERIAL_CARD_LIGHT);
+                blur.setMaterial(dark ? BackgroundBlurDrawable.MATERIAL_TILE_DARK
+                        : BackgroundBlurDrawable.MATERIAL_TILE_LIGHT);
                 blur.setXfermode(null);
-                blur.setColor(dark ? 0 : LiquidGlass.lightCardVeil());
-                blur.setBlurRadius(LiquidGlass.cardBlurRadiusPx(density));
+                blur.setColor(ColorOSGlassBlurKt.colorOSTileGlassTint(dark));
+                blur.setBlurRadius(ColorOSGlassBlurKt.colorOSTileGlassBlurPx(density));
             } else {
                 blur.setMaterial(dark ? BackgroundBlurDrawable.MATERIAL_TILE_DARK
                         : BackgroundBlurDrawable.MATERIAL_TILE_LIGHT);
@@ -401,8 +402,8 @@ public class FooterView extends StackScrollerDecorView {
             blur.setCornerRadius(corner);
         }
         // Without a blur region the translucent fill and rim stay, so a button keeps its
-        // background. They follow the view's alpha like the rest. Over the card material the
-        // rim comes from SurfaceFlinger and the fill is clear.
+        // background. They follow the view's alpha like the rest. Over the tile material with
+        // Liquid Glass the rim comes from SurfaceFlinger and the fill is clear.
         final GradientDrawable fill = new GradientDrawable();
         fill.setCornerRadius(corner);
         if (blur != null && cardGlass) {

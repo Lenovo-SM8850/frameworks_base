@@ -202,6 +202,25 @@ private val ColorOSLightTileTint = Color(0x66FFFFFF)
 private const val ColorOSLightTileTintGlass = 0x26FFFFFF
 
 /**
+ * The tint, as ARGB, of the glass of the tiles while Liquid Glass is on, for views outside Compose
+ * that take the glass of the footer row. None on the dark panel.
+ */
+fun colorOSTileGlassTint(dark: Boolean): Int =
+    ColorOSGlassBlurTune.tint(
+        if (dark) BackgroundBlurDrawable.MATERIAL_TILE_DARK
+        else BackgroundBlurDrawable.MATERIAL_TILE_LIGHT,
+        glassOn = true,
+    )
+
+/** The blur radius in pixels of the glass of the tiles while Liquid Glass is on, for the same. */
+fun colorOSTileGlassBlurPx(density: Float): Int =
+    ColorOSGlassBlurTune.blurRadiusPx(
+        BackgroundBlurDrawable.MATERIAL_TILE_LIGHT,
+        glassOn = true,
+        defaultPx = (ColorOSGlassBlurRadius.value * density).roundToInt(),
+    )
+
+/**
  * Returns the glass of the panel while SurfaceFlinger can blur behind the shade, and null when it
  * cannot: no support, a low end device, the window blur turned off by the user or by battery
  * saver, or `persist.sysui.disableBlur`. The same conditions as the blur of the shade itself.
