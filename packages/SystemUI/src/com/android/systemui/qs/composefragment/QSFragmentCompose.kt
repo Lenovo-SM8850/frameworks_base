@@ -1391,7 +1391,7 @@ constructor(
                                         showMedia =
                                             viewModel.qsMediaVisible &&
                                                 colorOSMedia != null,
-                                        media = { mediaModifier, extraHeight ->
+                                        media = { mediaModifier ->
                                             colorOSMedia?.let { data ->
                                                 val colorOSArtFill by
                                                     qsPanelStyleRepository.colorOSMediaArtFill
@@ -1399,7 +1399,6 @@ constructor(
                                                 ColorOSMediaCard(
                                                     data = data,
                                                     artFill = colorOSArtFill,
-                                                    extraHeight = extraHeight,
                                                     onOpen = ::openColorOSMedia,
                                                     onOutputSwitcher = ::showColorOSMediaOutput,
                                                     modifier = mediaModifier,

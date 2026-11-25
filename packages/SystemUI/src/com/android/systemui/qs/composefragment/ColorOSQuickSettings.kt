@@ -353,7 +353,7 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
     brightnessViewModel: BrightnessSliderViewModel,
     audioVolumeInteractor: AudioVolumeInteractor,
     showMedia: Boolean,
-    media: @Composable (Modifier, Dp) -> Unit,
+    media: @Composable (Modifier) -> Unit,
     listening: () -> Boolean,
     modifier: Modifier = Modifier,
     availableHeight: Dp = Dp.Unspecified,
@@ -522,12 +522,9 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (showMedia) {
-                            media(mediaContent, 0.dp)
+                            media(mediaContent)
                         } else {
-                            ColorOSIdleMediaCard(
-                                modifier = mediaContent,
-                                extraHeight = 0.dp,
-                            )
+                            ColorOSIdleMediaCard(modifier = mediaContent)
                         }
                     }
                 }
@@ -1385,7 +1382,7 @@ private fun ContentScope.ColorOSTabletLayout(
     brightnessViewModel: BrightnessSliderViewModel,
     audioVolumeInteractor: AudioVolumeInteractor,
     showMedia: Boolean,
-    media: @Composable (Modifier, Dp) -> Unit,
+    media: @Composable (Modifier) -> Unit,
     listening: () -> Boolean,
     glass: ColorOSGlass,
     glassBlur: ColorOSGlassBlur?,
@@ -1427,7 +1424,7 @@ private fun ContentScope.ColorOSTabletLayout(
                     ColorOSTabletItem.MEDIA ->
                         Box(cell.glassSurface(glass, ColorOSMediaShape)) {
                             val content = Modifier.fillMaxSize().colorOSFitScale(ColorOSMediaBaseHeight)
-                            if (showMedia) media(content, 0.dp) else ColorOSIdleMediaCard(content)
+                            if (showMedia) media(content) else ColorOSIdleMediaCard(content)
                         }
                     ColorOSTabletItem.BRIGHTNESS ->
                         ColorOSBrightnessSlider(brightnessViewModel, glass, cell)
