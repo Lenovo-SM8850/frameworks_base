@@ -18,7 +18,6 @@ package com.android.systemui.qs.composefragment
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.app.PendingIntent
 import android.content.Intent
 import android.content.res.Configuration
 import android.database.ContentObserver
@@ -895,32 +894,6 @@ constructor(
         }
     }
 
-    private fun openColorOSMedia(intent: PendingIntent) {
-        activityStarter.postStartActivityDismissingKeyguard(intent)
-    }
-
-    /**
-     * Same as the stock player: the app's own output intent when it has one, the system output
-     * switcher otherwise.
-     */
-    private fun showColorOSMediaOutput(mediaData: MediaData) {
-        val deviceIntent = mediaData.device?.intent
-        if (deviceIntent != null) {
-            if (deviceIntent.isActivity) {
-                activityStarter.postStartActivityDismissingKeyguard(deviceIntent)
-            }
-        } else {
-            mediaOutputDialogManager.createAndShow(
-                mediaData.packageName,
-                /* aboveStatusBar= */ true,
-                /* view= */ null,
-                UserHandle.getUserHandleForUid(mediaData.appUid),
-                mediaData.token,
-                /* useSystemColors= */ false,
-            )
-        }
-    }
-
     @Composable
     private fun currentColorOSMedia(): MediaData? {
         if (MediaControlsInComposeFlag.isEnabled) {
@@ -1399,8 +1372,37 @@ constructor(
                                                 ColorOSMediaCard(
                                                     data = data,
                                                     artFill = colorOSArtFill,
-                                                    onOpen = ::openColorOSMedia,
-                                                    onOutputSwitcher = ::showColorOSMediaOutput,
+                                                    onOpen = { intent ->
+                                                        activityStarter
+                                                            .postStartActivityDismissingKeyguard(
+                                                                intent
+                                                            )
+                                                    },
+                                                    onOutputSwitcher = { mediaData ->
+                                                        // Same as the stock player: the app's own
+                                                        // output intent when it has one, the
+                                                        // system output switcher otherwise.
+                                                        val deviceIntent = mediaData.device?.intent
+                                                        if (deviceIntent != null) {
+                                                            if (deviceIntent.isActivity) {
+                                                                activityStarter
+                                                                    .postStartActivityDismissingKeyguard(
+                                                                        deviceIntent
+                                                                    )
+                                                            }
+                                                        } else {
+                                                            mediaOutputDialogManager.createAndShow(
+                                                                mediaData.packageName,
+                                                                /* aboveStatusBar= */ true,
+                                                                /* view= */ null,
+                                                                UserHandle.getUserHandleForUid(
+                                                                    mediaData.appUid
+                                                                ),
+                                                                mediaData.token,
+                                                                /* useSystemColors= */ false,
+                                                            )
+                                                        }
+                                                    },
                                                     modifier = mediaModifier,
                                                 )
                                             }
