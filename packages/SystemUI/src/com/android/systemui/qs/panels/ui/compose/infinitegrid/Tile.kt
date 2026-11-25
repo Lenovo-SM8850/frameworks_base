@@ -1506,7 +1506,13 @@ private object TileDefaults {
         val bubbleOff =
             if (darkPanel) Color.White.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.06f)
         // An active tile is a white bubble with its colour in the icon, on a dark or a light panel.
-        val bubbleOn = ColorOSActiveFill
+        // Over the glass blur the white is translucent, without blur it stays solid.
+        val bubbleOn =
+            when {
+                LocalColorOSGlassBlur.current == null -> ColorOSActiveFill
+                darkPanel -> ColorOSActiveGlassFillDark
+                else -> ColorOSActiveGlassFillLight
+            }
         val ringerBubble =
             if (specialMode != null && !darkPanel) colorOSRingerLightBubble(specialMode) else null
         val iconOn = if (ringerBubble != null) Color.White else accent

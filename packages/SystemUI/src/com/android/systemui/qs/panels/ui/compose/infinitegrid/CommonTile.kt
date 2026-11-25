@@ -162,6 +162,12 @@ private const val BLUETOOTH_TILE_SPEC = "bt"
 /** White of an active ColorOS bubble on a dark panel, a touch short of opaque like ColorOS. */
 internal val ColorOSActiveFill = Color(0xF2FFFFFF)
 
+/** Active bubble and slider white over the glass blur, translucent to show it (dark panel). */
+internal val ColorOSActiveGlassFillDark = Color.White.copy(alpha = 0.70f)
+
+/** Active bubble and slider white over the glass blur, translucent to show it (light panel). */
+internal val ColorOSActiveGlassFillLight = Color.White.copy(alpha = 0.80f)
+
 /** White fill of the ColorOS sliders, which lets a little of the glass show through. */
 internal val ColorOSSliderFill = Color(0xF7FFFFFF)
 
