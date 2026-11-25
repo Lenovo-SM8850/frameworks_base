@@ -22,8 +22,6 @@ import android.os.Looper
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -69,7 +67,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
@@ -514,8 +511,6 @@ internal fun rememberDynamicIslandColorOSStyle(): Boolean {
     return enabled
 }
 
-private const val TABLET_MIN_WIDTH_DP = 600
-private val AppHandleGap = 8.dp
 
 private class IslandPresenceShape(
     private val widthFraction: Float,
