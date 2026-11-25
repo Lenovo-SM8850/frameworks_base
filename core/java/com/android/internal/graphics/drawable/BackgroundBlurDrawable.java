@@ -299,9 +299,9 @@ public final class BackgroundBlurDrawable extends Drawable {
         mTmpRadii[6] = mCornerRadiusBLX;
         mTmpRadii[7] = mCornerRadiusBLY;
         mRectPath.reset();
-        if (getAlpha() == 0 || !isVisible()) {
-            return;
-        }
+        // The path follows the geometry only. draw() and the aggregator already skip a hidden or
+        // clear drawable, and setAlpha() and setVisible() do not rebuild the path, so a path left
+        // empty while hidden would stay empty after the drawable is shown again.
         Rect bounds = getBounds();
         mRectPath.addRoundRect(bounds.left, bounds.top, bounds.right, bounds.bottom, mTmpRadii,
                 Path.Direction.CW);
