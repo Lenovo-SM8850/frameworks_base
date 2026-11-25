@@ -488,12 +488,16 @@ fun LargeTileContent(
         // pill. It has no blur region of its own: SurfaceFlinger draws overlapping regions in the
         // order they are listed, which is not the order they are drawn in, so a region under the
         // bubble could be covered by the glass of the pill and the bubble would be left grey. While
-        // the pill is off (or unavailable) the circle is a flat, lighter disc with no rim and no
-        // blur region of its own, as in ColorOS. Without blur it is the flat fill with the glass
-        // rim.
+        // the pill is off (or unavailable) the circle is glass like a round tile that is off: a
+        // blur region of its own under a lighter disc, so it is not a flat, opaque looking circle.
+        // Without blur it is the flat fill with the glass rim.
         val onGlass = colorOSStyle && LocalColorOSGlassBlur.current != null
         val glassBubbleAlpha by
             animateFloatAsState(if (onGlass && active) 1f else 0f, label = "QSTileGlassBubble")
+        // colorOSGlassBlur is @Composable, so it is built here and not inside the thenIf lambda.
+        val offGlassModifier =
+            if (onGlass && !active) Modifier.colorOSGlassBlur(iconShape, colorOSGlassTileMaterial())
+            else Modifier
         // The fill of a tile that is on is translucent while it is over a glass region of its own.
         // Here there is none under it, so the bubble takes the solid fill. A coloured bubble is
         // solid already.
@@ -508,6 +512,7 @@ fun LargeTileContent(
                             Modifier.borderOnFocus(color = focusBorderColor, iconShape.topEnd)
                         }
                         .clip(iconClip)
+                        .then(offGlassModifier)
                         .drawBehind {
                             if (onGlass) {
                                 // The flat disc of a pill that is off, it also stays under the
