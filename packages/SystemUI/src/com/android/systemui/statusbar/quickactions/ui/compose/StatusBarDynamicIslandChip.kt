@@ -231,7 +231,6 @@ fun StatusBarDynamicIslandChip(
             viewModel.icons.firstOrNull()?.let {
                 CapsuleEnd.Round(
                     when {
-                        cos -> CosIsland.IconSize
                         largeLeading -> IslandGlyphSize
                         else -> 16.dp
                     }
