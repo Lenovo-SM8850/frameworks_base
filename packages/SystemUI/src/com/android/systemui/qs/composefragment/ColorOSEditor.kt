@@ -173,9 +173,8 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
     var activeSpecs by remember { mutableStateOf(currentTiles.map { it.tileSpec }) }
     val dragState = remember { ColorOSEditDragState() }
 
-    // Keep activeSpecs in sync when view model emits and no drag is active
     // A tablet edits the whole panel: its tiles and the items that are not tiles, in one order.
-    val tabletEditor = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     val tabletSaved by rememberColorOSTabletLayout()
     val smallItems =
         remember(tabletSaved) { tabletSaved.orEmpty().filter { it.small }.mapTo(HashSet()) { it.key } }
@@ -186,10 +185,11 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
     var pendingLarge by remember { mutableStateOf<Set<TileSpec>?>(null) }
     val savedLarge by editViewModel.iconTilesViewModel.largeTiles.collectAsStateWithLifecycle()
 
+    // Keep activeSpecs in sync when view model emits and no drag is active
     LaunchedEffect(currentTiles, tabletSaved) {
         if (!dragState.isDragging && !dirty) {
             activeSpecs =
-                if (tabletEditor) {
+                if (tablet) {
                     colorOSTabletEntries(tabletSaved, currentTiles.map { it.tileSpec.spec })
                         .map { TileSpec.create(it.key) }
                 } else {
@@ -208,7 +208,7 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
     fun save() {
         if (!dirty) return
         val distinctActive = activeSpecs
-        if (tabletEditor) {
+        if (tablet) {
             val small = pendingSmall ?: smallItems
             writeColorOSTabletLayout(
                 context,
@@ -235,7 +235,7 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
         )
         // A tile added in this session is not current yet, so a resize would skip it. Set all
         // the wide tiles at once instead.
-        if (tabletEditor) pendingLarge?.let { editViewModel.iconTilesViewModel.setLargeTiles(it) }
+        if (tablet) pendingLarge?.let { editViewModel.iconTilesViewModel.setLargeTiles(it) }
         dirty = false
     }
 
@@ -284,7 +284,6 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
     val labelColor = MaterialTheme.colorScheme.onSurface
 
     // A tablet keeps the editor to the width of the panel's tile columns.
-    val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     val tabletColumns =
         if (tablet) rememberColorOSTabletColumns(editViewModel.columnsViewModelFactory)
         else ColorOSTabletColumns
@@ -374,7 +373,7 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                             .filter { known.isEmpty() || it in known }
                             .distinct()
                             .map(TileSpec::create)
-                    if (tabletEditor) {
+                    if (tablet) {
                         pendingLarge =
                             defaults.filter { it.spec in ColorOSTabletDefaultWide }.toSet()
                         commit(
@@ -411,52 +410,52 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
 
             // Pinned slots
             if (!tablet) {
-            Text(
-                text = stringResource(R.string.qs_coloros_edit_pinned),
-                color = labelColor.copy(alpha = 0.7f),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
-            )
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                repeat(COLOROS_PINNED_SLOTS) { slot ->
-                    val spec = if (slot < COLOROS_PILL_SLOT) pinned.cards[slot] else pinned.pill
-                    val label =
-                        spec?.let { bySpec[TileSpec.create(it)]?.label?.text?.toString() }.orEmpty()
-                    PinnedSlotChip(
-                        label = label,
-                        selected = selectedPin == slot,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        selectedPin = if (selectedPin == slot) null else slot
-                    }
-                }
-            }
-            val pickedSlot = selectedPin
-            if (pickedSlot != null) {
+                Text(
+                    text = stringResource(R.string.qs_coloros_edit_pinned),
+                    color = labelColor.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                )
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = stringResource(R.string.qs_coloros_edit_pinned_pick),
-                        color = EditorAccent,
-                        fontSize = 13.sp,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (pinnedChoice[pickedSlot] != null) {
-                        EditorTextButton(
-                            stringResource(R.string.qs_coloros_edit_pinned_default),
-                            labelColor.copy(alpha = 0.85f),
+                    repeat(COLOROS_PINNED_SLOTS) { slot ->
+                        val spec = if (slot < COLOROS_PILL_SLOT) pinned.cards[slot] else pinned.pill
+                        val label =
+                            spec?.let { bySpec[TileSpec.create(it)]?.label?.text?.toString() }.orEmpty()
+                        PinnedSlotChip(
+                            label = label,
+                            selected = selectedPin == slot,
+                            modifier = Modifier.weight(1f),
                         ) {
-                            resetPin()
+                            selectedPin = if (selectedPin == slot) null else slot
                         }
                     }
                 }
-            }
+                val pickedSlot = selectedPin
+                if (pickedSlot != null) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.qs_coloros_edit_pinned_pick),
+                            color = EditorAccent,
+                            fontSize = 13.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (pinnedChoice[pickedSlot] != null) {
+                            EditorTextButton(
+                                stringResource(R.string.qs_coloros_edit_pinned_default),
+                                labelColor.copy(alpha = 0.85f),
+                            ) {
+                                resetPin()
+                            }
+                        }
+                    }
+                }
 
             }
 
@@ -506,7 +505,6 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
                     .toMap()
             val activeRows = rowsOf(shownOrder)
             val activeGridHeight = cellH * activeRows.coerceAtLeast(1)
-
 
             Box(
                 Modifier.fillMaxWidth()
@@ -720,7 +718,7 @@ internal fun ColorOSEditor(editViewModel: EditModeViewModel, modifier: Modifier 
             // Section 2: Available Tiles Grid
             val availableSpecs =
                 availableTiles.map { it.tileSpec } +
-                    if (tabletEditor) {
+                    if (tablet) {
                         ColorOSTabletItem.ALL.map(TileSpec::create).filterNot { it in activeSpecs }
                     } else {
                         emptyList()
