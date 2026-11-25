@@ -26,18 +26,13 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowManager
-import android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -391,24 +386,6 @@ fun StatusBarPopup(
                     return IntOffset(x, y)
                 }
             }
-        }
-    // Direction the popup slides in from. Top camera: down from the status bar. Side camera:
-    // out from the edge the pill sits on.
-    val slideInPx = with(density) { 24.dp.toPx() }
-    val slideOutPx = with(density) { 16.dp.toPx() }
-    val enterOffset =
-        when (sideEdge?.edge) {
-            null,
-            DynamicIslandEdge.TOP -> Offset(0f, -24f)
-            DynamicIslandEdge.LEFT -> Offset(-slideInPx, 0f)
-            DynamicIslandEdge.RIGHT -> Offset(slideInPx, 0f)
-        }
-    val exitOffset =
-        when (sideEdge?.edge) {
-            null,
-            DynamicIslandEdge.TOP -> Offset(0f, -16f)
-            DynamicIslandEdge.LEFT -> Offset(-slideOutPx, 0f)
-            DynamicIslandEdge.RIGHT -> Offset(slideOutPx, 0f)
         }
     var popupAnchorBounds by remember { mutableStateOf(IntRect.Zero) }
     val positionProvider = remember {
