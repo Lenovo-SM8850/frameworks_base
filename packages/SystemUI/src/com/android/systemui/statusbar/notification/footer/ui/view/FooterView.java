@@ -502,9 +502,9 @@ public class FooterView extends StackScrollerDecorView {
             scHigh = 0;
         }
         if (LiquidGlass.isOnShade(mContext)) {
-            // The buttons take the same faint frost as the cards. In the light ColorOS shade the
+            // The buttons take the same faint frost as the cards. In the light theme the
             // cards sit on a light frost under dark text, and the dark glass would hide the labels.
-            final int surface = isCosLightShade() ? LiquidGlass.lightCardSurface()
+            final int surface = isLightGlassShade() ? LiquidGlass.lightCardSurface()
                     : LiquidGlass.viewSurface();
             final ColorFilter glass = new PorterDuffColorFilter(surface | 0xFF000000, SRC_ATOP);
             final int glassAlpha = Color.alpha(surface);
@@ -540,7 +540,7 @@ public class FooterView extends StackScrollerDecorView {
     }
 
     /** Whether the light card look applies: Liquid Glass on and the light theme. */
-    private boolean isCosLightShade() {
+    private boolean isLightGlassShade() {
         return LiquidGlass.isOnShade(mContext)
                 && (getResources().getConfiguration().uiMode
                         & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES;
