@@ -143,8 +143,6 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.InfiniteGridLayout
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGridRows
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSGap
-import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSPageInset
-import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSRowGap
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTablet
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.LocalColorOSTileSize
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.colorOSIconRowGap
@@ -233,40 +231,6 @@ private val ColorOSGridTopPadding = 2.dp
 private val ColorOSMinTileSize = 56.dp
 
 /**
- * Sizes of the panel on a large screen, the same collapsed and expanded and in both orientations:
- * the round tile (also the height of the pills and the width of the sliders), the gap between
- * tiles, rows and cards, and the gap between rows of labelled round tiles. ColorOS tablets use a
- * 56dp pill and a 15dp gap.
- */
-internal val ColorOSTabletTileSize = 56.dp
-internal val ColorOSTabletGap = 15.dp
-private val ColorOSTabletLabelRowGap = 12.dp
-
-/** Width of the large screen panel: its four tile columns and their gaps. */
-internal val ColorOSTabletPanelWidth = ColorOSTabletTileSize * 4 + ColorOSTabletGap * 3
-
-/** Most rows of round tiles a page of the large screen panel shows. */
-private const val ColorOSTabletMaxGridRows = 5
-
-/**
- * Rows of round tiles per page of the large screen panel, whose tiles keep their size: as many as
- * fit [availableHeight] under the cards, at least [ColorOSMinGridRows].
- */
-internal fun colorOSTabletFit(availableHeight: Dp, labelHeight: Dp, rowGap: Dp): ColorOSFit {
-    val t = ColorOSTabletTileSize
-    if (availableHeight == Dp.Unspecified || availableHeight <= 0.dp) {
-        return ColorOSFit(t, ColorOSGridRows, fits = true)
-    }
-    for (rows in ColorOSTabletMaxGridRows downTo ColorOSMinGridRows) {
-        val needed =
-            t * 4 + ColorOSTabletGap * 4 + ColorOSGridTopPadding + ColorOSGridHeadroom +
-                (t + labelHeight) * rows + rowGap * (rows - 1) + ColorOSGridFooterHeight
-        if (needed <= availableHeight) return ColorOSFit(t, rows, fits = true)
-    }
-    return ColorOSFit(t, ColorOSMinGridRows, fits = false)
-}
-
-/**
  * How the ColorOS panel is sized: the diameter of the round tiles (which is also the height of the
  * pills and of the sliders), the rows of round tiles per page, and whether it all fits the screen.
  */
@@ -288,7 +252,6 @@ internal fun colorOSFit(
     availableHeight: Dp,
     labelHeight: Dp,
     iconRowGap: Dp,
-    minTileSize: Dp = ColorOSMinTileSize,
 ): ColorOSFit {
     if (availableHeight == Dp.Unspecified || availableHeight <= 0.dp) {
         return ColorOSFit(columnSize, ColorOSGridRows, fits = true)
@@ -303,13 +266,13 @@ internal fun colorOSFit(
                 iconRowGap * (rows - 1) +
                 ColorOSGridFooterHeight
         val tileSize = (availableHeight - fixed) / (4 + rows)
-        if (tileSize >= minTileSize) {
+        if (tileSize >= ColorOSMinTileSize) {
             return ColorOSFit(minOf(columnSize, tileSize), rows, fits = true)
         }
     }
     // Do not grow back to full-width tiles when the minimum layout just misses the viewport:
     // the cards above the grid would consume its space again, pushing all round tiles offscreen.
-    return ColorOSFit(minOf(columnSize, minTileSize), ColorOSMinGridRows, fits = false)
+    return ColorOSFit(minOf(columnSize, ColorOSMinTileSize), ColorOSMinGridRows, fits = false)
 }
 
 /**
@@ -405,34 +368,16 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
 
     BoxWithConstraints(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         // ColorOS is built on four equal columns with a 17dp gap. The round tiles, the pills, the
-        // media card and sliders share the columns. The tile diameter is capped separately so
-        // extra room does not stretch it. A capped panel is the large screen one, see
-        // ColorOSTabletLayout, on 4 to 6 columns. Short screens still shrink the tiles, see
-        // colorOSFit.
+        // media card and sliders share the columns. Short screens shrink the tiles, see colorOSFit.
+        // A panel with a maximum tile size is the large screen one, which has its own layout, see
+        // ColorOSTabletLayout, on 4 to 6 columns.
         val panelMaxWidth = maxWidth
         val fullColumnSize = (panelMaxWidth - ColorOSGap * 3) / 4
-        val tileColumnSize = minOf(fullColumnSize, maximumTileSize)
         // Without the labels the round tile rows are shorter and further apart.
         val labelsHidden = rememberQSTileLabelHide()
         val labelHeight = if (labelsHidden) 0.dp else CommonTileDefaults.ClassicLabelHeight
         val iconRowGap = colorOSIconRowGap(labelsHidden)
-        val capped = maximumTileSize != Dp.Infinity
-        // A large screen panel has fixed sizes, a phone fits its tiles to the screen.
-        val gap = if (capped) ColorOSTabletGap else ColorOSGap
-        val rowGap = if (capped && !labelsHidden) ColorOSTabletLabelRowGap else iconRowGap
-        val fit =
-            remember(tileColumnSize, availableHeight, labelHeight, iconRowGap, capped) {
-                if (capped) colorOSTabletFit(availableHeight, labelHeight, rowGap)
-                else colorOSFit(tileColumnSize, availableHeight, labelHeight, iconRowGap)
-            }
-        SideEffect { onFitChanged(fit.fits) }
-        val tileSize = fit.tileSize
-        // Half of the panel holds the media card, the other half the sliders and the ringer.
-        val columnSize = if (capped) tileSize else fullColumnSize
-        val halfWidth = columnSize * 2 + gap
-        val sliderSlot = columnSize
-        val rowCard = pillTile
-        if (capped) {
+        if (maximumTileSize != Dp.Infinity) {
             // The tablet grid is one module: its glass fades with the cells, like the others.
             CompositionLocalProvider(LocalColorOSGlassBlur provides glassBlur) {
                 ColorOSModuleGlass(2, reveal) {
@@ -459,21 +404,25 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
             SideEffect { onFitChanged(true) }
             return@BoxWithConstraints
         }
+        val gap = ColorOSGap
+        val fit =
+            remember(fullColumnSize, availableHeight, labelHeight, iconRowGap) {
+                colorOSFit(fullColumnSize, availableHeight, labelHeight, iconRowGap)
+            }
+        SideEffect { onFitChanged(fit.fits) }
+        val tileSize = fit.tileSize
+        // Half of the panel holds the media card, the other half the sliders and the ringer.
+        val columnSize = fullColumnSize
+        val halfWidth = columnSize * 2 + gap
+        val sliderSlot = columnSize
+        val rowCard = pillTile
         CompositionLocalProvider(
             LocalColorOSTileSize provides tileSize,
             LocalColorOSGridRows provides fit.rows,
-            LocalColorOSGap provides gap,
-            LocalColorOSTablet provides capped,
-            LocalColorOSRowGap provides (if (capped) rowGap else null),
             LocalColorOSGlassBlur provides glassBlur,
         ) {
             Column(
-                modifier =
-                    if (capped) {
-                        Modifier.width(columnSize * 4 + gap * 3)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    },
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = spacedBy(gap),
             ) {
                 // The room the shade header keeps above the panel, with the two buttons at the top.
@@ -504,14 +453,7 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
                 // tiles below: the media card covers columns 1-2 and each slider one of columns 3-4.
                 val moduleHeight = tileSize * 2 + gap
                 val sliderWidth = minOf(sliderSlot, moduleHeight / ColorOSSliderAspect)
-                // The content of the card is laid out for its own size and scaled down to the card
-                // when the tiles are smaller than that, so it keeps its proportions.
-                val mediaContent =
-                    if (capped) {
-                        Modifier.fillMaxSize().colorOSFitScale(ColorOSMediaBaseHeight)
-                    } else {
-                        Modifier.fillMaxSize()
-                    }
+                val mediaContent = Modifier.fillMaxSize()
                 val mediaCard: @Composable (Modifier) -> Unit = { cardModifier ->
                     Box(
                         modifier =
@@ -583,26 +525,17 @@ internal fun ContentScope.ColorOSQuickSettingsLayout(
 
                 // Everything else: round icon tiles with labels (the grid handles paging + listening)
                 if (rest.isNotEmpty()) {
-                    // A capped panel lets its pager span the whole width, see
-                    // LocalColorOSPageInset, while the pages keep to the four columns.
-                    val panelWidth = columnSize * 4 + gap * 3
-                    val pageInset = if (capped) ((panelMaxWidth - panelWidth) / 2).coerceAtLeast(0.dp) else 0.dp
                     ColorOSModuleGlass(4, reveal) {
-                        CompositionLocalProvider(LocalColorOSPageInset provides pageInset) {
-                            with(gridLayout) {
-                                TileGrid(
-                                    tiles = rest,
-                                    modifier =
-                                        Modifier.colorOSModuleReveal(4, reveal)
-                                            .then(
-                                                if (capped) Modifier.requiredWidth(panelMaxWidth)
-                                                else Modifier.fillMaxWidth()
-                                            )
-                                            .padding(top = ColorOSGridTopPadding),
-                                    listening = listening,
-                                    enableRevealEffect = false,
-                                )
-                            }
+                        with(gridLayout) {
+                            TileGrid(
+                                tiles = rest,
+                                modifier =
+                                    Modifier.colorOSModuleReveal(4, reveal)
+                                        .fillMaxWidth()
+                                        .padding(top = ColorOSGridTopPadding),
+                                listening = listening,
+                                enableRevealEffect = false,
+                            )
                         }
                     }
                 }
@@ -1657,26 +1590,6 @@ internal data class ColorOSTabletMetrics(
 /** Fewest and most columns of the large screen panel. */
 internal const val ColorOSTabletColumns = 4
 internal const val ColorOSTabletMaxColumns = 6
-
-/** ColorOS tablets have a 15dp gap to a 56dp pill. */
-private const val ColorOSTabletGapRatio = 15f / 56f
-
-/**
- * Height of a landscape screen around the grid of the panel: the status bar, the space above the
- * grid, the page dots and the footer under it.
- */
-private const val ColorOSTabletChromeDp = 142
-
-/**
- * The tile of the large screen panel: the largest that fits the landscape panel with its default
- * six rows, three of them round tiles with labels, so it is the same in both orientations and on
- * every page. The gap keeps the ColorOS proportion.
- */
-internal fun colorOSTabletMetrics(shortSideDp: Int, labelHeight: Dp): ColorOSTabletMetrics {
-    val height = (shortSideDp - ColorOSTabletChromeDp).dp - labelHeight * 3
-    val tile = (height / (6f + 5f * ColorOSTabletGapRatio)).coerceIn(52.dp, 80.dp)
-    return ColorOSTabletMetrics(tile, tile * ColorOSTabletGapRatio)
-}
 
 /** The panel has the tile and the gap of its editor, the same everywhere, on [columns]. */
 @Composable
