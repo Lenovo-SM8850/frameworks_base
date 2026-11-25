@@ -399,9 +399,6 @@ private class ListClipShape(private val slackPx: Float) : Shape {
     ): Outline = Outline.Rectangle(Rect(-slackPx, 0f, size.width + slackPx, size.height))
 }
 
-private val Grow = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
-private val Ease = CubicBezierEasing(0.33f, 0f, 0.67f, 1f)
-private val CloseMove = CubicBezierEasing(0.6f, 0f, 0.1f, 1f)
 private val UpdateEase = Easing { ((1 - kotlin.math.cos(Math.PI * it)) / 2).toFloat() }
 private val CardShape = RoundedCornerShape(28.dp)
 // Liquid Glass shade over the blur: opaque at the top, letting the blur through toward the bottom.
@@ -802,27 +799,27 @@ private fun CosListCard(
                     entranceStarted = true
                     coroutineScope {
                         launch {
-                            scale.animateTo(1.03f, tween(300, easing = Grow))
-                            scale.animateTo(1f, tween(300, easing = Ease))
+                            scale.animateTo(1.03f, tween(300, easing = CosCardGrow))
+                            scale.animateTo(1f, tween(300, easing = CosCardEase))
                         }
-                        launch { reveal.animateTo(1f, tween(300, easing = Grow)) }
-                        launch { travel.animateTo(0f, tween(300, easing = Grow)) }
-                        launch { shadow.animateTo(0.8f, tween(300, easing = Ease)) }
-                        launch { content.animateTo(1f, tween(300, easing = Ease)) }
-                        launch { blur.animateTo(0f, tween(300, easing = Ease)) }
-                        launch { veil.animateTo(0f, tween(200, delayMillis = 100, easing = Ease)) }
+                        launch { reveal.animateTo(1f, tween(300, easing = CosCardGrow)) }
+                        launch { travel.animateTo(0f, tween(300, easing = CosCardGrow)) }
+                        launch { shadow.animateTo(0.8f, tween(300, easing = CosCardEase)) }
+                        launch { content.animateTo(1f, tween(300, easing = CosCardEase)) }
+                        launch { blur.animateTo(0f, tween(300, easing = CosCardEase)) }
+                        launch { veil.animateTo(0f, tween(200, delayMillis = 100, easing = CosCardEase)) }
                     }
                 }
             } else if (!visible) {
                 delay(stagger)
                 coroutineScope {
-                    launch { scale.animateTo(0.4f, tween(400, easing = Ease)) }
-                    launch { reveal.animateTo(0f, tween(400, easing = Ease)) }
-                    launch { travel.animateTo(1f, tween(400, easing = CloseMove)) }
-                    launch { shadow.animateTo(0f, tween(400, easing = Ease)) }
-                    launch { content.animateTo(0f, tween(150, easing = Ease)) }
-                    launch { blur.animateTo(12f, tween(400, easing = Ease)) }
-                    launch { veil.animateTo(1f, tween(150, easing = Ease)) }
+                    launch { scale.animateTo(0.4f, tween(400, easing = CosCardEase)) }
+                    launch { reveal.animateTo(0f, tween(400, easing = CosCardEase)) }
+                    launch { travel.animateTo(1f, tween(400, easing = CosCardMove)) }
+                    launch { shadow.animateTo(0f, tween(400, easing = CosCardEase)) }
+                    launch { content.animateTo(0f, tween(150, easing = CosCardEase)) }
+                    launch { blur.animateTo(12f, tween(400, easing = CosCardEase)) }
+                    launch { veil.animateTo(1f, tween(150, easing = CosCardEase)) }
                 }
                 closed = true
                 currentOnClosed()

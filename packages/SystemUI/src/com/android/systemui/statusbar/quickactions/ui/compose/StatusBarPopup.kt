@@ -26,7 +26,6 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowManager
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
@@ -78,14 +77,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlurEffect
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -95,9 +87,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -105,7 +94,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -129,7 +117,6 @@ import com.android.systemui.statusbar.quickactions.screenrecord.ui.compose.Scree
 import com.android.systemui.statusbar.quickactions.shared.model.PopupContentModel
 import com.android.systemui.statusbar.quickactions.shared.model.QuickActionChipModel
 import com.android.systemui.statusbar.quickactions.stopwatch.ui.compose.StopwatchPopup
-import com.android.systemui.statusbar.quickactions.popups.shared.DynamicIslandFeatureSettings.POPUP_COLOR_MODE_BLUR
 import com.android.systemui.statusbar.quickactions.timer.ui.compose.TimerPopup
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -156,10 +143,6 @@ private const val StackPeekScaleFar = 0.95f
 private const val StackPeekScaleNear = 0.975f
 private val StackShape = RoundedCornerShape(32.dp)
 
-// Dot colours over a dark and over a light backdrop.
-private val DotsOnDark = Color.White
-private val DotsOnLight = Color(0xFF1B1B1F)
-
 // How long the stack takes to open as a list, and to close again.
 private const val ListExpandMillis = 320
 
@@ -172,8 +155,6 @@ private val EffectsSpring = spring<Float>(dampingRatio = 1f, stiffness = 1600f)
 internal val CosCardEase = CubicBezierEasing(0.33f, 0f, 0.67f, 1f)
 internal val CosCardMove = CubicBezierEasing(0.6f, 0f, 0.1f, 1f)
 internal val CosCardGrow = CubicBezierEasing(0.3f, 0f, 0.1f, 1f)
-internal val CosCardCorner = 32.dp
-internal const val CosCardCloseMillis = 400
 
 internal data class IslandSwipeThresholds(
     val fadeDistancePx: Float,
@@ -196,7 +177,6 @@ internal fun islandSwipeThresholds(): IslandSwipeThresholds {
         )
     }
 }
-
 
 /**
  * Reuses the popup window as a shared container: it starts at the island's screen bounds and hands
@@ -309,22 +289,20 @@ fun StatusBarPopup(
         } else {
             0
         }
-    // Top popups clear an app handle. A ColorOS card also opens below the camera; the other
-    // styles run up behind it and push their content down by the camera clearance.
+    // Top popups clear an app handle. They run up behind the camera and push their content down
+    // by the camera clearance.
     val minimumTopPx =
         if (sideEdge == null) {
-            val handleTopPx = if (appHandleBottomPx > 0) appHandleBottomPx + topInsetPx else 0
-            if (cos) maxOf(handleTopPx, cameraBottomPx) else handleTopPx
+            if (appHandleBottomPx > 0) appHandleBottomPx + topInsetPx else 0
         } else {
             topInsetPx
         }
     val popupTopPx =
         if (sideEdge == null) anchorChip?.top?.toInt()?.coerceAtLeast(minimumTopPx)
         else null
-    // How far the popup's content has to be pushed down so it starts below the camera. Not for a
-    // ColorOS card, which is placed below it.
+    // How far the popup's content has to be pushed down so it starts below the camera.
     val cameraClearance =
-        if (!cos && popupTopPx != null && cameraBottomPx > 0) {
+        if (popupTopPx != null && cameraBottomPx > 0) {
             with(density) { (cameraBottomPx - popupTopPx).coerceAtLeast(0).toDp() }
         } else {
             0.dp
@@ -339,8 +317,6 @@ fun StatusBarPopup(
             popupTopPx,
             minimumTopPx,
             edgePaddingPx,
-            cameraBottomPx,
-            cos,
         ) {
             object : PopupPositionProvider {
                 override fun calculatePosition(
@@ -374,12 +350,9 @@ fun StatusBarPopup(
                     val x = (centerX - popupContentSize.width / 2).coerceIn(0, maxX)
                     val y =
                         if (popupTopPx != null) {
-                            // A ColorOS card opens fully below the camera, so its surface and
-                            // tint are one piece. The others run up behind it and push their
-                            // content down by the camera clearance instead.
-                            (popupTopPx - edgePaddingPx).let {
-                                if (cos) it.coerceAtLeast(cameraBottomPx) else it
-                            }
+                            // Runs up behind the camera; the content is pushed down by the
+                            // camera clearance instead.
+                            popupTopPx - edgePaddingPx
                         } else {
                             (anchorBounds.top + yOffsetPx).coerceAtLeast(minimumTopPx)
                         }
@@ -418,56 +391,8 @@ fun StatusBarPopup(
     ) {
         val popupView = LocalView.current
         IslandPopupSystemDialogs { currentChip.hidePopup() }
-        // The dots sit beside the cards over whatever is behind the popup, so their colour follows
-        // the brightness sampled there and not the theme. Until a sample arrives it is the theme's.
-        val backdrop = rememberIslandBackdrop(popupView, enabled = cos && hasIndicator && isVisible)
-        val themeDotsColor = MaterialTheme.colorScheme.onSurface
-        val veilColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        val dotsColor by
-            animateColorAsState(
-                targetValue =
-                    when (backdrop.isDark) {
-                        true -> DotsOnDark
-                        false -> DotsOnLight
-                        null -> themeDotsColor
-                    },
-                animationSpec = tween(200),
-                label = "islandDotsColor",
-            )
-        // A thin edge of the opposite shade keeps the dots readable where the backdrop is mixed.
-        val dotsOutlineColor =
-            when (backdrop.isDark) {
-                true -> DotsOnLight.copy(alpha = 0.35f)
-                false -> DotsOnDark.copy(alpha = 0.45f)
-                null -> Color.Transparent
-            }
-        var popupBoundsInScreen by remember { mutableStateOf<Rect?>(null) }
-        val cardScaleX = remember { Animatable(1f) }
-        val cardScaleY = remember { Animatable(1f) }
-        // The card stays hidden until its bounds arrive, so it never draws once at full size.
-        val cardAlpha = remember { Animatable(if (cos) 0f else 1f) }
-        val cardTranslationY = remember { Animatable(0f) }
-        val cardShiftX = remember { Animatable(0f) }
-        val reveal = remember { Animatable(1f) }
         // Height of the front card of the list, reported by the list when it is measured.
         val listFrontHeightPx = remember { IntArray(1) }
-        val veil = remember { Animatable(0f) }
-        // The card's content fades and sharpens in as the card grows, and out as it shrinks.
-        val cosContent = remember { Animatable(1f) }
-        val cosContentBlur = remember { Animatable(0f) }
-        val cosContentBlurPx = with(density) { CosCardContentBlur.toPx() }
-        // The stack behind the setting-on card is not in its layer, so it follows the card's reveal
-        // and fade instead of showing before the card or staying through the close.
-        val cosStackAlpha = { if (cos) (reveal.value * cardAlpha.value).coerceIn(0f, 1f) else 1f }
-        val cosCornerPx = with(density) { CosCardCorner.toPx() }
-        val colorMode = rememberPopupColorMode()
-        val glassCard = cos && viewModel.popupContent.let {
-            it is PopupContentModel.Stopwatch || it is PopupContentModel.Alarm ||
-                it is PopupContentModel.ScreenRecord || it is PopupContentModel.Flashlight ||
-                it is PopupContentModel.Timer
-        }
-        val skipMotionOnDismiss = colorMode == POPUP_COLOR_MODE_BLUR || glassCard
-        val cosReady = cos && popupBoundsInScreen != null
         val progress = remember { Animatable(0f) }
         val contentAlpha = remember { Animatable(0f) }
         var closingContentAlpha by remember { mutableFloatStateOf(1f) }
@@ -646,117 +571,7 @@ fun StatusBarPopup(
             swipeY = 0f
         }
 
-        // The setting-on motion does not wait for the first frame, so it must not restart on it.
-        LaunchedEffect(isVisible, ready && !cos, cosReady) {
-            if (cos) {
-                isAnimating = true
-                currentOnMorphActiveChanged(false)
-                progress.snapTo(1f)
-                contentAlpha.snapTo(1f)
-                surfaceProgress.snapTo(1f)
-                if (isVisible) {
-                    swipeJob?.cancel()
-                    settlingPageFraction = null
-                    dismissedBySwipe = false
-                    pendingLaunch = null
-                    swipeX = 0f
-                    swipeY = 0f
-                    // A close that was cut short by a reopening must not leave the list behind.
-                    listExpanded = false
-                    expansion.snapTo(0f)
-                }
-
-                if (isVisible) {
-                    // The bounds of the card are those of its last opening until it has been laid
-                    // out again, and its first frame would be drawn away from the island. It stays
-                    // hidden until then.
-                    cardAlpha.snapTo(0f)
-                    // Its glass is not in its layer and follows the reveal, so that goes too.
-                    reveal.snapTo(0f)
-                    repeat(2) { withFrameNanos {} }
-                }
-                val chip = chipBoundsInScreen
-                val popup = popupBoundsInScreen
-                val fromX = if (chip != null && popup != null) chip.center.x - popup.center.x else 0f
-                // The card grows from the middle of the island and shrinks back into it.
-                val fromY =
-                    if (chip != null && popup != null) chip.center.y - popup.center.y else 0f
-                if (isVisible && popup != null) {
-                    cardScaleX.snapTo(CosCardStartScale)
-                    cardScaleY.snapTo(CosCardStartScale)
-                    cardShiftX.snapTo(fromX)
-                    cardTranslationY.snapTo(fromY)
-                    reveal.snapTo(0f)
-                    veil.snapTo(1f)
-                    cosContent.snapTo(0f)
-                    cosContentBlur.snapTo(cosContentBlurPx)
-                    cardAlpha.snapTo(1f)
-                    coroutineScope {
-                        launch { cosContent.animateTo(1f, tween(300, easing = CosCardEase)) }
-                        launch { cosContentBlur.animateTo(0f, tween(300, easing = CosCardEase)) }
-                        launch { cardShiftX.animateTo(0f, tween(300, easing = CosCardGrow)) }
-                        launch { cardTranslationY.animateTo(0f, tween(300, easing = CosCardGrow)) }
-                        launch { reveal.animateTo(1f, tween(300, easing = CosCardGrow)) }
-                        launch {
-                            veil.animateTo(0f, tween(200, delayMillis = 100, easing = CosCardEase))
-                        }
-                        for (scale in listOf(cardScaleX, cardScaleY)) {
-                            launch {
-                                scale.animateTo(1.03f, tween(300, easing = CosCardGrow))
-                                scale.animateTo(1f, tween(300, easing = CosCardEase))
-                            }
-                        }
-                    }
-                } else if (!isVisible) {
-                    if (skipMotionOnDismiss) {
-                        // The blur is composited outside this layer and does not follow the
-                        // translation or the reveal clip, so it just shrinks and fades in place.
-                        coroutineScope {
-                            launch { cardScaleX.animateTo(0.01f, tween(130)) }
-                            launch { cardScaleY.animateTo(0.01f, tween(130)) }
-                            cardAlpha.animateTo(0f, tween(120))
-                        }
-                    } else {
-                        coroutineScope {
-                            launch { cardAlpha.animateTo(0f, tween(50, delayMillis = CosCardCloseMillis - 50)) }
-                            launch { cosContent.animateTo(0f, tween(150, easing = CosCardEase)) }
-                            launch {
-                                cosContentBlur.animateTo(
-                                    cosContentBlurPx,
-                                    tween(CosCardCloseMillis, easing = CosCardEase),
-                                )
-                            }
-                            for (scale in listOf(cardScaleX, cardScaleY)) {
-                                launch {
-                                    scale.animateTo(
-                                        CosCardStartScale,
-                                        tween(CosCardCloseMillis, easing = CosCardEase),
-                                    )
-                                }
-                            }
-                            launch {
-                                cardShiftX.animateTo(fromX, tween(CosCardCloseMillis, easing = CosCardMove))
-                            }
-                            launch {
-                                cardTranslationY.animateTo(fromY, tween(CosCardCloseMillis, easing = CosCardMove))
-                            }
-                            launch { reveal.animateTo(0f, tween(CosCardCloseMillis, easing = CosCardEase)) }
-                            veil.animateTo(1f, tween(150, easing = CosCardEase))
-                        }
-                    }
-                }
-                if (isVisible) { isAnimating = false } else {
-                    // Once the card is gone, so the list does not turn into the stack in view.
-                    listExpanded = false
-                    expansion.snapTo(0f)
-                    val launch = pendingLaunch
-                    pendingLaunch = null
-                    currentOnHidden()
-                    launch?.invoke()
-                }
-                return@LaunchedEffect
-            }
-
+        LaunchedEffect(isVisible, ready) {
             if (!ready) return@LaunchedEffect
             swipeJob?.cancel()
             settlingPageFraction = null
@@ -859,7 +674,7 @@ fun StatusBarPopup(
                                 scale = StackPeekScaleFar,
                                 offsetY = StackPeekDropFar,
                                 alpha = {
-                                    visibleContentAlpha() * 0.55f * cosStackAlpha() *
+                                    visibleContentAlpha() * 0.55f *
                                         (1f - expansion.value.coerceIn(0f, 1f))
                                 },
                                 progress = {
@@ -871,7 +686,7 @@ fun StatusBarPopup(
                             scale = StackPeekScaleNear,
                             offsetY = StackPeekDropNear,
                             alpha = {
-                                visibleContentAlpha() * 0.8f * cosStackAlpha() *
+                                visibleContentAlpha() * 0.8f *
                                     (1f - expansion.value.coerceIn(0f, 1f))
                             },
                             progress = {
@@ -879,7 +694,6 @@ fun StatusBarPopup(
                             },
                         )
                     }
-    if (!cos) {
                     // The window blur of the glass ignores the layer alpha below, so it takes the
                     // same fade, and only that one: the content fades out early in a collapse while
                     // the surface still has to carry the glass down to the island.
@@ -891,29 +705,28 @@ fun StatusBarPopup(
                     CompositionLocalProvider(
                         LocalIslandGlassAlpha provides containerAlpha
                     ) {
-                    PopupSurface(
-                        surfaceKey = displayedChipId,
-                        backgroundAlpha = 1f - dismissProgress,
-                        shape = RoundedCornerShape(with(density) { radiusPx.toDp() }),
-                        cornerRadius = with(density) { radiusPx.toDp() },
-                        shadowElevation =
-                            if (dismissedBySwipe) 0.dp
-                            else 12.dp * progress.value.coerceIn(0f, 1f),
-                        containerProgress =
-                            if (dismissedBySwipe) 0f
-                            else surfaceProgress.value * progress.value.coerceIn(0f, 1f),
-                        blurFraction =
-                            if (dismissedBySwipe) 0f else progress.value.coerceIn(0f, 1f),
-                        modifier =
-                            Modifier.fillMaxSize().graphicsLayer {
-                                translationX = swipeX
-                                // The front card of an open list has a surface of its own, so the
-                                // container makes way for it as the list opens.
-                                alpha = containerAlpha()
-                            },
-                    ) {}
+                        PopupSurface(
+                            surfaceKey = displayedChipId,
+                            backgroundAlpha = 1f - dismissProgress,
+                            shape = RoundedCornerShape(with(density) { radiusPx.toDp() }),
+                            cornerRadius = with(density) { radiusPx.toDp() },
+                            shadowElevation =
+                                if (dismissedBySwipe) 0.dp
+                                else 12.dp * progress.value.coerceIn(0f, 1f),
+                            containerProgress =
+                                if (dismissedBySwipe) 0f
+                                else surfaceProgress.value * progress.value.coerceIn(0f, 1f),
+                            blurFraction =
+                                if (dismissedBySwipe) 0f else progress.value.coerceIn(0f, 1f),
+                            modifier =
+                                Modifier.fillMaxSize().graphicsLayer {
+                                    translationX = swipeX
+                                    // The front card of an open list has a surface of its own, so the
+                                    // container makes way for it as the list opens.
+                                    alpha = containerAlpha()
+                                },
+                        ) {}
                     }
-} else { Box {} }
                 }
                 Box(
                     modifier =
@@ -1004,53 +817,15 @@ fun StatusBarPopup(
                                     }
                                 }
                             }
-                            // Only the setting-on motion reads the bounds, so the default path skips it.
-                            .then(
-                                if (cos) {
-                                    Modifier.onGloballyPositioned {
-                                        popupBoundsInScreen = it.boundsInScreen(popupView)
-                                    }
-                                } else {
-                                    Modifier
-                                }
-                            )
                             .graphicsLayer {
-                                if (cos) {
-                                    this.scaleX = cardScaleX.value
-                                    this.scaleY = cardScaleY.value
-                                    this.alpha = cardAlpha.value * (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f)
-                                    this.translationX = cardShiftX.value + swipeX
-                                    this.translationY = cardTranslationY.value
-                                    this.transformOrigin = TransformOrigin.Center
-                                    this.clip = reveal.value < 1f
-                                    if (this.clip) {
-                                        this.shape = CosRevealShape(reveal.value, cosCornerPx)
-                                    }
-                                } else {
                                 alpha =
                                     visibleContentAlpha() *
                                         (1f - dismissProgress)
                                 scaleX = 0.92f + 0.08f * visibleContentAlpha()
                                 scaleY = scaleX
                                 translationX = swipeX
-                                }
                             }
                             .drawWithContent {
-                                if (cos) {
-                                    drawContent()
-                                    if (veil.value > 0f) {
-                                        // The stack tail below the card is transparent; the veil
-                                        // covers the card, or the whole list with its gaps. It has
-                                        // the colour of the glass, as that cannot be shown until the
-                                        // card has grown; black would show as a black card first.
-                                        val tail = if (canPage) StackTailHeight.toPx() else 0f
-                                        drawRect(
-                                            lerp(CosIslandColor, veilColor, reveal.value),
-                                            size = Size(size.width, (size.height - tail).coerceAtLeast(0f)),
-                                            alpha = veil.value,
-                                        )
-                                    }
-                                } else {
                                 // Clip the final-size controls to the growing container, without
                                 // stretching text or artwork along independent axes.
                                 val scale = 0.92f + 0.08f * visibleContentAlpha()
@@ -1071,18 +846,6 @@ fun StatusBarPopup(
                                         )
                                     }
                                 clipPath(path) { this@drawWithContent.drawContent() }
-
-                                }
-                            }
-                            // The content alone, under the veil: it fades and sharpens as the card
-                            // opens and the other way as it closes.
-                            .graphicsLayer {
-                                if (cos) {
-                                    alpha = cosContent.value
-                                    val b = cosContentBlur.value
-                                    renderEffect =
-                                        if (b > 0.5f) BlurEffect(b, b, TileMode.Decal) else null
-                                }
                             }
                 ) {
                     CompositionLocalProvider(
@@ -1095,32 +858,16 @@ fun StatusBarPopup(
                         LocalPopupMarqueeEnabled provides
                             (isVisible && !isAnimating && swipeX == 0f && swipeY == 0f),
                         // An open list gives every card a surface of its own.
-                        LocalPopupContainer provides (!cos && !listShown),
-                        LocalIslandCosStyle provides cos,
-                        // The window blur ignores the veil and the layer alpha, so it fades with them.
+                        LocalPopupContainer provides !listShown,
+                        // The window blur ignores the layer alpha, so it fades with it.
                         LocalIslandGlassAlpha provides {
-                            if (cos) cardAlpha.value * (1f - veil.value)
-                            else visibleContentAlpha() * (1f - dismissProgress)
+                            visibleContentAlpha() * (1f - dismissProgress)
                         },
                         LocalIslandCardBlurState provides
                             IslandCardBlurState(
-                                shift =
-                                    if (cos) {
-                                        Offset(
-                                            cardShiftX.value + swipeX,
-                                            cardTranslationY.value,
-                                        )
-                                    } else {
-                                        Offset.Zero
-                                    },
                                 alpha =
                                     (1f - abs(swipeX) / fadeDistancePx).coerceIn(0f, 1f) *
-                                        (1f - dismissProgress) *
-                                        // The glass has the full size of the card and is not in
-                                        // the reveal clip, so it comes in only once the card has
-                                        // nearly grown. Earlier it would blur the island above it.
-                                        ((reveal.value - 0.9f) / 0.1f).coerceIn(0f, 1f) *
-                                        (if (cos) cardAlpha.value else 1f),
+                                        (1f - dismissProgress),
                             ),
                     ) {
                         if (listShown) {
@@ -1152,46 +899,21 @@ fun StatusBarPopup(
                     modifier = Modifier.graphicsLayer {
                         // With two cards the dots leave together with the dismissed one. They stay
                         // while the stack is open as a list, as the way back to the stack.
-                        alpha = visibleContentAlpha() * handoffAlpha.value * cosStackAlpha() *
+                        alpha = visibleContentAlpha() * handoffAlpha.value *
                             (if (chips.size > 2) 1f else 1f - dismissProgress)
                     }
-                        .onGloballyPositioned { coordinates ->
-                            val bounds = coordinates.boundsInScreen(popupView)
-                            backdrop.setBounds(
-                                android.graphics.Rect(
-                                    bounds.left.roundToInt(),
-                                    bounds.top.roundToInt(),
-                                    bounds.right.roundToInt(),
-                                    bounds.bottom.roundToInt(),
-                                )
-                            )
-                        }
                 ) {
                     if (hasIndicator) {
-                        if (cos) {
-                            CosPageDots(
-                                count = chips.size,
-                                index =
-                                    chips.indexOfFirst { it.chipId == displayedChipId }
-                                        .coerceAtLeast(0),
-                                color = dotsColor,
-                                outlineColor = dotsOutlineColor,
-                                cardOnLeft = dotsRightOfCard,
-                                onClickLabel = dotsClickLabel,
-                                onClick = toggleList,
-                            )
-                        } else {
-                            PageDots(
-                                count = chips.size,
-                                index =
-                                    chips.indexOfFirst { it.chipId == displayedChipId }
-                                        .coerceAtLeast(0),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                cardOnLeft = dotsRightOfCard,
-                                onClickLabel = dotsClickLabel,
-                                onClick = toggleList,
-                            )
-                        }
+                        PageDots(
+                            count = chips.size,
+                            index =
+                                chips.indexOfFirst { it.chipId == displayedChipId }
+                                    .coerceAtLeast(0),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            cardOnLeft = dotsRightOfCard,
+                            onClickLabel = dotsClickLabel,
+                            onClick = toggleList,
+                        )
                     }
                 }
                 Box {
@@ -1213,7 +935,6 @@ fun StatusBarPopup(
                         ) {
                             CompositionLocalProvider(
                                 LocalPopupContainer provides true,
-                                LocalIslandCosStyle provides cos,
                                 LocalPopupCameraClearance provides cameraClearance,
                                 LocalPopupMarqueeEnabled provides false,
                             ) {
@@ -1227,8 +948,7 @@ fun StatusBarPopup(
             val padding = PopupPadding.roundToPx()
             val stackTail = if (canPage) StackTailHeight.roundToPx() else 0
             val indicator = measurables[2].measure(Constraints())
-            // The ColorOS dots carry their own space to the card inside their touch area.
-            val indicatorGap = if (cos) 0 else PageIndicatorPadding.roundToPx()
+            val indicatorGap = PageIndicatorPadding.roundToPx()
             // The dots stay beside the front card when the stack is open as a list.
             val indicatorSpace = if (hasIndicator) indicator.width + indicatorGap else 0
             val width = constraints.maxWidth
@@ -1534,42 +1254,6 @@ private fun PopupPages(
             }
         }
     }
-}
-
-/** Scale the ColorOS card opens from and closes to, in the middle of the island. */
-private const val CosCardStartScale = 0.4f
-
-/** Blur of the card's content when it starts to open and when it has closed. */
-private val CosCardContentBlur = 12.dp
-
-/** The island capsule's colour, which the card starts in. */
-private val CosIslandColor = Color.Black
-
-/** The visible part of the ColorOS card while it grows: from a small square in its middle. */
-private class CosRevealShape(
-    private val fraction: Float,
-    private val cornerPx: Float,
-) : Shape {
-    override fun createOutline(
-        size: Size,
-        layoutDirection: LayoutDirection,
-        density: Density,
-    ): Outline {
-        val square = size.width * 0.12f
-        val startH = minOf(square, size.height)
-        val w = square + (size.width - square) * fraction
-        val h = startH + (size.height - startH) * fraction
-        val left = (size.width - w) / 2f
-        val top = (size.height - h) / 2f
-        val r = minOf(cornerPx, w / 2f, h / 2f)
-        return Outline.Rounded(RoundRect(left, top, left + w, top + h, CornerRadius(r)))
-    }
-}
-
-private fun LayoutCoordinates.boundsInScreen(view: android.view.View): Rect {
-    val location = IntArray(2)
-    view.getLocationOnScreen(location)
-    return boundsInRoot().translate(Offset(location[0].toFloat(), location[1].toFloat()))
 }
 
 /** Renders the per-feature card for [viewModel]; the single popup and the card stack show these. */
